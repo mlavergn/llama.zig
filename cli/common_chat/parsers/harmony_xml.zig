@@ -12,8 +12,6 @@ const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
 
-const Allocator = std.mem.Allocator;
-
 /// EOG text must reach the parser: an XML call has no closing tag of its own
 const eog_tokens = [_][]const u8{
     "<|call|>", "<|return|>", "<|endoftext|>", "<|im_end|>", "<|fim_pad|>", "<|repo_name|>", "<|file_sep|>",
@@ -23,12 +21,12 @@ const param_open = "<rfl:parameter name=\"";
 const param_close = "\n</rfl:parameter>";
 
 /// `with_eog`: `delims` followed by the EOG tokens.
-fn withEog(a: Allocator, delims: []const []const u8) common_chat.exception.Error![]const []const u8 {
+fn withEog(a: std.mem.Allocator, delims: []const []const u8) common_chat.exception.Error![]const []const u8 {
     return std.mem.concat(a, []const u8, &.{ delims, &eog_tokens });
 }
 
 const Build = struct {
-    a: Allocator,
+    a: std.mem.Allocator,
     inputs: *const common_chat.template.GenerationParams,
     has_tools: bool,
     has_response_format: bool,
@@ -131,7 +129,7 @@ const Build = struct {
     }
 
     /// `gbnf_format_literal`.
-    fn gbnfLiteral(a: Allocator, s: []const u8) peg.Error![]u8 {
+    fn gbnfLiteral(a: std.mem.Allocator, s: []const u8) peg.Error![]u8 {
         return json.schema_to_grammar.gbnfFormatLiteral(a, s) catch |e| peg.errors.fromSchema(e);
     }
 
@@ -208,7 +206,7 @@ const Build = struct {
 /// Ports `common_chat_params_init_harmony_xml` (parsers/harmony-xml.cpp:4 @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
-pub fn init(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
+pub fn init(a: std.mem.Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
     var data: common_chat.params.ChatParams = .{};
 
     data.prompt = try common_chat.template.directApplyImpl(a, tmpl, inputs, null, null, null);

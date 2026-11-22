@@ -48,10 +48,10 @@ fn u32Of(x: i64) u32 {
 /// nothing, where the hardware, the types or the layout do not fit, or
 /// cuBLASLt offers no algorithm. `weight_scale` (one `F32`) is the
 /// per-tensor weight scale a fused `MUL` applies.
-pub fn mulMatFp8(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.c.ggml_tensor, src1: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor, weight_scale: ?*const ggml.impl.c.ggml_tensor) bool {
+pub fn mulMatFp8(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor, weight_scale: ?*const ggml.impl.ggml_c.ggml_tensor) bool {
     const x = ggml.cuda.common.info().devices[@intCast(ctx.device)].cc;
-    if (!ggml.cuda.common.fp8MmaHardwareAvailable(x) or src0.type != ggml.impl.c.GGML_TYPE_F8_E4M3 or src1.type != ggml.impl.c.GGML_TYPE_F32 or
-        dst.type != ggml.impl.c.GGML_TYPE_F32 or !ggml.impl.c.ggml_is_contiguous(dst) or @rem(src0.ne[0], 16) != 0 or @rem(src0.ne[1], 16) != 0 or
+    if (!ggml.cuda.common.fp8MmaHardwareAvailable(x) or src0.type != ggml.impl.ggml_c.GGML_TYPE_F8_E4M3 or src1.type != ggml.impl.ggml_c.GGML_TYPE_F32 or
+        dst.type != ggml.impl.ggml_c.GGML_TYPE_F32 or !ggml.impl.ggml_c.ggml_is_contiguous(dst) or @rem(src0.ne[0], 16) != 0 or @rem(src0.ne[1], 16) != 0 or
         src0.nb[0] != @sizeOf(u8) or src0.nb[1] != @as(usize, @bitCast(src0.ne[0])) or src1.nb[0] != @sizeOf(f32) or
         !ggml.cuda.common.isAligned(src0, 16) or !ggml.cuda.common.isAligned(dst, 16))
     {
@@ -59,7 +59,7 @@ pub fn mulMatFp8(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.c.ggml_t
     }
 
     if (weight_scale) |w| {
-        ggml.impl.assert(w.type == ggml.impl.c.GGML_TYPE_F32 and ggml.impl.c.ggml_is_contiguous(w) and ggml.impl.c.ggml_nelements(w) == 1, "!weight_scale || (weight_scale->type == GGML_TYPE_F32 && ggml_is_contiguous(weight_scale) && ggml_nelements(weight_scale) == 1)");
+        ggml.impl.assert(w.type == ggml.impl.ggml_c.GGML_TYPE_F32 and ggml.impl.ggml_c.ggml_is_contiguous(w) and ggml.impl.ggml_c.ggml_nelements(w) == 1, "!weight_scale || (weight_scale->type == GGML_TYPE_F32 && ggml_is_contiguous(weight_scale) && ggml_nelements(weight_scale) == 1)");
     }
 
     const ne00 = src0.ne[0];
@@ -82,7 +82,7 @@ pub fn mulMatFp8(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.c.ggml_t
     ggml.impl.assert(@rem(ne13, ne03) == 0, "ne13 % ne03 == 0");
 
     const stream = ctx.stream();
-    const ne_src1 = ggml.impl.c.ggml_nelements(src1);
+    const ne_src1 = ggml.impl.ggml_c.ggml_nelements(src1);
     var src1_fp8 = ggml.cuda.common.PoolAlloc(u8).initAlloc(ctx.pool(), @intCast(ne_src1));
     defer src1_fp8.deinit();
     var src1_scale = ggml.cuda.common.PoolAlloc(f32).initAlloc(ctx.pool(), 1);

@@ -36,15 +36,15 @@ const InpPosSensenovaU1 = struct {
         // `[t, 0, 0, 0]`. The generic M-RoPE input uses `[t, t, t, 0]`, so
         // U1 needs an input of its own.
         if (ubatch.token != null) {
-            const pos_data = std.heap.c_allocator.alloc(llama.impl.c.llama_pos, n_tokens * n_pos_per_embd) catch llama.impl.abort("models/sensenova-u1.cpp", 15, "out of memory");
+            const pos_data = std.heap.c_allocator.alloc(llama.impl.llama_c.llama_pos, n_tokens * n_pos_per_embd) catch llama.impl.abort("models/sensenova-u1.cpp", 15, "out of memory");
             defer std.heap.c_allocator.free(pos_data);
             @memset(pos_data, 0);
             for (0..n_tokens) |i| {
                 pos_data[i] = ubatch.pos[i];
             }
-            llama.impl.c.ggml_backend_tensor_set(pos, pos_data.ptr, 0, pos_data.len * llama.impl.c.ggml_element_size(pos));
+            llama.impl.llama_c.ggml_backend_tensor_set(pos, pos_data.ptr, 0, pos_data.len * llama.impl.llama_c.ggml_element_size(pos));
         } else {
-            llama.impl.c.ggml_backend_tensor_set(pos, ubatch.pos, 0, n_tokens * n_pos_per_embd * llama.impl.c.ggml_element_size(pos));
+            llama.impl.llama_c.ggml_backend_tensor_set(pos, ubatch.pos, 0, n_tokens * n_pos_per_embd * llama.impl.llama_c.ggml_element_size(pos));
         }
     }
 
@@ -111,20 +111,20 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
 }
 
 /// The constructor's `normalize` lambda.
-fn normalize(b: *const llama.graph.Builder, x_: *llama.impl.c.ggml_tensor, weight: ?*llama.impl.c.ggml_tensor) *llama.impl.c.ggml_tensor {
-    const x: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_rms_norm(b.ctx0, x_, b.hparams.f_norm_rms_eps);
+fn normalize(b: *const llama.graph.Builder, x_: *llama.impl.llama_c.ggml_tensor, weight: ?*llama.impl.llama_c.ggml_tensor) *llama.impl.llama_c.ggml_tensor {
+    const x: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_rms_norm(b.ctx0, x_, b.hparams.f_norm_rms_eps);
 
-    return llama.impl.c.ggml_mul(b.ctx0, x, weight);
+    return llama.impl.llama_c.ggml_mul(b.ctx0, x, weight);
 }
 
 /// The constructor's `normalize_and_rotate` lambda: normalize the temporal
 /// and spatial halves separately, then rotate time, height and width.
-fn normalizeAndRotate(model: *const llama.model.Model, b: *const llama.graph.Builder, pos: *const [3]*llama.impl.c.ggml_tensor, n_embd_head: i64, x_: *llama.impl.c.ggml_tensor, weight: *llama.impl.c.ggml_tensor) *llama.impl.c.ggml_tensor {
+fn normalizeAndRotate(model: *const llama.model.Model, b: *const llama.graph.Builder, pos: *const [3]*llama.impl.llama_c.ggml_tensor, n_embd_head: i64, x_: *llama.impl.llama_c.ggml_tensor, weight: *llama.impl.llama_c.ggml_tensor) *llama.impl.llama_c.ggml_tensor {
     const ctx = b.ctx0;
     const heads = x_.ne[1];
-    var x: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_4d(ctx, x_, @divTrunc(n_embd_head, 2), 2, heads, b.n_tokens);
-    x = normalize(b, x, llama.impl.c.ggml_reshape_2d(ctx, weight, @divTrunc(n_embd_head, 2), 2));
-    x = llama.impl.c.ggml_reshape_3d(ctx, x, n_embd_head, heads, b.n_tokens);
+    var x: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_reshape_4d(ctx, x_, @divTrunc(n_embd_head, 2), 2, heads, b.n_tokens);
+    x = normalize(b, x, llama.impl.llama_c.ggml_reshape_2d(ctx, weight, @divTrunc(n_embd_head, 2), 2));
+    x = llama.impl.llama_c.ggml_reshape_3d(ctx, x, n_embd_head, heads, b.n_tokens);
 
     const head: c_int = @intCast(n_embd_head);
     var axis: c_int = 0;
@@ -132,8 +132,8 @@ fn normalizeAndRotate(model: *const llama.model.Model, b: *const llama.graph.Bui
         const dims: c_int = if (axis == 0) @divTrunc(head, 2) else @divTrunc(head, 4);
         const offset: c_int = if (axis == 0) 0 else @divTrunc(head, 2) + @divTrunc((axis - 1) * head, 4);
         const base: f32 = if (axis == 0) b.freq_base else model.rope_freq_base_spatial;
-        x = llama.impl.c.ggml_rope_ext(ctx, x, pos[@intCast(axis)], null, dims, llama.impl.c.GGML_ROPE_TYPE_NEOX, b.n_ctx_orig, base, 1.0, 0.0, 1.0, 32.0, 1.0);
-        _ = llama.impl.c.ggml_rope_set_offset(x, offset);
+        x = llama.impl.llama_c.ggml_rope_ext(ctx, x, pos[@intCast(axis)], null, dims, llama.impl.llama_c.GGML_ROPE_TYPE_NEOX, b.n_ctx_orig, base, 1.0, 0.0, 1.0, 32.0, 1.0);
+        _ = llama.impl.llama_c.ggml_rope_set_offset(x, offset);
     }
     return x;
 }
@@ -147,18 +147,18 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 
     llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/sensenova-u1.cpp", 81, "n_embd_head == hparams.n_embd_head_k()");
 
-    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.llama_c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
 
     const inp = std.heap.c_allocator.create(InpPosSensenovaU1) catch llama.impl.abort("models/sensenova-u1.cpp", 95, "out of memory");
     inp.* = .{};
-    const inp_pos: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_I32, b.n_tokens * hp.nPosPerEmbd());
+    const inp_pos: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_new_tensor_1d(ctx, llama.impl.llama_c.GGML_TYPE_I32, b.n_tokens * hp.nPosPerEmbd());
     inp.base.pos = inp_pos;
-    llama.impl.c.ggml_set_input(inp_pos);
+    llama.impl.llama_c.ggml_set_input(inp_pos);
     _ = b.res.addInput(InpPosSensenovaU1, inp);
 
-    var pos: [3]*llama.impl.c.ggml_tensor = undefined;
+    var pos: [3]*llama.impl.llama_c.ggml_tensor = undefined;
     for (&pos, 0..) |*p, axis| {
-        p.* = llama.impl.c.ggml_view_1d(ctx, inp_pos, b.n_tokens, axis * @as(usize, @intCast(b.n_tokens)) * @sizeOf(i32));
+        p.* = llama.impl.llama_c.ggml_view_1d(ctx, inp_pos, b.n_tokens, axis * @as(usize, @intCast(b.n_tokens)) * @sizeOf(i32));
     }
 
     const inp_attn = b.buildAttnInpKv();
@@ -194,10 +194,10 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
         }
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The feed-forward network.
@@ -207,7 +207,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         cur = b.buildFfn(cur, layer.ffn_up, null, layer.ffn_up_s, layer.ffn_gate, null, layer.ffn_gate_s, layer.ffn_down, null, layer.ffn_down_s, null, .silu, .par, il);
         b.cb(cur, "ffn_out", il);
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

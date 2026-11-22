@@ -129,11 +129,11 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
 
 /// Ports `beam_residual_add` (models/beam.cpp:109 @b1b770d90): the running
 /// average of the sublayers' outputs, `i` the sublayer's ordinal.
-fn beamResidualAdd(ctx: *llama.impl.c.ggml_context, h: *llama.impl.c.ggml_tensor, r: *llama.impl.c.ggml_tensor, i: c_int) *llama.impl.c.ggml_tensor {
+fn beamResidualAdd(ctx: *llama.impl.llama_c.ggml_context, h: *llama.impl.llama_c.ggml_tensor, r: *llama.impl.llama_c.ggml_tensor, i: c_int) *llama.impl.llama_c.ggml_tensor {
     const di: f64 = @floatFromInt(i);
     const h_scale: f32 = @floatCast(1.0 / @sqrt(di));
     const r_scale: f32 = @floatCast(@sqrt((di - 1.0) / di));
-    return llama.impl.c.ggml_add(ctx, llama.impl.c.ggml_scale(ctx, h, h_scale), llama.impl.c.ggml_scale(ctx, r, r_scale));
+    return llama.impl.llama_c.ggml_add(ctx, llama.impl.llama_c.ggml_scale(ctx, h, h_scale), llama.impl.llama_c.ggml_scale(ctx, r, r_scale));
 }
 
 /// Ports the constructor of `llama_model_beam`'s `graph`
@@ -144,7 +144,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
     llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/beam.cpp", 117, "n_embd_head == hparams.n_embd_head_k()");
 
-    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.llama_c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
 
     const inp_pos = b.buildInpPos();
 
@@ -155,7 +155,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             has_nope = has_nope or !hp.isSwa(@intCast(il));
         }
     }
-    const inp_attn_scale: ?*llama.impl.c.ggml_tensor = if (has_nope) b.buildInpAttnScale() else null;
+    const inp_attn_scale: ?*llama.impl.llama_c.ggml_tensor = if (has_nope) b.buildInpAttnScale() else null;
 
     const inp_attn = b.buildAttnInpKvIswa();
 
@@ -193,7 +193,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
                 b.cb(Qcur, "Qcur_rope", il);
                 b.cb(Kcur, "Kcur_rope", il);
             } else {
-                Qcur = llama.impl.c.ggml_mul(ctx, Qcur, inp_attn_scale);
+                Qcur = llama.impl.llama_c.ggml_mul(ctx, Qcur, inp_attn_scale);
                 b.cb(Qcur, "Qcur_scaled", il);
             }
 
@@ -203,13 +203,13 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 
             var gate = b.buildLoraMm(layer.wqkv_gate.?, attn_inp, null);
             b.cb(gate, "attn_gate_proj", il);
-            gate = llama.impl.c.ggml_reshape_3d(ctx, gate, n_embd_head, b.n_head, b.n_tokens);
-            gate = llama.impl.c.ggml_add(ctx, gate, llama.impl.c.ggml_reshape_3d(ctx, layer.wqkv_gate_b, 1, b.n_head, 1));
-            gate = llama.impl.c.ggml_sigmoid(ctx, gate);
-            gate = llama.impl.c.ggml_reshape_2d(ctx, gate, n_embd_head * b.n_head, b.n_tokens);
+            gate = llama.impl.llama_c.ggml_reshape_3d(ctx, gate, n_embd_head, b.n_head, b.n_tokens);
+            gate = llama.impl.llama_c.ggml_add(ctx, gate, llama.impl.llama_c.ggml_reshape_3d(ctx, layer.wqkv_gate_b, 1, b.n_head, 1));
+            gate = llama.impl.llama_c.ggml_sigmoid(ctx, gate);
+            gate = llama.impl.llama_c.ggml_reshape_2d(ctx, gate, n_embd_head * b.n_head, b.n_tokens);
             b.cb(gate, "attn_gate_sig", il);
 
-            cur = llama.impl.c.ggml_mul(ctx, cur, gate);
+            cur = llama.impl.llama_c.ggml_mul(ctx, cur, gate);
             b.cb(cur, "attn_gated", il);
 
             cur = b.buildLoraMm(layer.wo.?, cur, layer.wo_s);
@@ -220,8 +220,8 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         b.cb(cur, "attn_post_norm", il);
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
         const i_attn: c_int = 2 * (il + 1);
@@ -271,9 +271,9 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     cur = b.buildLoraMm(model.output.?, cur, model.output_s);
 
     if (hp.f_final_logit_softcapping != 0.0) {
-        cur = llama.impl.c.ggml_scale(ctx, cur, 1.0 / hp.f_final_logit_softcapping);
-        cur = llama.impl.c.ggml_tanh(ctx, cur);
-        cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_final_logit_softcapping);
+        cur = llama.impl.llama_c.ggml_scale(ctx, cur, 1.0 / hp.f_final_logit_softcapping);
+        cur = llama.impl.llama_c.ggml_tanh(ctx, cur);
+        cur = llama.impl.llama_c.ggml_scale(ctx, cur, hp.f_final_logit_softcapping);
     }
 
     b.cb(cur, "result_output", -1);

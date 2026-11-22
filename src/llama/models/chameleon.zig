@@ -80,7 +80,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/chameleon.cpp", 56, "n_embd_head == hparams.n_embd_head_k()");
     llama.impl.assert(n_embd_head == b.n_rot, "models/chameleon.cpp", 57, "n_embd_head == n_rot");
 
-    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.llama_c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
 
     // The positions.
     const inp_pos = b.buildInpPos();
@@ -95,7 +95,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         var inpSA = inpL;
 
         // Norm.
-        var cur: *llama.impl.c.ggml_tensor = undefined;
+        var cur: *llama.impl.llama_c.ggml_tensor = undefined;
         if (hp.swin_norm) {
             cur = inpL;
         } else {
@@ -132,15 +132,15 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         }
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
         if (hp.swin_norm) {
             cur = b.buildNorm(cur, layer.attn_norm, null, .rms, il);
         }
 
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The feed-forward network.
@@ -157,7 +157,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             b.cb(cur, "ffn_norm", il);
         }
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
         b.cb(cur, "ffn_out", il);
 
         cur = b.buildCvec(cur, il);
@@ -186,11 +186,11 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     const num_img_tokens: c_int = img_token_end_idx - img_token_start_idx;
     // A 1d tensor of num_img_tokens values of -FLT_MAX, which keeps every
     // text token's logit above every image token's.
-    var img_logits: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_F32, num_img_tokens);
-    img_logits = llama.impl.c.ggml_clamp(ctx, img_logits, -std.math.floatMax(f32), -std.math.floatMax(f32));
+    var img_logits: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_new_tensor_1d(ctx, llama.impl.llama_c.GGML_TYPE_F32, num_img_tokens);
+    img_logits = llama.impl.llama_c.ggml_clamp(ctx, img_logits, -std.math.floatMax(f32), -std.math.floatMax(f32));
     b.cb(img_logits, "img_logits", -1);
 
-    cur = llama.impl.c.ggml_set_1d(ctx, cur, img_logits, llama.impl.c.ggml_element_size(cur) * @as(usize, @intCast(img_token_start_idx)));
+    cur = llama.impl.llama_c.ggml_set_1d(ctx, cur, img_logits, llama.impl.llama_c.ggml_element_size(cur) * @as(usize, @intCast(img_token_start_idx)));
 
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;

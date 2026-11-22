@@ -19,11 +19,9 @@
 //! before decoding, and the decoder reads the new row -- as upstream's does.
 
 const std = @import("std");
+const llama = @import("llama");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const c = @import("tools_h");
-
-const gpa = std.heap.c_allocator;
 
 fn assertC(ok: bool, comptime line: c_int, comptime expr: [*:0]const u8) void {
     mod.ggml.ggmlAssert(ok, "speculative.cpp", line, expr);
@@ -35,7 +33,7 @@ fn oom() noreturn {
 
 /// The draft samplers' parameters: top-k 10 and nothing else, with
 /// performance metrics on.
-fn draftSampler(model: ?*const c.llama_model) *mod.sampling.Sampler {
+fn draftSampler(model: ?*const llama.impl.llama_c.llama_model) *mod.sampling.Sampler {
     var sparams: mod.params.Sampling = .{};
     sparams.no_perf = false;
     sparams.top_k = 10;
@@ -51,16 +49,16 @@ fn draftSampler(model: ?*const c.llama_model) *mod.sampling.Sampler {
 
 /// `common_token_to_piece(ctx, id)`, as a NUL-terminated string the caller
 /// frees with `freePiece`.
-fn piece(ctx: ?*c.llama_context, id: c.llama_token) [:0]u8 {
-    return mod.common.tokenToPiece(gpa, c.llama_model_get_vocab(c.llama_get_model(ctx)), id, true) catch oom();
+fn piece(ctx: ?*llama.impl.llama_c.llama_context, id: llama.impl.llama_c.llama_token) [:0]u8 {
+    return mod.common.tokenToPiece(std.heap.c_allocator, llama.api.model.llama_model_get_vocab(llama.api.context.llama_get_model(ctx)), id, true) catch oom();
 }
 
 fn freePiece(p: [:0]u8) void {
-    gpa.free(p[0 .. p.len + 1]);
+    std.heap.c_allocator.free(p[0 .. p.len + 1]);
 }
 
 /// The three best candidates, as every drafter logs them.
-fn logCandidates(comptime func: [*:0]const u8, ctx: ?*c.llama_context, seq_id: c.llama_seq_id, pos: c_int, cur_p: *const c.llama_token_data_array) void {
+fn logCandidates(comptime func: [*:0]const u8, ctx: ?*llama.impl.llama_c.llama_context, seq_id: llama.impl.llama_c.llama_seq_id, pos: c_int, cur_p: *const llama.impl.llama_c.llama_token_data_array) void {
     var k: usize = 0;
     while (k < @min(3, cur_p.size)) : (k += 1) {
         if (mod.log.verbosity_thold < mod.log.level_debug) break;
@@ -71,7 +69,7 @@ fn logCandidates(comptime func: [*:0]const u8, ctx: ?*c.llama_context, seq_id: c
 }
 
 /// `LOG_DBG` of the same, for DFlash, which logs without the `spec` prefix.
-fn logCandidatesPlain(ctx: ?*c.llama_context, seq_id: c.llama_seq_id, pos: c_int, cur_p: *const c.llama_token_data_array) void {
+fn logCandidatesPlain(ctx: ?*llama.impl.llama_c.llama_context, seq_id: llama.impl.llama_c.llama_seq_id, pos: c_int, cur_p: *const llama.impl.llama_c.llama_token_data_array) void {
     var k: usize = 0;
     while (k < @min(3, cur_p.size)) : (k += 1) {
         if (mod.log.verbosity_thold < mod.log.level_debug) break;
@@ -88,18 +86,18 @@ fn rowCopy(dst: [*]f32, src: [*]const f32, n: usize) void {
 
 /// One backend top-k chain per sequence on the draft context, or null
 /// where `llama_set_sampler` refuses it.
-fn backendChains(ctx_dft: ?*c.llama_context, n_seq: u32, on: bool) []?*c.llama_sampler {
-    const chains = gpa.alloc(?*c.llama_sampler, n_seq) catch oom();
+fn backendChains(ctx_dft: ?*llama.impl.llama_c.llama_context, n_seq: u32, on: bool) []?*llama.impl.llama_c.llama_sampler {
+    const chains = std.heap.c_allocator.alloc(?*llama.impl.llama_c.llama_sampler, n_seq) catch oom();
     @memset(chains, null);
     if (!on) return chains;
     for (0..n_seq) |s| {
-        const seq_id: c.llama_seq_id = @intCast(s);
-        var chain = c.llama_sampler_chain_init(c.llama_sampler_chain_default_params());
-        c.llama_sampler_chain_add(chain, c.llama_sampler_init_top_k(10));
+        const seq_id: llama.impl.llama_c.llama_seq_id = @intCast(s);
+        var chain = llama.sampler.chain.chainInit(llama.api.llama.llama_sampler_chain_default_params());
+        llama.sampler.chain.llama_sampler_chain_add(chain, llama.sampler.basic.llama_sampler_init_top_k(10));
 
-        if (!c.llama_set_sampler(ctx_dft, seq_id, chain)) {
+        if (!llama.api.context.llama_set_sampler(ctx_dft, seq_id, chain)) {
             mod.speculative.spcWrn("common_speculative_impl", "backend offload failed for seq_id=%d; using CPU sampler\n", .{seq_id});
-            c.llama_sampler_free(chain);
+            llama.sampler.core.llama_sampler_free(chain);
             chain = null;
         }
         chains[s] = chain;
@@ -108,18 +106,18 @@ fn backendChains(ctx_dft: ?*c.llama_context, n_seq: u32, on: bool) []?*c.llama_s
 }
 
 /// The destructors' loop: detach and free every backend chain.
-fn freeBackendChains(ctx_dft: ?*c.llama_context, chains: []?*c.llama_sampler) void {
+fn freeBackendChains(ctx_dft: ?*llama.impl.llama_c.llama_context, chains: []?*llama.impl.llama_c.llama_sampler) void {
     for (chains, 0..) |chain, s| {
         if (chain == null) continue;
-        if (ctx_dft != null) _ = c.llama_set_sampler(ctx_dft, @intCast(s), null);
-        c.llama_sampler_free(chain);
+        if (ctx_dft != null) _ = llama.api.context.llama_set_sampler(ctx_dft, @intCast(s), null);
+        llama.sampler.core.llama_sampler_free(chain);
     }
-    gpa.free(chains);
+    std.heap.c_allocator.free(chains);
 }
 
 fn freeSamplers(smpls: []*mod.sampling.Sampler) void {
     for (smpls) |s| s.destroy();
-    gpa.free(smpls);
+    std.heap.c_allocator.free(smpls);
 }
 
 /// What `spec_retune` remembers of a draft sampler's parameters: the C++
@@ -130,14 +128,14 @@ pub const SmplCfg = struct { temp: f32, seed: u32 };
 /// `seq_id`'s draft sampler at the target's temperature, since rejection
 /// weighs q against p and both have to sample alike. Only temp and seed
 /// carry over; the draft keeps its own top_k.
-fn specRetune(smpls: []*mod.sampling.Sampler, cfg: *std.ArrayList(SmplCfg), model: ?*const c.llama_model, seq_id: c.llama_seq_id, temp: f32, seed: u32) void {
+fn specRetune(smpls: []*mod.sampling.Sampler, cfg: *std.ArrayList(SmplCfg), model: ?*const llama.impl.llama_c.llama_model, seq_id: llama.impl.llama_c.llama_seq_id, temp: f32, seed: u32) void {
     if (cfg.items.len != smpls.len) {
         const n_old = cfg.items.len;
         // `resize` default-constructs; the temperature is what is read
-        cfg.resize(gpa, smpls.len) catch oom();
+        cfg.resize(std.heap.c_allocator, smpls.len) catch oom();
 
         // the initial sampler has no temperature, so no request may match the cache and skip a rebuild
-        for (cfg.items[n_old..]) |*e| e.* = .{ .temp = std.math.nan(f32), .seed = c.LLAMA_DEFAULT_SEED };
+        for (cfg.items[n_old..]) |*e| e.* = .{ .temp = std.math.nan(f32), .seed = llama.impl.llama_c.LLAMA_DEFAULT_SEED };
     }
 
     const cur = &cfg.items[@intCast(seq_id)];
@@ -152,7 +150,7 @@ fn specRetune(smpls: []*mod.sampling.Sampler, cfg: *std.ArrayList(SmplCfg), mode
     sparams.top_k = 10;
     sparams.temp = cur.temp;
     // must be explicit, the default reseeds at random; mixed so it differs from the target's
-    sparams.seed = if (cur.seed == c.LLAMA_DEFAULT_SEED) cur.seed else cur.seed ^ 0x85ebca6b;
+    sparams.seed = if (cur.seed == llama.impl.llama_c.LLAMA_DEFAULT_SEED) cur.seed else cur.seed ^ 0x85ebca6b;
     var types = [_]mod.params.SamplerType{ .top_k, .temperature };
     // `sampling.init` reads the list and keeps nothing of it
     sparams.samplers = .fromOwnedSlice(&types);
@@ -168,14 +166,14 @@ fn specRetune(smpls: []*mod.sampling.Sampler, cfg: *std.ArrayList(SmplCfg), mode
 
 /// The candidates `cur_p` holds, appended to `q` as one list -- the C++'s
 /// `emplace_back(cur_p->data, cur_p->data + cur_p->size)`.
-fn appendCandidates(q: *mod.speculative.Candidates, cur_p: *const c.llama_token_data_array) void {
-    var e: std.ArrayList(c.llama_token_data) = .empty;
-    e.appendSlice(gpa, cur_p.data[0..cur_p.size]) catch oom();
-    q.append(gpa, e) catch oom();
+fn appendCandidates(q: *mod.speculative.Candidates, cur_p: *const llama.impl.llama_c.llama_token_data_array) void {
+    var e: std.ArrayList(llama.impl.llama_c.llama_token_data) = .empty;
+    e.appendSlice(std.heap.c_allocator, cur_p.data[0..cur_p.size]) catch oom();
+    q.append(std.heap.c_allocator, e) catch oom();
 }
 
 /// `{ data, n_rows, n_embd }`.
-fn embdView(data: [*]const f32, n_rows: usize, n_embd: usize) c.llama_embd {
+fn embdView(data: [*]const f32, n_rows: usize, n_embd: usize) llama.impl.llama_c.llama_embd {
     return .{ .data = data, .n_rows = n_rows, .n_embd = n_embd };
 }
 
@@ -206,30 +204,30 @@ pub const DraftSimple = struct {
 
         if (ctx_dft == null) return mod.speculative.throwRuntime("draft-simple requires a draft context");
 
-        const zeros = gpa.alloc(f32, @intCast(c.llama_model_n_embd_inp(c.llama_get_model(ctx_dft)))) catch oom();
+        const zeros = std.heap.c_allocator.alloc(f32, @intCast(llama.api.model.llama_model_n_embd_inp(llama.api.context.llama_get_model(ctx_dft)))) catch oom();
         @memset(zeros, 0.0);
 
         mod.speculative.spcTrc(func, "%s", .{@as([*:0]const u8, "adding speculative implementation 'draft-simple'\n")});
         mod.speculative.spcTrc(func, "- n_max=%d, n_min=%d, p_min=%f\n", .{ p.n_max, p.n_min, @as(f64, p.p_min) });
         const devs = mod.speculative.devicesStr(p.devices.items);
-        defer gpa.free(devs);
+        defer std.heap.c_allocator.free(devs);
         mod.speculative.spcTrc(func, "- gpu_layers=%d, cache_k=%s, cache_v=%s, ctx_tgt=%s, ctx_dft=%s, devices=[%s]\n", .{
             p.n_gpu_layers,
-            c.ggml_type_name(p.cache_type_k),
-            c.ggml_type_name(p.cache_type_v),
+            llama.impl.llama_c.ggml_type_name(p.cache_type_k),
+            llama.impl.llama_c.ggml_type_name(p.cache_type_v),
             @as([*:0]const u8, if (ctx_tgt != null) "yes" else "no"),
             @as([*:0]const u8, if (ctx_dft != null) "yes" else "no"),
             devs.ptr,
         });
 
-        const batch = mod.common.Batch.init(gpa, ctx_dft);
+        const batch = mod.common.Batch.init(std.heap.c_allocator, ctx_dft);
 
-        const smpls = gpa.alloc(*mod.sampling.Sampler, base.n_seq) catch oom();
-        for (smpls) |*s| s.* = draftSampler(c.llama_get_model(ctx_dft));
+        const smpls = std.heap.c_allocator.alloc(*mod.sampling.Sampler, base.n_seq) catch oom();
+        for (smpls) |*s| s.* = draftSampler(llama.api.context.llama_get_model(ctx_dft));
 
         var self: DraftSimple = .{ .params = p, .batch = batch, .zeros = zeros, .smpls = smpls };
 
-        const vocab_cmpt = mod.speculative.areCompatible(c.llama_get_model(ctx_tgt), c.llama_get_model(ctx_dft));
+        const vocab_cmpt = mod.speculative.areCompatible(llama.api.context.llama_get_model(ctx_tgt), llama.api.context.llama_get_model(ctx_dft));
         mod.speculative.spcDbg(func, "vocab_cmpt = %d\n", .{@as(c_int, @intFromBool(vocab_cmpt))});
 
         if (!vocab_cmpt) {
@@ -238,8 +236,8 @@ pub const DraftSimple = struct {
             return mod.speculative.throwRuntime("draft model vocab type must match target model to use speculation");
         }
 
-        if (base.n_seq != c.llama_n_seq_max(ctx_dft)) {
-            mod.speculative.spcErr(func, "n_seq mismatch: %d != %d\n", .{ base.n_seq, c.llama_n_seq_max(ctx_dft) });
+        if (base.n_seq != llama.api.context.llama_n_seq_max(ctx_dft)) {
+            mod.speculative.spcErr(func, "n_seq mismatch: %d != %d\n", .{ base.n_seq, llama.api.context.llama_n_seq_max(ctx_dft) });
             self.deinit();
             return mod.speculative.throwRuntime("the draft model number of sequences is incompatible with the speculative n_seq");
         }
@@ -249,15 +247,15 @@ pub const DraftSimple = struct {
     /// The members' destructors: upstream's is the default.
     pub fn deinit(self: *DraftSimple) void {
         self.batch.deinit();
-        gpa.free(self.zeros);
+        std.heap.c_allocator.free(self.zeros);
         freeSamplers(self.smpls);
-        self.smpls_cfg.deinit(gpa);
+        self.smpls_cfg.deinit(std.heap.c_allocator);
     }
 
     /// Ports `begin` (speculative.cpp:299 @b1b770d90): the sequence's
     /// sampler is reset here rather than per round, or two identical
     /// requests differ.
-    pub fn begin(self: *DraftSimple, _: *mod.speculative.Base, seq_id: c.llama_seq_id, _: []const c.llama_token) void {
+    pub fn begin(self: *DraftSimple, _: *mod.speculative.Base, seq_id: llama.impl.llama_c.llama_seq_id, _: []const llama.impl.llama_c.llama_token) void {
         self.smpls[@intCast(seq_id)].reset();
     }
 
@@ -274,7 +272,7 @@ pub const DraftSimple = struct {
         while (k < n_tokens) : (k += 1) {
             const t = &batch_in.tokens.items[@intCast(k)];
             const output = k == n_tokens - 1;
-            if (t.id != c.LLAMA_TOKEN_NULL) {
+            if (t.id != llama.impl.llama_c.LLAMA_TOKEN_NULL) {
                 const idx = self.batch.add(t.id, t.pos[0], t.seq_id, output);
                 if (t.embd.data != null) {
                     _ = self.batch.setEmbd(idx, t.embd);
@@ -297,7 +295,7 @@ pub const DraftSimple = struct {
 
         if (self.batch.size() == 0) return true;
 
-        const ret = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
+        const ret = llama.api.context.llama_process(ctx_dft, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
 
         if (ret != 0) {
             mod.speculative.spcErr("process", "failed to decode draft batch, ret = %d\n", .{ret});
@@ -319,12 +317,12 @@ pub const DraftSimple = struct {
 
         // keep track of which sequences are still drafting
         var n_drafting: c_int = 0;
-        const drafting = gpa.alloc(bool, n_seq) catch oom();
-        defer gpa.free(drafting);
+        const drafting = std.heap.c_allocator.alloc(bool, n_seq) catch oom();
+        defer std.heap.c_allocator.free(drafting);
         @memset(drafting, false);
 
         for (0..n_seq) |s| {
-            const seq_id: c.llama_seq_id = @intCast(s);
+            const seq_id: llama.impl.llama_c.llama_seq_id = @intCast(s);
             const dp = &dparams[s];
 
             if (!dp.drafting) continue;
@@ -338,7 +336,7 @@ pub const DraftSimple = struct {
 
             // result_q is only set when the caller wants rejection, so it also gates the retune
             if (dp.result_q != null) {
-                specRetune(self.smpls, &self.smpls_cfg, c.llama_get_model(ctx_dft), seq_id, dp.temp, dp.seed);
+                specRetune(self.smpls, &self.smpls_cfg, llama.api.context.llama_get_model(ctx_dft), seq_id, dp.temp, dp.seed);
             }
 
             // a reset reseeds the chain, which breaks probabilistic drafting
@@ -349,7 +347,7 @@ pub const DraftSimple = struct {
             _ = self.batch.add(dp.id_last, dp.pos0, seq_id, true);
         }
 
-        var ret = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
+        var ret = llama.api.context.llama_process(ctx_dft, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
         if (ret != 0) {
             mod.speculative.spcErr("draft", "llama_process returned %d\n", .{ret});
             return;
@@ -363,7 +361,7 @@ pub const DraftSimple = struct {
             self.batch.clear();
 
             for (0..n_seq) |s| {
-                const seq_id: c.llama_seq_id = @intCast(s);
+                const seq_id: llama.impl.llama_c.llama_seq_id = @intCast(s);
                 if (!drafting[s]) continue;
 
                 const smpl = self.smpls[s];
@@ -390,7 +388,7 @@ pub const DraftSimple = struct {
                 const dp = &dparams[s];
                 const result = dp.result.?;
 
-                result.append(gpa, id) catch oom();
+                result.append(std.heap.c_allocator, id) catch oom();
 
                 if (dp.result_q) |q| appendCandidates(q, cur_p);
 
@@ -408,7 +406,7 @@ pub const DraftSimple = struct {
             if (self.batch.size() == 0) break;
 
             // evaluate the drafted tokens on the draft model
-            ret = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
+            ret = llama.api.context.llama_process(ctx_dft, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
             if (ret != 0) {
                 mod.speculative.spcErr("draft", "llama_process[%d] returned %d\n", .{ i, ret });
                 break;
@@ -425,7 +423,7 @@ pub const DraftSimple = struct {
     }
 
     /// Ports `accept` (speculative.cpp:474 @b1b770d90): nothing to do.
-    pub fn accept(_: *DraftSimple, _: *mod.speculative.Base, _: c.llama_seq_id, _: u16, _: bool) void {
+    pub fn accept(_: *DraftSimple, _: *mod.speculative.Base, _: llama.impl.llama_c.llama_seq_id, _: u16, _: bool) void {
         // noop
     }
 };
@@ -446,7 +444,7 @@ pub const Eagle3 = struct {
     smpls: []*mod.sampling.Sampler,
 
     // backend sampler chain per seq, attached to ctx_dft
-    backend_chains: []?*c.llama_sampler,
+    backend_chains: []?*llama.impl.llama_c.llama_sampler,
 
     n_embd_dec: i32 = 0, // draft hidden size
     n_embd_enc: i32 = 0, // target_layer_ids_n * target_hidden_size
@@ -458,11 +456,11 @@ pub const Eagle3 = struct {
 
     // [per-seq] deferred boundary state
     pending_g_last: [][]f32,
-    pending_pos_last: []c.llama_pos,
+    pending_pos_last: []llama.impl.llama_c.llama_pos,
 
     // [per-seq] snapshot of the most recent process()'s encoder output
     verify_g: []std.ArrayList(f32), // [n_seq][n_rows * n_embd_dec]
-    verify_pos_first: []c.llama_pos, // [n_seq] — pos of verify_g[seq][0]
+    verify_pos_first: []llama.impl.llama_c.llama_pos, // [n_seq] — pos of verify_g[seq][0]
     verify_g_rows: []i32, // [n_seq] — number of rows
 
     // scratch buffer for concatenated target features [n_tokens, n_embd_enc]
@@ -482,8 +480,8 @@ pub const Eagle3 = struct {
         const ctx_dft = p.ctx_dft;
         assertC(ctx_tgt != null and ctx_dft != null, 554, "ctx_tgt && ctx_dft && \"EAGLE3 requires ctx_tgt and ctx_dft to be set\"");
 
-        const model_dft = c.llama_get_model(ctx_dft);
-        const model_tgt = c.llama_get_model(ctx_tgt);
+        const model_dft = llama.api.context.llama_get_model(ctx_dft);
+        const model_tgt = llama.api.context.llama_get_model(ctx_tgt);
 
         const target_layer_ids = mod.speculative.ext.modelTargetLayerIds(model_dft);
         const target_layer_ids_n = mod.speculative.ext.modelTargetLayerIdsN(model_dft);
@@ -491,16 +489,16 @@ pub const Eagle3 = struct {
             return mod.speculative.throwRuntimeFmt("draft model is not eagle3 (expected 3 extract layers, got %u)", .{target_layer_ids_n});
         }
 
-        const n_embd_tgt = c.llama_model_n_embd(model_tgt);
-        const n_embd_dec = c.llama_model_n_embd(model_dft);
+        const n_embd_tgt = llama.api.model.llama_model_n_embd(model_tgt);
+        const n_embd_dec = llama.api.model.llama_model_n_embd(model_dft);
         const n_embd_enc: i32 = @as(i32, @intCast(target_layer_ids_n)) * n_embd_tgt;
-        const n_layer_tgt = c.llama_model_n_layer(model_tgt);
+        const n_layer_tgt = llama.api.model.llama_model_n_layer(model_tgt);
 
-        const batch = mod.common.Batch.init(gpa, ctx_dft);
-        const batch_enc = mod.common.Batch.init(gpa, ctx_dft);
+        const batch = mod.common.Batch.init(std.heap.c_allocator, ctx_dft);
+        const batch_enc = mod.common.Batch.init(std.heap.c_allocator, ctx_dft);
 
-        const smpls = gpa.alloc(*mod.sampling.Sampler, n_seq) catch oom();
-        for (smpls) |*s| s.* = draftSampler(c.llama_get_model(ctx_dft));
+        const smpls = std.heap.c_allocator.alloc(*mod.sampling.Sampler, n_seq) catch oom();
+        for (smpls) |*s| s.* = draftSampler(llama.api.context.llama_get_model(ctx_dft));
 
         // offload draft sampling to the backend
         const chains = backendChains(ctx_dft, n_seq, p.backend_sampling);
@@ -513,7 +511,7 @@ pub const Eagle3 = struct {
             } else if (lid == n_layer_tgt) {
                 mod.speculative.ext.setEmbeddingsNextn(ctx_tgt, true, false);
             } else {
-                _ = c.ggml_abort("speculative.cpp", 606, "EAGLE3: target layer id %d exceeds target n_layer %d", lid, n_layer_tgt);
+                _ = llama.impl.llama_c.ggml_abort("speculative.cpp", 606, "EAGLE3: target layer id %d exceeds target n_layer %d", lid, n_layer_tgt);
             }
         }
 
@@ -521,18 +519,18 @@ pub const Eagle3 = struct {
         // (used both for the encoder output g_embd and the decoder pre-norm output).
         mod.speculative.ext.setEmbeddingsNextn(ctx_dft, true, true);
 
-        const pending_g_last = gpa.alloc([]f32, n_seq) catch oom();
+        const pending_g_last = std.heap.c_allocator.alloc([]f32, n_seq) catch oom();
         for (pending_g_last) |*g| {
-            g.* = gpa.alloc(f32, @intCast(n_embd_dec)) catch oom();
+            g.* = std.heap.c_allocator.alloc(f32, @intCast(n_embd_dec)) catch oom();
             @memset(g.*, 0.0);
         }
-        const pending_pos_last = gpa.alloc(c.llama_pos, n_seq) catch oom();
+        const pending_pos_last = std.heap.c_allocator.alloc(llama.impl.llama_c.llama_pos, n_seq) catch oom();
         @memset(pending_pos_last, -1);
-        const verify_g = gpa.alloc(std.ArrayList(f32), n_seq) catch oom();
+        const verify_g = std.heap.c_allocator.alloc(std.ArrayList(f32), n_seq) catch oom();
         @memset(verify_g, .empty);
-        const verify_pos_first = gpa.alloc(c.llama_pos, n_seq) catch oom();
+        const verify_pos_first = std.heap.c_allocator.alloc(llama.impl.llama_c.llama_pos, n_seq) catch oom();
         @memset(verify_pos_first, -1);
-        const verify_g_rows = gpa.alloc(i32, n_seq) catch oom();
+        const verify_g_rows = std.heap.c_allocator.alloc(i32, n_seq) catch oom();
         @memset(verify_g_rows, 0);
 
         return .{
@@ -561,25 +559,25 @@ pub const Eagle3 = struct {
         self.batch.deinit();
         self.batch_enc.deinit();
         freeSamplers(self.smpls);
-        for (self.pending_g_last) |g| gpa.free(g);
-        gpa.free(self.pending_g_last);
-        gpa.free(self.pending_pos_last);
-        for (self.verify_g) |*g| g.deinit(gpa);
-        gpa.free(self.verify_g);
-        gpa.free(self.verify_pos_first);
-        gpa.free(self.verify_g_rows);
-        self.features_buf.deinit(gpa);
-        self.g_embd_buf.deinit(gpa);
+        for (self.pending_g_last) |g| std.heap.c_allocator.free(g);
+        std.heap.c_allocator.free(self.pending_g_last);
+        std.heap.c_allocator.free(self.pending_pos_last);
+        for (self.verify_g) |*g| g.deinit(std.heap.c_allocator);
+        std.heap.c_allocator.free(self.verify_g);
+        std.heap.c_allocator.free(self.verify_pos_first);
+        std.heap.c_allocator.free(self.verify_g_rows);
+        self.features_buf.deinit(std.heap.c_allocator);
+        self.g_embd_buf.deinit(std.heap.c_allocator);
     }
 
     /// Ports `begin` (speculative.cpp:636 @b1b770d90): warns when the
     /// draft context is missing more than the one deferred position.
-    pub fn begin(self: *Eagle3, _: *mod.speculative.Base, seq_id: c.llama_seq_id, prompt: []const c.llama_token) void {
+    pub fn begin(self: *Eagle3, _: *mod.speculative.Base, seq_id: llama.impl.llama_c.llama_seq_id, prompt: []const llama.impl.llama_c.llama_token) void {
         const n: i32 = @intCast(prompt.len);
         if (n <= 0) return;
         // expected state after prefill: ctx_dft has pos 0..N-2 (last position is deferred to
         // draft()'s seed step). Warn only if more than one position is missing.
-        const pos_max = c.llama_memory_seq_pos_max(c.llama_get_memory(self.params.ctx_dft), seq_id);
+        const pos_max = llama.api.context.llama_memory_seq_pos_max(llama.api.context.llama_get_memory(self.params.ctx_dft), seq_id);
         if (pos_max < n - 2) {
             mod.speculative.spcWrn("begin", "ctx_dft pos_max=%d < N-2=%d — process() did not run on every prefill ubatch. " ++
                 "Drafts may degrade.\n", .{ pos_max, n - 2 });
@@ -604,15 +602,15 @@ pub const Eagle3 = struct {
         // i_batch_beg[seq] / i_batch_end[seq]: inclusive batch indices of this seq's
         // first/last token in batch_in. Assumes per-seq tokens are contiguous within
         // the ubatch (server's default ordering).
-        const i_batch_beg = gpa.alloc(i32, n_seq) catch oom();
-        defer gpa.free(i_batch_beg);
-        const i_batch_end = gpa.alloc(i32, n_seq) catch oom();
-        defer gpa.free(i_batch_end);
+        const i_batch_beg = std.heap.c_allocator.alloc(i32, n_seq) catch oom();
+        defer std.heap.c_allocator.free(i_batch_beg);
+        const i_batch_end = std.heap.c_allocator.alloc(i32, n_seq) catch oom();
+        defer std.heap.c_allocator.free(i_batch_end);
         @memset(i_batch_beg, -1);
         @memset(i_batch_end, -1);
         for (0..n_tokens) |k| {
             const seq_id = tok[k].seq_id;
-            if (seq_id < 0 or seq_id >= @as(c.llama_seq_id, @intCast(n_seq))) continue;
+            if (seq_id < 0 or seq_id >= @as(llama.impl.llama_c.llama_seq_id, @intCast(n_seq))) continue;
             const s: usize = @intCast(seq_id);
             i_batch_end[s] = @intCast(k);
             if (i_batch_beg[s] < 0) i_batch_beg[s] = @intCast(k);
@@ -625,7 +623,7 @@ pub const Eagle3 = struct {
         // shape [n_tokens, target_layer_ids_n * n_embd_tgt]. Then run EAGLE3 encoder
         // to get one g_embd row per token.
         const old_len = self.features_buf.items.len;
-        self.features_buf.resize(gpa, n_tokens * n_embd_enc) catch oom();
+        self.features_buf.resize(std.heap.c_allocator, n_tokens * n_embd_enc) catch oom();
         if (self.features_buf.items.len > old_len) @memset(self.features_buf.items[old_len..], 0.0);
 
         for (0..self.target_layer_ids_n) |k| {
@@ -635,7 +633,7 @@ pub const Eagle3 = struct {
             else
                 mod.speculative.ext.getEmbeddingsNextn(ctx_tgt);
             if (layer == null) {
-                _ = c.ggml_abort("speculative.cpp", 692, "EAGLE3: target layer %d input not extracted.", lid);
+                _ = llama.impl.llama_c.ggml_abort("speculative.cpp", 692, "EAGLE3: target layer %d input not extracted.", lid);
             }
             for (0..n_tokens) |i| {
                 const dst = self.features_buf.items.ptr + i * n_embd_enc + k * n_embd_tgt;
@@ -644,27 +642,27 @@ pub const Eagle3 = struct {
             }
         }
 
-        self.g_embd_buf.resize(gpa, n_tokens * n_embd_dec) catch oom();
+        self.g_embd_buf.resize(std.heap.c_allocator, n_tokens * n_embd_dec) catch oom();
 
         // llama_process() requires the full encoder batch to fit in n_ubatch.
         // Allow batch > ubatch: eagle3's per-token encoder can be chunked safely.
-        const n_ubatch_dft: usize = @intCast(c.llama_n_ubatch(ctx_dft));
+        const n_ubatch_dft: usize = @intCast(llama.api.context.llama_n_ubatch(ctx_dft));
         var i: usize = 0;
         while (i < n_tokens) : (i += n_ubatch_dft) {
             const n_chunk = @min(n_ubatch_dft, n_tokens - i);
 
             // the per-token encoder does not use positions, generate placeholder ones from the memory state
             self.batch_enc.clear();
-            var pos: c.llama_pos = c.llama_memory_seq_pos_max(c.llama_get_memory(ctx_dft), 0) + 1;
+            var pos: llama.impl.llama_c.llama_pos = llama.api.context.llama_memory_seq_pos_max(llama.api.context.llama_get_memory(ctx_dft), 0) + 1;
             for (0..n_chunk) |j| {
                 // the C++ passes `&pos`, from which `add_embd` reads `n_pos`
                 // positions: one, the draft being no M-RoPE model
-                const pos_arr = [_]c.llama_pos{ pos, 0, 0, 0 };
+                const pos_arr = [_]llama.impl.llama_c.llama_pos{ pos, 0, 0, 0 };
                 _ = self.batch_enc.addEmbd(embdView(self.features_buf.items.ptr + (i + j) * n_embd_enc, 1, n_embd_enc), &pos_arr, 0, true);
                 pos += 1;
             }
 
-            const rc = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_ENCODE, self.batch_enc.get());
+            const rc = llama.api.context.llama_process(ctx_dft, llama.impl.llama_c.LLAMA_PROCESS_TYPE_ENCODE, self.batch_enc.get());
             if (rc != 0) {
                 mod.speculative.spcErr("process", "llama_process(ctx_dft) failed rc=%d (n_tokens=%d, offset=%d)\n", .{ rc, @as(c_int, @intCast(n_chunk)), @as(c_int, @intCast(i)) });
                 return false;
@@ -683,7 +681,7 @@ pub const Eagle3 = struct {
         self.batch.clear();
 
         for (0..n_seq) |s| {
-            const seq_id: c.llama_seq_id = @intCast(s);
+            const seq_id: llama.impl.llama_c.llama_seq_id = @intCast(s);
             const beg = i_batch_beg[s];
             const end = i_batch_end[s];
             if (beg < 0 or end < 0) continue;
@@ -693,7 +691,7 @@ pub const Eagle3 = struct {
             // cross-ubatch bridge — complete the prior ubatch's deferred boundary.
             const pending_pos = self.pending_pos_last[s];
             if (pending_pos >= 0 and pending_pos + 1 == tok[ub].pos[0]) {
-                const dft_pos_max = c.llama_memory_seq_pos_max(c.llama_get_memory(ctx_dft), seq_id);
+                const dft_pos_max = llama.api.context.llama_memory_seq_pos_max(llama.api.context.llama_get_memory(ctx_dft), seq_id);
                 if (pending_pos > dft_pos_max) {
                     const idx = self.batch.add(tok[ub].id, pending_pos, seq_id, false);
                     _ = self.batch.setEmbd(idx, embdView(self.pending_g_last[s].ptr, 1, n_embd_dec));
@@ -713,14 +711,14 @@ pub const Eagle3 = struct {
             self.verify_g_rows[s] = @intCast(n_rows);
             const vg = &self.verify_g[s];
             const vold = vg.items.len;
-            vg.resize(gpa, n_rows * n_embd_dec) catch oom();
+            vg.resize(std.heap.c_allocator, n_rows * n_embd_dec) catch oom();
             if (vg.items.len > vold) @memset(vg.items[vold..], 0.0);
             rowCopy(vg.items.ptr, g_embd + ub * n_embd_dec, n_embd_dec * n_rows);
             rowCopy(self.pending_g_last[s].ptr, g_embd + ue * n_embd_dec, n_embd_dec);
         }
 
         if (self.batch.size() > 0) {
-            const rc = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
+            const rc = llama.api.context.llama_process(ctx_dft, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
             if (rc != 0) {
                 mod.speculative.spcErr("process", "llama_process(ctx_dft) failed rc=%d (n_tokens=%d, ubatch_pos[0]=%d)\n", .{ rc, self.batch.size(), tok[0].pos[0] });
                 return false;
@@ -742,12 +740,12 @@ pub const Eagle3 = struct {
 
         // keep track of which sequences are still drafting
         var n_drafting: c_int = 0;
-        const drafting = gpa.alloc(bool, n_seq) catch oom();
-        defer gpa.free(drafting);
+        const drafting = std.heap.c_allocator.alloc(bool, n_seq) catch oom();
+        defer std.heap.c_allocator.free(drafting);
         @memset(drafting, false);
 
         for (0..n_seq) |s| {
-            const seq_id: c.llama_seq_id = @intCast(s);
+            const seq_id: llama.impl.llama_c.llama_seq_id = @intCast(s);
             const dp = &dparams[s];
 
             if (!dp.drafting) continue;
@@ -757,7 +755,7 @@ pub const Eagle3 = struct {
             drafting[s] = true;
             self.smpls[s].reset();
 
-            _ = c.llama_memory_seq_rm(c.llama_get_memory(ctx_dft), seq_id, self.pending_pos_last[s], -1);
+            _ = llama.api.context.llama_memory_seq_rm(llama.api.context.llama_get_memory(ctx_dft), seq_id, self.pending_pos_last[s], -1);
 
             const idx = self.batch.add(dp.id_last, self.pending_pos_last[s], seq_id, true);
             _ = self.batch.setEmbd(idx, embdView(self.pending_g_last[s].ptr, 1, n_embd_dec));
@@ -765,7 +763,7 @@ pub const Eagle3 = struct {
 
         if (self.batch.size() == 0) return;
 
-        var ret = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
+        var ret = llama.api.context.llama_process(ctx_dft, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
         if (ret != 0) {
             mod.speculative.spcErr("draft", "llama_process returned %d\n", .{ret});
             return;
@@ -779,7 +777,7 @@ pub const Eagle3 = struct {
             self.batch.clear();
 
             for (0..n_seq) |s| {
-                const seq_id: c.llama_seq_id = @intCast(s);
+                const seq_id: llama.impl.llama_c.llama_seq_id = @intCast(s);
                 if (!drafting[s]) continue;
 
                 const smpl = self.smpls[s];
@@ -808,7 +806,7 @@ pub const Eagle3 = struct {
                 const dp = &dparams[s];
                 const result = dp.result.?;
 
-                result.append(gpa, id) catch oom();
+                result.append(std.heap.c_allocator, id) catch oom();
 
                 if (self.params.n_max <= @as(i32, @intCast(result.items.len))) {
                     drafting[s] = false;
@@ -822,7 +820,7 @@ pub const Eagle3 = struct {
 
             if (self.batch.size() == 0) break;
 
-            ret = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
+            ret = llama.api.context.llama_process(ctx_dft, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
             if (ret != 0) {
                 mod.speculative.spcErr("draft", "llama_process[%d] returned %d\n", .{ i, ret });
                 break;
@@ -841,8 +839,8 @@ pub const Eagle3 = struct {
 
     /// Ports `accept` (speculative.cpp:920 @b1b770d90): the deferred
     /// boundary moves to the first position the target did not accept.
-    pub fn accept(self: *Eagle3, base: *mod.speculative.Base, seq_id: c.llama_seq_id, n_accepted: u16, _: bool) void {
-        if (seq_id < 0 or seq_id >= @as(c.llama_seq_id, @intCast(base.n_seq))) return;
+    pub fn accept(self: *Eagle3, base: *mod.speculative.Base, seq_id: llama.impl.llama_c.llama_seq_id, n_accepted: u16, _: bool) void {
+        if (seq_id < 0 or seq_id >= @as(llama.impl.llama_c.llama_seq_id, @intCast(base.n_seq))) return;
         const s: usize = @intCast(seq_id);
 
         const n_rows = self.verify_g_rows[s];
@@ -857,42 +855,42 @@ pub const Eagle3 = struct {
     /// Ports `need_boundary_stash` (speculative.cpp:939 @b1b770d90): only a
     /// recurrent or hybrid target drops the deferred row on restore.
     fn needBoundaryStash(self: *const Eagle3) bool {
-        const model_tgt = c.llama_get_model(self.params.ctx_tgt);
-        return c.llama_model_is_recurrent(model_tgt) or c.llama_model_is_hybrid(model_tgt);
+        const model_tgt = llama.api.context.llama_get_model(self.params.ctx_tgt);
+        return llama.api.model.llama_model_is_recurrent(model_tgt) or llama.api.model.llama_model_is_hybrid(model_tgt);
     }
 
     /// Ports `get_state` (speculative.cpp:944 @b1b770d90): the deferred
     /// position and its row, as bytes.
-    pub fn getState(self: *const Eagle3, base: *const mod.speculative.Base, seq_id: c.llama_seq_id, data: *std.ArrayList(u8)) bool {
+    pub fn getState(self: *const Eagle3, base: *const mod.speculative.Base, seq_id: llama.impl.llama_c.llama_seq_id, data: *std.ArrayList(u8)) bool {
         if (!self.needBoundaryStash()) return false;
-        if (seq_id < 0 or seq_id >= @as(c.llama_seq_id, @intCast(base.n_seq)) or self.pending_pos_last[@intCast(seq_id)] < 0) return false;
+        if (seq_id < 0 or seq_id >= @as(llama.impl.llama_c.llama_seq_id, @intCast(base.n_seq)) or self.pending_pos_last[@intCast(seq_id)] < 0) return false;
 
         const s: usize = @intCast(seq_id);
         const pos = self.pending_pos_last[s];
         const g = self.pending_g_last[s];
 
-        data.resize(gpa, @sizeOf(c.llama_pos) + g.len * @sizeOf(f32)) catch oom();
-        @memcpy(data.items[0..@sizeOf(c.llama_pos)], std.mem.asBytes(&pos));
-        @memcpy(data.items[@sizeOf(c.llama_pos)..], std.mem.sliceAsBytes(g));
+        data.resize(std.heap.c_allocator, @sizeOf(llama.impl.llama_c.llama_pos) + g.len * @sizeOf(f32)) catch oom();
+        @memcpy(data.items[0..@sizeOf(llama.impl.llama_c.llama_pos)], std.mem.asBytes(&pos));
+        @memcpy(data.items[@sizeOf(llama.impl.llama_c.llama_pos)..], std.mem.sliceAsBytes(g));
         return true;
     }
 
     /// Ports `set_state` (speculative.cpp:961 @b1b770d90).
-    pub fn setState(self: *Eagle3, base: *const mod.speculative.Base, seq_id: c.llama_seq_id, data: []const u8) void {
+    pub fn setState(self: *Eagle3, base: *const mod.speculative.Base, seq_id: llama.impl.llama_c.llama_seq_id, data: []const u8) void {
         if (!self.needBoundaryStash()) return;
-        if (seq_id < 0 or seq_id >= @as(c.llama_seq_id, @intCast(base.n_seq))) return;
+        if (seq_id < 0 or seq_id >= @as(llama.impl.llama_c.llama_seq_id, @intCast(base.n_seq))) return;
         const n_embd_dec: usize = @intCast(self.n_embd_dec);
-        if (data.len != @sizeOf(c.llama_pos) + n_embd_dec * @sizeOf(f32)) return;
+        if (data.len != @sizeOf(llama.impl.llama_c.llama_pos) + n_embd_dec * @sizeOf(f32)) return;
 
         const s: usize = @intCast(seq_id);
-        var pos: c.llama_pos = -1;
-        @memcpy(std.mem.asBytes(&pos), data[0..@sizeOf(c.llama_pos)]);
+        var pos: llama.impl.llama_c.llama_pos = -1;
+        @memcpy(std.mem.asBytes(&pos), data[0..@sizeOf(llama.impl.llama_c.llama_pos)]);
 
         self.pending_pos_last[s] = pos;
         if (self.pending_g_last[s].len != n_embd_dec) {
-            self.pending_g_last[s] = gpa.realloc(self.pending_g_last[s], n_embd_dec) catch oom();
+            self.pending_g_last[s] = std.heap.c_allocator.realloc(self.pending_g_last[s], n_embd_dec) catch oom();
         }
-        @memcpy(std.mem.sliceAsBytes(self.pending_g_last[s]), data[@sizeOf(c.llama_pos)..]);
+        @memcpy(std.mem.sliceAsBytes(self.pending_g_last[s]), data[@sizeOf(llama.impl.llama_c.llama_pos)..]);
     }
 };
 
@@ -917,20 +915,20 @@ pub const DFlash = struct {
     smpls: []*mod.sampling.Sampler,
 
     // backend sampler chain per seq, attached to ctx_dft
-    backend_chains: []?*c.llama_sampler,
+    backend_chains: []?*llama.impl.llama_c.llama_sampler,
 
     n_embd_dec: i32 = 0, // draft hidden size
     n_embd_enc: i32 = 0, // target_layer_ids_n * target_hidden_size
     n_embd_tgt: i32 = 0, // target model hidden size
 
     block_size: i32 = 0,
-    mask_token_id: c.llama_token = 0,
+    mask_token_id: llama.impl.llama_c.llama_token = 0,
 
     is_lilicorr: bool = false,
     lilicorr_top_k: i32 = 0,
     lilicorr_rows: usize = 0,
     lilicorr_embd: []f32 = &.{},
-    lilicorr_pos: []c.llama_pos = &.{},
+    lilicorr_pos: []llama.impl.llama_c.llama_pos = &.{},
 
     is_dflash2: bool = false,
     is_mrope: bool = false,
@@ -966,15 +964,15 @@ pub const DFlash = struct {
         const ctx_dft = p.ctx_dft;
         assertC(ctx_tgt != null and ctx_dft != null, 1039, "ctx_tgt && ctx_dft && \"DFlash requires ctx_tgt and ctx_dft to be set\"");
 
-        const model_dft = c.llama_get_model(ctx_dft);
-        const model_tgt = c.llama_get_model(ctx_tgt);
+        const model_dft = llama.api.context.llama_get_model(ctx_dft);
+        const model_tgt = llama.api.context.llama_get_model(ctx_tgt);
 
         const target_layer_ids = mod.speculative.ext.modelTargetLayerIds(model_dft);
         const target_layer_ids_n = mod.speculative.ext.modelTargetLayerIdsN(model_dft);
         assertC(target_layer_ids_n > 0, 1046, "target_layer_ids_n > 0 && \"DFlash model has no target_layer_ids\"");
 
-        const n_embd_tgt = c.llama_model_n_embd(model_tgt);
-        const n_embd_dec = c.llama_model_n_embd(model_dft);
+        const n_embd_tgt = llama.api.model.llama_model_n_embd(model_tgt);
+        const n_embd_dec = llama.api.model.llama_model_n_embd(model_dft);
         const n_embd_enc: i32 = @as(i32, @intCast(target_layer_ids_n)) * n_embd_tgt;
 
         // read the trained block size from the dflash.block_size metadata key
@@ -983,45 +981,45 @@ pub const DFlash = struct {
         var causal_attn = false;
         {
             var buf = std.mem.zeroes([32]u8);
-            if (c.llama_model_meta_val_str(model_dft, "dflash.block_size", &buf, buf.len) >= 0) {
+            if (llama.api.model.llama_model_meta_val_str(model_dft, "dflash.block_size", &buf, buf.len) >= 0) {
                 block_size = stdlib.num.atoi(std.mem.sliceTo(&buf, 0));
             }
-            if (c.llama_model_meta_val_str(model_dft, "dflash.sample_from_anchor", &buf, buf.len) >= 0) {
+            if (llama.api.model.llama_model_meta_val_str(model_dft, "dflash.sample_from_anchor", &buf, buf.len) >= 0) {
                 sample_from_anchor = std.mem.eql(u8, std.mem.sliceTo(&buf, 0), "true");
             }
-            if (c.llama_model_meta_val_str(model_dft, "dflash.attention.causal", &buf, buf.len) >= 0) {
+            if (llama.api.model.llama_model_meta_val_str(model_dft, "dflash.attention.causal", &buf, buf.len) >= 0) {
                 causal_attn = std.mem.eql(u8, std.mem.sliceTo(&buf, 0), "true");
             }
         }
 
         const selector_top_k = mod.speculative.ext.modelDflashSelectorTopK(model_dft);
         const is_dflash2 = selector_top_k > 0;
-        const dflash2_rng = gpa.alloc(stdlib.libcxx.Mt19937, n_seq) catch oom();
-        const dflash2_seed = gpa.alloc(i64, n_seq) catch oom();
+        const dflash2_rng = std.heap.c_allocator.alloc(stdlib.libcxx.Mt19937, n_seq) catch oom();
+        const dflash2_seed = std.heap.c_allocator.alloc(i64, n_seq) catch oom();
         @memset(dflash2_seed, -1);
         var lilicorr_meta = std.mem.zeroes([32]u8);
-        const lilicorr_top_k: i32 = if (c.llama_model_meta_val_str(model_dft, "lilicorr.candidate_topk", &lilicorr_meta, lilicorr_meta.len) >= 0)
+        const lilicorr_top_k: i32 = if (llama.api.model.llama_model_meta_val_str(model_dft, "lilicorr.candidate_topk", &lilicorr_meta, lilicorr_meta.len) >= 0)
             stdlib.num.atoi(std.mem.sliceTo(&lilicorr_meta, 0))
         else
             0;
         const is_lilicorr = lilicorr_top_k > 0;
         var lilicorr_rows: usize = 0;
         var lilicorr_embd: []f32 = &.{};
-        var lilicorr_pos: []c.llama_pos = &.{};
+        var lilicorr_pos: []llama.impl.llama_c.llama_pos = &.{};
         if (is_lilicorr) {
             lilicorr_rows = @as(usize, @intCast(block_size)) + 1;
             const lilicorr_slots = n_seq * lilicorr_rows;
-            lilicorr_embd = gpa.alloc(f32, lilicorr_slots * @as(usize, @intCast(n_embd_dec))) catch oom();
+            lilicorr_embd = std.heap.c_allocator.alloc(f32, lilicorr_slots * @as(usize, @intCast(n_embd_dec))) catch oom();
             @memset(lilicorr_embd, 0.0);
-            lilicorr_pos = gpa.alloc(c.llama_pos, lilicorr_slots) catch oom();
+            lilicorr_pos = std.heap.c_allocator.alloc(llama.impl.llama_c.llama_pos, lilicorr_slots) catch oom();
             @memset(lilicorr_pos, -1);
         }
-        const mask_token_id = c.llama_vocab_mask(c.llama_model_get_vocab(model_dft));
+        const mask_token_id = llama.api.vocab.llama_vocab_mask(llama.api.model.llama_model_get_vocab(model_dft));
 
         if (is_dspark and p.p_min > 0.0) {
             var buf = std.mem.zeroes([16]u8);
             const has_conf =
-                c.llama_model_meta_val_str(model_dft, "dflash.has_confidence_head", &buf, buf.len) < 0 or
+                llama.api.model.llama_model_meta_val_str(model_dft, "dflash.has_confidence_head", &buf, buf.len) < 0 or
                 std.mem.eql(u8, std.mem.sliceTo(&buf, 0), "true");
             if (!has_conf) {
                 return mod.speculative.throwRuntime("DSpark draft has no confidence head: please set --spec-draft-p-min 0");
@@ -1043,13 +1041,13 @@ pub const DFlash = struct {
         }
         base.n_max = p.n_max;
 
-        const batch = mod.common.Batch.init(gpa, ctx_dft);
-        const batch_inject = mod.common.Batch.init(gpa, ctx_dft);
+        const batch = mod.common.Batch.init(std.heap.c_allocator, ctx_dft);
+        const batch_inject = mod.common.Batch.init(std.heap.c_allocator, ctx_dft);
 
         // embd batches on an M-RoPE draft carry 4 position rows per token
-        const is_mrope = c.llama_model_rope_type(model_dft) == c.LLAMA_ROPE_TYPE_MROPE;
+        const is_mrope = llama.api.model.llama_model_rope_type(model_dft) == llama.impl.llama_c.LLAMA_ROPE_TYPE_MROPE;
 
-        const smpls = gpa.alloc(*mod.sampling.Sampler, n_seq) catch oom();
+        const smpls = std.heap.c_allocator.alloc(*mod.sampling.Sampler, n_seq) catch oom();
         for (smpls) |*s| s.* = draftSampler(model_dft);
 
         // offload draft sampling to the backend
@@ -1079,7 +1077,7 @@ pub const DFlash = struct {
 
         // DFlash2 reads its selector lattice from h_nextn and never consumes raw logits.
         mod.speculative.ext.setEmbeddingsNextn(ctx_dft, true, !is_dflash2 and !is_lilicorr);
-        c.llama_set_causal_attn(ctx_dft, causal_attn); // DFlash needs non-causal attention unless the model says otherwise
+        llama.api.context.llama_set_causal_attn(ctx_dft, causal_attn); // DFlash needs non-causal attention unless the model says otherwise
 
         return .{
             .params = p,
@@ -1116,17 +1114,17 @@ pub const DFlash = struct {
         freeBackendChains(self.params.ctx_dft, self.backend_chains);
         self.batch.deinit();
         self.batch_inject.deinit();
-        self.features_buf.deinit(gpa);
-        gpa.free(self.lilicorr_embd);
-        gpa.free(self.lilicorr_pos);
-        gpa.free(self.dflash2_rng);
-        gpa.free(self.dflash2_seed);
+        self.features_buf.deinit(std.heap.c_allocator);
+        std.heap.c_allocator.free(self.lilicorr_embd);
+        std.heap.c_allocator.free(self.lilicorr_pos);
+        std.heap.c_allocator.free(self.dflash2_rng);
+        std.heap.c_allocator.free(self.dflash2_seed);
         freeSamplers(self.smpls);
     }
 
     /// Ports `begin` (speculative.cpp:1181 @b1b770d90).
-    pub fn begin(self: *DFlash, base: *mod.speculative.Base, seq_id: c.llama_seq_id, prompt: []const c.llama_token) void {
-        if (seq_id < 0 or seq_id >= @as(c.llama_seq_id, @intCast(base.n_seq))) return;
+    pub fn begin(self: *DFlash, base: *mod.speculative.Base, seq_id: llama.impl.llama_c.llama_seq_id, prompt: []const llama.impl.llama_c.llama_token) void {
+        if (seq_id < 0 or seq_id >= @as(llama.impl.llama_c.llama_seq_id, @intCast(base.n_seq))) return;
 
         // reseed per request rather than per round, or two identical requests differ
         self.dflash2_seed[@intCast(seq_id)] = -1;
@@ -1134,7 +1132,7 @@ pub const DFlash = struct {
         const n: i32 = @intCast(prompt.len);
         if (n <= 0) return;
 
-        const pos_max = c.llama_memory_seq_pos_max(c.llama_get_memory(self.params.ctx_dft), seq_id);
+        const pos_max = llama.api.context.llama_memory_seq_pos_max(llama.api.context.llama_get_memory(self.params.ctx_dft), seq_id);
         if (pos_max < n - 1) {
             mod.log.wrn("%s: ctx_dft pos_max=%d < N-1=%d - process() did not run on every prefill ubatch. " ++
                 "Drafts may degrade.\n", .{ @as([*:0]const u8, "begin"), pos_max, n - 1 });
@@ -1163,15 +1161,15 @@ pub const DFlash = struct {
         const n_embd_tgt: usize = @intCast(self.n_embd_tgt);
 
         // per-seq inclusive batch range (assumes each seq's tokens are contiguous in the batch)
-        const i_batch_beg = gpa.alloc(i32, n_seq) catch oom();
-        defer gpa.free(i_batch_beg);
-        const i_batch_end = gpa.alloc(i32, n_seq) catch oom();
-        defer gpa.free(i_batch_end);
+        const i_batch_beg = std.heap.c_allocator.alloc(i32, n_seq) catch oom();
+        defer std.heap.c_allocator.free(i_batch_beg);
+        const i_batch_end = std.heap.c_allocator.alloc(i32, n_seq) catch oom();
+        defer std.heap.c_allocator.free(i_batch_end);
         @memset(i_batch_beg, -1);
         @memset(i_batch_end, -1);
         for (0..n_tokens) |k| {
             const seq_id = tok[k].seq_id;
-            if (seq_id < 0 or seq_id >= @as(c.llama_seq_id, @intCast(n_seq))) continue;
+            if (seq_id < 0 or seq_id >= @as(llama.impl.llama_c.llama_seq_id, @intCast(n_seq))) continue;
             const s: usize = @intCast(seq_id);
             i_batch_end[s] = @intCast(k);
             if (i_batch_beg[s] < 0) i_batch_beg[s] = @intCast(k);
@@ -1180,10 +1178,10 @@ pub const DFlash = struct {
         const ctx_tgt = self.params.ctx_tgt;
         const ctx_dft = self.params.ctx_dft;
 
-        const n_ubatch: i32 = @intCast(c.llama_n_ubatch(ctx_dft));
+        const n_ubatch: i32 = @intCast(llama.api.context.llama_n_ubatch(ctx_dft));
 
         for (0..n_seq) |s| {
-            const seq_id: c.llama_seq_id = @intCast(s);
+            const seq_id: llama.impl.llama_c.llama_seq_id = @intCast(s);
             if (i_batch_beg[s] < 0) continue;
             const ub: usize = @intCast(i_batch_beg[s]);
             const n_rows: i32 = i_batch_end[s] - i_batch_beg[s] + 1;
@@ -1205,11 +1203,11 @@ pub const DFlash = struct {
                     for (0..nc) |i| {
                         const row: i32 = @intCast(ub + uo + i);
                         const p = tok[ub + uo + i].pos[0];
-                        const pos_arr = [4]c.llama_pos{ p, p, p, 0 };
+                        const pos_arr = [4]llama.impl.llama_c.llama_pos{ p, p, p, 0 };
                         _ = self.batch_inject.addEmbdRow(row, &pos_arr, seq_id, false);
                     }
 
-                    const rc = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_DECODE, self.batch_inject.get());
+                    const rc = llama.api.context.llama_process(ctx_dft, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, self.batch_inject.get());
                     if (rc != 0) {
                         mod.log.err("%s: llama_process(ctx_dft) failed rc=%d (n_tokens=%d, offset=%d)\n", .{ @as([*:0]const u8, "process"), rc, n_chunk, offset });
                         return false;
@@ -1219,11 +1217,11 @@ pub const DFlash = struct {
 
                 // gather target features per extract layer; the fused decode encodes and
                 // injects them into the K/V cache at the target positions
-                self.features_buf.resize(gpa, nc * n_embd_enc) catch oom();
+                self.features_buf.resize(std.heap.c_allocator, nc * n_embd_enc) catch oom();
                 for (0..self.target_layer_ids_n) |k| {
                     const layer = mod.speculative.ext.getEmbeddingsLayerInp(ctx_tgt, @intCast(self.target_layer_ids[k]));
                     if (layer == null) {
-                        _ = c.ggml_abort("speculative.cpp", 1279, "DFlash: target layer %d input not extracted.", self.target_layer_ids[k]);
+                        _ = llama.impl.llama_c.ggml_abort("speculative.cpp", 1279, "DFlash: target layer %d input not extracted.", self.target_layer_ids[k]);
                     }
                     for (0..nc) |i| {
                         const dst = self.features_buf.items.ptr + i * n_embd_enc + k * n_embd_tgt;
@@ -1235,10 +1233,10 @@ pub const DFlash = struct {
                 self.batch_inject.clear();
                 for (0..nc) |i| {
                     const p = tok[ub + uo + i].pos[0];
-                    const pos_arr = [4]c.llama_pos{ p, p, p, 0 };
+                    const pos_arr = [4]llama.impl.llama_c.llama_pos{ p, p, p, 0 };
                     _ = self.batch_inject.addEmbd(embdView(self.features_buf.items.ptr + i * n_embd_enc, 1, n_embd_enc), &pos_arr, seq_id, false);
                 }
-                const rc = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_DECODE, self.batch_inject.get());
+                const rc = llama.api.context.llama_process(ctx_dft, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, self.batch_inject.get());
                 if (rc != 0) {
                     mod.log.err("%s: llama_process(ctx_dft) failed rc=%d (n_tokens=%d, offset=%d)\n", .{ @as([*:0]const u8, "process"), rc, n_chunk, offset });
                     return false;
@@ -1249,7 +1247,7 @@ pub const DFlash = struct {
                         const n_embd_dec: usize = @intCast(self.n_embd_dec);
                         const seq_offset = s * self.lilicorr_rows;
                         const inj = self.batch_inject.tokens.items;
-                        const pos_min: c.llama_pos = @max(0, inj[inj.len - 1].pos[0] - self.block_size);
+                        const pos_min: llama.impl.llama_c.llama_pos = @max(0, inj[inj.len - 1].pos[0] - self.block_size);
                         for (0..nc) |i| {
                             const pos = inj[i].pos[0];
                             if (pos < pos_min) {
@@ -1279,15 +1277,15 @@ pub const DFlash = struct {
 
         // build one batch holding every drafting sequence's noise block into a single decode)
         // record where each block starts and its size
-        const i_block_beg = gpa.alloc(i32, n_seq) catch oom();
-        defer gpa.free(i_block_beg);
-        const n_block = gpa.alloc(i32, n_seq) catch oom();
-        defer gpa.free(n_block);
+        const i_block_beg = std.heap.c_allocator.alloc(i32, n_seq) catch oom();
+        defer std.heap.c_allocator.free(i_block_beg);
+        const n_block = std.heap.c_allocator.alloc(i32, n_seq) catch oom();
+        defer std.heap.c_allocator.free(n_block);
         @memset(i_block_beg, -1);
         @memset(n_block, 0);
 
         for (0..n_seq) |s| {
-            const seq_id: c.llama_seq_id = @intCast(s);
+            const seq_id: llama.impl.llama_c.llama_seq_id = @intCast(s);
             const dp = &dparams[s];
             if (!dp.drafting) continue;
 
@@ -1305,7 +1303,7 @@ pub const DFlash = struct {
                 const idx = self.batch.add(if (i == 0) dp.id_last else self.mask_token_id, n + i, seq_id, !self.is_dflash2 and !self.is_lilicorr);
                 if (self.is_lilicorr) {
                     // For LiliCorr drafting batch, set state embeddings for use in the associated transformer head.
-                    const pos: c.llama_pos = dp.pos0 - 1;
+                    const pos: llama.impl.llama_c.llama_pos = dp.pos0 - 1;
                     // `(size_t) pos`: sign-extended, as the C++ converts it
                     const slot = s * self.lilicorr_rows + @as(usize, @bitCast(@as(isize, pos))) % self.lilicorr_rows;
                     const n_embd_dec: usize = @intCast(self.n_embd_dec);
@@ -1317,7 +1315,7 @@ pub const DFlash = struct {
         if (self.batch.size() == 0) return;
 
         // decode all sequence's noise block in a single batch
-        const ret = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
+        const ret = llama.api.context.llama_process(ctx_dft, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
         if (ret != 0) {
             mod.log.wrn("%s: llama_process returned %d\n", .{ @as([*:0]const u8, "draft"), ret });
             return;
@@ -1326,7 +1324,7 @@ pub const DFlash = struct {
         const n_embd_dec: usize = @intCast(self.n_embd_dec);
 
         for (0..n_seq) |s| {
-            const seq_id: c.llama_seq_id = @intCast(s);
+            const seq_id: llama.impl.llama_c.llama_seq_id = @intCast(s);
             if (i_block_beg[s] < 0) continue;
             const dp = &dparams[s];
 
@@ -1352,13 +1350,13 @@ pub const DFlash = struct {
                 if (sample and self.dflash2_seed[seq] != @as(i64, dp.seed)) {
                     self.dflash2_seed[seq] = dp.seed;
                     // the default seed means random; mixed so it differs from the target's, as in spec_retune
-                    self.dflash2_rng[seq].seed(if (dp.seed == c.LLAMA_DEFAULT_SEED) stdlib.libcxx.randomDevice() else dp.seed ^ 0x85ebca6b);
+                    self.dflash2_rng[seq].seed(if (dp.seed == llama.impl.llama_c.LLAMA_DEFAULT_SEED) stdlib.libcxx.randomDevice() else dp.seed ^ 0x85ebca6b);
                 }
 
                 var probs: std.ArrayList(f32) = .empty;
-                defer probs.deinit(gpa);
+                defer probs.deinit(std.heap.c_allocator);
                 var sorted_idx: std.ArrayList(i32) = .empty;
-                defer sorted_idx.deinit(gpa);
+                defer sorted_idx.deinit(std.heap.c_allocator);
 
                 var predecessor: usize = 0;
                 var i: i32 = 1;
@@ -1375,7 +1373,7 @@ pub const DFlash = struct {
                     predecessor = best;
                     if (self.params.p_min > 0.0 or sample) {
                         // softmax(scores / temp) at the argmax, i.e. 1 / sum(exp((s_k - s_max) / temp))
-                        probs.resize(gpa, top_k) catch oom();
+                        probs.resize(std.heap.c_allocator, top_k) catch oom();
                         var sum: f32 = 0.0;
                         for (0..top_k) |k| {
                             probs.items[k] = @exp((scores[k] - scores[predecessor]) / temp);
@@ -1386,7 +1384,7 @@ pub const DFlash = struct {
                     }
                     if (sample) {
                         // ggml_top_k leaves candidates unordered, so walk them by token id to keep a seed's draft stable
-                        sorted_idx.resize(gpa, top_k) catch oom();
+                        sorted_idx.resize(std.heap.c_allocator, top_k) catch oom();
                         for (0..top_k) |k| sorted_idx.items[k] = @intCast(k);
                         stdlib.libcxx.sort(i32, sorted_idx.items, row, struct {
                             fn lt(r: [*]const f32, x: i32, y: i32) bool {
@@ -1404,14 +1402,14 @@ pub const DFlash = struct {
                             }
                         }
 
-                        const q = dp.result_q.?.addOne(gpa) catch oom();
+                        const q = dp.result_q.?.addOne(std.heap.c_allocator) catch oom();
                         q.* = .empty;
-                        q.ensureTotalCapacity(gpa, top_k) catch oom();
+                        q.ensureTotalCapacity(std.heap.c_allocator, top_k) catch oom();
                         for (0..top_k) |k| {
                             q.appendAssumeCapacity(.{ .id = @intFromFloat(row[k]), .logit = scores[k], .p = probs.items[k] });
                         }
                     }
-                    result.append(gpa, @intFromFloat(row[predecessor])) catch oom();
+                    result.append(std.heap.c_allocator, @intFromFloat(row[predecessor])) catch oom();
                 }
 
                 if (result.items.len < @as(usize, @bitCast(@as(isize, self.params.n_min)))) {
@@ -1442,7 +1440,7 @@ pub const DFlash = struct {
 
                     smpl.accept(id, true);
 
-                    result.append(gpa, id) catch oom();
+                    result.append(std.heap.c_allocator, id) catch oom();
                 }
             } else {
                 // greedily read the predicted block at this sequence's noise positions 1..n_block_tokens-1
@@ -1460,7 +1458,7 @@ pub const DFlash = struct {
 
                     smpl.accept(id, true);
 
-                    result.append(gpa, id) catch oom();
+                    result.append(std.heap.c_allocator, id) catch oom();
                 }
             }
 
@@ -1469,7 +1467,7 @@ pub const DFlash = struct {
     }
 
     /// Ports `accept` (speculative.cpp:1521 @b1b770d90): nothing to do.
-    pub fn accept(_: *DFlash, _: *mod.speculative.Base, _: c.llama_seq_id, _: u16, _: bool) void {
+    pub fn accept(_: *DFlash, _: *mod.speculative.Base, _: llama.impl.llama_c.llama_seq_id, _: u16, _: bool) void {
         // noop
     }
 };
@@ -1491,7 +1489,7 @@ pub const Mtp = struct {
     smpls_cfg: std.ArrayList(SmplCfg) = .empty,
 
     // backend sampler chain per seq, attached to ctx_dft
-    backend_chains: []?*c.llama_sampler,
+    backend_chains: []?*llama.impl.llama_c.llama_sampler,
 
     n_embd: i32 = 0,
 
@@ -1530,27 +1528,27 @@ pub const Mtp = struct {
         const ctx_dft = p.ctx_dft;
         assertC(ctx_tgt != null and ctx_dft != null, 1577, "ctx_tgt && ctx_dft && \"MTP requires ctx_tgt and ctx_dft to be set\"");
 
-        const n_embd = c.llama_model_n_embd_out(c.llama_get_model(ctx_dft));
-        assertC(n_embd == c.llama_model_n_embd_out(c.llama_get_model(ctx_tgt)), 1580, "n_embd == llama_model_n_embd_out(llama_get_model(ctx_tgt)) && \"MTP input row width must match the target h_nextn width\"");
-        const n_mtp_layers: i32 = @max(1, c.llama_model_n_layer_nextn(c.llama_get_model(ctx_dft)));
+        const n_embd = llama.api.model.llama_model_n_embd_out(llama.api.context.llama_get_model(ctx_dft));
+        assertC(n_embd == llama.api.model.llama_model_n_embd_out(llama.api.context.llama_get_model(ctx_tgt)), 1580, "n_embd == llama_model_n_embd_out(llama_get_model(ctx_tgt)) && \"MTP input row width must match the target h_nextn width\"");
+        const n_mtp_layers: i32 = @max(1, llama.api.model.llama_model_n_layer_nextn(llama.api.context.llama_get_model(ctx_dft)));
 
         mod.speculative.spcTrc(func, "%s", .{@as([*:0]const u8, "adding speculative implementation 'draft-mtp'\n")});
         mod.speculative.spcTrc(func, "- n_max=%d, n_min=%d, p_min=%.2f, n_embd=%d, backend_sampling=%d\n", .{ p.n_max, p.n_min, @as(f64, p.p_min), n_embd, @as(c_int, @intFromBool(p.backend_sampling)) });
         const devs = mod.speculative.devicesStr(p.devices.items);
-        defer gpa.free(devs);
+        defer std.heap.c_allocator.free(devs);
         mod.speculative.spcTrc(func, "- gpu_layers=%d, cache_k=%s, cache_v=%s, ctx_tgt=%s, ctx_dft=%s, devices=[%s]\n", .{
             p.n_gpu_layers,
-            c.ggml_type_name(p.cache_type_k),
-            c.ggml_type_name(p.cache_type_v),
+            llama.impl.llama_c.ggml_type_name(p.cache_type_k),
+            llama.impl.llama_c.ggml_type_name(p.cache_type_v),
             @as([*:0]const u8, if (ctx_tgt != null) "yes" else "no"),
             @as([*:0]const u8, if (ctx_dft != null) "yes" else "no"),
             devs.ptr,
         });
 
-        const batch = mod.common.Batch.init(gpa, ctx_dft);
+        const batch = mod.common.Batch.init(std.heap.c_allocator, ctx_dft);
 
-        const smpls = gpa.alloc(*mod.sampling.Sampler, n_seq) catch oom();
-        for (smpls) |*s| s.* = draftSampler(c.llama_get_model(ctx_dft));
+        const smpls = std.heap.c_allocator.alloc(*mod.sampling.Sampler, n_seq) catch oom();
+        for (smpls) |*s| s.* = draftSampler(llama.api.context.llama_get_model(ctx_dft));
 
         // offload draft sampling to the backend
         const chains = backendChains(ctx_dft, n_seq, p.backend_sampling);
@@ -1561,46 +1559,46 @@ pub const Mtp = struct {
         mod.speculative.ext.setEmbeddingsNextn(ctx_tgt, true, is_mem_shared);
         mod.speculative.ext.setEmbeddingsNextn(ctx_dft, true, true);
 
-        const chain_h = gpa.alloc(std.ArrayList(f32), if (chain_heads) n_seq else 0) catch oom();
+        const chain_h = std.heap.c_allocator.alloc(std.ArrayList(f32), if (chain_heads) n_seq else 0) catch oom();
         if (chain_heads) {
             p.n_max = @min(p.n_max, n_mtp_layers);
 
             for (chain_h) |*ch| {
                 ch.* = .empty;
-                ch.ensureTotalCapacity(gpa, @as(usize, @intCast(p.n_max + 1)) * @as(usize, @intCast(n_embd))) catch oom();
+                ch.ensureTotalCapacity(std.heap.c_allocator, @as(usize, @intCast(p.n_max + 1)) * @as(usize, @intCast(n_embd))) catch oom();
             }
         }
         base.n_max = p.n_max;
 
-        const pending_h = gpa.alloc([]f32, n_seq) catch oom();
+        const pending_h = std.heap.c_allocator.alloc([]f32, n_seq) catch oom();
         for (pending_h) |*h| {
-            h.* = gpa.alloc(f32, @intCast(n_embd)) catch oom();
+            h.* = std.heap.c_allocator.alloc(f32, @intCast(n_embd)) catch oom();
             @memset(h.*, 0.0);
         }
 
-        const i_last = gpa.alloc(c_int, n_seq) catch oom();
+        const i_last = std.heap.c_allocator.alloc(c_int, n_seq) catch oom();
         @memset(i_last, -1);
-        const i_batch_beg = gpa.alloc(i32, n_seq) catch oom();
+        const i_batch_beg = std.heap.c_allocator.alloc(i32, n_seq) catch oom();
         @memset(i_batch_beg, -1);
-        const i_batch_end = gpa.alloc(i32, n_seq) catch oom();
+        const i_batch_end = std.heap.c_allocator.alloc(i32, n_seq) catch oom();
         @memset(i_batch_end, -1);
 
-        const verify_h = gpa.alloc(std.ArrayList(f32), n_seq) catch oom();
+        const verify_h = std.heap.c_allocator.alloc(std.ArrayList(f32), n_seq) catch oom();
         @memset(verify_h, .empty);
-        const verify_h_rows = gpa.alloc(i32, n_seq) catch oom();
+        const verify_h_rows = std.heap.c_allocator.alloc(i32, n_seq) catch oom();
         @memset(verify_h_rows, 0);
 
-        const n_batch_tgt: i32 = @bitCast(c.llama_n_batch(ctx_tgt));
-        const verify_row0 = gpa.alloc(i32, n_seq) catch oom();
+        const n_batch_tgt: i32 = @bitCast(llama.api.context.llama_n_batch(ctx_tgt));
+        const verify_row0 = std.heap.c_allocator.alloc(i32, n_seq) catch oom();
         @memset(verify_row0, -1);
 
         // shared memory and chained heads keep the host rows
         var dev_rows = false;
         if (!is_mem_shared and !chain_heads) {
-            dev_rows = c.llama_set_embeddings_nextn_dev(ctx_tgt, true) and c.llama_set_ctx_state_src(ctx_dft, ctx_tgt);
+            dev_rows = llama.api.context.llama_set_embeddings_nextn_dev(ctx_tgt, true) and llama.api.context.llama_set_ctx_state_src(ctx_dft, ctx_tgt);
             if (!dev_rows) {
-                _ = c.llama_set_ctx_state_src(ctx_dft, null);
-                _ = c.llama_set_embeddings_nextn_dev(ctx_tgt, false);
+                _ = llama.api.context.llama_set_ctx_state_src(ctx_dft, null);
+                _ = llama.api.context.llama_set_embeddings_nextn_dev(ctx_tgt, false);
             }
         }
         mod.speculative.spcTrc(func, "- target h rows on the device: %s\n", .{@as([*:0]const u8, if (dev_rows) "yes" else "no")});
@@ -1630,36 +1628,36 @@ pub const Mtp = struct {
     /// Ports the destructor of `common_speculative_impl_draft_mtp` (speculative.cpp:1660 @b1b770d90).
     pub fn deinit(self: *Mtp) void {
         if (self.dev_rows) {
-            _ = c.llama_set_ctx_state_src(self.params.ctx_dft, null);
-            _ = c.llama_set_embeddings_nextn_dev(self.params.ctx_tgt, false);
+            _ = llama.api.context.llama_set_ctx_state_src(self.params.ctx_dft, null);
+            _ = llama.api.context.llama_set_embeddings_nextn_dev(self.params.ctx_tgt, false);
         }
         freeBackendChains(self.params.ctx_dft, self.backend_chains);
         self.batch.deinit();
         freeSamplers(self.smpls);
-        self.smpls_cfg.deinit(gpa);
-        for (self.pending_h) |h| gpa.free(h);
-        gpa.free(self.pending_h);
-        gpa.free(self.i_batch_beg);
-        gpa.free(self.i_batch_end);
-        for (self.verify_h) |*h| h.deinit(gpa);
-        gpa.free(self.verify_h);
-        gpa.free(self.verify_h_rows);
-        gpa.free(self.verify_row0);
-        gpa.free(self.i_last);
-        for (self.chain_h) |*h| h.deinit(gpa);
-        gpa.free(self.chain_h);
+        self.smpls_cfg.deinit(std.heap.c_allocator);
+        for (self.pending_h) |h| std.heap.c_allocator.free(h);
+        std.heap.c_allocator.free(self.pending_h);
+        std.heap.c_allocator.free(self.i_batch_beg);
+        std.heap.c_allocator.free(self.i_batch_end);
+        for (self.verify_h) |*h| h.deinit(std.heap.c_allocator);
+        std.heap.c_allocator.free(self.verify_h);
+        std.heap.c_allocator.free(self.verify_h_rows);
+        std.heap.c_allocator.free(self.verify_row0);
+        std.heap.c_allocator.free(self.i_last);
+        for (self.chain_h) |*h| h.deinit(std.heap.c_allocator);
+        std.heap.c_allocator.free(self.chain_h);
     }
 
     /// Ports `begin` (speculative.cpp:1678 @b1b770d90): the sequence's
     /// sampler is reset here rather than per round, or two identical
     /// requests differ.
-    pub fn begin(self: *Mtp, _: *mod.speculative.Base, seq_id: c.llama_seq_id, prompt: []const c.llama_token) void {
+    pub fn begin(self: *Mtp, _: *mod.speculative.Base, seq_id: llama.impl.llama_c.llama_seq_id, prompt: []const llama.impl.llama_c.llama_token) void {
         self.smpls[@intCast(seq_id)].reset();
 
         const n: i32 = @intCast(prompt.len);
         if (n <= 0) return;
 
-        const pos_max = c.llama_memory_seq_pos_max(c.llama_get_memory(self.params.ctx_dft), seq_id);
+        const pos_max = llama.api.context.llama_memory_seq_pos_max(llama.api.context.llama_get_memory(self.params.ctx_dft), seq_id);
 
         if (pos_max < n - 1 and !self.is_mem_shared) {
             mod.speculative.spcWrn("begin", "ctx_dft pos_max=%d < N-1=%d - " ++
@@ -1690,7 +1688,7 @@ pub const Mtp = struct {
 
         for (0..n_tokens) |k| {
             for (0..n_seq) |s| {
-                if (tok[k].seq_id == @as(c.llama_seq_id, @intCast(s))) {
+                if (tok[k].seq_id == @as(llama.impl.llama_c.llama_seq_id, @intCast(s))) {
                     self.i_batch_end[s] = @intCast(k);
                     if (self.i_batch_beg[s] < 0) self.i_batch_beg[s] = @intCast(k);
                 }
@@ -1714,7 +1712,7 @@ pub const Mtp = struct {
                 assertC(n_tokens <= self.n_batch_tgt, 1741, "n_tokens <= n_batch_tgt && \"the target batch exceeds the h_nextn device buffer\"");
                 for (0..n_seq) |s| {
                     if (self.i_batch_beg[s] >= 0) {
-                        _ = c.llama_set_embeddings_nextn_rows(ctx_tgt, self.n_batch_tgt + @as(i64, @intCast(s)), 1, self.pending_h[s].ptr);
+                        _ = llama.api.context.llama_set_embeddings_nextn_rows(ctx_tgt, self.n_batch_tgt + @as(i64, @intCast(s)), 1, self.pending_h[s].ptr);
                     }
                 }
             }
@@ -1728,7 +1726,7 @@ pub const Mtp = struct {
                 const s: usize = @intCast(seq_id);
 
                 // vision tokens carry an embedding instead of an id
-                const idx = if (t.id != c.LLAMA_TOKEN_NULL)
+                const idx = if (t.id != llama.impl.llama_c.LLAMA_TOKEN_NULL)
                     self.batch.add(t.id, t.pos[0], seq_id, false)
                 else
                     self.batch.addEmbd(t.embd, &t.pos, seq_id, false);
@@ -1746,7 +1744,7 @@ pub const Mtp = struct {
                 _ = self.batch.setEmbdState(idx, embdView(h_row, 1, n_embd));
             }
 
-            const mem_dft = c.llama_get_memory(ctx_dft);
+            const mem_dft = llama.api.context.llama_get_memory(ctx_dft);
 
             var ok = true;
             var head: i32 = 0;
@@ -1754,12 +1752,12 @@ pub const Mtp = struct {
                 if (self.chain_heads) {
                     for (0..n_seq) |s| {
                         if (self.i_batch_beg[s] < 0) continue;
-                        _ = c.llama_memory_seq_rm(mem_dft, @intCast(s), tok[@intCast(self.i_batch_beg[s])].pos[0], -1);
+                        _ = llama.api.context.llama_memory_seq_rm(mem_dft, @intCast(s), tok[@intCast(self.i_batch_beg[s])].pos[0], -1);
                     }
                     mod.speculative.ext.setNextnLayerOffset(ctx_dft, head);
                 }
 
-                const rc = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
+                const rc = llama.api.context.llama_process(ctx_dft, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
                 if (rc != 0) {
                     mod.speculative.spcErr("process", "llama_process(ctx_dft) head=%d failed rc=%d (pos=%d)\n", .{ head, rc, tok[0].pos[0] });
                     ok = false;
@@ -1791,11 +1789,11 @@ pub const Mtp = struct {
             if (self.dev_rows) {
                 // the rows stay on the device until the next target decode, only the pending row comes to the host
                 self.verify_row0[s] = h_offset;
-                _ = c.llama_get_embeddings_nextn_rows(ctx_tgt, h_offset + @as(i64, @intCast(h_rows)) - 1, 1, self.pending_h[s].ptr);
+                _ = llama.api.context.llama_get_embeddings_nextn_rows(ctx_tgt, h_offset + @as(i64, @intCast(h_rows)) - 1, 1, self.pending_h[s].ptr);
                 continue;
             }
 
-            self.verify_h[s].resize(gpa, h_rows * n_embd) catch oom();
+            self.verify_h[s].resize(std.heap.c_allocator, h_rows * n_embd) catch oom();
 
             for (0..h_rows) |i| {
                 const h = mod.speculative.ext.getEmbeddingsNextnIth(ctx_tgt, h_offset + @as(i32, @intCast(i)));
@@ -1820,12 +1818,12 @@ pub const Mtp = struct {
 
         // keep track of which sequences are still drafting
         var n_drafting: c_int = 0;
-        const drafting = gpa.alloc(bool, n_seq) catch oom();
-        defer gpa.free(drafting);
+        const drafting = std.heap.c_allocator.alloc(bool, n_seq) catch oom();
+        defer std.heap.c_allocator.free(drafting);
         @memset(drafting, false);
 
         for (0..n_seq) |s| {
-            const seq_id: c.llama_seq_id = @intCast(s);
+            const seq_id: llama.impl.llama_c.llama_seq_id = @intCast(s);
             const dp = &dparams[s];
 
             if (!dp.drafting) continue;
@@ -1839,7 +1837,7 @@ pub const Mtp = struct {
 
             // result_q is only set when the caller wants rejection, so it also gates the retune
             if (dp.result_q != null) {
-                specRetune(self.smpls, &self.smpls_cfg, c.llama_get_model(ctx_dft), seq_id, dp.temp, dp.seed);
+                specRetune(self.smpls, &self.smpls_cfg, llama.api.context.llama_get_model(ctx_dft), seq_id, dp.temp, dp.seed);
             }
 
             // a reset reseeds the chain, which breaks probabilistic drafting
@@ -1854,7 +1852,7 @@ pub const Mtp = struct {
 
             if (self.chain_heads) {
                 self.chain_h[s].clearRetainingCapacity();
-                self.chain_h[s].appendSlice(gpa, self.pending_h[s]) catch oom();
+                self.chain_h[s].appendSlice(std.heap.c_allocator, self.pending_h[s]) catch oom();
             }
         }
 
@@ -1865,14 +1863,14 @@ pub const Mtp = struct {
             // KV is per layer. reset the draft region and select head i so it rebuilds its
             // own layer's KV there.
             if (self.chain_heads) {
-                const mem_dft = c.llama_get_memory(ctx_dft);
+                const mem_dft = llama.api.context.llama_get_memory(ctx_dft);
                 for (0..n_seq) |s| {
-                    if (drafting[s]) _ = c.llama_memory_seq_rm(mem_dft, @intCast(s), dparams[s].pos0, -1);
+                    if (drafting[s]) _ = llama.api.context.llama_memory_seq_rm(mem_dft, @intCast(s), dparams[s].pos0, -1);
                 }
                 mod.speculative.ext.setNextnLayerOffset(ctx_dft, i);
             }
 
-            const ret = c.llama_process(ctx_dft, c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
+            const ret = llama.api.context.llama_process(ctx_dft, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get());
             if (ret != 0) {
                 mod.speculative.spcErr("draft", "llama_process[%d] returned %d\n", .{ i, ret });
                 break;
@@ -1884,7 +1882,7 @@ pub const Mtp = struct {
             self.batch.clear();
 
             for (0..n_seq) |s| {
-                const seq_id: c.llama_seq_id = @intCast(s);
+                const seq_id: llama.impl.llama_c.llama_seq_id = @intCast(s);
                 if (!drafting[s]) continue;
 
                 const smpl = self.smpls[s];
@@ -1911,7 +1909,7 @@ pub const Mtp = struct {
                 const dp = &dparams[s];
                 const result = dp.result.?;
 
-                result.append(gpa, id) catch oom();
+                result.append(std.heap.c_allocator, id) catch oom();
 
                 if (dp.result_q) |q| appendCandidates(q, cur_p);
 
@@ -1922,12 +1920,12 @@ pub const Mtp = struct {
                 }
 
                 if (self.chain_heads) {
-                    self.chain_h[s].appendSlice(gpa, h_row.?[0..n_embd]) catch oom();
+                    self.chain_h[s].appendSlice(std.heap.c_allocator, h_row.?[0..n_embd]) catch oom();
 
                     const n_rows: usize = result.items.len + 1; // id_last + tokens drafted so far
                     for (0..n_rows) |t| {
                         const tk = if (t == 0) dp.id_last else result.items[t - 1];
-                        const idx = self.batch.add(tk, dp.pos0 + @as(c.llama_pos, @intCast(t)), seq_id, t == n_rows - 1);
+                        const idx = self.batch.add(tk, dp.pos0 + @as(llama.impl.llama_c.llama_pos, @intCast(t)), seq_id, t == n_rows - 1);
                         _ = self.batch.setEmbdState(idx, embdView(self.chain_h[s].items.ptr + t * n_embd, 1, n_embd));
                         self.i_last[s] = idx;
                     }
@@ -1961,8 +1959,8 @@ pub const Mtp = struct {
 
     /// Ports `accept` (speculative.cpp:2012 @b1b770d90): the hidden row of
     /// the first position the target did not accept becomes pending.
-    pub fn accept(self: *Mtp, base: *mod.speculative.Base, seq_id: c.llama_seq_id, n_accepted: u16, _: bool) void {
-        if (seq_id < 0 or seq_id >= @as(c.llama_seq_id, @intCast(base.n_seq))) return;
+    pub fn accept(self: *Mtp, base: *mod.speculative.Base, seq_id: llama.impl.llama_c.llama_seq_id, n_accepted: u16, _: bool) void {
+        if (seq_id < 0 or seq_id >= @as(llama.impl.llama_c.llama_seq_id, @intCast(base.n_seq))) return;
         const s: usize = @intCast(seq_id);
 
         const n_rows = self.verify_h_rows[s];
@@ -1972,7 +1970,7 @@ pub const Mtp = struct {
         if (self.dev_rows) {
             // process() already fetched the last row
             if (i_h != n_rows - 1) {
-                _ = c.llama_get_embeddings_nextn_rows(self.params.ctx_tgt, self.verify_row0[s] + i_h, 1, self.pending_h[s].ptr);
+                _ = llama.api.context.llama_get_embeddings_nextn_rows(self.params.ctx_tgt, self.verify_row0[s] + i_h, 1, self.pending_h[s].ptr);
             }
             return;
         }
@@ -1982,18 +1980,18 @@ pub const Mtp = struct {
 
     /// Ports `get_state` (speculative.cpp:2034 @b1b770d90): the pending
     /// hidden row, as bytes.
-    pub fn getState(self: *const Mtp, base: *const mod.speculative.Base, seq_id: c.llama_seq_id, data: *std.ArrayList(u8)) bool {
-        if (seq_id < 0 or seq_id >= @as(c.llama_seq_id, @intCast(base.n_seq))) return false;
+    pub fn getState(self: *const Mtp, base: *const mod.speculative.Base, seq_id: llama.impl.llama_c.llama_seq_id, data: *std.ArrayList(u8)) bool {
+        if (seq_id < 0 or seq_id >= @as(llama.impl.llama_c.llama_seq_id, @intCast(base.n_seq))) return false;
 
         const row_bytes: usize = @as(usize, @intCast(self.n_embd)) * @sizeOf(f32);
-        data.resize(gpa, row_bytes) catch oom();
+        data.resize(std.heap.c_allocator, row_bytes) catch oom();
         @memcpy(data.items, std.mem.sliceAsBytes(self.pending_h[@intCast(seq_id)])[0..row_bytes]);
         return true;
     }
 
     /// Ports `set_state` (speculative.cpp:2045 @b1b770d90).
-    pub fn setState(self: *Mtp, base: *const mod.speculative.Base, seq_id: c.llama_seq_id, data: []const u8) void {
-        if (seq_id < 0 or seq_id >= @as(c.llama_seq_id, @intCast(base.n_seq))) return;
+    pub fn setState(self: *Mtp, base: *const mod.speculative.Base, seq_id: llama.impl.llama_c.llama_seq_id, data: []const u8) void {
+        if (seq_id < 0 or seq_id >= @as(llama.impl.llama_c.llama_seq_id, @intCast(base.n_seq))) return;
 
         const row_bytes: usize = @as(usize, @intCast(self.n_embd)) * @sizeOf(f32);
         if (data.len != row_bytes) return;

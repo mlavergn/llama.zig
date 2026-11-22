@@ -42,8 +42,8 @@ const Fmt = enum { iq4_nl, mxfp4 };
 
 inline fn codebook(comptime fmt: Fmt, nibble: u8) i32 {
     return switch (fmt) {
-        .iq4_nl => ggml.impl.c.kvalues_iq4nl[nibble],
-        .mxfp4 => ggml.impl.c.kvalues_mxfp4[nibble],
+        .iq4_nl => ggml.impl.ggml_c.kvalues_iq4nl[nibble],
+        .mxfp4 => ggml.impl.ggml_c.kvalues_mxfp4[nibble],
     };
 }
 
@@ -82,7 +82,7 @@ fn gemv(
 
     var sumf: [ncols_interleaved]f32 = undefined;
 
-    const a_ptr: [*]const ggml.impl.c.block_q8_0 = @ptrCast(@alignCast(vy));
+    const a_ptr: [*]const ggml.impl.ggml_c.block_q8_0 = @ptrCast(@alignCast(vy));
     var x: i32 = 0;
     while (x < @divTrunc(nc, ncols_interleaved)) : (x += 1) {
         const b_ptr: [*]const BlockX =
@@ -182,16 +182,16 @@ fn gemm(
     }
 }
 
-pub export fn ggml_gemv_iq4_nl_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemv_iq4_nl_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     gemv(.iq4_nl, 4, 4, ggml.cpu.repack.blocks.block_iq4_nlx4, n, s, bs, vx, vy, nr, nc);
 }
-pub export fn ggml_gemm_iq4_nl_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemm_iq4_nl_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     gemm(.iq4_nl, 4, 4, ggml.cpu.repack.blocks.block_iq4_nlx4, n, s, bs, vx, vy, nr, nc);
 }
-pub export fn ggml_gemv_mxfp4_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemv_mxfp4_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     gemv(.mxfp4, 4, 4, ggml.cpu.repack.blocks.block_mxfp4x4, n, s, bs, vx, vy, nr, nc);
 }
-pub export fn ggml_gemm_mxfp4_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemm_mxfp4_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     gemm(.mxfp4, 4, 4, ggml.cpu.repack.blocks.block_mxfp4x4, n, s, bs, vx, vy, nr, nc);
 }
 

@@ -19,6 +19,7 @@
 //! rest reach it the way the C++ base class reaches the override.
 
 const std = @import("std");
+const llama = @import("llama");
 const mtmd = @import("../module.zig");
 const stdlib = @import("stdlib");
 
@@ -32,8 +33,8 @@ pub const max_past: i64 = 12;
 /// Ports `list_gemma4a_state_slots` (gemma4a.cpp:13 @b1b770d90): the state of
 /// the streaming encoder, a zero state is a cold start. The caller frees the
 /// slice with `module.freeSlots`.
-pub fn listStateSlots(hparams: *const mtmd.model.Hparams, model: *const mtmd.model.Model) mtmd.clip.Error![]mtmd.models.StateSlot {
-    var slots: std.ArrayList(mtmd.models.StateSlot) = .empty;
+pub fn listStateSlots(hparams: *const mtmd.model.Hparams, model: *const mtmd.model.Model) mtmd.clip.Error![]mtmd.models.dispatch.StateSlot {
+    var slots: std.ArrayList(mtmd.models.dispatch.StateSlot) = .empty;
     errdefer {
         for (slots.items) |sl| std.heap.c_allocator.free(sl.name);
         slots.deinit(std.heap.c_allocator);
@@ -84,21 +85,21 @@ const State = struct {
 /// block dimension.
 fn extractBlocks(g: *const mtmd.graph.Graph, st: *State, t_in: mtmd.graph.T, name: [:0]const u8, S: i64, B: i64, P: i64, C: i64, n_pos: i64) mtmd.clip.Error!mtmd.graph.T {
     const ctx0 = g.ctx0;
-    var t = mtmd.impl.c.ggml_concat(ctx0, mtmd.impl.c.ggml_reshape_3d(ctx0, st.at(name), g.d_head, g.n_head, P), t_in, 2);
-    const tail = mtmd.impl.c.ggml_view_3d(ctx0, t, g.d_head, g.n_head, P, mtmd.graph.nb(t, 1), mtmd.graph.nb(t, 2), @as(usize, @intCast(n_pos)) * mtmd.graph.nb(t, 2));
-    try st.out(name, mtmd.impl.c.ggml_reshape_2d(ctx0, mtmd.impl.c.ggml_cont(ctx0, tail), @as(i64, g.d_head) * g.n_head, P));
-    t = mtmd.impl.c.ggml_pad_ext(ctx0, t, 0, 0, 0, 0, 0, @truncate(S * B - P - n_pos), 0, 0); // [D, H, S*B]
+    var t = llama.impl.llama_c.ggml_concat(ctx0, llama.impl.llama_c.ggml_reshape_3d(ctx0, st.at(name), g.d_head, g.n_head, P), t_in, 2);
+    const tail = llama.impl.llama_c.ggml_view_3d(ctx0, t, g.d_head, g.n_head, P, mtmd.graph.nb(t, 1), mtmd.graph.nb(t, 2), @as(usize, @intCast(n_pos)) * mtmd.graph.nb(t, 2));
+    try st.out(name, llama.impl.llama_c.ggml_reshape_2d(ctx0, llama.impl.llama_c.ggml_cont(ctx0, tail), @as(i64, g.d_head) * g.n_head, P));
+    t = llama.impl.llama_c.ggml_pad_ext(ctx0, t, 0, 0, 0, 0, 0, @truncate(S * B - P - n_pos), 0, 0); // [D, H, S*B]
     // Overlapping view: stride for B dim is C positions, not S
     // ne = [D, H, S, B], data_size = D*H*S*B*sizeof = source_nbytes (exact fit)
     // nb1=D*sizeof, nb2=D*H*sizeof, nb3=C*D*H*sizeof (overlap: C < S)
-    t = mtmd.impl.c.ggml_view_4d(ctx0, t, g.d_head, g.n_head, S, B, mtmd.graph.nb(t, 1), mtmd.graph.nb(t, 2), @as(usize, @intCast(C)) * mtmd.graph.nb(t, 2), 0);
-    t = mtmd.impl.c.ggml_cont(ctx0, t); // materialize overlapping windows
+    t = llama.impl.llama_c.ggml_view_4d(ctx0, t, g.d_head, g.n_head, S, B, mtmd.graph.nb(t, 1), mtmd.graph.nb(t, 2), @as(usize, @intCast(C)) * mtmd.graph.nb(t, 2), 0);
+    t = llama.impl.llama_c.ggml_cont(ctx0, t); // materialize overlapping windows
     return t;
 }
 
 /// Ports `build` (gemma4a.cpp:36 @b1b770d90), a member of
 /// `mtmd_graph_gemma4a`.
-pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*llama.impl.llama_c.ggml_cgraph {
     _ = params;
     g.mm_hook = buildMm;
     const ctx0 = g.ctx0;
@@ -117,56 +118,56 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     var st: State = .{ .arena = arena };
     {
         const slots = try listStateSlots(hparams, model);
-        defer mtmd.models.freeSlots(slots);
+        defer mtmd.models.dispatch.freeSlots(slots);
         for (slots) |slot| {
-            const t = mtmd.impl.c.ggml_new_tensor_2d(ctx0, mtmd.impl.c.GGML_TYPE_F32, slot.ne0, slot.ne1);
+            const t = llama.impl.llama_c.ggml_new_tensor_2d(ctx0, llama.impl.llama_c.GGML_TYPE_F32, slot.ne0, slot.ne1);
             const name = try mtmd.impl.stringFormat(arena, "state_in_%s", .{slot.name.ptr});
-            _ = mtmd.impl.c.ggml_set_name(t, name.ptr);
-            mtmd.impl.c.ggml_set_input(t);
+            _ = llama.impl.llama_c.ggml_set_name(t, name.ptr);
+            llama.impl.llama_c.ggml_set_input(t);
             try st.state_in.put(arena, try arena.dupe(u8, slot.name), t);
         }
     }
 
     // 1. Input
     const inp = g.buildInpRaw(1);
-    var cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, inp));
+    var cur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, inp));
 
     // 2. Subsampling Conv2D (padding=1, matching PyTorch)
     // in time, the left pad comes from the state
     {
         for (0..2) |i| {
             const name = try mtmd.impl.stringFormat(arena, "sscp_%zu", .{i});
-            const left = mtmd.impl.c.ggml_reshape_3d(ctx0, st.at(name), mtmd.graph.ne(cur, 0), 1, mtmd.graph.ne(cur, 2));
-            cur = mtmd.impl.c.ggml_concat(ctx0, left, cur, 1);
-            const last = mtmd.impl.c.ggml_view_3d(ctx0, cur, mtmd.graph.ne(cur, 0), 1, mtmd.graph.ne(cur, 2), mtmd.graph.nb(cur, 1), mtmd.graph.nb(cur, 2), @as(usize, @intCast(mtmd.graph.ne(cur, 1) - 1)) * mtmd.graph.nb(cur, 1));
-            try st.out(name, mtmd.impl.c.ggml_reshape_2d(ctx0, mtmd.impl.c.ggml_cont(ctx0, last), mtmd.graph.ne(cur, 0), mtmd.graph.ne(cur, 2)));
-            cur = mtmd.impl.c.ggml_pad_ext(ctx0, cur, 0, 0, 0, 1, 0, 0, 0, 0);
-            cur = mtmd.impl.c.ggml_conv_2d(ctx0, model.sscp_conv_w[i], cur, 2, 2, 1, 0, 1, 1);
+            const left = llama.impl.llama_c.ggml_reshape_3d(ctx0, st.at(name), mtmd.graph.ne(cur, 0), 1, mtmd.graph.ne(cur, 2));
+            cur = llama.impl.llama_c.ggml_concat(ctx0, left, cur, 1);
+            const last = llama.impl.llama_c.ggml_view_3d(ctx0, cur, mtmd.graph.ne(cur, 0), 1, mtmd.graph.ne(cur, 2), mtmd.graph.nb(cur, 1), mtmd.graph.nb(cur, 2), @as(usize, @intCast(mtmd.graph.ne(cur, 1) - 1)) * mtmd.graph.nb(cur, 1));
+            try st.out(name, llama.impl.llama_c.ggml_reshape_2d(ctx0, llama.impl.llama_c.ggml_cont(ctx0, last), mtmd.graph.ne(cur, 0), mtmd.graph.ne(cur, 2)));
+            cur = llama.impl.llama_c.ggml_pad_ext(ctx0, cur, 0, 0, 0, 1, 0, 0, 0, 0);
+            cur = llama.impl.llama_c.ggml_conv_2d(ctx0, model.sscp_conv_w[i], cur, 2, 2, 1, 0, 1, 1);
             if (model.sscp_conv_b[i] != null) {
-                cur = mtmd.impl.c.ggml_add(ctx0, cur, model.sscp_conv_b[i]);
+                cur = llama.impl.llama_c.ggml_add(ctx0, cur, model.sscp_conv_b[i]);
             }
             // nn.LayerNorm(channels): permute ch to ne[0], normalize, permute back
             if (model.sscp_norm_w[i] != null) {
-                cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, cur, 1, 2, 0, 3));
-                cur = mtmd.impl.c.ggml_norm(ctx0, cur, norm_eps);
-                cur = mtmd.impl.c.ggml_mul(ctx0, cur, model.sscp_norm_w[i]);
-                cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, cur, 2, 0, 1, 3));
+                cur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_permute(ctx0, cur, 1, 2, 0, 3));
+                cur = llama.impl.llama_c.ggml_norm(ctx0, cur, norm_eps);
+                cur = llama.impl.llama_c.ggml_mul(ctx0, cur, model.sscp_norm_w[i]);
+                cur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_permute(ctx0, cur, 2, 0, 1, 3));
             }
-            cur = mtmd.impl.c.ggml_relu(ctx0, cur);
+            cur = llama.impl.llama_c.ggml_relu(ctx0, cur);
         }
         // Flatten [freq, time, ch, 1] -> [ch*freq, time]
-        cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, cur, 1, 2, 0, 3));
-        cur = mtmd.impl.c.ggml_reshape_2d(ctx0, cur, mtmd.graph.ne(cur, 0) * mtmd.graph.ne(cur, 1), mtmd.graph.ne(cur, 2));
+        cur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_permute(ctx0, cur, 1, 2, 0, 3));
+        cur = llama.impl.llama_c.ggml_reshape_2d(ctx0, cur, mtmd.graph.ne(cur, 0) * mtmd.graph.ne(cur, 1), mtmd.graph.ne(cur, 2));
         if (model.sscp_inp_proj_w != null) {
             cur = g.buildMm(model.sscp_inp_proj_w, cur);
             if (model.sscp_inp_proj_b != null) {
-                cur = mtmd.impl.c.ggml_add(ctx0, cur, model.sscp_inp_proj_b);
+                cur = llama.impl.llama_c.ggml_add(ctx0, cur, model.sscp_inp_proj_b);
             }
         }
     }
 
     const n_pos = mtmd.graph.ne(cur, 1);
-    try st.out("pos", mtmd.impl.c.ggml_scale_bias(ctx0, st.at("pos"), 1.0, @floatFromInt(n_pos)));
+    try st.out("pos", llama.impl.llama_c.ggml_scale_bias(ctx0, st.at("pos"), 1.0, @floatFromInt(n_pos)));
 
     // Chunked local attention parameters
     const C: i64 = chunk_size;
@@ -178,13 +179,13 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     const pad_seq = Np - n_pos;
 
     // Input tensors: blocked RPE and blocked attention mask
-    const pos_emb = mtmd.impl.c.ggml_new_tensor_2d(ctx0, mtmd.impl.c.GGML_TYPE_F32, @as(i64, n_head) * d_head, R);
-    _ = mtmd.impl.c.ggml_set_name(pos_emb, "pos_emb");
-    mtmd.impl.c.ggml_set_input(pos_emb);
+    const pos_emb = llama.impl.llama_c.ggml_new_tensor_2d(ctx0, llama.impl.llama_c.GGML_TYPE_F32, @as(i64, n_head) * d_head, R);
+    _ = llama.impl.llama_c.ggml_set_name(pos_emb, "pos_emb");
+    llama.impl.llama_c.ggml_set_input(pos_emb);
 
-    const kq_mask = mtmd.impl.c.ggml_new_tensor_3d(ctx0, mtmd.impl.c.GGML_TYPE_F32, S, C, B);
-    _ = mtmd.impl.c.ggml_set_name(kq_mask, "kq_mask");
-    mtmd.impl.c.ggml_set_input(kq_mask);
+    const kq_mask = llama.impl.llama_c.ggml_new_tensor_3d(ctx0, llama.impl.llama_c.GGML_TYPE_F32, S, C, B);
+    _ = llama.impl.llama_c.ggml_set_name(kq_mask, "kq_mask");
+    llama.impl.llama_c.ggml_set_input(kq_mask);
 
     // 3. Conformer Blocks
     var il: c_int = 0;
@@ -199,7 +200,7 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
             if (layer.ff_post_norm_w != null) {
                 cur = g.buildNorm(cur, layer.ff_post_norm_w, null, .rms, norm_eps, il);
             }
-            residual = mtmd.impl.c.ggml_add(ctx0, residual, mtmd.impl.c.ggml_scale(ctx0, cur, res_weight));
+            residual = llama.impl.llama_c.ggml_add(ctx0, residual, llama.impl.llama_c.ggml_scale(ctx0, cur, res_weight));
         }
 
         // Chunked local self-attention with RPE
@@ -216,94 +217,94 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
             var Vcur = g.buildMm(layer.v_w, cur);
 
             // [n_embd, n_pos] -> [D, H, N]
-            Qcur = mtmd.impl.c.ggml_reshape_3d(ctx0, Qcur, d_head, n_head, n_pos);
-            Kcur = mtmd.impl.c.ggml_reshape_3d(ctx0, Kcur, d_head, n_head, n_pos);
-            Vcur = mtmd.impl.c.ggml_reshape_3d(ctx0, Vcur, d_head, n_head, n_pos);
+            Qcur = llama.impl.llama_c.ggml_reshape_3d(ctx0, Qcur, d_head, n_head, n_pos);
+            Kcur = llama.impl.llama_c.ggml_reshape_3d(ctx0, Kcur, d_head, n_head, n_pos);
+            Vcur = llama.impl.llama_c.ggml_reshape_3d(ctx0, Vcur, d_head, n_head, n_pos);
 
             // Q/K scaling
-            Qcur = mtmd.impl.c.ggml_scale(ctx0, Qcur, q_scale);
+            Qcur = llama.impl.llama_c.ggml_scale(ctx0, Qcur, q_scale);
             if (layer.per_dim_scale_w != null) {
-                Qcur = mtmd.impl.c.ggml_mul(ctx0, Qcur, mtmd.impl.c.ggml_reshape_3d(ctx0, layer.per_dim_scale_w, d_head, 1, 1));
+                Qcur = llama.impl.llama_c.ggml_mul(ctx0, Qcur, llama.impl.llama_c.ggml_reshape_3d(ctx0, layer.per_dim_scale_w, d_head, 1, 1));
             }
-            Kcur = mtmd.impl.c.ggml_scale(ctx0, Kcur, k_scale);
+            Kcur = llama.impl.llama_c.ggml_scale(ctx0, Kcur, k_scale);
             if (layer.per_dim_k_scale_w != null) {
-                Kcur = mtmd.impl.c.ggml_mul(ctx0, Kcur, mtmd.impl.c.ggml_reshape_3d(ctx0, layer.per_dim_k_scale_w, d_head, 1, 1));
+                Kcur = llama.impl.llama_c.ggml_mul(ctx0, Kcur, llama.impl.llama_c.ggml_reshape_3d(ctx0, layer.per_dim_k_scale_w, d_head, 1, 1));
             }
 
             // Q blocking: [D, H, N] -> pad to Np -> reshape [D, H, C, B]
             // ggml permute: ne[ax_i] = src->ne[i], so (0,3,1,2) sends H->3, C->1, B->2
-            Qcur = mtmd.impl.c.ggml_pad(ctx0, Qcur, 0, 0, @intCast(pad_seq), 0); // [D, H, Np]
-            Qcur = mtmd.impl.c.ggml_reshape_4d(ctx0, Qcur, d_head, n_head, C, B); // [D, H, C, B]
-            Qcur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, Qcur, 0, 3, 1, 2)); // [D, C, B, H]
+            Qcur = llama.impl.llama_c.ggml_pad(ctx0, Qcur, 0, 0, @intCast(pad_seq), 0); // [D, H, Np]
+            Qcur = llama.impl.llama_c.ggml_reshape_4d(ctx0, Qcur, d_head, n_head, C, B); // [D, H, C, B]
+            Qcur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_permute(ctx0, Qcur, 0, 3, 1, 2)); // [D, C, B, H]
 
             var Kblk = try extractBlocks(g, &st, Kcur, try mtmd.impl.stringFormat(arena, "k_%d", .{il}), S, B, P, C, n_pos);
             // [D, H, S, B] -> [D, S, B, H] via permute(0,3,1,2)
-            Kblk = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, Kblk, 0, 3, 1, 2));
+            Kblk = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_permute(ctx0, Kblk, 0, 3, 1, 2));
 
             var Vblk = try extractBlocks(g, &st, Vcur, try mtmd.impl.stringFormat(arena, "v_%d", .{il}), S, B, P, C, n_pos);
             // [D, H, S, B] -> [S, D, B, H] via permute(1,3,0,2)
-            Vblk = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, Vblk, 1, 3, 0, 2));
+            Vblk = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_permute(ctx0, Vblk, 1, 3, 0, 2));
 
             // Content attention: Q @ K^T
             // Kblk=[D,S,B,H], Qcur=[D,C,B,H] -> mul_mat contracts on D -> [S,C,B,H]
-            var matrix_ac = mtmd.impl.c.ggml_mul_mat(ctx0, Kblk, Qcur);
+            var matrix_ac = llama.impl.llama_c.ggml_mul_mat(ctx0, Kblk, Qcur);
 
             // Relative position attention
             if (layer.attn_k_rel_w != null) {
                 // RPE: [n_embd, R] -> project -> [D, H, R] -> [D, R, H]
-                var p = mtmd.impl.c.ggml_mul_mat(ctx0, layer.attn_k_rel_w, pos_emb);
-                p = mtmd.impl.c.ggml_reshape_3d(ctx0, p, d_head, n_head, R);
-                p = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, p, 0, 2, 1, 3)); // [D, R, H]
+                var p = llama.impl.llama_c.ggml_mul_mat(ctx0, layer.attn_k_rel_w, pos_emb);
+                p = llama.impl.llama_c.ggml_reshape_3d(ctx0, p, d_head, n_head, R);
+                p = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_permute(ctx0, p, 0, 2, 1, 3)); // [D, R, H]
 
                 // Q_flat @ RPE^T: [D, C*B, H] @ [D, R, H] -> [R, C*B, H]
-                const Q_flat = mtmd.impl.c.ggml_reshape_3d(ctx0, Qcur, d_head, C * B, n_head);
-                var matrix_bd = mtmd.impl.c.ggml_mul_mat(ctx0, p, Q_flat); // [R, C*B, H]
-                matrix_bd = mtmd.impl.c.ggml_reshape_4d(ctx0, matrix_bd, R, C, B, n_head); // [R, C, B, H]
+                const Q_flat = llama.impl.llama_c.ggml_reshape_3d(ctx0, Qcur, d_head, C * B, n_head);
+                var matrix_bd = llama.impl.llama_c.ggml_mul_mat(ctx0, p, Q_flat); // [R, C*B, H]
+                matrix_bd = llama.impl.llama_c.ggml_reshape_4d(ctx0, matrix_bd, R, C, B, n_head); // [R, C, B, H]
 
                 // Blocked relative shift (appendix B of Transformer-XL)
                 {
-                    matrix_bd = mtmd.impl.c.ggml_pad(ctx0, matrix_bd, @intCast(S + 1 - R), 0, 0, 0); // [S+1, C, B, H]
-                    matrix_bd = mtmd.impl.c.ggml_reshape_3d(ctx0, matrix_bd, (S + 1) * C, B, n_head);
-                    matrix_bd = mtmd.impl.c.ggml_view_3d(ctx0, matrix_bd, C * S, B, n_head, mtmd.graph.nb(matrix_bd, 1), mtmd.graph.nb(matrix_bd, 2), 0);
-                    matrix_bd = mtmd.impl.c.ggml_cont(ctx0, matrix_bd); // [C*S, B, H]
-                    matrix_bd = mtmd.impl.c.ggml_reshape_4d(ctx0, matrix_bd, S, C, B, n_head); // [S, C, B, H]
+                    matrix_bd = llama.impl.llama_c.ggml_pad(ctx0, matrix_bd, @intCast(S + 1 - R), 0, 0, 0); // [S+1, C, B, H]
+                    matrix_bd = llama.impl.llama_c.ggml_reshape_3d(ctx0, matrix_bd, (S + 1) * C, B, n_head);
+                    matrix_bd = llama.impl.llama_c.ggml_view_3d(ctx0, matrix_bd, C * S, B, n_head, mtmd.graph.nb(matrix_bd, 1), mtmd.graph.nb(matrix_bd, 2), 0);
+                    matrix_bd = llama.impl.llama_c.ggml_cont(ctx0, matrix_bd); // [C*S, B, H]
+                    matrix_bd = llama.impl.llama_c.ggml_reshape_4d(ctx0, matrix_bd, S, C, B, n_head); // [S, C, B, H]
                 }
 
-                matrix_ac = mtmd.impl.c.ggml_add(ctx0, matrix_ac, matrix_bd);
+                matrix_ac = llama.impl.llama_c.ggml_add(ctx0, matrix_ac, matrix_bd);
             }
 
             var scores = matrix_ac; // [S, C, B, H]
 
             // Softcap
-            scores = mtmd.impl.c.ggml_scale(ctx0, scores, 1.0 / softcap);
-            scores = mtmd.impl.c.ggml_tanh(ctx0, scores);
-            scores = mtmd.impl.c.ggml_scale(ctx0, scores, softcap);
+            scores = llama.impl.llama_c.ggml_scale(ctx0, scores, 1.0 / softcap);
+            scores = llama.impl.llama_c.ggml_tanh(ctx0, scores);
+            scores = llama.impl.llama_c.ggml_scale(ctx0, scores, softcap);
 
             // Blocked attention mask: [S, C, B] broadcasts over H
-            scores = mtmd.impl.c.ggml_add(ctx0, scores, kq_mask);
+            scores = llama.impl.llama_c.ggml_add(ctx0, scores, kq_mask);
 
-            const attn = mtmd.impl.c.ggml_soft_max(ctx0, scores);
+            const attn = llama.impl.llama_c.ggml_soft_max(ctx0, scores);
 
             // attn @ V: [S,C,B,H] @ [S,D,B,H] -> [D,C,B,H]
-            var x = mtmd.impl.c.ggml_mul_mat(ctx0, Vblk, attn);
+            var x = llama.impl.llama_c.ggml_mul_mat(ctx0, Vblk, attn);
 
             // [D,C,B,H] -> [D,H,C,B] via permute(0,2,3,1) -> flatten -> trim
-            x = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, x, 0, 2, 3, 1));
-            x = mtmd.impl.c.ggml_cont_2d(ctx0, x, @as(i64, d_head) * n_head, C * B);
+            x = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_permute(ctx0, x, 0, 2, 3, 1));
+            x = llama.impl.llama_c.ggml_cont_2d(ctx0, x, @as(i64, d_head) * n_head, C * B);
             if (pad_seq > 0) {
-                x = mtmd.impl.c.ggml_view_2d(ctx0, x, @as(i64, d_head) * n_head, n_pos, mtmd.graph.nb(x, 1), 0);
-                x = mtmd.impl.c.ggml_cont(ctx0, x);
+                x = llama.impl.llama_c.ggml_view_2d(ctx0, x, @as(i64, d_head) * n_head, n_pos, mtmd.graph.nb(x, 1), 0);
+                x = llama.impl.llama_c.ggml_cont(ctx0, x);
             }
 
             x = g.buildMm(layer.o_w, x);
             if (layer.o_b != null) {
-                x = mtmd.impl.c.ggml_add(ctx0, x, layer.o_b);
+                x = llama.impl.llama_c.ggml_add(ctx0, x, layer.o_b);
             }
 
             if (layer.attn_post_norm_w != null) {
                 x = g.buildNorm(x, layer.attn_post_norm_w, null, .rms, norm_eps, il);
             }
-            residual = mtmd.impl.c.ggml_add(ctx0, residual, x);
+            residual = llama.impl.llama_c.ggml_add(ctx0, residual, x);
         }
 
         // Convolution Module
@@ -314,30 +315,30 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
             // GLU
             {
                 const d = @divTrunc(mtmd.graph.ne(x, 0), 2);
-                const gate = mtmd.impl.c.ggml_sigmoid(ctx0, mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_view_2d(ctx0, x, d, mtmd.graph.ne(x, 1), mtmd.graph.nb(x, 1), @as(usize, @intCast(d)) * mtmd.graph.nb(x, 0))));
-                x = mtmd.impl.c.ggml_mul(ctx0, mtmd.impl.c.ggml_view_2d(ctx0, x, d, mtmd.graph.ne(x, 1), mtmd.graph.nb(x, 1), 0), gate);
-                x = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, x));
+                const gate = llama.impl.llama_c.ggml_sigmoid(ctx0, llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_view_2d(ctx0, x, d, mtmd.graph.ne(x, 1), mtmd.graph.nb(x, 1), @as(usize, @intCast(d)) * mtmd.graph.nb(x, 0))));
+                x = llama.impl.llama_c.ggml_mul(ctx0, llama.impl.llama_c.ggml_view_2d(ctx0, x, d, mtmd.graph.ne(x, 1), mtmd.graph.nb(x, 1), 0), gate);
+                x = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, x));
             }
 
             // Causal depthwise Conv1D via ggml_ssm_conv, the left context comes from the state
             {
                 const d_conv = mtmd.graph.ne(layer.conv_dw_w, 0) - 1;
                 const name = try mtmd.impl.stringFormat(arena, "conv_%d", .{il});
-                x = mtmd.impl.c.ggml_concat(ctx0, st.at(name), x, 0);
-                try st.out(name, mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_view_2d(ctx0, x, d_conv, mtmd.graph.ne(x, 1), mtmd.graph.nb(x, 1), @as(usize, @intCast(n_pos)) * mtmd.graph.nb(x, 0))));
+                x = llama.impl.llama_c.ggml_concat(ctx0, st.at(name), x, 0);
+                try st.out(name, llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_view_2d(ctx0, x, d_conv, mtmd.graph.ne(x, 1), mtmd.graph.nb(x, 1), @as(usize, @intCast(n_pos)) * mtmd.graph.nb(x, 0))));
             }
-            x = mtmd.impl.c.ggml_ssm_conv(ctx0, x, layer.conv_dw_w);
+            x = llama.impl.llama_c.ggml_ssm_conv(ctx0, x, layer.conv_dw_w);
             if (layer.conv_dw_b != null) {
-                x = mtmd.impl.c.ggml_add(ctx0, x, layer.conv_dw_b);
+                x = llama.impl.llama_c.ggml_add(ctx0, x, layer.conv_dw_b);
             }
 
             if (layer.conv_norm_w != null) {
-                x = mtmd.impl.c.ggml_rms_norm(ctx0, x, norm_eps);
-                x = mtmd.impl.c.ggml_mul(ctx0, x, layer.conv_norm_w);
+                x = llama.impl.llama_c.ggml_rms_norm(ctx0, x, norm_eps);
+                x = llama.impl.llama_c.ggml_mul(ctx0, x, layer.conv_norm_w);
             }
-            x = mtmd.impl.c.ggml_silu(ctx0, x);
+            x = llama.impl.llama_c.ggml_silu(ctx0, x);
             x = g.buildMm(layer.conv_pw2_w, x);
-            residual = mtmd.impl.c.ggml_add(ctx0, residual, x);
+            residual = llama.impl.llama_c.ggml_add(ctx0, residual, x);
         }
 
         // FFN 2 (half-step)
@@ -347,7 +348,7 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
             if (layer.ff_post_norm_1_w != null) {
                 cur = g.buildNorm(cur, layer.ff_post_norm_1_w, null, .rms, norm_eps, il);
             }
-            residual = mtmd.impl.c.ggml_add(ctx0, residual, mtmd.impl.c.ggml_scale(ctx0, cur, res_weight));
+            residual = llama.impl.llama_c.ggml_add(ctx0, residual, llama.impl.llama_c.ggml_scale(ctx0, cur, res_weight));
         }
 
         // Layer output norm
@@ -358,14 +359,14 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     if (model.audio_out_proj_w != null) {
         cur = g.buildMm(model.audio_out_proj_w, cur);
         if (model.audio_out_proj_b != null) {
-            cur = mtmd.impl.c.ggml_add(ctx0, cur, model.audio_out_proj_b);
+            cur = llama.impl.llama_c.ggml_add(ctx0, cur, model.audio_out_proj_b);
         }
     }
 
     // 5. Audio Multimodal Embedder
-    cur = mtmd.impl.c.ggml_rms_norm(ctx0, cur, norm_eps);
+    cur = llama.impl.llama_c.ggml_rms_norm(ctx0, cur, norm_eps);
     if (model.mm_soft_emb_norm_w != null) {
-        cur = mtmd.impl.c.ggml_mul(ctx0, cur, model.mm_soft_emb_norm_w);
+        cur = llama.impl.llama_c.ggml_mul(ctx0, cur, model.mm_soft_emb_norm_w);
     }
     if (model.mm_input_proj_w != null) {
         cur = g.buildMm(model.mm_input_proj_w, cur);
@@ -374,12 +375,12 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     // the embeddings must stay the last node
     for (st.state_out.items) |so| {
         const name = try mtmd.impl.stringFormat(arena, "state_out_%s", .{so.name.ptr});
-        _ = mtmd.impl.c.ggml_set_name(so.t, name.ptr);
-        mtmd.impl.c.ggml_set_output(so.t);
-        mtmd.impl.c.ggml_build_forward_expand(g.gf, so.t);
+        _ = llama.impl.llama_c.ggml_set_name(so.t, name.ptr);
+        llama.impl.llama_c.ggml_set_output(so.t);
+        llama.impl.llama_c.ggml_build_forward_expand(g.gf, so.t);
     }
 
-    mtmd.impl.c.ggml_build_forward_expand(g.gf, cur);
+    llama.impl.llama_c.ggml_build_forward_expand(g.gf, cur);
     return g.gf;
 }
 
@@ -395,10 +396,10 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
 /// Return: `w @ x`, clamped where the model says so.
 pub fn buildMm(g: *const mtmd.graph.Graph, w: mtmd.graph.T, x: mtmd.graph.T) mtmd.graph.T {
     const ctx0 = g.ctx0;
-    const ci = g.model.clamp_info_map.get(std.mem.sliceTo(&w.?.name, 0)) orelse return mtmd.impl.c.ggml_mul_mat(ctx0, w, x);
-    const clamped = mtmd.impl.c.ggml_clamp(ctx0, x, ci.inp_min, ci.inp_max);
-    const out = mtmd.impl.c.ggml_mul_mat(ctx0, w, clamped);
-    return mtmd.impl.c.ggml_clamp(ctx0, out, ci.out_min, ci.out_max);
+    const ci = g.model.clamp_info_map.get(std.mem.sliceTo(&w.?.name, 0)) orelse return llama.impl.llama_c.ggml_mul_mat(ctx0, w, x);
+    const clamped = llama.impl.llama_c.ggml_clamp(ctx0, x, ci.inp_min, ci.inp_max);
+    const out = llama.impl.llama_c.ggml_mul_mat(ctx0, w, clamped);
+    return llama.impl.llama_c.ggml_clamp(ctx0, out, ci.out_min, ci.out_max);
 }
 
 // -----------------------------------------------------------------------------

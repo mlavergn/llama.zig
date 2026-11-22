@@ -29,13 +29,14 @@
 //! `http.zig` serves none and neither does this.
 
 const std = @import("std");
+const llama = @import("llama");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 const builtin = @import("builtin");
-const tc = @import("tools_common");
+const tools_common = @import("tools_common");
 const json = @import("json");
 
-const fit = @import("cli_fit");
+const cli_fit = @import("cli_fit");
 
 // -----------------------------------------------------------------------------
 // shutdown
@@ -57,7 +58,7 @@ fn signalHandler(sig: std.posix.SIG) callconv(.c) void {
     if (is_terminating.swap(true, .seq_cst)) {
         // in case it hangs, we can force terminate the server by hitting Ctrl+C twice
         // this is for better developer experience, we can remove when the server is stable enough
-        tc.io.eprintf("Received second interrupt, terminating immediately.\n", .{});
+        tools_common.io.eprintf("Received second interrupt, terminating immediately.\n", .{});
         stdlib.stdio.exit(1);
     }
 
@@ -137,7 +138,7 @@ const ExWrapper = struct {
             },
         }
 
-        const res = try mod.http.Res.create(mod.context.gpa);
+        const res = try mod.http.Res.create(std.heap.c_allocator);
         errdefer res.destroy();
         const a = res.allocator();
         res.status = 500;
@@ -175,7 +176,7 @@ const ExWrapper = struct {
 
 /// The `res_403` handler (server.cpp:246 @b1b770d90): for disabled features.
 fn res403(_: ?*anyopaque, _: *const mod.http.Req) anyerror!*mod.http.Res {
-    const res = try mod.http.Res.create(mod.context.gpa);
+    const res = try mod.http.Res.create(std.heap.c_allocator);
     errdefer res.destroy();
     const a = res.allocator();
     res.status = 403;
@@ -218,9 +219,9 @@ pub fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     }
 
     // own arguments required by this example
-    var params = try tc.params.Params.init(a);
+    var params = try tools_common.params.Params.init(a);
 
-    tc.common.init();
+    tools_common.common.init();
 
     // start the stream session manager GC right after common init, before any HTTP route can
     // touch it. lifecycle is symmetric, stop_gc() runs in clean_up() before backend free
@@ -228,12 +229,12 @@ pub fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
 
     // `common/chat.cpp`'s log and its template check, which the parse runs
     mod.context.installChat();
-    if (!try tc.arg.parse(argv, &params, .server, null)) return 1;
+    if (!try tools_common.arg.parse(argv, &params, .server, null)) return 1;
 
     mod.common.srv(.inf, "llama_server", "%s", .{@as([*:0]const u8, "initializing ...\n")});
 
-    tc.c.llama_backend_init();
-    tc.c.llama_numa_init(params.numa);
+    llama.api.llama.llama_backend_init();
+    llama.api.llama.llama_numa_init(params.numa);
 
     // `common_log_flush(common_log_main())` after this returns has nothing
     // to wait for: the port's log writes each message as it is made
@@ -248,7 +249,7 @@ fn srvErrWhat(comptime func: []const u8, comptime fmt: []const u8, e: anyerror) 
 }
 
 /// The server's `common_params` as `server_http_context::init` reads them.
-fn httpParams(p: *const tc.params.Params) mod.http.Params {
+fn httpParams(p: *const tools_common.params.Params) mod.http.Params {
     return .{
         .api_prefix = p.api_prefix,
         .port = p.port,
@@ -283,7 +284,7 @@ const RunOpts = struct {
 
 /// Ports `server_role_detect` (server.cpp:106 @b1b770d90): a server given no
 /// model is a router.
-fn serverRoleDetect(params: *const tc.params.Params, role: *const mod.models.Role) mod.models.RoleType {
+fn serverRoleDetect(params: *const tools_common.params.Params, role: *const mod.models.Role) mod.models.RoleType {
     if (role.isManagedByRouter()) {
         return role.getRole();
     }
@@ -297,7 +298,7 @@ fn serverRoleDetect(params: *const tc.params.Params, role: *const mod.models.Rol
 /// params for the role.
 ///
 /// Return: false on a configuration error.
-fn serverPrepareParams(a: std.mem.Allocator, params: *tc.params.Params, role_type: mod.models.RoleType) !bool {
+fn serverPrepareParams(a: std.mem.Allocator, params: *tools_common.params.Params, role_type: mod.models.RoleType) !bool {
     const func = "server_prepare_params";
     if (role_type != .router) {
         // validate batch size for embeddings
@@ -427,7 +428,7 @@ fn serverRegisterStreamRoutes(a: std.mem.Allocator, ctx_http: *mod.http.Context,
 /// `--allow-unauthenticated-tools`.
 ///
 /// Return: false when one of them fails to start.
-fn serverSetupFeatures(a: std.mem.Allocator, ctx_http: *mod.http.Context, params: *const tc.params.Params, mcp_mgr: *mod.mcp.Mcp, tools: *mod.tools.Tools, role_type: mod.models.RoleType) !bool {
+fn serverSetupFeatures(a: std.mem.Allocator, ctx_http: *mod.http.Context, params: *const tools_common.params.Params, mcp_mgr: *mod.mcp.Mcp, tools: *mod.tools.Tools, role_type: mod.models.RoleType) !bool {
     const func = "server_setup_features";
     // return 403 for disabled features
     const res_403: mod.http.Handler = .{ .ctx = null, .func = res403 };
@@ -522,7 +523,7 @@ fn serverInstallSignalHandlers() void {
 /// server listens: log the addresses and spawn llama-connect if asked, so the
 /// port is bound and the child startup health check reaches us. The
 /// destructor of `connect_proc` stops it.
-fn serverOnListening(a: std.mem.Allocator, ctx_http: *const mod.http.Context, params: *const tc.params.Params, connect_proc: *mod.connect.ServerConnect) !bool {
+fn serverOnListening(a: std.mem.Allocator, ctx_http: *const mod.http.Context, params: *const tools_common.params.Params, connect_proc: *mod.connect.ServerConnect) !bool {
     const func = "server_on_listening";
     for (ctx_http.listening_addresses.items) |address| {
         const z = try a.dupeSentinel(u8, address, 0);
@@ -553,8 +554,8 @@ const DownloadState = struct {
 
     fn deinit(dl: *DownloadState) void {
         var it = dl.last_progress_time.keyIterator();
-        while (it.next()) |k| mod.context.gpa.free(k.*);
-        dl.last_progress_time.deinit(mod.context.gpa);
+        while (it.next()) |k| std.heap.c_allocator.free(k.*);
+        dl.last_progress_time.deinit(std.heap.c_allocator);
     }
 
     fn callback(dl: *DownloadState) mod.download.Callback {
@@ -563,8 +564,8 @@ const DownloadState = struct {
 
     /// Ports `run` (server.cpp:379 @b1b770d90), a member of
     /// `server_download_state`.
-    fn run(dl: *DownloadState, params: *tc.params.Params) bool {
-        var arena = std.heap.ArenaAllocator.init(mod.context.gpa);
+    fn run(dl: *DownloadState, params: *tools_common.params.Params) bool {
+        var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer arena.deinit();
         const a = arena.allocator();
         const cb = dl.callback();
@@ -582,7 +583,7 @@ const DownloadState = struct {
         return dl.is_ok;
     }
 
-    fn fail(dl: *DownloadState, params: *const tc.params.Params, e: anyerror) void {
+    fn fail(dl: *DownloadState, params: *const tools_common.params.Params, e: anyerror) void {
         const model_name = mod.common.dupZ(params.model.getName());
         defer mod.common.freeZ(model_name);
         const wz = mod.common.dupZ(mod.context.whatOf(e));
@@ -594,7 +595,7 @@ const DownloadState = struct {
     /// Ports `on_progress` (server.cpp:391 @b1b770d90), a member of
     /// `server_download_state`.
     fn onProgress(dl: *DownloadState, p: *const mod.download.Progress) void {
-        var arena = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer arena.deinit();
         var o = mod.common.Obj.init(arena.allocator());
         o.put("url", p.url) catch return;
@@ -613,7 +614,7 @@ const DownloadState = struct {
     /// `server_download_state`.
     fn onUpdate(ctx: *anyopaque, p: *const mod.download.Progress) void {
         const dl: *DownloadState = @ptrCast(@alignCast(ctx));
-        const now = tc.c.ggml_time_ms();
+        const now = llama.impl.llama_c.ggml_time_ms();
         // throttle progress updates to avoid flooding logs; the first update of a file
         // always passes, it carries the file's total size
         {
@@ -625,9 +626,9 @@ const DownloadState = struct {
                 }
                 t.* = now;
             } else {
-                const key = mod.context.gpa.dupe(u8, p.url) catch return;
-                dl.last_progress_time.put(mod.context.gpa, key, now) catch {
-                    mod.context.gpa.free(key);
+                const key = std.heap.c_allocator.dupe(u8, p.url) catch return;
+                dl.last_progress_time.put(std.heap.c_allocator, key, now) catch {
+                    std.heap.c_allocator.free(key);
                     return;
                 };
             }
@@ -648,8 +649,8 @@ const DownloadState = struct {
 
 /// Ports `server_run_download` (server.cpp:424 @b1b770d90): download the
 /// model, report the result, and wait for the router's exit command.
-fn serverRunDownload(params: *tc.params.Params, role: *mod.models.Role) !u8 {
-    const cancelled = try mod.context.gpa.create(std.atomic.Value(bool));
+fn serverRunDownload(params: *tools_common.params.Params, role: *mod.models.Role) !u8 {
+    const cancelled = try std.heap.c_allocator.create(std.atomic.Value(bool));
     cancelled.* = .init(false);
 
     // monitor stdin for cancellation command from the router
@@ -666,7 +667,7 @@ fn serverRunDownload(params: *tc.params.Params, role: *mod.models.Role) !u8 {
     const ok = dl.run(params);
 
     {
-        var arena = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer arena.deinit();
         var o = mod.common.Obj.init(arena.allocator());
         try o.put("result", if (ok) "download_finished" else "download_failed");
@@ -688,7 +689,7 @@ fn serverRunDownload(params: *tc.params.Params, role: *mod.models.Role) !u8 {
 //
 
 /// Ports `server_run_measure` (server.cpp:456 @b1b770d90).
-fn serverRunMeasure(a: std.mem.Allocator, params: *tc.params.Params, role: *mod.models.Role, models_handler: *mod.download.ModelsHandler) !u8 {
+fn serverRunMeasure(a: std.mem.Allocator, params: *tools_common.params.Params, role: *mod.models.Role, models_handler: *mod.download.ModelsHandler) !u8 {
     const func = "server_run_measure";
     // the router sets --offline: only resolve the local path, never download
     mod.download.modelsHandlerApply(a, models_handler, params, null) catch |e| {
@@ -701,7 +702,7 @@ fn serverRunMeasure(a: std.mem.Allocator, params: *tc.params.Params, role: *mod.
     // TODO: mmproj is not in llama_get_memory_breakdown, a multimodal model is underestimated
     var o = mod.common.Obj.init(a);
     var what_out: []const u8 = "";
-    if (tc.init.measureMemory(mod.context.gpa, params, &what_out)) |m| {
+    if (tools_common.init.measureMemory(std.heap.c_allocator, params, &what_out)) |m| {
         const min = try mod.models_sched.ServerModelMemory.fromRows(a, m.n_ctx_min, m.info_min);
         const max = try mod.models_sched.ServerModelMemory.fromRows(a, m.n_ctx_max, m.info_max);
         try o.put("result", "measured");
@@ -735,7 +736,7 @@ const CleanUp = struct {
         h.stop();
         s.terminate();
         if (shutdown_mcp) |m| m.shutdown();
-        tc.c.llama_backend_free();
+        llama.api.llama.llama_backend_free();
     }
 };
 
@@ -748,12 +749,12 @@ const RouterCleanUp = struct {
         m.stopping.store(true, .seq_cst); // maybe redundant, but just to be safe
         m.models.unloadAll();
         if (shutdown_mcp) |mm| mm.shutdown();
-        tc.c.llama_backend_free();
+        llama.api.llama.llama_backend_free();
     }
 };
 
 /// Ports `server_run_router` (server.cpp:495 @b1b770d90).
-fn serverRunRouter(a: std.mem.Allocator, params: *tc.params.Params, argv: []const [:0]const u8, opts: RunOpts) !u8 {
+fn serverRunRouter(a: std.mem.Allocator, params: *tools_common.params.Params, argv: []const [:0]const u8, opts: RunOpts) !u8 {
     const func = "server_run_router";
     mod.common.srv(.inf, func, "%s", .{@as([*:0]const u8, "starting server in router mode. models will be automatically loaded on-demand\n")});
 
@@ -775,13 +776,13 @@ fn serverRunRouter(a: std.mem.Allocator, params: *tc.params.Params, argv: []cons
     var models_routes: ?*mod.models.ModelsRoutes = null;
     defer if (models_routes) |m| {
         m.deinit();
-        mod.context.gpa.destroy(m);
+        std.heap.c_allocator.destroy(m);
     };
 
     // declared after everything its listeners' handlers reach, so it is
     // stopped and joined before they are destroyed
     var http_params = httpParams(params);
-    var ctx_http = try mod.http.Context.init(mod.context.gpa);
+    var ctx_http = try mod.http.Context.init(std.heap.c_allocator);
     defer ctx_http.deinit();
     if (!try ctx_http.setup(&http_params)) {
         mod.common.srv(.err, func, "%s", .{@as([*:0]const u8, "failed to initialize HTTP server\n")});
@@ -789,9 +790,9 @@ fn serverRunRouter(a: std.mem.Allocator, params: *tc.params.Params, argv: []cons
     }
 
     // setup server instances manager
-    const mr = try mod.context.gpa.create(mod.models.ModelsRoutes);
+    const mr = try std.heap.c_allocator.create(mod.models.ModelsRoutes);
     mr.init(params, argv) catch |e| {
-        mod.context.gpa.destroy(mr);
+        std.heap.c_allocator.destroy(mr);
         srvErrWhat(func, "failed to initialize router models: %s\n", e);
         return 1;
     };
@@ -895,7 +896,7 @@ fn serverRunRouter(a: std.mem.Allocator, params: *tc.params.Params, argv: []cons
 //
 
 /// Ports `server_run_instance` (server.cpp:638 @b1b770d90).
-fn serverRunInstance(a: std.mem.Allocator, params: *tc.params.Params, role: *mod.models.Role, models_handler: *mod.download.ModelsHandler, opts: RunOpts) !u8 {
+fn serverRunInstance(a: std.mem.Allocator, params: *tools_common.params.Params, role: *mod.models.Role, models_handler: *mod.download.ModelsHandler, opts: RunOpts) !u8 {
     const func = "server_run_instance";
     // -hf / docker: download if needed and resolve the local path. a child resolves what the router downloaded
     if (opts.resolve_model) {
@@ -922,7 +923,7 @@ fn serverRunInstance(a: std.mem.Allocator, params: *tc.params.Params, role: *mod
     // declared after everything its listeners' handlers reach, so it is
     // stopped and joined before they are destroyed
     var http_params = httpParams(params);
-    var ctx_http = try mod.http.Context.init(mod.context.gpa);
+    var ctx_http = try mod.http.Context.init(std.heap.c_allocator);
     defer ctx_http.deinit();
     if (!try ctx_http.setup(&http_params)) {
         mod.common.srv(.err, func, "%s", .{@as([*:0]const u8, "failed to initialize HTTP server\n")});
@@ -986,14 +987,14 @@ fn serverRunInstance(a: std.mem.Allocator, params: *tc.params.Params, role: *mod
                 if (shutdown_handler) |h| h(sig);
             }
         }.f });
-        var info_arena = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var info_arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer info_arena.deinit();
         const ia = info_arena.allocator();
         var info = try routes.getModelInfo(ia);
         // the router tracks device memory from these reports
         if (ctx_server.getLlamaContext()) |ll_ctx| {
-            const rows = try fit.memoryBreakdownRows(ia, @ptrCast(ll_ctx));
-            const mem = try mod.models_sched.ServerModelMemory.fromRows(ia, tc.c.llama_n_ctx(ll_ctx), rows);
+            const rows = try cli_fit.memoryBreakdownRows(ia, @ptrCast(ll_ctx));
+            const mem = try mod.models_sched.ServerModelMemory.fromRows(ia, llama.api.context.llama_n_ctx(ll_ctx), rows);
             try info.set(ia, "memory", try mem.toJson(ia));
         }
         role.notifyToRouter(mod.context.serverStateToStr(.ready), &info);
@@ -1009,7 +1010,7 @@ fn serverRunInstance(a: std.mem.Allocator, params: *tc.params.Params, role: *mod
     }
 
     if (ctx_server.getLlamaContext()) |ll_ctx| {
-        try fit.memoryBreakdownPrint(mod.context.gpa, .{ .verbosity = std.math.maxInt(i32), .sink = tc.common.fitLogSink, .json = tc.common.fitLogJson }, @ptrCast(ll_ctx));
+        try cli_fit.memoryBreakdownPrint(std.heap.c_allocator, .{ .verbosity = std.math.maxInt(i32), .sink = tools_common.common.fitLogSink, .json = tools_common.common.fitLogJson }, @ptrCast(ll_ctx));
     }
 
     return 0;
@@ -1020,7 +1021,7 @@ fn serverRunInstance(a: std.mem.Allocator, params: *tc.params.Params, role: *mod
 //
 
 /// Ports `server_run` (server.cpp:761 @b1b770d90).
-fn serverRun(a: std.mem.Allocator, params: *tc.params.Params, argv: []const [:0]const u8, role: *mod.models.Role, opts: RunOpts) !u8 {
+fn serverRun(a: std.mem.Allocator, params: *tools_common.params.Params, argv: []const [:0]const u8, role: *mod.models.Role, opts: RunOpts) !u8 {
     const func = "server_run";
     var models_handler: mod.download.ModelsHandler = .{};
 
@@ -1043,7 +1044,7 @@ fn serverRun(a: std.mem.Allocator, params: *tc.params.Params, argv: []const [:0]
 
     // only an instance loads a model; the others must not touch the GPU, so skip the
     // device enumeration for them and the CUDA primary context stays uncreated
-    try tc.common.paramsPrintInfo(a, params, role_type == .instance);
+    try tools_common.common.paramsPrintInfo(a, params, role_type == .instance);
 
     if (!try serverPrepareParams(a, params, role_type)) {
         return 1;

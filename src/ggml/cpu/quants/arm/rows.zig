@@ -55,10 +55,10 @@ fn absMax(srcv: *const [8]ggml.cpu.quants.arch.neon.f32x4) f32 {
 /// - `x`: the source row.
 /// - `vy`: destination, `k / 32` blocks.
 /// - `k`: element count; must be a multiple of `QK8_0`.
-pub export fn quantize_row_q8_0(x: [*c]const f32, vy: ?*anyopaque, k: i64) void {
-    comptime std.debug.assert(ggml.impl.c.QK8_0 == 32);
-    std.debug.assert(@rem(k, ggml.impl.c.QK8_0) == 0);
-    const nb: usize = @intCast(@divTrunc(k, ggml.impl.c.QK8_0));
+pub fn quantize_row_q8_0(x: [*c]const f32, vy: ?*anyopaque, k: i64) callconv(.c) void {
+    comptime std.debug.assert(ggml.impl.ggml_c.QK8_0 == 32);
+    std.debug.assert(@rem(k, ggml.impl.ggml_c.QK8_0) == 0);
+    const nb: usize = @intCast(@divTrunc(k, ggml.impl.ggml_c.QK8_0));
 
     const y: [*]ggml.quants.blocks.Q8_0 = @ptrCast(@alignCast(vy.?));
 
@@ -96,9 +96,9 @@ pub export fn quantize_row_q8_0(x: [*c]const f32, vy: ?*anyopaque, k: i64) void 
 /// - `x`: the source row.
 /// - `vy`: destination, `k / 32` blocks.
 /// - `k`: element count; must be a multiple of `QK8_1`.
-pub export fn quantize_row_q8_1(x: [*c]const f32, vy: ?*anyopaque, k: i64) void {
-    std.debug.assert(@rem(k, ggml.impl.c.QK8_1) == 0);
-    const nb: usize = @intCast(@divTrunc(k, ggml.impl.c.QK8_1));
+pub fn quantize_row_q8_1(x: [*c]const f32, vy: ?*anyopaque, k: i64) callconv(.c) void {
+    std.debug.assert(@rem(k, ggml.impl.ggml_c.QK8_1) == 0);
+    const nb: usize = @intCast(@divTrunc(k, ggml.impl.ggml_c.QK8_1));
 
     const y: [*]ggml.quants.blocks.Q8_1 = @ptrCast(@alignCast(vy.?));
 
@@ -137,7 +137,7 @@ pub export fn quantize_row_q8_1(x: [*c]const f32, vy: ?*anyopaque, k: i64) void 
 /// The C's comment calls this a "placeholder implementation for Apple
 /// targets": there is no NEON version, so the symbol exists only to occupy the
 /// name that `arch-fallback.h` would otherwise alias to the generic one.
-pub export fn quantize_row_q8_K(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
+pub fn quantize_row_q8_K(x: [*c]const f32, y: ?*anyopaque, k: i64) callconv(.c) void {
     ggml.quants.k.quantize_row_q8_K_ref(x, @ptrCast(@alignCast(y)), k);
 }
 
@@ -151,15 +151,15 @@ test {
 const golden = if (ggml.cpu.features.golden_generic) ggml.cpu.quants.arch.golden_generic else ggml.cpu.quants.arch.golden;
 
 test "q8_0 row quantizer matches the C" {
-    try ggml.cpu.quants.testing.checkRow(quantize_row_q8_0, ggml.impl.c.GGML_TYPE_Q8_0, golden.row_q8_0);
+    try ggml.cpu.quants.testing.checkRow(quantize_row_q8_0, ggml.impl.ggml_c.GGML_TYPE_Q8_0, golden.row_q8_0);
 }
 
 test "q8_1 row quantizer matches the C" {
-    try ggml.cpu.quants.testing.checkRow(quantize_row_q8_1, ggml.impl.c.GGML_TYPE_Q8_1, golden.row_q8_1);
+    try ggml.cpu.quants.testing.checkRow(quantize_row_q8_1, ggml.impl.ggml_c.GGML_TYPE_Q8_1, golden.row_q8_1);
 }
 
 test "q8_K row quantizer matches the C" {
-    try ggml.cpu.quants.testing.checkRow(quantize_row_q8_K, ggml.impl.c.GGML_TYPE_Q8_K, golden.row_q8_K);
+    try ggml.cpu.quants.testing.checkRow(quantize_row_q8_K, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.row_q8_K);
 }
 
 test "the NEON and scalar q8 quantizers agree byte for byte" {
@@ -167,7 +167,6 @@ test "the NEON and scalar q8 quantizers agree byte for byte" {
     // must load the same models. The two round by different routines --
     // `fcvtns` here, `nearest_int` there -- so it is worth asserting rather
     // than assuming.
-    const generic = @import("../rows.zig");
 
     var x: [512]f32 = undefined;
     var seed: u32 = 7;
@@ -180,13 +179,13 @@ test "the NEON and scalar q8 quantizers agree byte for byte" {
     var b: [2048]u8 align(8) = @splat(0);
 
     quantize_row_q8_0(&x, &a, 512);
-    generic.quantize_row_q8_0_generic(&x, &b, 512);
+    ggml.cpu.quants.rows.quantize_row_q8_0_generic(&x, &b, 512);
     try std.testing.expectEqualSlices(u8, &b, &a);
 
     @memset(&a, 0);
     @memset(&b, 0);
     quantize_row_q8_1(&x, &a, 512);
-    generic.quantize_row_q8_1_generic(&x, &b, 512);
+    ggml.cpu.quants.rows.quantize_row_q8_1_generic(&x, &b, 512);
     try std.testing.expectEqualSlices(u8, &b, &a);
 }
 

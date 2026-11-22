@@ -205,36 +205,36 @@ fn getRowsCudaFloat(comptime S: type, comptime D: type, src0_d: ?*const anyopaqu
 
 /// Ports `ggml_cuda_get_rows_switch_src0_type` (getrows.cu:296 @b1b770d90).
 /// `F8_E4M3` is included.
-fn switchSrc0Type(comptime D: type, src0_d: ?*const anyopaque, src0_type: ggml.impl.c.ggml_type, src1_d: ?*const anyopaque, dst_d: ?*anyopaque, a: Args, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn switchSrc0Type(comptime D: type, src0_d: ?*const anyopaque, src0_type: ggml.impl.ggml_c.ggml_type, src1_d: ?*const anyopaque, dst_d: ?*anyopaque, a: Args, stream: ggml.cuda.common.cu.cudaStream_t) void {
     switch (src0_type) {
-        ggml.impl.c.GGML_TYPE_F16 => getRowsCudaFloat(ggml.cuda.kernels.half, D, src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_F32 => getRowsCudaFloat(f32, D, src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_I32 => getRowsCudaFloat(i32, D, src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_BF16 => getRowsCudaFloat(ggml.cuda.kernels.bf16, D, src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_F8_E4M3 => getRowsCudaFloat(ggml.cuda.kernels.fp8_e4m3, D, src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_Q1_0 => getRowsCudaQ(128, 1, "dequantize_q1_0", D, src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_Q2_0 => getRowsCudaQ(64, 1, "dequantize_q2_0", D, src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_Q4_0 => getRowsCudaQ(32, 2, "dequantize_q4_0", D, src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_Q4_1 => getRowsCudaQ(32, 2, "dequantize_q4_1", D, src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_Q5_0 => getRowsCudaQ(32, 2, "dequantize_q5_0", D, src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_Q5_1 => getRowsCudaQ(32, 2, "dequantize_q5_1", D, src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_Q8_0 => getRowsCudaQ(32, 1, "dequantize_q8_0", D, src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_Q2_K => getRowsCudaKq(64, D, "dequantize_q2_K", src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_Q3_K => getRowsCudaKq(64, D, "dequantize_q3_K", src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_Q4_K => getRowsCudaKq(32, D, "dequantize_q4_K", src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_Q5_K => getRowsCudaKq(64, D, "dequantize_q5_K", src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_Q6_K => getRowsCudaKq(64, D, "dequantize_q6_K", src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_IQ2_XXS => getRowsCudaKq(32, D, "dequantize_iq2_xxs", src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_IQ2_XS => getRowsCudaKq(32, D, "dequantize_iq2_xs", src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_IQ2_S => getRowsCudaKq(32, D, "dequantize_iq2_s", src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_IQ3_XXS => getRowsCudaKq(32, D, "dequantize_iq3_xxs", src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_IQ3_S => getRowsCudaKq(32, D, "dequantize_iq3_s", src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_IQ1_S => getRowsCudaKq(32, D, "dequantize_iq1_s", src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_IQ1_M => getRowsCudaKq(32, D, "dequantize_iq1_m", src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_IQ4_NL => getRowsCudaKq(32, D, "dequantize_iq4_nl", src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_IQ4_XS => getRowsCudaKq(32, D, "dequantize_iq4_xs", src0_d, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_MXFP4 => getRowsCudaKq(32, D, "dequantize_mxfp4", src0_d, src1_d, dst_d, a, stream),
-        else => ggml.impl.c.ggml_abort(@src().file.ptr, @intCast(@src().line), "%s: unsupported src0 type: %s\n", "ggml_cuda_get_rows_switch_src0_type", ggml.impl.c.ggml_type_name(src0_type)),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => getRowsCudaFloat(ggml.cuda.kernels.half, D, src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => getRowsCudaFloat(f32, D, src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_I32 => getRowsCudaFloat(i32, D, src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_BF16 => getRowsCudaFloat(ggml.cuda.kernels.bf16, D, src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_F8_E4M3 => getRowsCudaFloat(ggml.cuda.kernels.fp8_e4m3, D, src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_Q1_0 => getRowsCudaQ(128, 1, "dequantize_q1_0", D, src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_Q2_0 => getRowsCudaQ(64, 1, "dequantize_q2_0", D, src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_Q4_0 => getRowsCudaQ(32, 2, "dequantize_q4_0", D, src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_Q4_1 => getRowsCudaQ(32, 2, "dequantize_q4_1", D, src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_Q5_0 => getRowsCudaQ(32, 2, "dequantize_q5_0", D, src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_Q5_1 => getRowsCudaQ(32, 2, "dequantize_q5_1", D, src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_Q8_0 => getRowsCudaQ(32, 1, "dequantize_q8_0", D, src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_Q2_K => getRowsCudaKq(64, D, "dequantize_q2_K", src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_Q3_K => getRowsCudaKq(64, D, "dequantize_q3_K", src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_Q4_K => getRowsCudaKq(32, D, "dequantize_q4_K", src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_Q5_K => getRowsCudaKq(64, D, "dequantize_q5_K", src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_Q6_K => getRowsCudaKq(64, D, "dequantize_q6_K", src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS => getRowsCudaKq(32, D, "dequantize_iq2_xxs", src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XS => getRowsCudaKq(32, D, "dequantize_iq2_xs", src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_S => getRowsCudaKq(32, D, "dequantize_iq2_s", src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_IQ3_XXS => getRowsCudaKq(32, D, "dequantize_iq3_xxs", src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_IQ3_S => getRowsCudaKq(32, D, "dequantize_iq3_s", src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_S => getRowsCudaKq(32, D, "dequantize_iq1_s", src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_M => getRowsCudaKq(32, D, "dequantize_iq1_m", src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_IQ4_NL => getRowsCudaKq(32, D, "dequantize_iq4_nl", src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_IQ4_XS => getRowsCudaKq(32, D, "dequantize_iq4_xs", src0_d, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_MXFP4 => getRowsCudaKq(32, D, "dequantize_mxfp4", src0_d, src1_d, dst_d, a, stream),
+        else => ggml.impl.ggml_c.ggml_abort(@src().file.ptr, @intCast(@src().line), "%s: unsupported src0 type: %s\n", "ggml_cuda_get_rows_switch_src0_type", ggml.impl.ggml_c.ggml_type_name(src0_type)),
     }
 }
 
@@ -248,10 +248,10 @@ fn switchSrc0Type(comptime D: type, src0_d: ?*const anyopaque, src0_type: ggml.i
 /// - `stream`: the stream to launch on.
 pub fn getRowsCuda(
     src0_d: ?*const anyopaque,
-    src0_type: ggml.impl.c.ggml_type,
+    src0_type: ggml.impl.ggml_c.ggml_type,
     src1_d: ?*const anyopaque,
     dst_d: ?*anyopaque,
-    dst_type: ggml.impl.c.ggml_type,
+    dst_type: ggml.impl.ggml_c.ggml_type,
     ne00: i64,
     nb01: usize,
     nb02: usize,
@@ -283,31 +283,31 @@ pub fn getRowsCuda(
         .nb3 = nb3,
     };
     switch (dst_type) {
-        ggml.impl.c.GGML_TYPE_F32 => switchSrc0Type(f32, src0_d, src0_type, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_I32 => switchSrc0Type(i32, src0_d, src0_type, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_F16 => switchSrc0Type(ggml.cuda.kernels.half, src0_d, src0_type, src1_d, dst_d, a, stream),
-        ggml.impl.c.GGML_TYPE_BF16 => switchSrc0Type(ggml.cuda.kernels.bf16, src0_d, src0_type, src1_d, dst_d, a, stream),
-        else => ggml.impl.c.ggml_abort(@src().file.ptr, @intCast(@src().line), "%s: unsupported dst type: %s\n", "get_rows_cuda", ggml.impl.c.ggml_type_name(dst_type)),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => switchSrc0Type(f32, src0_d, src0_type, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_I32 => switchSrc0Type(i32, src0_d, src0_type, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => switchSrc0Type(ggml.cuda.kernels.half, src0_d, src0_type, src1_d, dst_d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_BF16 => switchSrc0Type(ggml.cuda.kernels.bf16, src0_d, src0_type, src1_d, dst_d, a, stream),
+        else => ggml.impl.ggml_c.ggml_abort(@src().file.ptr, @intCast(@src().line), "%s: unsupported dst type: %s\n", "get_rows_cuda", ggml.impl.ggml_c.ggml_type_name(dst_type)),
     }
 }
 
-fn srcOf(dst: *const ggml.impl.c.ggml_tensor, i: usize) *const ggml.impl.c.ggml_tensor {
-    return ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[i]);
+fn srcOf(dst: *const ggml.impl.ggml_c.ggml_tensor, i: usize) *const ggml.impl.ggml_c.ggml_tensor {
+    return ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[i]);
 }
 
 /// Ports `ggml_cuda_op_get_rows` (getrows.cu:444 @b1b770d90).
-pub fn opGetRows(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+pub fn opGetRows(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const src0 = srcOf(dst, 0);
     const src1 = srcOf(dst, 1);
 
     const stream = ctx.stream();
 
-    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_I32, "src1->type == GGML_TYPE_I32");
+    ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_I32, "src1->type == GGML_TYPE_I32");
     ggml.impl.assert(src1.ne[3] == 1, "ne13 == 1");
 
-    ggml.impl.assert(src0.nb[0] == ggml.impl.c.ggml_type_size(src0.type), "src0->nb[0] == ggml_type_size(src0->type)");
-    ggml.impl.assert(src1.nb[0] == ggml.impl.c.ggml_type_size(src1.type), "src1->nb[0] == ggml_type_size(src1->type)");
-    ggml.impl.assert(dst.nb[0] == ggml.impl.c.ggml_type_size(dst.type), "dst->nb[0]  == ggml_type_size(dst->type)");
+    ggml.impl.assert(src0.nb[0] == ggml.impl.ggml_c.ggml_type_size(src0.type), "src0->nb[0] == ggml_type_size(src0->type)");
+    ggml.impl.assert(src1.nb[0] == ggml.impl.ggml_c.ggml_type_size(src1.type), "src1->nb[0] == ggml_type_size(src1->type)");
+    ggml.impl.assert(dst.nb[0] == ggml.impl.ggml_c.ggml_type_size(dst.type), "dst->nb[0]  == ggml_type_size(dst->type)");
 
     getRowsCuda(
         src0.data,
@@ -333,7 +333,7 @@ pub fn opGetRows(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) 
 }
 
 /// Ports `ggml_cuda_op_get_rows_back` (getrows.cu:463 @b1b770d90).
-pub fn opGetRowsBack(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+pub fn opGetRowsBack(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const src0 = srcOf(dst, 0); // gradients of forward pass output
     const src1 = srcOf(dst, 1); // src1 in forward pass
 
@@ -347,13 +347,13 @@ pub fn opGetRowsBack(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tens
 
     const stream = ctx.stream();
 
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_I32, "src1->type == GGML_TYPE_I32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type  == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_I32, "src1->type == GGML_TYPE_I32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type  == GGML_TYPE_F32");
 
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(src1), "ggml_is_contiguous(src1)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src1), "ggml_is_contiguous(src1)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
 
     ggml.impl.assert(src0.ne[2] * src0.ne[3] == 1, "ne02*ne03 == 1");
     ggml.impl.assert(src1.ne[2] * src1.ne[3] == 1, "ne12*ne13 == 1");

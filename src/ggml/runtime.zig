@@ -61,7 +61,7 @@ var graph_uid = std.atomic.Value(u64).init(0);
 ///
 /// Return: a value unique across the process. Graphs use it to recognise that
 /// two of them are the same, so a repeat must never occur.
-pub export fn ggml_graph_next_uid() u64 {
+pub fn ggml_graph_next_uid() callconv(.c) u64 {
     return graph_uid.fetchAdd(1, .monotonic);
 }
 
@@ -70,7 +70,7 @@ pub export fn ggml_graph_next_uid() u64 {
 
 /// Ports `g_abort_callback` (ggml.c:244 @b1b770d90), the storage behind
 /// `ggml_set_abort_callback`.
-var abort_callback: mod.impl.c.ggml_abort_callback_t = null;
+var abort_callback: mod.impl.ggml_c.ggml_abort_callback_t = null;
 
 /// Ports `ggml_print_backtrace_symbols` (ggml.c:147 @b1b770d90) -- the `__APPLE__`
 /// variant, and the `__linux__ && __GLIBC__` one at ggml.c:139, which is the
@@ -92,7 +92,7 @@ fn printBacktraceSymbols() void {
 /// macOS, forking to attach a debugger; that path is not ported, because it is
 /// documented upstream as crashing Terminal and is opt-in only. Windows takes
 /// the `#else`, which does not read the variable either.
-export fn ggml_print_backtrace() void {
+pub fn ggml_print_backtrace() callconv(.c) void {
     if (comptime is_windows) return;
     if (stdlib.env.getenv("GGML_NO_BACKTRACE") != null) return;
     if (comptime builtin.os.tag == .linux) return printBacktraceLinux();
@@ -149,9 +149,9 @@ fn printBacktraceLinux() void {
         _ = stdlib.libc.execlp("lldb", "lldb", "--batch", "-o", "bt", "-o", "quit", "-p", attach_z + "attach ".len, @as(?[*:0]const u8, null));
         // gdb failed, fallback to backtrace_symbols
         printBacktraceSymbols();
-        stdlib.libc._Exit(0);
+        std.c._Exit(0);
     } else {
-        _ = stdlib.libc.prctl(pr_set_ptracer, @as(c_ulong, @intCast(child_pid)));
+        _ = std.c.prctl(pr_set_ptracer, @as(c_ulong, @intCast(child_pid)));
         _ = std.c.close(lock[1]);
         _ = std.c.close(lock[0]);
         _ = std.c.waitpid(child_pid, null, 0);
@@ -162,7 +162,7 @@ fn printBacktraceLinux() void {
 ///
 /// Return: the previous callback, so a caller can chain or restore it. Passing
 /// null restores the default of printing a message and a backtrace.
-export fn ggml_set_abort_callback(callback: mod.impl.c.ggml_abort_callback_t) mod.impl.c.ggml_abort_callback_t {
+pub fn ggml_set_abort_callback(callback: mod.impl.ggml_c.ggml_abort_callback_t) callconv(.c) mod.impl.ggml_c.ggml_abort_callback_t {
     const previous = abort_callback;
     abort_callback = callback;
     return previous;
@@ -172,7 +172,7 @@ export fn ggml_set_abort_callback(callback: mod.impl.c.ggml_abort_callback_t) mo
 ///
 /// Formats `file:line: ` followed by the message, hands it to the callback if
 /// one is set, and otherwise prints it with a backtrace. Never returns.
-fn ggmlAbort(file: [*:0]const u8, line: c_int, fmt: [*:0]const u8, ...) callconv(.c) noreturn {
+pub fn ggmlAbort(file: [*:0]const u8, line: c_int, fmt: [*:0]const u8, ...) callconv(.c) noreturn {
     _ = stdlib.libc.fflush(stdlib.stdio.cStream(.stdout));
 
     var message: [2048]u8 = undefined;
@@ -192,7 +192,7 @@ fn ggmlAbort(file: [*:0]const u8, line: c_int, fmt: [*:0]const u8, ...) callconv
 /// The second half of `ggml_abort` (ggml.c:253 @b1b770d90), once the message
 /// is formatted: exported as `ggml_zig_abort_message` for `varargs.c` where
 /// that file defines `ggml_abort`.
-fn abortWith(message: [*:0]const u8) callconv(.c) noreturn {
+pub fn abortWith(message: [*:0]const u8) callconv(.c) noreturn {
     // `fflush(stdout)`, for what a tool wrote through `stdlib.stdio`; the C
     // library's own stdout was flushed before the message was formatted
     @import("stdlib").stdio.stdout().flush();
@@ -203,7 +203,7 @@ fn abortWith(message: [*:0]const u8) callconv(.c) noreturn {
         ggml_print_backtrace();
     }
 
-    stdlib.libc.abort();
+    std.c.abort();
 }
 
 // -----------------------------------------------------------------------------
@@ -211,7 +211,7 @@ fn abortWith(message: [*:0]const u8) callconv(.c) noreturn {
 
 /// Ports `struct ggml_logger_state` (ggml.c:281 @b1b770d90).
 const LoggerState = struct {
-    log_callback: mod.impl.c.ggml_log_callback,
+    log_callback: mod.impl.ggml_c.ggml_log_callback,
     log_callback_user_data: ?*anyopaque,
 };
 
@@ -225,7 +225,7 @@ var logger_state: LoggerState = .{
 /// Formats into a small stack buffer first and only allocates when the message
 /// does not fit, which is why the argument list has to be copied before the
 /// first attempt consumes it.
-fn logInternalV(level: mod.impl.c.enum_ggml_log_level, format: ?[*:0]const u8, ap: std.lang.VaList) void {
+fn logInternalV(level: mod.impl.ggml_c.enum_ggml_log_level, format: ?[*:0]const u8, ap: std.lang.VaList) void {
     const fmt = format orelse return;
 
     var ap_first = ap;
@@ -248,7 +248,7 @@ fn logInternalV(level: mod.impl.c.enum_ggml_log_level, format: ?[*:0]const u8, a
 }
 
 /// Ports `ggml_log_internal` (ggml.c:307 @b1b770d90).
-fn ggmlLogInternal(level: mod.impl.c.enum_ggml_log_level, format: ?[*:0]const u8, ...) callconv(.c) void {
+pub fn ggmlLogInternal(level: mod.impl.ggml_c.enum_ggml_log_level, format: ?[*:0]const u8, ...) callconv(.c) void {
     var ap = @cVaStart();
     defer @cVaEnd(&ap);
     logInternalV(level, format, ap);
@@ -257,23 +257,13 @@ fn ggmlLogInternal(level: mod.impl.c.enum_ggml_log_level, format: ?[*:0]const u8
 /// Hands a message `varargs.c` has formatted to the current callback: the last
 /// line of `ggml_log_internal_v` (ggml.c:287 @b1b770d90). Exported as
 /// `ggml_zig_log_emit` where that file defines `ggml_log_internal`.
-fn logEmit(level: mod.impl.c.enum_ggml_log_level, text: [*:0]const u8) callconv(.c) void {
+pub fn logEmit(level: mod.impl.ggml_c.enum_ggml_log_level, text: [*:0]const u8) callconv(.c) void {
     logger_state.log_callback.?(level, text, logger_state.log_callback_user_data);
 }
 
-comptime {
-    if (mod.impl.zig_varargs) {
-        @export(&ggmlAbort, .{ .name = "ggml_abort" });
-        @export(&ggmlLogInternal, .{ .name = "ggml_log_internal" });
-    } else {
-        @export(&abortWith, .{ .name = "ggml_zig_abort_message" });
-        @export(&logEmit, .{ .name = "ggml_zig_log_emit" });
-    }
-}
-
 /// Ports `ggml_log_callback_default` (ggml.c:314 @b1b770d90).
-export fn ggml_log_callback_default(
-    level: mod.impl.c.enum_ggml_log_level,
+pub fn ggml_log_callback_default(
+    level: mod.impl.ggml_c.enum_ggml_log_level,
     text: [*c]const u8,
     user_data: ?*anyopaque,
 ) callconv(.c) void {
@@ -284,7 +274,7 @@ export fn ggml_log_callback_default(
 }
 
 /// Ports `ggml_log_get` (ggml.c:8084 @b1b770d90).
-pub export fn ggml_log_get(log_callback: *mod.impl.c.ggml_log_callback, user_data: *?*anyopaque) void {
+pub fn ggml_log_get(log_callback: *mod.impl.ggml_c.ggml_log_callback, user_data: *?*anyopaque) callconv(.c) void {
     log_callback.* = logger_state.log_callback;
     user_data.* = logger_state.log_callback_user_data;
 }
@@ -293,7 +283,7 @@ pub export fn ggml_log_get(log_callback: *mod.impl.c.ggml_log_callback, user_dat
 ///
 /// A null callback restores the default rather than disabling logging, so
 /// there is always something to call.
-pub export fn ggml_log_set(log_callback: mod.impl.c.ggml_log_callback, user_data: ?*anyopaque) void {
+pub fn ggml_log_set(log_callback: mod.impl.ggml_c.ggml_log_callback, user_data: ?*anyopaque) callconv(.c) void {
     logger_state.log_callback = log_callback orelse ggml_log_callback_default;
     logger_state.log_callback_user_data = user_data;
 }
@@ -325,7 +315,7 @@ const use_vm_allocate = builtin.os.tag.isDarwin() and !tsan_enabled;
 /// neither the zero-size warning nor the failure log.
 ///
 /// Return: the allocation, or null on failure after logging why.
-pub export fn ggml_aligned_malloc(size: usize) ?*anyopaque {
+pub fn ggml_aligned_malloc(size: usize) callconv(.c) ?*anyopaque {
     if (comptime is_windows) return stdlib.libc._aligned_malloc(size, 64);
 
     if (size == 0) {
@@ -335,7 +325,7 @@ pub export fn ggml_aligned_malloc(size: usize) ?*anyopaque {
 
     if (comptime !use_vm_allocate) {
         var aligned_memory: ?*anyopaque = null;
-        const result = stdlib.libc.posix_memalign(&aligned_memory, 64, size);
+        const result = std.c.posix_memalign(&aligned_memory, 64, size);
         if (result != 0) {
             logAllocFailure(result, size);
             return null;
@@ -381,34 +371,34 @@ fn logAllocFailure(result: c_int, size: usize) void {
 /// On an Apple OS `size` is required, not decorative: `vm_deallocate` needs the
 /// length that was allocated, so this cannot be a plain `free`. Elsewhere it
 /// is the C's plain `free`, or on MinGW `_aligned_free`, and `size` is unused.
-pub export fn ggml_aligned_free(ptr: ?*anyopaque, size: usize) void {
+pub fn ggml_aligned_free(ptr: ?*anyopaque, size: usize) callconv(.c) void {
     if (comptime is_windows) return stdlib.libc._aligned_free(ptr);
     if (comptime !use_vm_allocate) return std.c.free(ptr);
     const p = ptr orelse return;
-    _ = stdlib.libc.vm_deallocate(mach_task_self_, @intFromPtr(p), size);
+    _ = std.c.vm_deallocate(mach_task_self_, @intFromPtr(p), size);
 }
 
 // -----------------------------------------------------------------------------
 // Status and version
 
 /// Ports `ggml_status_to_string` (ggml.c:450 @b1b770d90).
-export fn ggml_status_to_string(status: mod.impl.c.enum_ggml_status) [*:0]const u8 {
+pub fn ggml_status_to_string(status: mod.impl.ggml_c.enum_ggml_status) callconv(.c) [*:0]const u8 {
     return switch (status) {
-        mod.impl.c.GGML_STATUS_ALLOC_FAILED => "GGML status: error (failed to allocate memory)",
-        mod.impl.c.GGML_STATUS_FAILED => "GGML status: error (operation failed)",
-        mod.impl.c.GGML_STATUS_SUCCESS => "GGML status: success",
-        mod.impl.c.GGML_STATUS_ABORTED => "GGML status: warning (operation aborted)",
+        mod.impl.ggml_c.GGML_STATUS_ALLOC_FAILED => "GGML status: error (failed to allocate memory)",
+        mod.impl.ggml_c.GGML_STATUS_FAILED => "GGML status: error (operation failed)",
+        mod.impl.ggml_c.GGML_STATUS_SUCCESS => "GGML status: success",
+        mod.impl.ggml_c.GGML_STATUS_ABORTED => "GGML status: warning (operation aborted)",
         else => "GGML status: unknown",
     };
 }
 
 /// Ports `ggml_version` (ggml.c:525 @b1b770d90).
-export fn ggml_version() [*:0]const u8 {
+pub fn ggml_version() callconv(.c) [*:0]const u8 {
     return build_version;
 }
 
 /// Ports `ggml_commit` (ggml.c:529 @b1b770d90).
-export fn ggml_commit() [*:0]const u8 {
+pub fn ggml_commit() callconv(.c) [*:0]const u8 {
     return build_commit;
 }
 
@@ -421,7 +411,7 @@ const build_version: [*:0]const u8 = "1.0.0";
 const build_commit: [*:0]const u8 = "b1b770d90";
 
 /// Ports `ggml_guid_matches` (ggml.c:521 @b1b770d90).
-export fn ggml_guid_matches(guid_a: mod.impl.c.ggml_guid_t, guid_b: mod.impl.c.ggml_guid_t) bool {
+pub fn ggml_guid_matches(guid_a: mod.impl.ggml_c.ggml_guid_t, guid_b: mod.impl.ggml_c.ggml_guid_t) callconv(.c) bool {
     const a: [*]const u8 = @ptrCast(guid_a);
     const b: [*]const u8 = @ptrCast(guid_b);
     return std.mem.eql(u8, a[0..16], b[0..16]);
@@ -435,12 +425,12 @@ export fn ggml_guid_matches(guid_a: mod.impl.c.ggml_guid_t, guid_b: mod.impl.c.g
 // points at, so they are on the hot path for every dequantized tensor.
 
 /// Ports `ggml_fp16_to_fp32` (ggml.c:462 @b1b770d90).
-export fn ggml_fp16_to_fp32(x: mod.impl.c.ggml_fp16_t) f32 {
+pub fn ggml_fp16_to_fp32(x: mod.impl.ggml_c.ggml_fp16_t) callconv(.c) f32 {
     return mod.impl.fp16ToFp32(x);
 }
 
 /// Ports `ggml_fp32_to_fp16` (ggml.c:467 @b1b770d90).
-export fn ggml_fp32_to_fp16(x: f32) mod.impl.c.ggml_fp16_t {
+pub fn ggml_fp32_to_fp16(x: f32) callconv(.c) mod.impl.ggml_c.ggml_fp16_t {
     return mod.impl.fp32ToFp16(x);
 }
 
@@ -455,32 +445,32 @@ export fn ggml_fp32_to_fp16(x: f32) mod.impl.c.ggml_fp16_t {
 /// does now. `u16` has the same size and is passed correctly, and the C
 /// caller is unaffected: `ggml_bf16_t` is a one-field struct over exactly
 /// those bits.
-export fn ggml_bf16_to_fp32(x: u16) f32 {
+pub fn ggml_bf16_to_fp32(x: u16) callconv(.c) f32 {
     return mod.impl.bf16ToFp32(x);
 }
 
 /// Ports `ggml_fp32_to_bf16` (ggml.c:477 @b1b770d90).
-export fn ggml_fp32_to_bf16(x: f32) mod.impl.c.ggml_bf16_t {
+pub fn ggml_fp32_to_bf16(x: f32) callconv(.c) mod.impl.ggml_c.ggml_bf16_t {
     return .{ .bits = mod.impl.fp32ToBf16(x) };
 }
 
 /// Ports `ggml_fp16_to_fp32_row` (ggml.c:481 @b1b770d90).
-export fn ggml_fp16_to_fp32_row(x: [*]const mod.impl.c.ggml_fp16_t, y: [*]f32, n: i64) void {
+pub fn ggml_fp16_to_fp32_row(x: [*]const mod.impl.ggml_c.ggml_fp16_t, y: [*]f32, n: i64) callconv(.c) void {
     for (0..@intCast(n)) |i| y[i] = mod.impl.fp16ToFp32(x[i]);
 }
 
 /// Ports `ggml_fp32_to_fp16_row` (ggml.c:487 @b1b770d90).
-export fn ggml_fp32_to_fp16_row(x: [*]const f32, y: [*]mod.impl.c.ggml_fp16_t, n: i64) void {
+pub fn ggml_fp32_to_fp16_row(x: [*]const f32, y: [*]mod.impl.ggml_c.ggml_fp16_t, n: i64) callconv(.c) void {
     for (0..@intCast(n)) |i| y[i] = mod.impl.fp32ToFp16(x[i]);
 }
 
 /// Ports `ggml_bf16_to_fp32_row` (ggml.c:493 @b1b770d90).
-export fn ggml_bf16_to_fp32_row(x: [*]const mod.impl.c.ggml_bf16_t, y: [*]f32, n: i64) void {
+pub fn ggml_bf16_to_fp32_row(x: [*]const mod.impl.ggml_c.ggml_bf16_t, y: [*]f32, n: i64) callconv(.c) void {
     for (0..@intCast(n)) |i| y[i] = mod.impl.bf16ToFp32(x[i].bits);
 }
 
 /// Ports `ggml_fp32_to_bf16_row_ref` (ggml.c:499 @b1b770d90).
-export fn ggml_fp32_to_bf16_row_ref(x: [*]const f32, y: [*]mod.impl.c.ggml_bf16_t, n: i64) void {
+pub fn ggml_fp32_to_bf16_row_ref(x: [*]const f32, y: [*]mod.impl.ggml_c.ggml_bf16_t, n: i64) callconv(.c) void {
     for (0..@intCast(n)) |i| y[i] = .{ .bits = mod.impl.fp32ToBf16(x[i]) };
 }
 
@@ -488,7 +478,7 @@ export fn ggml_fp32_to_bf16_row_ref(x: [*]const f32, y: [*]mod.impl.c.ggml_bf16_
 ///
 /// The C has an AVX512-BF16 fast path here; on ARM it falls through to the
 /// same scalar loop as the reference version.
-export fn ggml_fp32_to_bf16_row(x: [*]const f32, y: [*]mod.impl.c.ggml_bf16_t, n: i64) void {
+pub fn ggml_fp32_to_bf16_row(x: [*]const f32, y: [*]mod.impl.ggml_c.ggml_bf16_t, n: i64) callconv(.c) void {
     for (0..@intCast(n)) |i| y[i] = .{ .bits = mod.impl.fp32ToBf16(x[i]) };
 }
 
@@ -502,7 +492,7 @@ var timer_freq: i64 = 0;
 var timer_start: i64 = 0;
 
 /// Ports `ggml_time_init_once` (ggml.c:539 @b1b770d90).
-fn timeInitOnce(once: *mod.win32.INIT_ONCE, param: ?*anyopaque, ctx: ?*?*anyopaque) callconv(.winapi) mod.win32.BOOL {
+fn timeInitOnce(once: *std.os.windows.INIT_ONCE, param: ?*anyopaque, ctx: ?*?*anyopaque) callconv(.winapi) mod.win32.BOOL {
     _ = once;
     _ = param;
     _ = ctx;
@@ -518,16 +508,16 @@ fn timeInitOnce(once: *mod.win32.INIT_ONCE, param: ?*anyopaque, ctx: ?*?*anyopaq
 ///
 /// A no-op outside Windows, where the C initialises a performance counter
 /// once per process.
-pub export fn ggml_time_init() void {
+pub fn ggml_time_init() callconv(.c) void {
     if (comptime !is_windows) return;
     const S = struct {
-        var once: mod.win32.INIT_ONCE = std.os.windows.INIT_ONCE_STATIC_INIT;
+        var once: std.os.windows.INIT_ONCE = std.os.windows.INIT_ONCE_STATIC_INIT;
     };
     _ = mod.win32.InitOnceExecuteOnce(&S.once, timeInitOnce, null, null);
 }
 
 /// Ports `ggml_time_ms`, `ggml_time_ms` (ggml.c:557, 569 @b1b770d90).
-export fn ggml_time_ms() i64 {
+pub fn ggml_time_ms() callconv(.c) i64 {
     if (comptime is_windows) {
         var t: i64 = undefined;
         _ = mod.win32.QueryPerformanceCounter(&t);
@@ -539,7 +529,7 @@ export fn ggml_time_ms() i64 {
 }
 
 /// Ports `ggml_time_us`, `ggml_time_us` (ggml.c:562, 575 @b1b770d90).
-pub export fn ggml_time_us() i64 {
+pub fn ggml_time_us() callconv(.c) i64 {
     if (comptime is_windows) {
         var t: i64 = undefined;
         _ = mod.win32.QueryPerformanceCounter(&t);
@@ -551,12 +541,12 @@ pub export fn ggml_time_us() i64 {
 }
 
 /// Ports `ggml_cycles` (ggml.c:582 @b1b770d90).
-export fn ggml_cycles() i64 {
+pub fn ggml_cycles() callconv(.c) i64 {
     return @intCast(stdlib.libc.clock());
 }
 
 /// Ports `ggml_cycles_per_ms` (ggml.c:586 @b1b770d90).
-export fn ggml_cycles_per_ms() i64 {
+pub fn ggml_cycles_per_ms() callconv(.c) i64 {
     return @divTrunc(clocks_per_sec, 1000);
 }
 
@@ -564,7 +554,7 @@ export fn ggml_cycles_per_ms() i64 {
 // Threadpool parameters
 
 /// Ports `ggml_threadpool_params_init` (ggml.c:8094 @b1b770d90).
-export fn ggml_threadpool_params_init(p: *mod.impl.c.struct_ggml_threadpool_params, n_threads: c_int) void {
+pub fn ggml_threadpool_params_init(p: *mod.impl.ggml_c.struct_ggml_threadpool_params, n_threads: c_int) callconv(.c) void {
     p.n_threads = n_threads;
     p.prio = 0; // normal, or inherited
     p.poll = 50; // hybrid polling
@@ -575,17 +565,17 @@ export fn ggml_threadpool_params_init(p: *mod.impl.c.struct_ggml_threadpool_para
 }
 
 /// Ports `ggml_threadpool_params_default` (ggml.c:8103 @b1b770d90).
-pub export fn ggml_threadpool_params_default(n_threads: c_int) mod.impl.c.struct_ggml_threadpool_params {
-    var p: mod.impl.c.struct_ggml_threadpool_params = undefined;
+pub fn ggml_threadpool_params_default(n_threads: c_int) callconv(.c) mod.impl.ggml_c.struct_ggml_threadpool_params {
+    var p: mod.impl.ggml_c.struct_ggml_threadpool_params = undefined;
     ggml_threadpool_params_init(&p, n_threads);
     return p;
 }
 
 /// Ports `ggml_threadpool_params_match` (ggml.c:8109 @b1b770d90).
-export fn ggml_threadpool_params_match(
-    p0: *const mod.impl.c.struct_ggml_threadpool_params,
-    p1: *const mod.impl.c.struct_ggml_threadpool_params,
-) bool {
+pub fn ggml_threadpool_params_match(
+    p0: *const mod.impl.ggml_c.struct_ggml_threadpool_params,
+    p1: *const mod.impl.ggml_c.struct_ggml_threadpool_params,
+) callconv(.c) bool {
     if (p0.n_threads != p1.n_threads) return false;
     if (p0.prio != p1.prio) return false;
     if (p0.poll != p1.poll) return false;
@@ -604,7 +594,7 @@ test "graph uids are unique and monotonic" {
 }
 
 test "status strings cover every status" {
-    try std.testing.expectEqualStrings("GGML status: success", std.mem.span(ggml_status_to_string(mod.impl.c.GGML_STATUS_SUCCESS)));
+    try std.testing.expectEqualStrings("GGML status: success", std.mem.span(ggml_status_to_string(mod.impl.ggml_c.GGML_STATUS_SUCCESS)));
     try std.testing.expectEqualStrings("GGML status: unknown", std.mem.span(ggml_status_to_string(@intCast(999))));
 }
 
@@ -636,7 +626,7 @@ test "aligned malloc returns aligned memory and frees it" {
 /// A plain `fopen`, except on Windows, where both arguments are converted from
 /// UTF-8 to wide characters and the file is opened with `_wfopen`, so a path
 /// outside the ANSI code page still opens.
-pub export fn ggml_fopen(fname: [*:0]const u8, mode: [*:0]const u8) ?*std.c.FILE {
+pub fn ggml_fopen(fname: [*:0]const u8, mode: [*:0]const u8) callconv(.c) ?*std.c.FILE {
     if (comptime !is_windows) return @ptrCast(stdlib.libc.fopen(fname, mode));
 
     var file: ?*std.c.FILE = null;

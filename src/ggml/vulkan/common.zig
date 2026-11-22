@@ -20,7 +20,7 @@ const builtin = @import("builtin");
 /// The Vulkan C API, `vulkan_core.h` at the pinned SDK,
 /// translated with `VK_NO_PROTOTYPES`: every command is reached through
 /// `dispatch`, as `vulkan.hpp`'s dynamic dispatcher reaches it.
-pub const vk = @import("vulkan_c");
+pub const vulkan_c = @import("vulkan_c");
 
 /// Ports `GGML_VK_NAME` (ggml-vulkan.h:10 @b1b770d90).
 pub const name = "Vulkan";
@@ -42,11 +42,11 @@ pub const vendor_id = struct {
 };
 
 /// Ports `ggml_vk_external_memory_host_usable` (ggml-vulkan.cpp:4211 @b1b770d90).
-pub fn externalMemoryHostUsable(driver_id: vk.VkDriverId) bool {
+pub fn externalMemoryHostUsable(driver_id: vulkan_c.VkDriverId) bool {
     // Disable external_memory_host until
     // https://github.com/KhronosGroup/MoltenVK/pull/2622 is available in the
     // Vulkan SDK.
-    return driver_id != vk.VK_DRIVER_ID_MOLTENVK;
+    return driver_id != vulkan_c.VK_DRIVER_ID_MOLTENVK;
 }
 
 /// Ports `ggml_vk_host_buffer_import_usable` (ggml-vulkan.cpp:4217 @b1b770d90).
@@ -59,15 +59,15 @@ pub fn hostBufferImportUsable(vendor: u32) bool {
 /// memory type that is device-local, host-visible and host-coherent lives on
 /// the heap of the first device-local type, i.e. the whole of VRAM is
 /// mappable (resizable BAR).
-pub fn hasRebar(physical_device: vk.VkPhysicalDevice) bool {
-    var mem_props: vk.VkPhysicalDeviceMemoryProperties = undefined;
+pub fn hasRebar(physical_device: vulkan_c.VkPhysicalDevice) bool {
+    var mem_props: vulkan_c.VkPhysicalDeviceMemoryProperties = undefined;
     dispatch.vkGetPhysicalDeviceMemoryProperties.?(physical_device, &mem_props);
-    const hvv: vk.VkMemoryPropertyFlags = vk.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
-        vk.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-        vk.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    const hvv: vulkan_c.VkMemoryPropertyFlags = vulkan_c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+        vulkan_c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+        vulkan_c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     var vram_heap: u32 = std.math.maxInt(u32);
     for (mem_props.memoryTypes[0..mem_props.memoryTypeCount]) |t| {
-        if (vram_heap == std.math.maxInt(u32) and (t.propertyFlags & vk.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0) {
+        if (vram_heap == std.math.maxInt(u32) and (t.propertyFlags & vulkan_c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0) {
             vram_heap = t.heapIndex;
         }
         if ((t.propertyFlags & hvv) == hvv and t.heapIndex == vram_heap) return true;
@@ -78,11 +78,11 @@ pub fn hasRebar(physical_device: vk.VkPhysicalDevice) bool {
 /// The loader's one entry point every other command is found through. The
 /// C++ links it directly (`VULKAN_HPP_DISPATCH_LOADER_DYNAMIC` still names
 /// `vkGetInstanceProcAddr` at `init`).
-pub extern fn vkGetInstanceProcAddr(instance: vk.VkInstance, p_name: [*:0]const u8) vk.PFN_vkVoidFunction;
+pub extern fn vkGetInstanceProcAddr(instance: vulkan_c.VkInstance, p_name: [*:0]const u8) vulkan_c.PFN_vkVoidFunction;
 
 /// The four commands the C++ calls by their exported names rather than
 /// through the dispatcher (measured with `nm` on the reference).
-pub extern fn vkGetPhysicalDeviceFeatures2(physical_device: vk.VkPhysicalDevice, features: *vk.VkPhysicalDeviceFeatures2) void;
+pub extern fn vkGetPhysicalDeviceFeatures2(physical_device: vulkan_c.VkPhysicalDevice, features: *vulkan_c.VkPhysicalDeviceFeatures2) void;
 
 /// Commands that need no instance: `vulkan.hpp`'s `init(vkGetInstanceProcAddr)`
 /// loads these with a null instance.
@@ -104,87 +104,87 @@ const global_commands = [_][:0]const u8{
 /// the loader's trampoline, as the C++'s does. A field the driver does not
 /// provide stays null, and calling it is the C++'s null-pointer call.
 pub const Dispatch = struct {
-    vkCreateInstance: vk.PFN_vkCreateInstance = null,
-    vkEnumerateInstanceVersion: vk.PFN_vkEnumerateInstanceVersion = null,
-    vkEnumerateInstanceExtensionProperties: vk.PFN_vkEnumerateInstanceExtensionProperties = null,
-    vkEnumerateInstanceLayerProperties: vk.PFN_vkEnumerateInstanceLayerProperties = null,
+    vkCreateInstance: vulkan_c.PFN_vkCreateInstance = null,
+    vkEnumerateInstanceVersion: vulkan_c.PFN_vkEnumerateInstanceVersion = null,
+    vkEnumerateInstanceExtensionProperties: vulkan_c.PFN_vkEnumerateInstanceExtensionProperties = null,
+    vkEnumerateInstanceLayerProperties: vulkan_c.PFN_vkEnumerateInstanceLayerProperties = null,
 
-    vkEnumeratePhysicalDevices: vk.PFN_vkEnumeratePhysicalDevices = null,
-    vkEnumerateDeviceExtensionProperties: vk.PFN_vkEnumerateDeviceExtensionProperties = null,
-    vkGetPhysicalDeviceProperties: vk.PFN_vkGetPhysicalDeviceProperties = null,
-    vkGetPhysicalDeviceProperties2: vk.PFN_vkGetPhysicalDeviceProperties2 = null,
-    vkGetPhysicalDeviceMemoryProperties2: vk.PFN_vkGetPhysicalDeviceMemoryProperties2 = null,
-    vkGetPhysicalDeviceQueueFamilyProperties: vk.PFN_vkGetPhysicalDeviceQueueFamilyProperties = null,
-    vkGetPhysicalDeviceFeatures: vk.PFN_vkGetPhysicalDeviceFeatures = null,
+    vkEnumeratePhysicalDevices: vulkan_c.PFN_vkEnumeratePhysicalDevices = null,
+    vkEnumerateDeviceExtensionProperties: vulkan_c.PFN_vkEnumerateDeviceExtensionProperties = null,
+    vkGetPhysicalDeviceProperties: vulkan_c.PFN_vkGetPhysicalDeviceProperties = null,
+    vkGetPhysicalDeviceProperties2: vulkan_c.PFN_vkGetPhysicalDeviceProperties2 = null,
+    vkGetPhysicalDeviceMemoryProperties2: vulkan_c.PFN_vkGetPhysicalDeviceMemoryProperties2 = null,
+    vkGetPhysicalDeviceQueueFamilyProperties: vulkan_c.PFN_vkGetPhysicalDeviceQueueFamilyProperties = null,
+    vkGetPhysicalDeviceFeatures: vulkan_c.PFN_vkGetPhysicalDeviceFeatures = null,
 
-    vkCreateDevice: vk.PFN_vkCreateDevice = null,
-    vkDestroyDevice: vk.PFN_vkDestroyDevice = null,
-    vkGetDeviceQueue2: vk.PFN_vkGetDeviceQueue2 = null,
-    vkCreateCommandPool: vk.PFN_vkCreateCommandPool = null,
-    vkDestroyCommandPool: vk.PFN_vkDestroyCommandPool = null,
-    vkCreateDescriptorSetLayout: vk.PFN_vkCreateDescriptorSetLayout = null,
-    vkDestroyDescriptorSetLayout: vk.PFN_vkDestroyDescriptorSetLayout = null,
-    vkCreateFence: vk.PFN_vkCreateFence = null,
-    vkDestroyFence: vk.PFN_vkDestroyFence = null,
-    vkCreateShaderModule: vk.PFN_vkCreateShaderModule = null,
-    vkDestroyShaderModule: vk.PFN_vkDestroyShaderModule = null,
-    vkCreatePipelineLayout: vk.PFN_vkCreatePipelineLayout = null,
-    vkDestroyPipelineLayout: vk.PFN_vkDestroyPipelineLayout = null,
-    vkCreateComputePipelines: vk.PFN_vkCreateComputePipelines = null,
-    vkDestroyPipeline: vk.PFN_vkDestroyPipeline = null,
-    vkGetPipelineExecutableStatisticsKHR: vk.PFN_vkGetPipelineExecutableStatisticsKHR = null,
-    vkCreateBuffer: vk.PFN_vkCreateBuffer = null,
-    vkDestroyBuffer: vk.PFN_vkDestroyBuffer = null,
-    vkGetBufferMemoryRequirements: vk.PFN_vkGetBufferMemoryRequirements = null,
-    vkGetPhysicalDeviceMemoryProperties: vk.PFN_vkGetPhysicalDeviceMemoryProperties = null,
-    vkAllocateMemory: vk.PFN_vkAllocateMemory = null,
-    vkFreeMemory: vk.PFN_vkFreeMemory = null,
-    vkMapMemory: vk.PFN_vkMapMemory = null,
-    vkBindBufferMemory: vk.PFN_vkBindBufferMemory = null,
-    vkGetBufferDeviceAddress: vk.PFN_vkGetBufferDeviceAddress = null,
-    vkGetMemoryHostPointerPropertiesEXT: vk.PFN_vkGetMemoryHostPointerPropertiesEXT = null,
-    vkAllocateCommandBuffers: vk.PFN_vkAllocateCommandBuffers = null,
-    vkFreeCommandBuffers: vk.PFN_vkFreeCommandBuffers = null,
-    vkResetCommandBuffer: vk.PFN_vkResetCommandBuffer = null,
-    vkBeginCommandBuffer: vk.PFN_vkBeginCommandBuffer = null,
-    vkEndCommandBuffer: vk.PFN_vkEndCommandBuffer = null,
-    vkQueueSubmit: vk.PFN_vkQueueSubmit = null,
-    vkWaitForFences: vk.PFN_vkWaitForFences = null,
-    vkResetFences: vk.PFN_vkResetFences = null,
-    vkGetFenceStatus: vk.PFN_vkGetFenceStatus = null,
-    vkResetCommandPool: vk.PFN_vkResetCommandPool = null,
-    vkCmdPipelineBarrier: vk.PFN_vkCmdPipelineBarrier = null,
-    vkCmdCopyBuffer: vk.PFN_vkCmdCopyBuffer = null,
-    vkCmdFillBuffer: vk.PFN_vkCmdFillBuffer = null,
-    vkCmdResetEvent: vk.PFN_vkCmdResetEvent = null,
-    vkCmdSetEvent: vk.PFN_vkCmdSetEvent = null,
-    vkCmdWaitEvents: vk.PFN_vkCmdWaitEvents = null,
-    vkCreateSemaphore: vk.PFN_vkCreateSemaphore = null,
-    vkDestroySemaphore: vk.PFN_vkDestroySemaphore = null,
-    vkWaitSemaphores: vk.PFN_vkWaitSemaphores = null,
-    vkSignalSemaphore: vk.PFN_vkSignalSemaphore = null,
-    vkGetSemaphoreCounterValue: vk.PFN_vkGetSemaphoreCounterValue = null,
-    vkGetDeviceProcAddr: vk.PFN_vkGetDeviceProcAddr = null,
-    vkGetPhysicalDeviceExternalSemaphoreProperties: vk.PFN_vkGetPhysicalDeviceExternalSemaphoreProperties = null,
-    vkCreateEvent: vk.PFN_vkCreateEvent = null,
-    vkDestroyEvent: vk.PFN_vkDestroyEvent = null,
-    vkGetEventStatus: vk.PFN_vkGetEventStatus = null,
-    vkResetEvent: vk.PFN_vkResetEvent = null,
-    vkUpdateDescriptorSets: vk.PFN_vkUpdateDescriptorSets = null,
-    vkCmdPushConstants: vk.PFN_vkCmdPushConstants = null,
-    vkCmdBindPipeline: vk.PFN_vkCmdBindPipeline = null,
-    vkCmdBindDescriptorSets: vk.PFN_vkCmdBindDescriptorSets = null,
-    vkCmdDispatch: vk.PFN_vkCmdDispatch = null,
-    vkCreateDescriptorPool: vk.PFN_vkCreateDescriptorPool = null,
-    vkDestroyDescriptorPool: vk.PFN_vkDestroyDescriptorPool = null,
-    vkAllocateDescriptorSets: vk.PFN_vkAllocateDescriptorSets = null,
-    vkResetDescriptorPool: vk.PFN_vkResetDescriptorPool = null,
-    vkCreateQueryPool: vk.PFN_vkCreateQueryPool = null,
-    vkDestroyQueryPool: vk.PFN_vkDestroyQueryPool = null,
-    vkCmdResetQueryPool: vk.PFN_vkCmdResetQueryPool = null,
-    vkResetQueryPool: vk.PFN_vkResetQueryPool = null,
-    vkCmdWriteTimestamp: vk.PFN_vkCmdWriteTimestamp = null,
-    vkGetQueryPoolResults: vk.PFN_vkGetQueryPoolResults = null,
+    vkCreateDevice: vulkan_c.PFN_vkCreateDevice = null,
+    vkDestroyDevice: vulkan_c.PFN_vkDestroyDevice = null,
+    vkGetDeviceQueue2: vulkan_c.PFN_vkGetDeviceQueue2 = null,
+    vkCreateCommandPool: vulkan_c.PFN_vkCreateCommandPool = null,
+    vkDestroyCommandPool: vulkan_c.PFN_vkDestroyCommandPool = null,
+    vkCreateDescriptorSetLayout: vulkan_c.PFN_vkCreateDescriptorSetLayout = null,
+    vkDestroyDescriptorSetLayout: vulkan_c.PFN_vkDestroyDescriptorSetLayout = null,
+    vkCreateFence: vulkan_c.PFN_vkCreateFence = null,
+    vkDestroyFence: vulkan_c.PFN_vkDestroyFence = null,
+    vkCreateShaderModule: vulkan_c.PFN_vkCreateShaderModule = null,
+    vkDestroyShaderModule: vulkan_c.PFN_vkDestroyShaderModule = null,
+    vkCreatePipelineLayout: vulkan_c.PFN_vkCreatePipelineLayout = null,
+    vkDestroyPipelineLayout: vulkan_c.PFN_vkDestroyPipelineLayout = null,
+    vkCreateComputePipelines: vulkan_c.PFN_vkCreateComputePipelines = null,
+    vkDestroyPipeline: vulkan_c.PFN_vkDestroyPipeline = null,
+    vkGetPipelineExecutableStatisticsKHR: vulkan_c.PFN_vkGetPipelineExecutableStatisticsKHR = null,
+    vkCreateBuffer: vulkan_c.PFN_vkCreateBuffer = null,
+    vkDestroyBuffer: vulkan_c.PFN_vkDestroyBuffer = null,
+    vkGetBufferMemoryRequirements: vulkan_c.PFN_vkGetBufferMemoryRequirements = null,
+    vkGetPhysicalDeviceMemoryProperties: vulkan_c.PFN_vkGetPhysicalDeviceMemoryProperties = null,
+    vkAllocateMemory: vulkan_c.PFN_vkAllocateMemory = null,
+    vkFreeMemory: vulkan_c.PFN_vkFreeMemory = null,
+    vkMapMemory: vulkan_c.PFN_vkMapMemory = null,
+    vkBindBufferMemory: vulkan_c.PFN_vkBindBufferMemory = null,
+    vkGetBufferDeviceAddress: vulkan_c.PFN_vkGetBufferDeviceAddress = null,
+    vkGetMemoryHostPointerPropertiesEXT: vulkan_c.PFN_vkGetMemoryHostPointerPropertiesEXT = null,
+    vkAllocateCommandBuffers: vulkan_c.PFN_vkAllocateCommandBuffers = null,
+    vkFreeCommandBuffers: vulkan_c.PFN_vkFreeCommandBuffers = null,
+    vkResetCommandBuffer: vulkan_c.PFN_vkResetCommandBuffer = null,
+    vkBeginCommandBuffer: vulkan_c.PFN_vkBeginCommandBuffer = null,
+    vkEndCommandBuffer: vulkan_c.PFN_vkEndCommandBuffer = null,
+    vkQueueSubmit: vulkan_c.PFN_vkQueueSubmit = null,
+    vkWaitForFences: vulkan_c.PFN_vkWaitForFences = null,
+    vkResetFences: vulkan_c.PFN_vkResetFences = null,
+    vkGetFenceStatus: vulkan_c.PFN_vkGetFenceStatus = null,
+    vkResetCommandPool: vulkan_c.PFN_vkResetCommandPool = null,
+    vkCmdPipelineBarrier: vulkan_c.PFN_vkCmdPipelineBarrier = null,
+    vkCmdCopyBuffer: vulkan_c.PFN_vkCmdCopyBuffer = null,
+    vkCmdFillBuffer: vulkan_c.PFN_vkCmdFillBuffer = null,
+    vkCmdResetEvent: vulkan_c.PFN_vkCmdResetEvent = null,
+    vkCmdSetEvent: vulkan_c.PFN_vkCmdSetEvent = null,
+    vkCmdWaitEvents: vulkan_c.PFN_vkCmdWaitEvents = null,
+    vkCreateSemaphore: vulkan_c.PFN_vkCreateSemaphore = null,
+    vkDestroySemaphore: vulkan_c.PFN_vkDestroySemaphore = null,
+    vkWaitSemaphores: vulkan_c.PFN_vkWaitSemaphores = null,
+    vkSignalSemaphore: vulkan_c.PFN_vkSignalSemaphore = null,
+    vkGetSemaphoreCounterValue: vulkan_c.PFN_vkGetSemaphoreCounterValue = null,
+    vkGetDeviceProcAddr: vulkan_c.PFN_vkGetDeviceProcAddr = null,
+    vkGetPhysicalDeviceExternalSemaphoreProperties: vulkan_c.PFN_vkGetPhysicalDeviceExternalSemaphoreProperties = null,
+    vkCreateEvent: vulkan_c.PFN_vkCreateEvent = null,
+    vkDestroyEvent: vulkan_c.PFN_vkDestroyEvent = null,
+    vkGetEventStatus: vulkan_c.PFN_vkGetEventStatus = null,
+    vkResetEvent: vulkan_c.PFN_vkResetEvent = null,
+    vkUpdateDescriptorSets: vulkan_c.PFN_vkUpdateDescriptorSets = null,
+    vkCmdPushConstants: vulkan_c.PFN_vkCmdPushConstants = null,
+    vkCmdBindPipeline: vulkan_c.PFN_vkCmdBindPipeline = null,
+    vkCmdBindDescriptorSets: vulkan_c.PFN_vkCmdBindDescriptorSets = null,
+    vkCmdDispatch: vulkan_c.PFN_vkCmdDispatch = null,
+    vkCreateDescriptorPool: vulkan_c.PFN_vkCreateDescriptorPool = null,
+    vkDestroyDescriptorPool: vulkan_c.PFN_vkDestroyDescriptorPool = null,
+    vkAllocateDescriptorSets: vulkan_c.PFN_vkAllocateDescriptorSets = null,
+    vkResetDescriptorPool: vulkan_c.PFN_vkResetDescriptorPool = null,
+    vkCreateQueryPool: vulkan_c.PFN_vkCreateQueryPool = null,
+    vkDestroyQueryPool: vulkan_c.PFN_vkDestroyQueryPool = null,
+    vkCmdResetQueryPool: vulkan_c.PFN_vkCmdResetQueryPool = null,
+    vkResetQueryPool: vulkan_c.PFN_vkResetQueryPool = null,
+    vkCmdWriteTimestamp: vulkan_c.PFN_vkCmdWriteTimestamp = null,
+    vkGetQueryPoolResults: vulkan_c.PFN_vkGetQueryPoolResults = null,
 
     /// Loads the global commands. Ports `init(vkGetInstanceProcAddr)`.
     pub fn loadGlobal(self: *Dispatch) void {
@@ -197,7 +197,7 @@ pub const Dispatch = struct {
     ///
     /// Parameters:
     /// - `instance`: the instance the commands are looked up through.
-    pub fn loadInstance(self: *Dispatch, instance: vk.VkInstance) void {
+    pub fn loadInstance(self: *Dispatch, instance: vulkan_c.VkInstance) void {
         inline for (@typeInfo(Dispatch).@"struct".field_names) |field| {
             @field(self, field) = @ptrCast(vkGetInstanceProcAddr(instance, field));
         }
@@ -214,7 +214,7 @@ pub const VkError = error{VulkanError};
 
 /// The last failed result and the command that returned it, for the
 /// message a catch site prints.
-pub threadlocal var last_error: struct { result: vk.VkResult = vk.VK_SUCCESS, what: [*:0]const u8 = "" } = .{};
+pub threadlocal var last_error: struct { result: vulkan_c.VkResult = vulkan_c.VK_SUCCESS, what: [*:0]const u8 = "" } = .{};
 
 /// `vulkan.hpp`'s `resultCheck`: anything but `VK_SUCCESS` throws.
 ///
@@ -225,8 +225,8 @@ pub threadlocal var last_error: struct { result: vk.VkResult = vk.VK_SUCCESS, wh
 ///
 /// Return: nothing on success; `error.VulkanError` otherwise, with
 /// `last_error` set.
-pub fn check(result: vk.VkResult, what: [*:0]const u8) VkError!void {
-    if (result == vk.VK_SUCCESS) return;
+pub fn check(result: vulkan_c.VkResult, what: [*:0]const u8) VkError!void {
+    if (result == vulkan_c.VK_SUCCESS) return;
     last_error = .{ .result = result, .what = what };
     return error.VulkanError;
 }
@@ -237,7 +237,7 @@ pub fn check(result: vk.VkResult, what: [*:0]const u8) VkError!void {
 /// Parameters:
 /// - `result`: what the command returned.
 /// - `what`: the command's `vulkan.hpp` name.
-pub fn checkOrAbort(result: vk.VkResult, what: [*:0]const u8) void {
+pub fn checkOrAbort(result: vulkan_c.VkResult, what: [*:0]const u8) void {
     check(result, what) catch abortLastError();
 }
 
@@ -252,34 +252,34 @@ pub fn abortLastError() noreturn {
 ///
 /// Return: the name; an unknown value's text lives in a thread-local buffer
 /// until the next call.
-pub fn resultString(result: vk.VkResult) [:0]const u8 {
+pub fn resultString(result: vulkan_c.VkResult) [:0]const u8 {
     return switch (result) {
-        vk.VK_SUCCESS => "Success",
-        vk.VK_NOT_READY => "NotReady",
-        vk.VK_TIMEOUT => "Timeout",
-        vk.VK_EVENT_SET => "EventSet",
-        vk.VK_EVENT_RESET => "EventReset",
-        vk.VK_INCOMPLETE => "Incomplete",
-        vk.VK_ERROR_OUT_OF_HOST_MEMORY => "ErrorOutOfHostMemory",
-        vk.VK_ERROR_OUT_OF_DEVICE_MEMORY => "ErrorOutOfDeviceMemory",
-        vk.VK_ERROR_INITIALIZATION_FAILED => "ErrorInitializationFailed",
-        vk.VK_ERROR_DEVICE_LOST => "ErrorDeviceLost",
-        vk.VK_ERROR_MEMORY_MAP_FAILED => "ErrorMemoryMapFailed",
-        vk.VK_ERROR_LAYER_NOT_PRESENT => "ErrorLayerNotPresent",
-        vk.VK_ERROR_EXTENSION_NOT_PRESENT => "ErrorExtensionNotPresent",
-        vk.VK_ERROR_FEATURE_NOT_PRESENT => "ErrorFeatureNotPresent",
-        vk.VK_ERROR_INCOMPATIBLE_DRIVER => "ErrorIncompatibleDriver",
-        vk.VK_ERROR_TOO_MANY_OBJECTS => "ErrorTooManyObjects",
-        vk.VK_ERROR_FORMAT_NOT_SUPPORTED => "ErrorFormatNotSupported",
-        vk.VK_ERROR_FRAGMENTED_POOL => "ErrorFragmentedPool",
-        vk.VK_ERROR_UNKNOWN => "ErrorUnknown",
-        vk.VK_ERROR_OUT_OF_POOL_MEMORY => "ErrorOutOfPoolMemory",
-        vk.VK_ERROR_INVALID_EXTERNAL_HANDLE => "ErrorInvalidExternalHandle",
-        vk.VK_ERROR_FRAGMENTATION => "ErrorFragmentation",
-        vk.VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS => "ErrorInvalidOpaqueCaptureAddress",
-        vk.VK_PIPELINE_COMPILE_REQUIRED => "PipelineCompileRequired",
-        vk.VK_ERROR_VALIDATION_FAILED => "ErrorValidationFailed",
-        vk.VK_ERROR_NOT_PERMITTED => "ErrorNotPermitted",
+        vulkan_c.VK_SUCCESS => "Success",
+        vulkan_c.VK_NOT_READY => "NotReady",
+        vulkan_c.VK_TIMEOUT => "Timeout",
+        vulkan_c.VK_EVENT_SET => "EventSet",
+        vulkan_c.VK_EVENT_RESET => "EventReset",
+        vulkan_c.VK_INCOMPLETE => "Incomplete",
+        vulkan_c.VK_ERROR_OUT_OF_HOST_MEMORY => "ErrorOutOfHostMemory",
+        vulkan_c.VK_ERROR_OUT_OF_DEVICE_MEMORY => "ErrorOutOfDeviceMemory",
+        vulkan_c.VK_ERROR_INITIALIZATION_FAILED => "ErrorInitializationFailed",
+        vulkan_c.VK_ERROR_DEVICE_LOST => "ErrorDeviceLost",
+        vulkan_c.VK_ERROR_MEMORY_MAP_FAILED => "ErrorMemoryMapFailed",
+        vulkan_c.VK_ERROR_LAYER_NOT_PRESENT => "ErrorLayerNotPresent",
+        vulkan_c.VK_ERROR_EXTENSION_NOT_PRESENT => "ErrorExtensionNotPresent",
+        vulkan_c.VK_ERROR_FEATURE_NOT_PRESENT => "ErrorFeatureNotPresent",
+        vulkan_c.VK_ERROR_INCOMPATIBLE_DRIVER => "ErrorIncompatibleDriver",
+        vulkan_c.VK_ERROR_TOO_MANY_OBJECTS => "ErrorTooManyObjects",
+        vulkan_c.VK_ERROR_FORMAT_NOT_SUPPORTED => "ErrorFormatNotSupported",
+        vulkan_c.VK_ERROR_FRAGMENTED_POOL => "ErrorFragmentedPool",
+        vulkan_c.VK_ERROR_UNKNOWN => "ErrorUnknown",
+        vulkan_c.VK_ERROR_OUT_OF_POOL_MEMORY => "ErrorOutOfPoolMemory",
+        vulkan_c.VK_ERROR_INVALID_EXTERNAL_HANDLE => "ErrorInvalidExternalHandle",
+        vulkan_c.VK_ERROR_FRAGMENTATION => "ErrorFragmentation",
+        vulkan_c.VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS => "ErrorInvalidOpaqueCaptureAddress",
+        vulkan_c.VK_PIPELINE_COMPILE_REQUIRED => "PipelineCompileRequired",
+        vulkan_c.VK_ERROR_VALIDATION_FAILED => "ErrorValidationFailed",
+        vulkan_c.VK_ERROR_NOT_PERMITTED => "ErrorNotPermitted",
         else => blk: {
             const S = struct {
                 threadlocal var buf: [32]u8 = undefined;
@@ -306,7 +306,7 @@ pub fn enumerate(comptime T: type, what: [*:0]const u8, f: anytype, args: anytyp
         try check(@call(.auto, f, args ++ .{ &count, @as([*c]T, null) }), what);
         const items = std.heap.c_allocator.alloc(T, count) catch ggml.impl.abort("ggml_vulkan: out of memory");
         const result = @call(.auto, f, args ++ .{ &count, items.ptr });
-        if (result == vk.VK_INCOMPLETE) {
+        if (result == vulkan_c.VK_INCOMPLETE) {
             std.heap.c_allocator.free(items);
             continue;
         }
@@ -321,14 +321,14 @@ pub fn enumerate(comptime T: type, what: [*:0]const u8, f: anytype, args: anytyp
 
 /// `enumerate` for an output structure: `vulkan.hpp` default-constructs
 /// each element, so each arrives zeroed with its `sType` set.
-pub fn enumerateWith(comptime T: type, s_type: vk.VkStructureType, what: [*:0]const u8, f: anytype, args: anytype) VkError![]T {
+pub fn enumerateWith(comptime T: type, s_type: vulkan_c.VkStructureType, what: [*:0]const u8, f: anytype, args: anytype) VkError![]T {
     while (true) {
         var count: u32 = 0;
         try check(@call(.auto, f, args ++ .{ &count, @as([*c]T, null) }), what);
         const items = std.heap.c_allocator.alloc(T, count) catch ggml.impl.abort("ggml_vulkan: out of memory");
         for (items) |*item| item.* = structure(T, s_type);
         const result = @call(.auto, f, args ++ .{ &count, items.ptr });
-        if (result == vk.VK_INCOMPLETE) {
+        if (result == vulkan_c.VK_INCOMPLETE) {
             std.heap.c_allocator.free(items);
             continue;
         }
@@ -341,28 +341,28 @@ pub fn enumerateWith(comptime T: type, s_type: vk.VkStructureType, what: [*:0]co
 }
 
 /// `vk::Instance::enumeratePhysicalDevices`.
-pub fn enumeratePhysicalDevices(instance: vk.VkInstance) VkError![]vk.VkPhysicalDevice {
-    return enumerate(vk.VkPhysicalDevice, "vk::Instance::enumeratePhysicalDevices", dispatch.vkEnumeratePhysicalDevices.?, .{instance});
+pub fn enumeratePhysicalDevices(instance: vulkan_c.VkInstance) VkError![]vulkan_c.VkPhysicalDevice {
+    return enumerate(vulkan_c.VkPhysicalDevice, "vk::Instance::enumeratePhysicalDevices", dispatch.vkEnumeratePhysicalDevices.?, .{instance});
 }
 
 /// `vk::PhysicalDevice::enumerateDeviceExtensionProperties`, for no layer.
-pub fn enumerateDeviceExtensionProperties(dev: vk.VkPhysicalDevice) VkError![]vk.VkExtensionProperties {
-    return enumerate(vk.VkExtensionProperties, "vk::PhysicalDevice::enumerateDeviceExtensionProperties", dispatch.vkEnumerateDeviceExtensionProperties.?, .{ dev, @as([*c]const u8, null) });
+pub fn enumerateDeviceExtensionProperties(dev: vulkan_c.VkPhysicalDevice) VkError![]vulkan_c.VkExtensionProperties {
+    return enumerate(vulkan_c.VkExtensionProperties, "vk::PhysicalDevice::enumerateDeviceExtensionProperties", dispatch.vkEnumerateDeviceExtensionProperties.?, .{ dev, @as([*c]const u8, null) });
 }
 
 /// `vk::enumerateInstanceExtensionProperties`, for `layer` or none.
-pub fn enumerateInstanceExtensionProperties(layer: ?[*:0]const u8) VkError![]vk.VkExtensionProperties {
-    return enumerate(vk.VkExtensionProperties, "vk::enumerateInstanceExtensionProperties", dispatch.vkEnumerateInstanceExtensionProperties.?, .{@as([*c]const u8, layer)});
+pub fn enumerateInstanceExtensionProperties(layer: ?[*:0]const u8) VkError![]vulkan_c.VkExtensionProperties {
+    return enumerate(vulkan_c.VkExtensionProperties, "vk::enumerateInstanceExtensionProperties", dispatch.vkEnumerateInstanceExtensionProperties.?, .{@as([*c]const u8, layer)});
 }
 
 /// `vk::enumerateInstanceLayerProperties`.
-pub fn enumerateInstanceLayerProperties() VkError![]vk.VkLayerProperties {
-    return enumerate(vk.VkLayerProperties, "vk::enumerateInstanceLayerProperties", dispatch.vkEnumerateInstanceLayerProperties.?, .{});
+pub fn enumerateInstanceLayerProperties() VkError![]vulkan_c.VkLayerProperties {
+    return enumerate(vulkan_c.VkLayerProperties, "vk::enumerateInstanceLayerProperties", dispatch.vkEnumerateInstanceLayerProperties.?, .{});
 }
 
 /// Whether `props` lists the extension `ext_name`: the C++'s
 /// `strcmp(name, properties.extensionName) == 0` loop.
-pub fn hasExtension(props: []const vk.VkExtensionProperties, ext_name: []const u8) bool {
+pub fn hasExtension(props: []const vulkan_c.VkExtensionProperties, ext_name: []const u8) bool {
     for (props) |p| {
         if (std.mem.eql(u8, std.mem.sliceTo(&p.extensionName, 0), ext_name)) return true;
     }
@@ -370,15 +370,15 @@ pub fn hasExtension(props: []const vk.VkExtensionProperties, ext_name: []const u
 }
 
 /// `vk::PhysicalDevice::getProperties`.
-pub fn getProperties(dev: vk.VkPhysicalDevice) vk.VkPhysicalDeviceProperties {
-    var props: vk.VkPhysicalDeviceProperties = undefined;
+pub fn getProperties(dev: vulkan_c.VkPhysicalDevice) vulkan_c.VkPhysicalDeviceProperties {
+    var props: vulkan_c.VkPhysicalDeviceProperties = undefined;
     dispatch.vkGetPhysicalDeviceProperties.?(dev, &props);
     return props;
 }
 
 /// A `vulkan.hpp` structure value: zeroed, with its `sType` set, as the
 /// C++ wrapper's default constructor leaves it.
-pub fn structure(comptime T: type, s_type: vk.VkStructureType) T {
+pub fn structure(comptime T: type, s_type: vulkan_c.VkStructureType) T {
     var s = std.mem.zeroes(T);
     s.sType = s_type;
     return s;
@@ -410,8 +410,8 @@ test {
 }
 
 test "host memory is imported everywhere but MoltenVK and amdgpu" {
-    try std.testing.expect(externalMemoryHostUsable(vk.VK_DRIVER_ID_NVIDIA_PROPRIETARY));
-    try std.testing.expect(!externalMemoryHostUsable(vk.VK_DRIVER_ID_MOLTENVK));
+    try std.testing.expect(externalMemoryHostUsable(vulkan_c.VK_DRIVER_ID_NVIDIA_PROPRIETARY));
+    try std.testing.expect(!externalMemoryHostUsable(vulkan_c.VK_DRIVER_ID_MOLTENVK));
     try std.testing.expect(hostBufferImportUsable(vendor_id.nvidia));
     try std.testing.expect(hostBufferImportUsable(vendor_id.intel));
     try std.testing.expect(!hostBufferImportUsable(vendor_id.amd));

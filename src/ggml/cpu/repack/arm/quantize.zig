@@ -28,7 +28,6 @@
 //! `32 / blck` iterations with `blck / 4` vectors per row, which is the
 //! C's two bodies expressed once.
 
-const std = @import("std");
 const ggml = @import("../../../module.zig");
 
 /// Ports `ggml_quantize_mat_q8_0_4x4` and `ggml_quantize_mat_q8_0_4x8`
@@ -84,15 +83,10 @@ fn quantizeMat(comptime blck: i64, x: [*]const f32, vy: *anyopaque, k: i64) void
     }
 }
 
-pub export fn ggml_quantize_mat_q8_0_4x4(x: [*]const f32, vy: *anyopaque, k: i64) callconv(.c) void {
+pub fn ggml_quantize_mat_q8_0_4x4(x: [*]const f32, vy: *anyopaque, k: i64) callconv(.c) void {
     quantizeMat(4, x, vy, k);
 }
 
-pub export fn ggml_quantize_mat_q8_0_4x8(x: [*]const f32, vy: *anyopaque, k: i64) callconv(.c) void {
+pub fn ggml_quantize_mat_q8_0_4x8(x: [*]const f32, vy: *anyopaque, k: i64) callconv(.c) void {
     quantizeMat(8, x, vy, k);
-}
-
-comptime {
-    _ = std;
-    _ = ggml.impl.c;
 }

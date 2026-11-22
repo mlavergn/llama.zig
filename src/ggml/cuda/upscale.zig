@@ -67,14 +67,14 @@ fn ratio(a: i64, b: i64) f32 {
 }
 
 /// Ports `ggml_cuda_op_upscale` (upscale.cu:257 @b1b770d90).
-pub fn opUpscale(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn opUpscale(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
     const src0_d: ?*const anyopaque = src0.data;
     const dst_d: ?*anyopaque = dst.data;
     const stream = ctx.stream();
 
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F32");
 
     const mode_flags: c_int = dst.op_params[0];
     const mode = mode_flags & 0xFF;
@@ -85,7 +85,7 @@ pub fn opUpscale(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) 
     const sf3 = ratio(dst.ne[3], src0.ne[3]);
 
     var pixel_offset: f32 = 0.5;
-    if ((mode_flags & ggml.impl.c.GGML_SCALE_FLAG_ALIGN_CORNERS) != 0) {
+    if ((mode_flags & ggml.impl.ggml_c.GGML_SCALE_FLAG_ALIGN_CORNERS) != 0) {
         sf0 = if (dst.ne[0] > 1 and src0.ne[0] > 1) ratio(dst.ne[0] - 1, src0.ne[0] - 1) else sf0;
         sf1 = if (dst.ne[1] > 1 and src0.ne[1] > 1) ratio(dst.ne[1] - 1, src0.ne[1] - 1) else sf1;
         pixel_offset = 0.0;
@@ -94,12 +94,12 @@ pub fn opUpscale(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) 
     const nb = [4]c_int{ int(src0.nb[0]), int(src0.nb[1]), int(src0.nb[2]), int(src0.nb[3]) };
     const ne = [4]c_int{ int64(dst.ne[0]), int64(dst.ne[1]), int64(dst.ne[2]), int64(dst.ne[3]) };
 
-    if (mode == ggml.impl.c.GGML_SCALE_MODE_NEAREST) {
+    if (mode == ggml.impl.ggml_c.GGML_SCALE_MODE_NEAREST) {
         upscaleF32Cuda(src0_d, dst_d, nb[0], nb[1], nb[2], nb[3], ne[0], ne[1], ne[2], ne[3], sf0, sf1, sf2, sf3, stream);
-    } else if (mode == ggml.impl.c.GGML_SCALE_MODE_BILINEAR) {
-        const antialias = (mode_flags & ggml.impl.c.GGML_SCALE_FLAG_ANTIALIAS) != 0;
+    } else if (mode == ggml.impl.ggml_c.GGML_SCALE_MODE_BILINEAR) {
+        const antialias = (mode_flags & ggml.impl.ggml_c.GGML_SCALE_FLAG_ANTIALIAS) != 0;
         upscaleF32BilinearCuda(src0_d, dst_d, nb[0], nb[1], nb[2], nb[3], int64(src0.ne[0]), int64(src0.ne[1]), ne[0], ne[1], ne[2], ne[3], sf0, sf1, sf2, sf3, pixel_offset, antialias, stream);
-    } else if (mode == ggml.impl.c.GGML_SCALE_MODE_BICUBIC) {
+    } else if (mode == ggml.impl.ggml_c.GGML_SCALE_MODE_BICUBIC) {
         upscaleF32BicubicCuda(src0_d, dst_d, nb[0], nb[1], nb[2], nb[3], int64(src0.ne[0]), int64(src0.ne[1]), ne[0], ne[1], ne[2], ne[3], sf0, sf1, sf2, sf3, pixel_offset, stream);
     }
 }

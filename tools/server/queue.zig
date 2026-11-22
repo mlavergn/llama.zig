@@ -34,18 +34,17 @@
 //! over `libcxx.I32Map`.
 
 const std = @import("std");
+const llama = @import("llama");
 const stdlib = @import("stdlib");
-const tools = @import("tools_common");
-
-const c = @import("tools_h");
+const tools_common = @import("tools_common");
 
 fn timeMs() i64 {
-    return c.ggml_time_ms();
+    return llama.impl.llama_c.ggml_time_ms();
 }
 
 /// `GGML_ASSERT` with the C's message.
 fn ggmlAssert(ok: bool, comptime line: c_int, comptime cond: [*:0]const u8) void {
-    tools.ggml.ggmlAssert(ok, "server-queue.cpp", line, cond);
+    tools_common.ggml.ggmlAssert(ok, "server-queue.cpp", line, cond);
 }
 
 /// `std::unordered_set<int>` as libc++ lays it out (see the file header).
@@ -170,7 +169,7 @@ pub fn Queue(comptime Task: type) type {
             if (task.type == .cancel) self.cleanupPendingTask(task.id_target);
             const task_id = task.id;
             const reset_timer = taskResetsIdleTimer(task.type);
-            tools.log.dbg("que  %12.*s: new task, id = %d, front = %d\n", .{ @as(c_int, 12), "post", task_id, @as(c_int, @intFromBool(front)) });
+            tools_common.log.dbg("que  %12.*s: new task, id = %d, front = %d\n", .{ @as(c_int, 12), "post", task_id, @as(c_int, @intFromBool(front)) });
             try self.push(&self.queue_tasks, task, front);
             if (reset_timer) self.time_last_task = timeMs();
             self.condition_tasks.signal();
@@ -191,7 +190,7 @@ pub fn Queue(comptime Task: type) type {
                 // if this is cancel task make sure to clean up pending tasks
                 if (task.type == .cancel) self.cleanupPendingTask(task.id_target);
                 reset_timer = reset_timer or taskResetsIdleTimer(task.type);
-                tools.log.dbg("que  %12.*s: new task, id = %d/%d, front = %d\n", .{ @as(c_int, 12), "post", task.id, @as(c_int, @intCast(tasks.len)), @as(c_int, @intFromBool(front)) });
+                tools_common.log.dbg("que  %12.*s: new task, id = %d/%d, front = %d\n", .{ @as(c_int, 12), "post", task.id, @as(c_int, @intCast(tasks.len)), @as(c_int, @intFromBool(front)) });
                 try self.push(&self.queue_tasks, task.*, front);
             }
             if (reset_timer) self.time_last_task = timeMs();
@@ -202,7 +201,7 @@ pub fn Queue(comptime Task: type) type {
         pub fn deferTask(self: *Self, task: Task) !void {
             self.mutex_tasks.lock();
             defer self.mutex_tasks.unlock();
-            tools.log.dbg("que  %12.*s: defer task, id = %d\n", .{ @as(c_int, 12), "defer", task.id });
+            tools_common.log.dbg("que  %12.*s: defer task, id = %d\n", .{ @as(c_int, 12), "defer", task.id });
             try self.queue_tasks_deferred.append(self.gpa, task);
             self.time_last_task = timeMs();
             self.condition_tasks.signal();
@@ -226,7 +225,7 @@ pub fn Queue(comptime Task: type) type {
                 var found = false;
                 for (self.queue_tasks_deferred.items, 0..) |t, i| {
                     if (t.id_slot == id_slot) {
-                        tools.log.dbg("que  %12.*s: pop deferred task (use slot %d), id_task = %d\n", .{ @as(c_int, 12), "pop_deferred_task", id_slot, t.id });
+                        tools_common.log.dbg("que  %12.*s: pop deferred task (use slot %d), id_task = %d\n", .{ @as(c_int, 12), "pop_deferred_task", id_slot, t.id });
                         try self.queue_tasks.insert(self.gpa, 0, t);
                         _ = self.queue_tasks_deferred.orderedRemove(i);
                         found = true;
@@ -235,7 +234,7 @@ pub fn Queue(comptime Task: type) type {
                 }
                 // if not tasks found using the slot, just pop the first deferred task (default behavior)
                 if (!found) {
-                    tools.log.dbg("que  %12.*s: pop deferred task, id_task = %d\n", .{ @as(c_int, 12), "pop_deferred_task", self.queue_tasks_deferred.items[0].id });
+                    tools_common.log.dbg("que  %12.*s: pop deferred task, id_task = %d\n", .{ @as(c_int, 12), "pop_deferred_task", self.queue_tasks_deferred.items[0].id });
                     try self.queue_tasks.insert(self.gpa, 0, self.queue_tasks_deferred.items[0]);
                     _ = self.queue_tasks_deferred.orderedRemove(0);
                 }
@@ -253,11 +252,11 @@ pub fn Queue(comptime Task: type) type {
             defer self.mutex_tasks.unlock();
             if (self.sleeping) {
                 if (!self.req_stop_sleeping) {
-                    tools.log.dbg("que  %12.*s: %s", .{ @as(c_int, 12), "wait_until_no_sleep", "requesting to stop sleeping\n" });
+                    tools_common.log.dbg("que  %12.*s: %s", .{ @as(c_int, 12), "wait_until_no_sleep", "requesting to stop sleeping\n" });
                     self.req_stop_sleeping = true;
                     self.condition_tasks.signal(); // only main thread is waiting on this
                 }
-                tools.log.dbg("que  %12.*s: %s", .{ @as(c_int, 12), "wait_until_no_sleep", "waiting until no sleep\n" });
+                tools_common.log.dbg("que  %12.*s: %s", .{ @as(c_int, 12), "wait_until_no_sleep", "waiting until no sleep\n" });
                 while (self.sleeping) self.condition_tasks.wait(&self.mutex_tasks);
             }
             self.n_inflight += 1;
@@ -316,7 +315,7 @@ pub fn Queue(comptime Task: type) type {
             while (true) {
                 self.mutex_tasks.lock();
                 if (!self.running) {
-                    tools.log.dbg("que  %12.*s: %s", .{ @as(c_int, 12), "process_new_tasks", "terminate\n" });
+                    tools_common.log.dbg("que  %12.*s: %s", .{ @as(c_int, 12), "process_new_tasks", "terminate\n" });
                     self.mutex_tasks.unlock();
                     return true;
                 }
@@ -327,11 +326,11 @@ pub fn Queue(comptime Task: type) type {
                 var task = self.queue_tasks.orderedRemove(0);
                 self.mutex_tasks.unlock();
 
-                tools.log.dbg("que  %12.*s: processing task, id = %d\n", .{ @as(c_int, 12), "process_new_tasks", task.id });
+                tools_common.log.dbg("que  %12.*s: processing task, id = %d\n", .{ @as(c_int, 12), "process_new_tasks", task.id });
                 if (!try self.callback_new_task.?(self.cb_ctx, &task, is_yielding)) {
                     // set it aside, do not put it back in the queue, else we offer it again in a loop
                     ggmlAssert(is_yielding, 160, "is_yielding && \"a task can only be declined while yielding\"");
-                    tools.log.dbg("que  %12.*s: task declined, id = %d\n", .{ @as(c_int, 12), "process_new_tasks", task.id });
+                    tools_common.log.dbg("que  %12.*s: task declined, id = %d\n", .{ @as(c_int, 12), "process_new_tasks", task.id });
                     self.mutex_tasks.lock();
                     defer self.mutex_tasks.unlock();
                     try self.queue_tasks_unhandled.append(self.gpa, task);
@@ -400,7 +399,7 @@ pub fn Queue(comptime Task: type) type {
         pub fn yieldToQueue(self: *Self, work_ctx: anytype, comptime work: fn (@TypeOf(work_ctx)) anyerror!void) anyerror!void {
             ggmlAssert(self.worker.thread != null, 228, "worker.thread.joinable() && \"yield_to_queue() requires start_loop() to be running\"");
 
-            tools.log.dbg("que  %12.*s: %s", .{ @as(c_int, 12), "yield_to_queue", "yielding to queue\n" });
+            tools_common.log.dbg("que  %12.*s: %s", .{ @as(c_int, 12), "yield_to_queue", "yielding to queue\n" });
 
             {
                 self.mutex_tasks.lock();
@@ -443,7 +442,7 @@ pub fn Queue(comptime Task: type) type {
                 }
             }
 
-            tools.log.dbg("que  %12.*s: %s", .{ @as(c_int, 12), "yield_to_queue", "done yielding to queue\n" });
+            tools_common.log.dbg("que  %12.*s: %s", .{ @as(c_int, 12), "yield_to_queue", "done yielding to queue\n" });
 
             // note: rethrow only after the declined tasks are back in the queue, so they are not lost
             if (exception) |e| return e;
@@ -466,11 +465,11 @@ pub fn Queue(comptime Task: type) type {
             const max_wait_time = std.time.ns_per_s;
 
             outer: while (true) {
-                tools.log.dbg("que  %12.*s: %s", .{ @as(c_int, 12), "start_loop", "processing new tasks\n" });
+                tools_common.log.dbg("que  %12.*s: %s", .{ @as(c_int, 12), "start_loop", "processing new tasks\n" });
                 if (try self.processNewTasks(false)) break; // terminate
 
                 // all tasks in the current loop is processed, slots data is now ready
-                tools.log.dbg("que  %12.*s: %s", .{ @as(c_int, 12), "start_loop", "update slots\n" });
+                tools_common.log.dbg("que  %12.*s: %s", .{ @as(c_int, 12), "start_loop", "update slots\n" });
 
                 // this will run the main inference process for all slots
                 const t_update_slots = timeMs();
@@ -484,7 +483,7 @@ pub fn Queue(comptime Task: type) type {
                     self.time_last_task = @min(now, self.time_last_task + (now - t_update_slots));
                 }
 
-                tools.log.dbg("que  %12.*s: %s", .{ @as(c_int, 12), "start_loop", "waiting for new tasks\n" });
+                tools_common.log.dbg("que  %12.*s: %s", .{ @as(c_int, 12), "start_loop", "waiting for new tasks\n" });
                 while (true) {
                     self.mutex_tasks.lock();
                     if (!self.running or self.queue_tasks.items.len != 0) {
@@ -496,7 +495,7 @@ pub fn Queue(comptime Task: type) type {
                     // the `should_sleep` lambda: caller must hold mutex_tasks
                     const should_sleep = !(idle_sleep_ms < 0 or self.n_inflight > 0) and (timeMs() - self.time_last_task) >= idle_sleep_ms;
                     if (should_sleep) {
-                        tools.log.inf("que  %12.*s: %s", .{ @as(c_int, 12), "start_loop", "entering sleeping state\n" });
+                        tools_common.log.inf("que  %12.*s: %s", .{ @as(c_int, 12), "start_loop", "entering sleeping state\n" });
                         self.sleeping = true;
                         // Call order cb0 -> cb1 -> cb{N}
                         for (self.callback_sleeping_state.items) |cb| cb.f(cb.ctx, true);
@@ -507,7 +506,7 @@ pub fn Queue(comptime Task: type) type {
                             self.mutex_tasks.unlock();
                             break :outer; // terminate
                         }
-                        tools.log.inf("que  %12.*s: %s", .{ @as(c_int, 12), "start_loop", "exiting sleeping state\n" });
+                        tools_common.log.inf("que  %12.*s: %s", .{ @as(c_int, 12), "start_loop", "exiting sleeping state\n" });
                         self.req_stop_sleeping = false;
                         // Call order cb{N} -> cb1 -> cb0
                         var i = self.callback_sleeping_state.items.len;
@@ -579,7 +578,7 @@ pub fn Response(comptime ResultPtr: type) type {
 
         /// Ports `server_response`'s `add_waiting_task_id` (server-queue.cpp:394 @b1b770d90).
         pub fn addWaitingTaskId(self: *Self, id_task: i32) !void {
-            tools.log.dbg("res  %12.*s: add task %d to waiting list. current waiting = %d (before add)\n", .{ @as(c_int, 12), "add_waiting_task_id", id_task, @as(c_int, @intCast(self.waiting_task_ids.count())) });
+            tools_common.log.dbg("res  %12.*s: add task %d to waiting list. current waiting = %d (before add)\n", .{ @as(c_int, 12), "add_waiting_task_id", id_task, @as(c_int, @intCast(self.waiting_task_ids.count())) });
             self.mutex_results.lock();
             defer self.mutex_results.unlock();
             try self.waiting_task_ids.insert(id_task);
@@ -591,14 +590,14 @@ pub fn Response(comptime ResultPtr: type) type {
             defer self.mutex_results.unlock();
             var it = id_tasks.map.iterator();
             while (it.next()) |e| {
-                tools.log.dbg("res  %12.*s: add task %d to waiting list. current waiting = %d (before add)\n", .{ @as(c_int, 12), "add_waiting_task_ids", e.key, @as(c_int, @intCast(self.waiting_task_ids.count())) });
+                tools_common.log.dbg("res  %12.*s: add task %d to waiting list. current waiting = %d (before add)\n", .{ @as(c_int, 12), "add_waiting_task_ids", e.key, @as(c_int, @intCast(self.waiting_task_ids.count())) });
                 try self.waiting_task_ids.insert(e.key);
             }
         }
 
         /// Ports `server_response`'s `remove_waiting_task_id` (server-queue.cpp:410 @b1b770d90).
         pub fn removeWaitingTaskId(self: *Self, id_task: i32) void {
-            tools.log.dbg("res  %12.*s: remove task %d from waiting list. current waiting = %d (before remove)\n", .{ @as(c_int, 12), "remove_waiting_task_id", id_task, @as(c_int, @intCast(self.waiting_task_ids.count())) });
+            tools_common.log.dbg("res  %12.*s: remove task %d from waiting list. current waiting = %d (before remove)\n", .{ @as(c_int, 12), "remove_waiting_task_id", id_task, @as(c_int, @intCast(self.waiting_task_ids.count())) });
             self.mutex_results.lock();
             defer self.mutex_results.unlock();
             self.eraseId(id_task);
@@ -621,7 +620,7 @@ pub fn Response(comptime ResultPtr: type) type {
             defer self.mutex_results.unlock();
             var it = id_tasks.map.iterator();
             while (it.next()) |e| {
-                tools.log.dbg("res  %12.*s: remove task %d from waiting list. current waiting = %d (before remove)\n", .{ @as(c_int, 12), "remove_waiting_task_ids", e.key, @as(c_int, @intCast(self.waiting_task_ids.count())) });
+                tools_common.log.dbg("res  %12.*s: remove task %d from waiting list. current waiting = %d (before remove)\n", .{ @as(c_int, 12), "remove_waiting_task_ids", e.key, @as(c_int, @intCast(self.waiting_task_ids.count())) });
                 self.eraseId(e.key);
             }
         }
@@ -656,8 +655,8 @@ pub fn Response(comptime ResultPtr: type) type {
                 defer self.mutex_results.unlock();
                 while (true) {
                     if (!self.running) {
-                        tools.log.dbg("res  %12.*s: %s : queue result stop\n", .{ @as(c_int, 12), "operator()", "recv" });
-                        stdlib.libc.abort(); // we cannot return here since the caller is HTTP code
+                        tools_common.log.dbg("res  %12.*s: %s : queue result stop\n", .{ @as(c_int, 12), "operator()", "recv" });
+                        std.c.abort(); // we cannot return here since the caller is HTTP code
                     }
                     if (self.queue_results.items.len != 0) break;
                     self.condition_results.wait(&self.mutex_results);
@@ -679,8 +678,8 @@ pub fn Response(comptime ResultPtr: type) type {
                 if (self.takeFirst(id_tasks)) |r| return r;
                 const ok = self.condition_results.waitUntil(&self.mutex_results, deadline);
                 if (!self.running) {
-                    tools.log.dbg("res  %12.*s: %s : queue result stop\n", .{ @as(c_int, 12), "recv_with_timeout", "recv_with_timeout" });
-                    stdlib.libc.abort(); // we cannot return here since the caller is HTTP code
+                    tools_common.log.dbg("res  %12.*s: %s : queue result stop\n", .{ @as(c_int, 12), "recv_with_timeout", "recv_with_timeout" });
+                    std.c.abort(); // we cannot return here since the caller is HTTP code
                 }
                 if (!ok) return null;
             }
@@ -689,11 +688,11 @@ pub fn Response(comptime ResultPtr: type) type {
         /// Ports `server_response`'s `send` (server-queue.cpp:486 @b1b770d90).
         /// Takes the result; drops it when nobody waits for its task.
         pub fn send(self: *Self, result: ResultPtr) !void {
-            tools.log.dbg("res  %12.*s: sending result for task id = %d\n", .{ @as(c_int, 12), "send", result.id });
+            tools_common.log.dbg("res  %12.*s: sending result for task id = %d\n", .{ @as(c_int, 12), "send", result.id });
             self.mutex_results.lock();
             defer self.mutex_results.unlock();
             if (self.waiting_task_ids.contains(result.id)) {
-                tools.log.dbg("res  %12.*s: task id = %d pushed to result queue\n", .{ @as(c_int, 12), "send", result.id });
+                tools_common.log.dbg("res  %12.*s: task id = %d pushed to result queue\n", .{ @as(c_int, 12), "send", result.id });
                 try self.queue_results.append(self.gpa, result);
                 self.condition_results.broadcast();
                 return;
@@ -708,7 +707,7 @@ pub fn Response(comptime ResultPtr: type) type {
             defer self.mutex_results.unlock();
             var it = self.waiting_task_ids.map.iterator();
             while (it.next()) |e| {
-                tools.log.dbg("res  %12.*s: task id = %d pushed to result queue\n", .{ @as(c_int, 12), "broadcast", e.key });
+                tools_common.log.dbg("res  %12.*s: task id = %d pushed to result queue\n", .{ @as(c_int, 12), "broadcast", e.key });
                 const res_copy = try result.clone(self.gpa);
                 res_copy.id = e.key; // override id with target task id
                 try self.queue_results.append(self.gpa, res_copy);
@@ -819,7 +818,7 @@ pub fn ResponseReader(comptime Task: type, comptime ResultPtr: type, comptime St
                 };
                 if (result.isError()) {
                     try self.stop(); // cancel remaining tasks
-                    tools.log.dbg("srv  %12.*s: %s", .{ @as(c_int, 12), "next", "received error result, stopping further processing\n" });
+                    tools_common.log.dbg("srv  %12.*s: %s", .{ @as(c_int, 12), "next", "received error result, stopping further processing\n" });
                     return result;
                 }
                 if (self.states.items.len != 0) {
@@ -880,7 +879,7 @@ pub fn ResponseReader(comptime Task: type, comptime ResultPtr: type, comptime St
                 try cancel_tasks.ensureTotalCapacity(self.gpa, self.id_tasks.count());
                 var it = self.id_tasks.map.iterator();
                 while (it.next()) |e| {
-                    tools.log.wrn("srv  %12.*s: cancel task, id_task = %d\n", .{ @as(c_int, 12), "stop", e.key });
+                    tools_common.log.wrn("srv  %12.*s: cancel task, id_task = %d\n", .{ @as(c_int, 12), "stop", e.key });
                     var task = Task.initType(.cancel);
                     task.id_target = e.key;
                     self.queue_results.removeWaitingTaskId(e.key);
@@ -889,7 +888,7 @@ pub fn ResponseReader(comptime Task: type, comptime ResultPtr: type, comptime St
                 // push to beginning of the queue, so it has highest priority
                 try self.queue_tasks.postMany(cancel_tasks.items, true);
             } else {
-                tools.log.dbg("srv  %12.*s: %s", .{ @as(c_int, 12), "stop", "all tasks already finished, no need to cancel\n" });
+                tools_common.log.dbg("srv  %12.*s: %s", .{ @as(c_int, 12), "stop", "all tasks already finished, no need to cancel\n" });
             }
         }
     };

@@ -19,13 +19,10 @@
 //! A `msg_t` owns its strings. The client is `httplib/client.zig`'s.
 
 const std = @import("std");
+const common_chat = @import("common_chat");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 const json = @import("json");
-
-const Allocator = std.mem.Allocator;
-
-const gpa = std.heap.c_allocator;
 
 /// Ports `server_http_proxy`'s `msg_t` (server-models.h:461 @b1b770d90): the
 /// headers (first message only) or a chunk of the body.
@@ -37,12 +34,12 @@ const Msg = struct {
 
     fn deinit(self: *Msg) void {
         for (self.headers.entries.items) |e| {
-            gpa.free(e.key);
-            gpa.free(e.value);
+            std.heap.c_allocator.free(e.key);
+            std.heap.c_allocator.free(e.value);
         }
-        self.headers.entries.deinit(gpa);
-        gpa.free(self.data);
-        gpa.free(self.content_type);
+        self.headers.entries.deinit(std.heap.c_allocator);
+        std.heap.c_allocator.free(self.data);
+        std.heap.c_allocator.free(self.content_type);
     }
 };
 
@@ -63,12 +60,12 @@ const Shared = struct {
         var m: Msg = undefined;
         while (self.pipe.read(&m, null, false)) m.deinit();
         self.pipe.deinit();
-        gpa.destroy(self);
+        std.heap.c_allocator.destroy(self);
     }
 };
 
 /// Ports `to_lower_copy` (server-models.cpp:2554 @b1b770d90).
-fn toLowerCopy(a: Allocator, value: []const u8) ![]u8 {
+fn toLowerCopy(a: std.mem.Allocator, value: []const u8) ![]u8 {
     return std.ascii.allocLowerString(a, value);
 }
 
@@ -89,7 +86,7 @@ fn shouldStripProxyHeader(header_name: []const u8) bool {
 
 /// Ports `generate_multipart_boundary` (server-models.cpp:2577 @b1b770d90): 16
 /// characters from a `std::mt19937` seeded by `std::random_device`.
-fn generateMultipartBoundary(a: Allocator) ![]u8 {
+fn generateMultipartBoundary(a: std.mem.Allocator) ![]u8 {
     const chars = "0123456789abcdefghijklmnopqrstuvwxyz";
     var gen = stdlib.libcxx.Mt19937.init(stdlib.libcxx.randomDevice());
     var out: std.ArrayList(u8) = .empty;
@@ -102,7 +99,7 @@ fn generateMultipartBoundary(a: Allocator) ![]u8 {
 
 /// `sanitize_field`: a form field's name, file name or type without CR,
 /// LF or double quotes.
-fn sanitizeField(a: Allocator, text: []const u8) ![]u8 {
+fn sanitizeField(a: std.mem.Allocator, text: []const u8) ![]u8 {
     var result: std.ArrayList(u8) = .empty;
     for (text) |c| {
         if (c != '\n' and c != '\r' and c != '"') try result.append(a, c);
@@ -113,7 +110,7 @@ fn sanitizeField(a: Allocator, text: []const u8) ![]u8 {
 /// Ports `build_multipart_body` (server-models.cpp:2588 @b1b770d90): the form
 /// fields (from the JSON the HTTP layer made of them) and the files,
 /// re-encoded as `multipart/form-data`.
-fn buildMultipartBody(a: Allocator, form_fields: *json.Value, files: *const mod.http.SortedMap(mod.http.UploadedFile), boundary: []const u8) ![]u8 {
+fn buildMultipartBody(a: std.mem.Allocator, form_fields: *json.Value, files: *const mod.http.SortedMap(mod.http.UploadedFile), boundary: []const u8) ![]u8 {
     var body: std.ArrayList(u8) = .empty;
     var it = form_fields.items();
     while (it.next()) |item| {
@@ -122,12 +119,12 @@ fn buildMultipartBody(a: Allocator, form_fields: *json.Value, files: *const mod.
         if (value.isArray()) {
             for (value.array.items) |*v| {
                 try body.print(a, "--{s}\r\nContent-Disposition: form-data; name=\"{s}\"\r\n\r\n", .{ boundary, key });
-                if (!v.isString()) return mod.common.throw(error.InvalidArgument, "expected string", .{});
+                if (!v.isString()) return common_chat.exception.throw(error.InvalidArgument, "expected string", .{});
                 try body.print(a, "{s}\r\n", .{v.string});
             }
         } else {
             try body.print(a, "--{s}\r\nContent-Disposition: form-data; name=\"{s}\"\r\n\r\n", .{ boundary, key });
-            if (!value.isString()) return mod.common.throw(error.InvalidArgument, "expected string", .{});
+            if (!value.isString()) return common_chat.exception.throw(error.InvalidArgument, "expected string", .{});
             try body.print(a, "{s}\r\n", .{value.string});
         }
     }
@@ -179,7 +176,7 @@ pub const Proxy = struct {
         if (self.cleanup) |c| c.func(c.ctx);
         self.shared.release();
         self.base.arena.deinit();
-        gpa.destroy(self);
+        std.heap.c_allocator.destroy(self);
     }
 
     fn stopFn(ctx: *anyopaque) bool {
@@ -193,7 +190,7 @@ pub const Proxy = struct {
 
     /// The `next` lambda: one message's data; false at EOF or a broken
     /// pipe.
-    fn next(ctx: ?*anyopaque, out: *std.ArrayList(u8), a: Allocator) anyerror!bool {
+    fn next(ctx: ?*anyopaque, out: *std.ArrayList(u8), a: std.mem.Allocator) anyerror!bool {
         const self: *Proxy = @ptrCast(@alignCast(ctx.?));
         var msg: Msg = .{};
         const has_next = self.shared.pipe.read(&msg, self.stopper(), true);
@@ -213,21 +210,21 @@ pub const Proxy = struct {
         /// router's own, `Content-Type` apart.
         fn makeHeaderMsg(response: *const mod.httplib.client.Response) !Msg {
             var msg: Msg = .{ .status = response.status };
-            var tmp = std.heap.ArenaAllocator.init(gpa);
+            var tmp = std.heap.ArenaAllocator.init(std.heap.c_allocator);
             defer tmp.deinit();
             for (response.headers.entries.items) |h| {
                 const lowered = try toLowerCopy(tmp.allocator(), h.key);
                 if (shouldStripProxyHeader(lowered)) continue;
                 if (std.mem.eql(u8, lowered, "content-type")) {
-                    gpa.free(msg.content_type);
-                    msg.content_type = try gpa.dupe(u8, h.value);
+                    std.heap.c_allocator.free(msg.content_type);
+                    msg.content_type = try std.heap.c_allocator.dupe(u8, h.value);
                     continue;
                 }
                 if (msg.headers.get(h.key)) |v| {
-                    gpa.free(v.*);
-                    v.* = try gpa.dupe(u8, h.value);
+                    std.heap.c_allocator.free(v.*);
+                    v.* = try std.heap.c_allocator.dupe(u8, h.value);
                 } else {
-                    try msg.headers.put(gpa, try gpa.dupe(u8, h.key), try gpa.dupe(u8, h.value));
+                    try msg.headers.put(std.heap.c_allocator, try std.heap.c_allocator.dupe(u8, h.key), try std.heap.c_allocator.dupe(u8, h.value));
                 }
             }
             return msg;
@@ -243,9 +240,9 @@ pub const Proxy = struct {
         fn contentReceiver(ctx: ?*anyopaque, data: []const u8) bool {
             const job: *Job = @ptrCast(@alignCast(ctx.?));
             // send data chunks; false if pipe is closed / broken (signal to stop receiving)
-            const d = gpa.dupe(u8, data) catch return false;
+            const d = std.heap.c_allocator.dupe(u8, data) catch return false;
             const ok = job.shared.pipe.write(.{ .data = d }) catch false;
-            if (!ok) gpa.free(d);
+            if (!ok) std.heap.c_allocator.free(d);
             return ok;
         }
 
@@ -261,7 +258,7 @@ pub const Proxy = struct {
                 job.shared.release();
                 job.cli.deinit();
                 job.arena.deinit();
-                gpa.destroy(job);
+                std.heap.c_allocator.destroy(job);
             }
             const result = job.cli.send(&job.req) catch mod.httplib.client.Result{ .res = null, .err = .unknown };
             if (result.err != .success) {
@@ -270,7 +267,7 @@ pub const Proxy = struct {
                 defer mod.common.freeZ(ez);
                 mod.common.srv(.err, "operator()", "http client error: %s\n", .{ez});
                 _ = job.shared.pipe.write(.{ .status = 500 }) catch false; // header
-                const body: []u8 = std.mem.concat(gpa, u8, &.{ "proxy error: ", err_str }) catch @constCast(&[_]u8{});
+                const body: []u8 = std.mem.concat(std.heap.c_allocator, u8, &.{ "proxy error: ", err_str }) catch @constCast(&[_]u8{});
                 _ = job.shared.pipe.write(.{ .data = body }) catch false; // body
             } else if (!job.shared.headers_sent.load(.seq_cst)) {
                 // httplib skips response_handler for bodyless statuses like 204, send headers here instead
@@ -304,11 +301,11 @@ pub const Proxy = struct {
         resolved_addr: []const u8, // if set: connect to this address only, do not follow redirects
     ) !*mod.http.Res {
         // shared between reader and writer threads
-        const job = try gpa.create(Job);
-        job.* = .{ .arena = std.heap.ArenaAllocator.init(gpa), .cli = undefined, .req = undefined, .shared = undefined };
+        const job = try std.heap.c_allocator.create(Job);
+        job.* = .{ .arena = std.heap.ArenaAllocator.init(std.heap.c_allocator), .cli = undefined, .req = undefined, .shared = undefined };
         const ja = job.arena.allocator();
-        const shared = try gpa.create(Shared);
-        shared.* = .{ .pipe = mod.common.Pipe(Msg).init(gpa) };
+        const shared = try std.heap.c_allocator.create(Shared);
+        shared.* = .{ .pipe = mod.common.Pipe(Msg).init(std.heap.c_allocator) };
         job.shared = shared;
         job.cli = mod.httplib.client.ClientImpl.init(ja, try ja.dupe(u8, host), port);
         shared.cli = &job.cli;
@@ -318,11 +315,11 @@ pub const Proxy = struct {
             shared.release();
             job.cli.deinit();
             job.arena.deinit();
-            gpa.destroy(job);
+            std.heap.c_allocator.destroy(job);
         };
 
         if (std.mem.eql(u8, scheme, "https")) {
-            return mod.common.throw(error.RuntimeError, "HTTPS requested but CPPHTTPLIB_OPENSSL_SUPPORT is not defined", .{});
+            return common_chat.exception.throw(error.RuntimeError, "HTTPS requested but CPPHTTPLIB_OPENSSL_SUPPORT is not defined", .{});
         }
 
         // setup Client
@@ -335,9 +332,9 @@ pub const Proxy = struct {
         job.cli.setWriteTimeout(timeout_read, 0); // reversed for cli (client) vs srv (server)
         job.cli.setReadTimeout(timeout_write, 0);
 
-        const self = try gpa.create(Proxy);
-        errdefer if (!started) gpa.destroy(self);
-        self.* = .{ .base = .{ .arena = std.heap.ArenaAllocator.init(gpa), .vtable = &vtable }, .shared = shared, .should_stop = should_stop };
+        const self = try std.heap.c_allocator.create(Proxy);
+        errdefer if (!started) std.heap.c_allocator.destroy(self);
+        self.* = .{ .base = .{ .arena = std.heap.ArenaAllocator.init(std.heap.c_allocator), .vtable = &vtable }, .shared = shared, .should_stop = should_stop };
         errdefer if (!started) self.base.arena.deinit();
         self.base.status = 500; // to be overwritten upon response
 
@@ -356,7 +353,7 @@ pub const Proxy = struct {
                 effective_body = try buildMultipartBody(ja, &form_fields, files, boundary);
                 override_content_type = try std.mem.concat(ja, u8, &.{ "multipart/form-data; boundary=", boundary });
             } else {
-                return mod.common.throw(error.RuntimeError, "failed to parse multipart form fields JSON", .{});
+                return common_chat.exception.throw(error.RuntimeError, "failed to parse multipart form fields JSON", .{});
             }
         }
 

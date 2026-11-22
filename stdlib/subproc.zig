@@ -40,8 +40,6 @@ const std = @import("std");
 const mod = @import("module.zig");
 const builtin = @import("builtin");
 
-const fd_t = std.posix.fd_t;
-const pid_t = std.posix.pid_t;
 const EXIT_FAILURE: c_int = 1;
 
 /// The `Io` that spawns children: `init_single_threaded` (`Threaded.init`
@@ -67,11 +65,11 @@ fn spawner() std.Io {
     return spawner_state.io();
 }
 
-fn closeFd(fd: fd_t) void {
+fn closeFd(fd: std.posix.fd_t) void {
     _ = std.posix.system.close(fd);
 }
 
-fn pipeFile(fd: fd_t) std.Io.File {
+fn pipeFile(fd: std.posix.fd_t) std.Io.File {
     return .{ .handle = fd, .flags = .{ .nonblocking = false } };
 }
 
@@ -81,7 +79,7 @@ fn pipeFile(fd: fd_t) std.Io.File {
 ///
 /// Parameters:
 /// - `fd`: a pipe end, `std.Io.File.handle`.
-pub fn setNonBlocking(fd: fd_t) void {
+pub fn setNonBlocking(fd: std.posix.fd_t) void {
     const fl = std.posix.system.fcntl(fd, std.posix.F.GETFL, @as(c_int, 0));
     if (std.posix.errno(fl) != .SUCCESS) return;
     const nonblock: u32 = @bitCast(std.posix.O{ .NONBLOCK = true });
@@ -110,7 +108,7 @@ const Process = struct {
     stdin_file: ?std.Io.File = null,
     stdout_file: ?std.Io.File = null,
     stderr_file: ?std.Io.File = null, // stdout_file's when combined
-    child: pid_t = 0,
+    child: std.posix.pid_t = 0,
     return_status: c_int = 0,
     alive: c_int = 0,
     no_wait: c_int = 0,
@@ -132,7 +130,7 @@ fn spawnError(err: anyerror) c_int {
 /// Ports `subprocess_fds_above_std` (subprocess.h:732 @b1b770d90): moves a
 /// pipe end off 0, 1 or 2, keeping it close-on-exec, so the child's
 /// `dup2` onto its standard streams never meets it there.
-fn fdsAboveStd(fds: *[2]fd_t) error{Pipe}!void {
+fn fdsAboveStd(fds: *[2]std.posix.fd_t) error{Pipe}!void {
     for (0..2) |index| {
         if (fds[index] > 2) continue;
         const moved = std.posix.system.fcntl(fds[index], std.posix.F.DUPFD_CLOEXEC, @as(c_int, 3));
@@ -149,7 +147,7 @@ fn fdsAboveStd(fds: *[2]fd_t) error{Pipe}!void {
 
 /// Ports `subprocess_pipe_cloexec` (subprocess.h:774 @b1b770d90): a pipe
 /// whose ends later children do not inherit.
-fn pipeCloexec() error{Pipe}![2]fd_t {
+fn pipeCloexec() error{Pipe}![2]std.posix.fd_t {
     var fds = std.Io.Threaded.pipe2(.{ .CLOEXEC = true }) catch return error.Pipe;
     try fdsAboveStd(&fds);
     return fds;
@@ -165,9 +163,9 @@ fn pipeCloexec() error{Pipe}![2]fd_t {
 ///
 /// Return: 0, or a `subprocess_error_e`.
 fn createEx(argv: []const []const u8, options: c_int, environment: ?*const std.process.Environ.Map, process_cwd: ?[]const u8, out: *Process) c_int {
-    var stdinfd: [2]fd_t = .{ -1, -1 };
-    var stdoutfd: [2]fd_t = .{ -1, -1 };
-    var stderrfd: [2]fd_t = .{ -1, -1 };
+    var stdinfd: [2]std.posix.fd_t = .{ -1, -1 };
+    var stdoutfd: [2]std.posix.fd_t = .{ -1, -1 };
+    var stderrfd: [2]std.posix.fd_t = .{ -1, -1 };
     var result: c_int = 0;
 
     const async_no_wait = option_enable_async_no_wait == (options & option_enable_async_no_wait);
@@ -242,7 +240,7 @@ fn createEx(argv: []const []const u8, options: c_int, environment: ?*const std.p
     }
 
     // cleanup:
-    for ([_]fd_t{ stdinfd[0], stdinfd[1], stdoutfd[0], stdoutfd[1], stderrfd[0], stderrfd[1] }) |fd| {
+    for ([_]std.posix.fd_t{ stdinfd[0], stdinfd[1], stdoutfd[0], stdoutfd[1], stderrfd[0], stderrfd[1] }) |fd| {
         if (fd != -1) closeFd(fd);
     }
     return result;
@@ -260,7 +258,7 @@ fn exitStatus(status: c_int) c_int {
 ///
 /// Return: the pid reaped, 0 when `WNOHANG` found it running, -1 on an
 /// error (EINTR included, as the C's single call).
-fn waitPid(pid: pid_t, status: *c_int, flags: u32) pid_t {
+fn waitPid(pid: std.posix.pid_t, status: *c_int, flags: u32) std.posix.pid_t {
     const rc = std.posix.system.waitpid(pid, status, @intCast(flags));
     if (std.posix.errno(rc) != .SUCCESS) return -1;
     return @intCast(rc);

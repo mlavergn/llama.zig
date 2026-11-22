@@ -104,9 +104,9 @@ fn ssmConvF32Cuda(
 /// - `bias_add_node`: the fused `ADD` whose other operand is the bias, or
 ///   null; never without `silu_dst`.
 /// - `silu_dst`: the fused `SILU`, which the result is written to, or null.
-pub fn opSsmConv(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor, bias_add_node: ?*ggml.impl.c.ggml_tensor, silu_dst: ?*ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]); // conv_x
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]); // conv1d.weight
+pub fn opSsmConv(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor, bias_add_node: ?*ggml.impl.ggml_c.ggml_tensor, silu_dst: ?*ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]); // conv_x
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]); // conv1d.weight
     const fuse_bias = bias_add_node != null;
     const fuse_silu = silu_dst != null;
 
@@ -114,13 +114,13 @@ pub fn opSsmConv(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor, 
     ggml.impl.assert(!fuse_bias or fuse_silu, "!fuse_bias || fuse_silu");
 
     // The bias (when fused) is the non-conv operand of the ADD node.
-    const bias: ?*const ggml.impl.c.ggml_tensor = if (bias_add_node) |b|
-        (if (b.src[0] == @as([*c]ggml.impl.c.ggml_tensor, dst)) ggml.impl.one(ggml.impl.c.ggml_tensor, b.src[1]) else ggml.impl.one(ggml.impl.c.ggml_tensor, b.src[0]))
+    const bias: ?*const ggml.impl.ggml_c.ggml_tensor = if (bias_add_node) |b|
+        (if (b.src[0] == @as([*c]ggml.impl.ggml_c.ggml_tensor, dst)) ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, b.src[1]) else ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, b.src[0]))
     else
         null;
 
     // When fusing, write to silu_dst (the node downstream references).
-    const out: *const ggml.impl.c.ggml_tensor = if (silu_dst) |s| s else dst;
+    const out: *const ggml.impl.ggml_c.ggml_tensor = if (silu_dst) |s| s else dst;
 
     const nc = src1.ne[0]; // d_conv
     const nr = src0.ne[1]; // d_inner
@@ -138,12 +138,12 @@ pub fn opSsmConv(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor, 
     const dst_d: ?*anyopaque = out.data;
     const stream = ctx.stream();
 
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    ggml.impl.assert(out.type == ggml.impl.c.GGML_TYPE_F32, "out->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(out.type == ggml.impl.ggml_c.GGML_TYPE_F32, "out->type == GGML_TYPE_F32");
     if (fuse_bias) {
-        ggml.impl.assert(bias.?.type == ggml.impl.c.GGML_TYPE_F32, "bias->type == GGML_TYPE_F32");
-        ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(bias.?), "ggml_is_contiguous(bias)");
-        ggml.impl.assert(ggml.impl.c.ggml_nelements(bias.?) == nr, "ggml_nelements(bias) == nr");
+        ggml.impl.assert(bias.?.type == ggml.impl.ggml_c.GGML_TYPE_F32, "bias->type == GGML_TYPE_F32");
+        ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(bias.?), "ggml_is_contiguous(bias)");
+        ggml.impl.assert(ggml.impl.ggml_c.ggml_nelements(bias.?) == nr, "ggml_nelements(bias) == nr");
     }
 
     if (fuse_silu) {

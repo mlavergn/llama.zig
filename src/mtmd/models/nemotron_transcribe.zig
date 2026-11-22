@@ -14,6 +14,7 @@
 //! and the line it began at.
 
 const std = @import("std");
+const llama = @import("llama");
 const mtmd = @import("../module.zig");
 const stdlib = @import("stdlib");
 
@@ -84,21 +85,21 @@ fn buildSpkEncoder(g: *mtmd.graph.Graph, cur_in: mtmd.graph.T, pos: mtmd.graph.T
         var x = g.buildNorm(cur, layer.ln_1_w, layer.ln_1_b, .normal, eps, il);
 
         const qkv = g.buildMm(layer.qkv_w, x);
-        const es = mtmd.impl.c.ggml_element_size(qkv);
+        const es = llama.impl.llama_c.ggml_element_size(qkv);
         const de: usize = @intCast(d_head);
         const ee: usize = @intCast(n_embd);
-        var q = mtmd.impl.c.ggml_view_3d(ctx0, qkv, d_head, n_head, n_pos, de * es, mtmd.graph.nb(qkv, 1), 0);
-        var k = mtmd.impl.c.ggml_view_3d(ctx0, qkv, d_head, n_head, n_pos, de * es, mtmd.graph.nb(qkv, 1), ee * es);
-        const v = mtmd.impl.c.ggml_view_3d(ctx0, qkv, d_head, n_head, n_pos, de * es, mtmd.graph.nb(qkv, 1), 2 * ee * es);
-        q = mtmd.impl.c.ggml_rope_ext(ctx0, q, pos, null, @intCast(d_head), mtmd.impl.c.GGML_ROPE_TYPE_NEOX, 0, 10000.0, 1.0, 0.0, 1.0, 0.0, 0.0);
-        k = mtmd.impl.c.ggml_rope_ext(ctx0, k, pos, null, @intCast(d_head), mtmd.impl.c.GGML_ROPE_TYPE_NEOX, 0, 10000.0, 1.0, 0.0, 1.0, 0.0, 0.0);
+        var q = llama.impl.llama_c.ggml_view_3d(ctx0, qkv, d_head, n_head, n_pos, de * es, mtmd.graph.nb(qkv, 1), 0);
+        var k = llama.impl.llama_c.ggml_view_3d(ctx0, qkv, d_head, n_head, n_pos, de * es, mtmd.graph.nb(qkv, 1), ee * es);
+        const v = llama.impl.llama_c.ggml_view_3d(ctx0, qkv, d_head, n_head, n_pos, de * es, mtmd.graph.nb(qkv, 1), 2 * ee * es);
+        q = llama.impl.llama_c.ggml_rope_ext(ctx0, q, pos, null, @intCast(d_head), llama.impl.llama_c.GGML_ROPE_TYPE_NEOX, 0, 10000.0, 1.0, 0.0, 1.0, 0.0, 0.0);
+        k = llama.impl.llama_c.ggml_rope_ext(ctx0, k, pos, null, @intCast(d_head), llama.impl.llama_c.GGML_ROPE_TYPE_NEOX, 0, 10000.0, 1.0, 0.0, 1.0, 0.0, 0.0);
 
         x = g.buildAttn(layer.o_w, layer.o_b, q, k, v, null, 1.0 / stdlib.libm.sqrtfInt(d_head), il, null);
-        cur = mtmd.impl.c.ggml_add(ctx0, cur, x);
+        cur = llama.impl.llama_c.ggml_add(ctx0, cur, x);
 
         x = g.buildNorm(cur, layer.ln_2_w, layer.ln_2_b, .normal, eps, il);
         x = g.buildFfn(x, layer.ff_up_w, layer.ff_up_b, null, null, layer.ff_down_w, layer.ff_down_b, .gelu_erf, il);
-        cur = mtmd.impl.c.ggml_add(ctx0, cur, x);
+        cur = llama.impl.llama_c.ggml_add(ctx0, cur, x);
     }
 
     return g.buildNorm(cur, model.spk_post_ln_w, model.spk_post_ln_b, .normal, eps, -1);
@@ -106,7 +107,7 @@ fn buildSpkEncoder(g: *mtmd.graph.Graph, cur_in: mtmd.graph.T, pos: mtmd.graph.T
 
 /// The `stack_mel` lambda (nemotron-transcribe.cpp:76 @b1b770d90) of `build`.
 fn stackMel(g: *mtmd.graph.Graph, mel: mtmd.graph.T, sub: i32, n_mel: i32) mtmd.graph.T {
-    return g.buildStack(mtmd.impl.c.ggml_cont(g.ctx0, mtmd.impl.c.ggml_transpose(g.ctx0, mel)), sub, n_mel);
+    return g.buildStack(llama.impl.llama_c.ggml_cont(g.ctx0, llama.impl.llama_c.ggml_transpose(g.ctx0, mel)), sub, n_mel);
 }
 
 /// The `add_pos` lambda (nemotron-transcribe.cpp:93 @b1b770d90) of `build`:
@@ -118,14 +119,14 @@ const AsrPos = struct {
     fn addPos(ctx: ?*anyopaque, g: *mtmd.graph.Graph, cur: mtmd.graph.T, layer: *const mtmd.model.Layer) mtmd.graph.T {
         _ = layer;
         const self: *AsrPos = @ptrCast(@alignCast(ctx.?));
-        return mtmd.impl.c.ggml_rope_ext(g.ctx0, cur, self.asr_pos, null, self.rope_dims, mtmd.impl.c.GGML_ROPE_TYPE_NEOX, 0, 10000.0, 1.0, 0.0, 1.0, 0.0, 0.0);
+        return llama.impl.llama_c.ggml_rope_ext(g.ctx0, cur, self.asr_pos, null, self.rope_dims, llama.impl.llama_c.GGML_ROPE_TYPE_NEOX, 0, 10000.0, 1.0, 0.0, 1.0, 0.0, 0.0);
     }
 };
 
 /// Ports `build` (nemotron-transcribe.cpp:60 @b1b770d90), a member of
 /// `mtmd_graph_nemotron_transcribe`, with the state `mtmd_get_graph_builder`
 /// (mtmd-graph.cpp:749 @b1b770d90) passes it: null during warmup.
-pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*llama.impl.llama_c.ggml_cgraph {
     const state: ?*mtmd.clip.EncState = if (params) |p| p.enc_state else null;
     const ctx0 = g.ctx0;
     const model = g.model;
@@ -146,66 +147,66 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
 
     // [n_frames, n_mel] log-mel: raw for the speaker expert, normalized over the recording (encode_windows) for the ASR one
     const inp = g.buildInpRaw(1);
-    const inp_norm = mtmd.impl.c.ggml_new_tensor_2d(ctx0, mtmd.impl.c.GGML_TYPE_F32, n_mel_frames, n_mel);
-    _ = mtmd.impl.c.ggml_set_name(inp_norm, "inp_norm");
-    mtmd.impl.c.ggml_set_input(inp_norm);
+    const inp_norm = llama.impl.llama_c.ggml_new_tensor_2d(ctx0, llama.impl.llama_c.GGML_TYPE_F32, n_mel_frames, n_mel);
+    _ = llama.impl.llama_c.ggml_set_name(inp_norm, "inp_norm");
+    llama.impl.llama_c.ggml_set_input(inp_norm);
 
     // positions over [cache | FIFO | window]; the ASR expert takes the first n_pos
-    const pos = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, n_prev + n_pos);
-    _ = mtmd.impl.c.ggml_set_name(pos, "positions");
-    mtmd.impl.c.ggml_set_input(pos);
+    const pos = llama.impl.llama_c.ggml_new_tensor_1d(ctx0, llama.impl.llama_c.GGML_TYPE_I32, n_prev + n_pos);
+    _ = llama.impl.llama_c.ggml_set_name(pos, "positions");
+    llama.impl.llama_c.ggml_set_input(pos);
 
     var spk_prev: mtmd.graph.T = null;
     if (n_prev > 0) {
-        spk_prev = mtmd.impl.c.ggml_new_tensor_2d(ctx0, mtmd.impl.c.GGML_TYPE_F32, hparams.spk_n_embd, n_prev);
-        _ = mtmd.impl.c.ggml_set_name(spk_prev, "spk_prev");
-        mtmd.impl.c.ggml_set_input(spk_prev);
+        spk_prev = llama.impl.llama_c.ggml_new_tensor_2d(ctx0, llama.impl.llama_c.GGML_TYPE_F32, hparams.spk_n_embd, n_prev);
+        _ = llama.impl.llama_c.ggml_set_name(spk_prev, "spk_prev");
+        llama.impl.llama_c.ggml_set_input(spk_prev);
     }
 
-    const asr_pos = mtmd.impl.c.ggml_view_1d(ctx0, pos, n_pos, 0);
+    const asr_pos = llama.impl.llama_c.ggml_view_1d(ctx0, pos, n_pos, 0);
     var add_pos: AsrPos = .{ .asr_pos = asr_pos, .rope_dims = hparams.audio_rope_dims };
     const asr = g.buildVit(g.buildMm(model.inp_proj_w, stackMel(g, inp_norm, @intCast(sub), @intCast(n_mel))), n_pos, .normal, .gelu_erf, null, .{ .ctx = &add_pos, .f = AsrPos.addPos }, .{});
     g.cb(asr, "asr_out", -1);
 
     // speaker expert over [cache | FIFO | window]; the window's rows and predictions feed the next window's state
     const chunk = g.buildMm(model.spk_inp_proj_w, stackMel(g, inp, @intCast(sub), @intCast(n_mel)));
-    _ = mtmd.impl.c.ggml_set_name(chunk, "spk_chunk");
-    mtmd.impl.c.ggml_set_output(chunk);
-    var spk = if (spk_prev != null) mtmd.impl.c.ggml_concat(ctx0, spk_prev, chunk, 1) else chunk;
+    _ = llama.impl.llama_c.ggml_set_name(chunk, "spk_chunk");
+    llama.impl.llama_c.ggml_set_output(chunk);
+    var spk = if (spk_prev != null) llama.impl.llama_c.ggml_concat(ctx0, spk_prev, chunk, 1) else chunk;
     const n_spk_pos = n_prev + n_pos;
     spk = buildSpkEncoder(g, spk, pos);
     g.cb(spk, "spk_out", -1);
 
     // Sortformer head, 10 ms frames
-    var cur = mtmd.impl.c.ggml_add(ctx0, g.buildMm(model.spk_head_proj_w, spk), model.spk_head_proj_b);
+    var cur = llama.impl.llama_c.ggml_add(ctx0, g.buildMm(model.spk_head_proj_w, spk), model.spk_head_proj_b);
     const d_tf = mtmd.graph.ne(cur, 0);
-    cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, cur));
-    cur = mtmd.impl.c.ggml_conv_1d(ctx0, model.spk_head_up_w, cur, 1, 1, 1); // [n_spk_pos, sub*d_tf]
-    cur = mtmd.impl.c.ggml_add(ctx0, cur, mtmd.impl.c.ggml_reshape_2d(ctx0, model.spk_head_up_b, 1, sub * d_tf));
-    cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, cur));
-    cur = mtmd.impl.c.ggml_reshape_2d(ctx0, cur, d_tf, sub * n_spk_pos);
-    cur = mtmd.impl.c.ggml_add(ctx0, g.buildMm(model.spk_head_fc1_w, mtmd.impl.c.ggml_relu(ctx0, cur)), model.spk_head_fc1_b);
-    cur = mtmd.impl.c.ggml_add(ctx0, g.buildMm(model.spk_head_fc2_w, mtmd.impl.c.ggml_relu(ctx0, cur)), model.spk_head_fc2_b);
-    const probs = mtmd.impl.c.ggml_sigmoid(ctx0, cur); // [n_spk, sub*n_spk_pos]
+    cur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, cur));
+    cur = llama.impl.llama_c.ggml_conv_1d(ctx0, model.spk_head_up_w, cur, 1, 1, 1); // [n_spk_pos, sub*d_tf]
+    cur = llama.impl.llama_c.ggml_add(ctx0, cur, llama.impl.llama_c.ggml_reshape_2d(ctx0, model.spk_head_up_b, 1, sub * d_tf));
+    cur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, cur));
+    cur = llama.impl.llama_c.ggml_reshape_2d(ctx0, cur, d_tf, sub * n_spk_pos);
+    cur = llama.impl.llama_c.ggml_add(ctx0, g.buildMm(model.spk_head_fc1_w, llama.impl.llama_c.ggml_relu(ctx0, cur)), model.spk_head_fc1_b);
+    cur = llama.impl.llama_c.ggml_add(ctx0, g.buildMm(model.spk_head_fc2_w, llama.impl.llama_c.ggml_relu(ctx0, cur)), model.spk_head_fc2_b);
+    const probs = llama.impl.llama_c.ggml_sigmoid(ctx0, cur); // [n_spk, sub*n_spk_pos]
     g.cb(probs, "spk_probs", -1);
 
     // 80 ms predictions
-    var preds = mtmd.impl.c.ggml_pool_2d(ctx0, probs, mtmd.impl.c.GGML_OP_POOL_AVG, 1, @intCast(sub), 1, @intCast(sub), 0, 0); // [n_spk, n_spk_pos]
-    _ = mtmd.impl.c.ggml_set_name(preds, "spk_preds");
-    mtmd.impl.c.ggml_set_output(preds);
+    var preds = llama.impl.llama_c.ggml_pool_2d(ctx0, probs, llama.impl.llama_c.GGML_OP_POOL_AVG, 1, @intCast(sub), 1, @intCast(sub), 0, 0); // [n_spk, n_spk_pos]
+    _ = llama.impl.llama_c.ggml_set_name(preds, "spk_preds");
+    llama.impl.llama_c.ggml_set_output(preds);
 
     // fusion, on the window's rows
-    preds = mtmd.impl.c.ggml_view_2d(ctx0, preds, mtmd.graph.ne(preds, 0), n_pos, mtmd.graph.nb(preds, 1), @as(usize, @intCast(n_prev)) * mtmd.graph.nb(preds, 1));
-    var act = mtmd.impl.c.ggml_step(ctx0, mtmd.impl.c.ggml_scale_bias(ctx0, preds, 1.0, -spk_activity_thr));
+    preds = llama.impl.llama_c.ggml_view_2d(ctx0, preds, mtmd.graph.ne(preds, 0), n_pos, mtmd.graph.nb(preds, 1), @as(usize, @intCast(n_prev)) * mtmd.graph.nb(preds, 1));
+    var act = llama.impl.llama_c.ggml_step(ctx0, llama.impl.llama_c.ggml_scale_bias(ctx0, preds, 1.0, -spk_activity_thr));
     act = g.buildNorm(act, model.fusion_spk_norm_w, model.fusion_spk_norm_b, .normal, eps, -1);
     cur = g.buildNorm(asr, model.fusion_asr_norm_w, model.fusion_asr_norm_b, .normal, eps, -1);
-    cur = mtmd.impl.c.ggml_add(ctx0, cur, g.buildMm(model.fusion_spk_kernel, act));
+    cur = llama.impl.llama_c.ggml_add(ctx0, cur, g.buildMm(model.fusion_spk_kernel, act));
     g.cb(cur, "fused", -1);
 
-    cur = mtmd.impl.c.ggml_add(ctx0, g.buildMm(model.mm_fc_w, cur), model.mm_fc_b);
+    cur = llama.impl.llama_c.ggml_add(ctx0, g.buildMm(model.mm_fc_w, cur), model.mm_fc_b);
     g.cb(cur, "projected", -1);
 
-    mtmd.impl.c.ggml_build_forward_expand(g.gf, cur);
+    llama.impl.llama_c.ggml_build_forward_expand(g.gf, cur);
 
     return g.gf;
 }

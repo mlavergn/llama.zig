@@ -29,15 +29,15 @@ fn launch(experts: ?*const anyopaque, expert_scale: ?*const anyopaque, weights: 
 }
 
 /// Ports `ggml_cuda_op_moe_weighted_reduction` (moe-weighted-reduction.cu:41 @b1b770d90).
-pub fn opMoeWeightedReduction(ctx: *ggml.cuda.common.Context, experts: *const ggml.impl.c.ggml_tensor, expert_scale: ?*const ggml.impl.c.ggml_tensor, weights: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor) void {
-    ggml.impl.assert(experts.type == ggml.impl.c.GGML_TYPE_F32, "experts->type == GGML_TYPE_F32");
-    ggml.impl.assert(weights.type == ggml.impl.c.GGML_TYPE_F32, "weights->type == GGML_TYPE_F32");
-    ggml.impl.assert(expert_scale == null or expert_scale.?.type == ggml.impl.c.GGML_TYPE_F32, "expert_scale == nullptr || expert_scale->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(experts), "ggml_is_contiguous(experts)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(weights), "ggml_is_contiguous(weights)");
-    ggml.impl.assert(expert_scale == null or ggml.impl.c.ggml_is_contiguous(expert_scale.?), "expert_scale == nullptr || ggml_is_contiguous(expert_scale)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+pub fn opMoeWeightedReduction(ctx: *ggml.cuda.common.Context, experts: *const ggml.impl.ggml_c.ggml_tensor, expert_scale: ?*const ggml.impl.ggml_c.ggml_tensor, weights: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    ggml.impl.assert(experts.type == ggml.impl.ggml_c.GGML_TYPE_F32, "experts->type == GGML_TYPE_F32");
+    ggml.impl.assert(weights.type == ggml.impl.ggml_c.GGML_TYPE_F32, "weights->type == GGML_TYPE_F32");
+    ggml.impl.assert(expert_scale == null or expert_scale.?.type == ggml.impl.ggml_c.GGML_TYPE_F32, "expert_scale == nullptr || expert_scale->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(experts), "ggml_is_contiguous(experts)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(weights), "ggml_is_contiguous(weights)");
+    ggml.impl.assert(expert_scale == null or ggml.impl.ggml_c.ggml_is_contiguous(expert_scale.?), "expert_scale == nullptr || ggml_is_contiguous(expert_scale)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
 
     const n_embd: i64 = experts.ne[0];
     const n_expert_used: i64 = experts.ne[1];

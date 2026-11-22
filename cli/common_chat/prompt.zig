@@ -17,8 +17,6 @@
 
 const std = @import("std");
 
-const Allocator = std.mem.Allocator;
-
 /// Ports `common_chat_prompt_part` (chat.h:282 @b1b770d90).
 pub const PromptPart = struct {
     text: []const u8,
@@ -33,7 +31,7 @@ pub const Prompt = struct {
 
     /// Ports `common_chat_prompt` (chat.h:294 @b1b770d90), the constructor
     /// from text: a single part of template text, borrowed.
-    pub fn fromText(a: Allocator, text: []const u8) Allocator.Error!Prompt {
+    pub fn fromText(a: std.mem.Allocator, text: []const u8) std.mem.Allocator.Error!Prompt {
         var self: Prompt = .{};
         try self.parts.append(a, .{ .text = text, .is_input = false });
         return self;
@@ -42,7 +40,7 @@ pub const Prompt = struct {
     /// Ports `str` (chat.cpp:1705 @b1b770d90): the parts joined.
     ///
     /// Return: the one part's text when there is one, else owned by `a`.
-    pub fn str(self: *const Prompt, a: Allocator) Allocator.Error![]const u8 {
+    pub fn str(self: *const Prompt, a: std.mem.Allocator) std.mem.Allocator.Error![]const u8 {
         if (self.parts.items.len == 1) return self.parts.items[0].text;
         var len: usize = 0;
         for (self.parts.items) |part| len += part.text.len;
@@ -58,7 +56,7 @@ pub const Prompt = struct {
     /// Ports `append` (chat.cpp:1721 @b1b770d90): `text` joined onto the
     /// last part when it is of the same kind, else a new part. Empty text
     /// adds nothing.
-    pub fn append(self: *Prompt, a: Allocator, text: []const u8, is_input: bool) Allocator.Error!void {
+    pub fn append(self: *Prompt, a: std.mem.Allocator, text: []const u8, is_input: bool) std.mem.Allocator.Error!void {
         if (text.len == 0) return;
         if (self.parts.items.len != 0 and self.parts.items[self.parts.items.len - 1].is_input == is_input) {
             const last = &self.parts.items[self.parts.items.len - 1];
@@ -72,7 +70,7 @@ pub const Prompt = struct {
     /// of `from` within one template part, searching the parts from the
     /// end, replaced by `to`. User input parts are skipped, and an
     /// occurrence spanning two parts is not one.
-    pub fn replaceLast(self: *Prompt, a: Allocator, from: []const u8, to: []const u8) Allocator.Error!void {
+    pub fn replaceLast(self: *Prompt, a: std.mem.Allocator, from: []const u8, to: []const u8) std.mem.Allocator.Error!void {
         var i = self.parts.items.len;
         while (i > 0) {
             i -= 1;

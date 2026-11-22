@@ -161,9 +161,9 @@ fn checkKernel(
         switch (which) {
             .f32_ => ggml.cpu.vec.ggml_vec_dot_f32(@intCast(n), &s, 0, xf.ptr, 0, yf.ptr, 0, 1),
             .f16_ => {
-                const xh = try alloc.alloc(ggml.impl.c.ggml_fp16_t, n);
+                const xh = try alloc.alloc(ggml.impl.ggml_c.ggml_fp16_t, n);
                 defer alloc.free(xh);
-                const yh = try alloc.alloc(ggml.impl.c.ggml_fp16_t, n);
+                const yh = try alloc.alloc(ggml.impl.ggml_c.ggml_fp16_t, n);
                 defer alloc.free(yh);
                 for (0..n) |i| {
                     xh[i] = ggml.impl.fp32ToFp16(xf[i]);
@@ -172,9 +172,9 @@ fn checkKernel(
                 ggml.cpu.vec.ggml_vec_dot_f16(@intCast(n), &s, 0, xh.ptr, 0, yh.ptr, 0, 1);
             },
             .bf16_ => {
-                const xb = try alloc.alloc(ggml.impl.c.ggml_bf16_t, n);
+                const xb = try alloc.alloc(ggml.impl.ggml_c.ggml_bf16_t, n);
                 defer alloc.free(xb);
-                const yb = try alloc.alloc(ggml.impl.c.ggml_bf16_t, n);
+                const yb = try alloc.alloc(ggml.impl.ggml_c.ggml_bf16_t, n);
                 defer alloc.free(yb);
                 for (0..n) |i| {
                     xb[i] = .{ .bits = ggml.impl.fp32ToBf16(xf[i]) };

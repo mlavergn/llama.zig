@@ -131,8 +131,8 @@ fn checkDVec(comptime Block: type, comptime nr: usize, data: [*]const u8, nb: us
 ///
 /// Return: false, with a message on stderr, if the data is not a whole number
 /// of blocks or any scale is an infinity or a NaN.
-pub export fn ggml_validate_row_data(t: ggml.impl.c.enum_ggml_type, data: ?*const anyopaque, nbytes: usize) bool {
-    if (t < 0 or t >= ggml.impl.c.GGML_TYPE_COUNT) {
+pub fn ggml_validate_row_data(t: ggml.impl.ggml_c.enum_ggml_type, data: ?*const anyopaque, nbytes: usize) callconv(.c) bool {
+    if (t < 0 or t >= ggml.impl.ggml_c.GGML_TYPE_COUNT) {
         warn("%s: invalid type %d\n", .{ "ggml_validate_row_data", @as(c_int, @intCast(t)) });
         return false;
     }
@@ -149,7 +149,7 @@ pub export fn ggml_validate_row_data(t: ggml.impl.c.enum_ggml_type, data: ?*cons
     const bytes: [*]const u8 = @ptrCast(data.?);
 
     return switch (t) {
-        ggml.impl.c.GGML_TYPE_BF16 => blk: {
+        ggml.impl.ggml_c.GGML_TYPE_BF16 => blk: {
             // Counted rather than short-circuited, so the message can say how
             // many -- the C reports totals here and per-block elsewhere.
             var nans: usize = 0;
@@ -169,21 +169,21 @@ pub export fn ggml_validate_row_data(t: ggml.impl.c.enum_ggml_type, data: ?*cons
             }
             break :blk true;
         },
-        ggml.impl.c.GGML_TYPE_F16 => blk: {
+        ggml.impl.ggml_c.GGML_TYPE_F16 => blk: {
             const f: [*]const ggml.quants.blocks.Half = @ptrCast(@alignCast(bytes));
             for (0..nb) |i| {
                 if (!validateFp16(f[i], i)) break :blk false;
             }
             break :blk true;
         },
-        ggml.impl.c.GGML_TYPE_F32 => blk: {
+        ggml.impl.ggml_c.GGML_TYPE_F32 => blk: {
             const f: [*]const f32 = @ptrCast(@alignCast(bytes));
             for (0..nb) |i| {
                 if (!validateFloat(f[i], i)) break :blk false;
             }
             break :blk true;
         },
-        ggml.impl.c.GGML_TYPE_F64 => blk: {
+        ggml.impl.ggml_c.GGML_TYPE_F64 => blk: {
             const f: [*]const f64 = @ptrCast(@alignCast(bytes));
             for (0..nb) |i| {
                 if (!validateFloat(@floatCast(f[i]), i)) break :blk false;
@@ -191,21 +191,21 @@ pub export fn ggml_validate_row_data(t: ggml.impl.c.enum_ggml_type, data: ?*cons
             break :blk true;
         },
 
-        ggml.impl.c.GGML_TYPE_Q1_0 => checkD(ggml.quants.blocks.Q1_0, bytes, nb),
-        ggml.impl.c.GGML_TYPE_Q2_0 => checkD(ggml.quants.blocks.Q2_0, bytes, nb),
-        ggml.impl.c.GGML_TYPE_Q4_0 => checkD(ggml.quants.blocks.Q4_0, bytes, nb),
-        ggml.impl.c.GGML_TYPE_Q4_1 => checkDM(ggml.quants.blocks.Q4_1, "m", bytes, nb),
-        ggml.impl.c.GGML_TYPE_Q5_0 => checkD(ggml.quants.blocks.Q5_0, bytes, nb),
-        ggml.impl.c.GGML_TYPE_Q5_1 => checkDM(ggml.quants.blocks.Q5_1, "m", bytes, nb),
-        ggml.impl.c.GGML_TYPE_Q8_0 => checkD(ggml.quants.blocks.Q8_0, bytes, nb),
-        ggml.impl.c.GGML_TYPE_MXFP4 => checkE(ggml.quants.blocks.MXFP4, bytes, nb),
+        ggml.impl.ggml_c.GGML_TYPE_Q1_0 => checkD(ggml.quants.blocks.Q1_0, bytes, nb),
+        ggml.impl.ggml_c.GGML_TYPE_Q2_0 => checkD(ggml.quants.blocks.Q2_0, bytes, nb),
+        ggml.impl.ggml_c.GGML_TYPE_Q4_0 => checkD(ggml.quants.blocks.Q4_0, bytes, nb),
+        ggml.impl.ggml_c.GGML_TYPE_Q4_1 => checkDM(ggml.quants.blocks.Q4_1, "m", bytes, nb),
+        ggml.impl.ggml_c.GGML_TYPE_Q5_0 => checkD(ggml.quants.blocks.Q5_0, bytes, nb),
+        ggml.impl.ggml_c.GGML_TYPE_Q5_1 => checkDM(ggml.quants.blocks.Q5_1, "m", bytes, nb),
+        ggml.impl.ggml_c.GGML_TYPE_Q8_0 => checkD(ggml.quants.blocks.Q8_0, bytes, nb),
+        ggml.impl.ggml_c.GGML_TYPE_MXFP4 => checkE(ggml.quants.blocks.MXFP4, bytes, nb),
         // NVFP4 is not checked: its scales are UE4M3 bytes, decoded without
         // a NaN (upstream's TODO is to reject the NaN encodings and the sign
         // bit). `checkDVec` exists for the C's macro of the same shape, which
         // no format currently reaches.
-        ggml.impl.c.GGML_TYPE_NVFP4 => true,
-        ggml.impl.c.GGML_TYPE_F8_E4M3 => blk: {
-            const q: [*]const ggml.impl.c.ggml_fp8_e4m3_t = @ptrCast(bytes);
+        ggml.impl.ggml_c.GGML_TYPE_NVFP4 => true,
+        ggml.impl.ggml_c.GGML_TYPE_F8_E4M3 => blk: {
+            const q: [*]const ggml.impl.ggml_c.ggml_fp8_e4m3_t = @ptrCast(bytes);
             for (0..nb) |i| {
                 if ((q[i].bits & 0x7F) == 0x7F) {
                     warn("%s: found NaN at index %zu in row of %zu F8_E4M3 values\n", .{ "ggml_validate_row_data", i, nb });
@@ -215,12 +215,12 @@ pub export fn ggml_validate_row_data(t: ggml.impl.c.enum_ggml_type, data: ?*cons
             break :blk true;
         },
 
-        ggml.impl.c.GGML_TYPE_Q2_K => checkDM(ggml.quants.blocks.Q2_K, "dmin", bytes, nb),
-        ggml.impl.c.GGML_TYPE_Q3_K => checkD(ggml.quants.blocks.Q3_K, bytes, nb),
-        ggml.impl.c.GGML_TYPE_Q4_K => checkDM(ggml.quants.blocks.Q4_K, "dmin", bytes, nb),
-        ggml.impl.c.GGML_TYPE_Q5_K => checkDM(ggml.quants.blocks.Q5_K, "dmin", bytes, nb),
-        ggml.impl.c.GGML_TYPE_Q6_K => checkD(ggml.quants.blocks.Q6_K, bytes, nb),
-        ggml.impl.c.GGML_TYPE_Q8_K => blk: {
+        ggml.impl.ggml_c.GGML_TYPE_Q2_K => checkDM(ggml.quants.blocks.Q2_K, "dmin", bytes, nb),
+        ggml.impl.ggml_c.GGML_TYPE_Q3_K => checkD(ggml.quants.blocks.Q3_K, bytes, nb),
+        ggml.impl.ggml_c.GGML_TYPE_Q4_K => checkDM(ggml.quants.blocks.Q4_K, "dmin", bytes, nb),
+        ggml.impl.ggml_c.GGML_TYPE_Q5_K => checkDM(ggml.quants.blocks.Q5_K, "dmin", bytes, nb),
+        ggml.impl.ggml_c.GGML_TYPE_Q6_K => checkD(ggml.quants.blocks.Q6_K, bytes, nb),
+        ggml.impl.ggml_c.GGML_TYPE_Q8_K => blk: {
             // The only block format whose scale is a full f32.
             const q: [*]const ggml.quants.blocks.Q8_K = @ptrCast(@alignCast(bytes));
             for (0..nb) |i| {
@@ -229,11 +229,11 @@ pub export fn ggml_validate_row_data(t: ggml.impl.c.enum_ggml_type, data: ?*cons
             break :blk true;
         },
 
-        ggml.impl.c.GGML_TYPE_TQ1_0 => checkD(ggml.quants.blocks.TQ1_0, bytes, nb),
-        ggml.impl.c.GGML_TYPE_TQ2_0 => checkD(ggml.quants.blocks.TQ2_0, bytes, nb),
+        ggml.impl.ggml_c.GGML_TYPE_TQ1_0 => checkD(ggml.quants.blocks.TQ1_0, bytes, nb),
+        ggml.impl.ggml_c.GGML_TYPE_TQ2_0 => checkD(ggml.quants.blocks.TQ2_0, bytes, nb),
 
-        ggml.impl.c.GGML_TYPE_IQ1_S => checkD(ggml.quants.blocks.IQ1_S, bytes, nb),
-        ggml.impl.c.GGML_TYPE_IQ1_M => blk: {
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_S => checkD(ggml.quants.blocks.IQ1_S, bytes, nb),
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_M => blk: {
             // No `d` field: the scale is scattered across the `scales` shorts
             // and has to be reassembled before it can be checked.
             const q: [*]const ggml.quants.blocks.IQ1_M = @ptrCast(@alignCast(bytes));
@@ -243,16 +243,16 @@ pub export fn ggml_validate_row_data(t: ggml.impl.c.enum_ggml_type, data: ?*cons
             }
             break :blk true;
         },
-        ggml.impl.c.GGML_TYPE_IQ2_XXS => checkD(ggml.quants.blocks.IQ2_XXS, bytes, nb),
-        ggml.impl.c.GGML_TYPE_IQ2_XS => checkD(ggml.quants.blocks.IQ2_XS, bytes, nb),
-        ggml.impl.c.GGML_TYPE_IQ2_S => checkD(ggml.quants.blocks.IQ2_S, bytes, nb),
-        ggml.impl.c.GGML_TYPE_IQ3_XXS => checkD(ggml.quants.blocks.IQ3_XXS, bytes, nb),
-        ggml.impl.c.GGML_TYPE_IQ3_S => checkD(ggml.quants.blocks.IQ3_S, bytes, nb),
-        ggml.impl.c.GGML_TYPE_IQ4_XS => checkD(ggml.quants.blocks.IQ4_XS, bytes, nb),
-        ggml.impl.c.GGML_TYPE_IQ4_NL => checkD(ggml.quants.blocks.IQ4_NL, bytes, nb),
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS => checkD(ggml.quants.blocks.IQ2_XXS, bytes, nb),
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XS => checkD(ggml.quants.blocks.IQ2_XS, bytes, nb),
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_S => checkD(ggml.quants.blocks.IQ2_S, bytes, nb),
+        ggml.impl.ggml_c.GGML_TYPE_IQ3_XXS => checkD(ggml.quants.blocks.IQ3_XXS, bytes, nb),
+        ggml.impl.ggml_c.GGML_TYPE_IQ3_S => checkD(ggml.quants.blocks.IQ3_S, bytes, nb),
+        ggml.impl.ggml_c.GGML_TYPE_IQ4_XS => checkD(ggml.quants.blocks.IQ4_XS, bytes, nb),
+        ggml.impl.ggml_c.GGML_TYPE_IQ4_NL => checkD(ggml.quants.blocks.IQ4_NL, bytes, nb),
 
         // Integer formats have no scale to be NaN.
-        ggml.impl.c.GGML_TYPE_I8, ggml.impl.c.GGML_TYPE_I16, ggml.impl.c.GGML_TYPE_I32, ggml.impl.c.GGML_TYPE_I64 => true,
+        ggml.impl.ggml_c.GGML_TYPE_I8, ggml.impl.ggml_c.GGML_TYPE_I16, ggml.impl.ggml_c.GGML_TYPE_I32, ggml.impl.ggml_c.GGML_TYPE_I64 => true,
 
         else => blk: {
             warn("%s: invalid type %d\n", .{ "ggml_validate_row_data", @as(c_int, @intCast(t)) });

@@ -21,8 +21,8 @@
 //! descriptor as `\r\n`; this writes them so.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const builtin = @import("builtin");
-const Mutex = @import("sync/mutex.zig").Mutex;
 
 /// How a stream holds what is written to it: `_IONBF`, `_IOLBF`, `_IOFBF`.
 pub const Buffering = enum { none, line, full };
@@ -42,7 +42,7 @@ pub const Stream = struct {
     buffering: Buffering = .none,
     /// Windows text mode: each `\n` is written as `\r\n`.
     text: bool = builtin.os.tag == .windows,
-    mutex: Mutex = .{},
+    mutex: mod.sync.mutex.Mutex = .{},
     len: usize = 0,
     buf: [4096]u8 = undefined,
 
@@ -154,7 +154,7 @@ pub fn flushAll() void {
 /// still flushes the C streams the libraries and the console write through.
 pub fn exit(code: c_int) noreturn {
     flushAll();
-    @import("libc.zig").exit(code);
+    std.c.exit(code);
 }
 
 /// One of the C library's three standard streams.
@@ -167,7 +167,7 @@ pub const CStream = enum(c_uint) { stdin = 0, stdout = 1, stderr = 2 };
 ///
 /// Return: the stream, the C library's for the process's life.
 pub fn cStream(which: CStream) *anyopaque {
-    if (comptime builtin.os.tag == .windows) return @import("libc.zig").__acrt_iob_func(@backingInt(which));
+    if (comptime builtin.os.tag == .windows) return mod.libc.__acrt_iob_func(@backingInt(which));
     return switch (which) {
         inline else => |w| @extern(*const *anyopaque, .{
             .name = if (builtin.os.tag.isDarwin()) "__" ++ @tagName(w) ++ "p" else @tagName(w),

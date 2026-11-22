@@ -9,10 +9,10 @@
 const ggml = @import("../module.zig");
 /// Ports `ggml_cuda_op_add_id` (add-id.cu:28 @b1b770d90), which launches with
 /// `<<<>>>`.
-pub fn opAddId(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const src2 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
+pub fn opAddId(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const src2 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]);
 
     // GGML_TENSOR_TERNARY_OP_LOCALS
     const ne00 = src0.ne[0];
@@ -28,10 +28,10 @@ pub fn opAddId(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) vo
     const ne0 = dst.ne[0];
     const ne1 = dst.ne[1];
 
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type  == GGML_TYPE_F32");
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
-    ggml.impl.assert(src2.type == ggml.impl.c.GGML_TYPE_I32, "src2->type == GGML_TYPE_I32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type  == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+    ggml.impl.assert(src2.type == ggml.impl.ggml_c.GGML_TYPE_I32, "src2->type == GGML_TYPE_I32");
 
     ggml.impl.assert(nb00 == @sizeOf(f32), "nb00 == sizeof(float)");
     ggml.impl.assert(nb10 == @sizeOf(f32), "nb10 == sizeof(float)");

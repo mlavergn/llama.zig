@@ -29,19 +29,18 @@
 //! random strings; `server-task-diff` masks both.
 
 const std = @import("std");
+const llama = @import("llama");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 const json = @import("json");
-const chat = @import("common_chat");
-const tools = @import("tools_common");
-
-const Allocator = std.mem.Allocator;
+const common_chat = @import("common_chat");
+const tools_common = @import("tools_common");
 
 /// Ports `llama_build_info` (build-info.cpp.in:27 @b1b770d90): `b<number>-<commit>`.
-pub const build_info = std.fmt.comptimePrint("b{d}-{s}", .{ tools.build_info.build_number, tools.build_info.commit });
+pub const build_info = std.fmt.comptimePrint("b{d}-{s}", .{ tools_common.build_info.build_number, tools_common.build_info.commit });
 
 /// `{"event": name, "data": data}`, the shape every streamed event has.
-fn event(a: Allocator, name: []const u8, data: json.Value) mod.common.Error!json.Value {
+fn event(a: std.mem.Allocator, name: []const u8, data: json.Value) common_chat.exception.Error!json.Value {
     var o = mod.common.Obj.init(a);
     errdefer o.deinit();
     try o.put("event", name);
@@ -53,7 +52,7 @@ fn event(a: Allocator, name: []const u8, data: json.Value) mod.common.Error!json
 /// one OpenAI chat delta.
 ///
 /// Return: owned by `a`.
-pub fn chatMsgDiffToJsonOaicompat(a: Allocator, diff: *const chat.MsgDiff) mod.common.Error!json.Value {
+pub fn chatMsgDiffToJsonOaicompat(a: std.mem.Allocator, diff: *const common_chat.MsgDiff) common_chat.exception.Error!json.Value {
     var delta = mod.common.Obj.init(a);
     errdefer delta.deinit();
     if (diff.reasoning_content_delta.len != 0) {
@@ -62,7 +61,7 @@ pub fn chatMsgDiffToJsonOaicompat(a: Allocator, diff: *const chat.MsgDiff) mod.c
     if (diff.content_delta.len != 0) {
         try delta.put("content", diff.content_delta);
     }
-    if (diff.tool_call_index != chat.msg.npos) {
+    if (diff.tool_call_index != common_chat.msg.npos) {
         var tool_call = mod.common.Obj.init(a);
         errdefer tool_call.deinit();
         try tool_call.put("index", diff.tool_call_index);
@@ -95,8 +94,8 @@ pub fn chatMsgDiffToJsonOaicompat(a: Allocator, diff: *const chat.MsgDiff) mod.c
 /// Ports `server_task_result_cmpl_final` (server-task.h:408 @b1b770d90).
 /// `content` is in the result's arena.
 pub const CmplFinal = struct {
-    content: chat.input.Input = .{ .gpa = std.heap.c_allocator },
-    tokens: []const mod.common.Token = &.{},
+    content: common_chat.input.Input = .{ .gpa = std.heap.c_allocator },
+    tokens: []const llama.impl.llama_c.llama_token = &.{},
 
     stream: bool = false,
     include_usage: bool = false,
@@ -123,9 +122,9 @@ pub const CmplFinal = struct {
     res_type: mod.task.ResponseType = .none,
     oaicompat_model: []const u8 = "",
     oaicompat_cmpl_id: []const u8 = "",
-    oaicompat_msg: chat.Msg = .{}, // to be populated by update()
+    oaicompat_msg: common_chat.Msg = .{}, // to be populated by update()
 
-    oaicompat_msg_diffs: std.ArrayList(chat.MsgDiff) = .empty, // to be populated by update()
+    oaicompat_msg_diffs: std.ArrayList(common_chat.MsgDiff) = .empty, // to be populated by update()
     is_updated: bool = false,
 
     // for OpenAI Responses API
@@ -137,8 +136,8 @@ pub const CmplFinal = struct {
 /// Ports `server_task_result_cmpl_partial` (server-task.h:483 @b1b770d90).
 /// `content` is in the result's arena.
 pub const CmplPartial = struct {
-    content: chat.input.Input = .{ .gpa = std.heap.c_allocator },
-    tokens: []const mod.common.Token = &.{},
+    content: common_chat.input.Input = .{ .gpa = std.heap.c_allocator },
+    tokens: []const llama.impl.llama_c.llama_token = &.{},
 
     n_decoded: i32 = 0,
     n_prompt_tokens: i32 = 0,
@@ -158,7 +157,7 @@ pub const CmplPartial = struct {
     res_type: mod.task.ResponseType = .none,
     oaicompat_model: []const u8 = "",
     oaicompat_cmpl_id: []const u8 = "",
-    oaicompat_msg_diffs: std.ArrayList(chat.MsgDiff) = .empty, // to be populated by update()
+    oaicompat_msg_diffs: std.ArrayList(common_chat.MsgDiff) = .empty, // to be populated by update()
     is_updated: bool = false,
 
     // Streaming state copied from task_result_state for this chunk
@@ -191,7 +190,7 @@ pub const Embd = struct {
 /// response being generated, or its end. `content` and `audio` are in the
 /// result's arena.
 pub const Realtime = struct {
-    content: chat.input.Input = .{ .gpa = std.heap.c_allocator }, // the text with its token, in the result's arena
+    content: common_chat.input.Input = .{ .gpa = std.heap.c_allocator }, // the text with its token, in the result's arena
     audio: []const f32 = &.{}, // PCM F32 at the sample rate of mtmd_gen_audio_get_info()
     response_done: bool = false,
     cancelled: bool = false,
@@ -281,9 +280,9 @@ pub const Control = struct {
 pub const GetLora = struct {
     /// Ports `server_task_result_get_lora`'s `lora` (server-task.h:674 @b1b770d90).
     pub const Lora = struct {
-        info: mod.common.LoraInfo,
+        info: tools_common.params.LoraInfo,
         alora_invocation_string: []const u8 = "",
-        alora_invocation_tokens: []const mod.common.Token = &.{},
+        alora_invocation_tokens: []const llama.impl.llama_c.llama_token = &.{},
     };
     loras: []const Lora = &.{},
 };
@@ -330,7 +329,7 @@ pub const Result = struct {
 
     /// `new server_task_result_X()`: a result of the given kind, its members
     /// at their defaults; set them through `kind` and allocate with `alloc`.
-    pub fn create(gpa: Allocator, comptime tag: std.meta.Tag(Kind)) mod.common.Error!*Result {
+    pub fn create(gpa: std.mem.Allocator, comptime tag: std.meta.Tag(Kind)) common_chat.exception.Error!*Result {
         const r = try gpa.create(Result);
         const T = @FieldType(Kind, @tagName(tag));
         const v: T = if (T == void) {} else .{};
@@ -339,12 +338,12 @@ pub const Result = struct {
     }
 
     /// The result's arena: everything set into it should be allocated here.
-    pub fn alloc(self: *Result) Allocator {
+    pub fn alloc(self: *Result) std.mem.Allocator {
         return self.arena.allocator();
     }
 
     /// The `std::unique_ptr`'s delete.
-    pub fn destroy(self: *Result, gpa: Allocator) void {
+    pub fn destroy(self: *Result, gpa: std.mem.Allocator) void {
         self.arena.deinit();
         gpa.destroy(self);
     }
@@ -369,7 +368,7 @@ pub const Result = struct {
     /// Ports `update` (server-task.h:374 @b1b770d90), a virtual member of
     /// `server_task_result`: a completion result parses the text it carries
     /// into the task's chat state.
-    pub fn update(self: *Result, state: *mod.task.TaskResultState) mod.common.Error!void {
+    pub fn update(self: *Result, state: *mod.task.TaskResultState) common_chat.exception.Error!void {
         switch (self.kind) {
             .cmpl_final => try self.updateFinal(state),
             .cmpl_partial => try self.updatePartial(state),
@@ -379,7 +378,7 @@ pub const Result = struct {
 
     /// Ports `clone` (server-task.h:379 @b1b770d90), a virtual member of
     /// `server_task_result`: only router results copy.
-    pub fn clone(self: *Result, gpa: Allocator) mod.common.Error!*Result {
+    pub fn clone(self: *Result, gpa: std.mem.Allocator) common_chat.exception.Error!*Result {
         switch (self.kind) {
             .router => |r| {
                 const out = try create(gpa, .router);
@@ -391,7 +390,7 @@ pub const Result = struct {
                 return out;
             },
             else => {
-                _ = tools.c.ggml_abort("server-task.h", 380, "not implemented for this task type");
+                _ = llama.impl.llama_c.ggml_abort("server-task.h", 380, "not implemented for this task type");
                 unreachable;
             },
         }
@@ -401,7 +400,7 @@ pub const Result = struct {
     /// `server_task_result`, through each subclass's.
     ///
     /// Return: owned by `a`.
-    pub fn toJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    pub fn toJson(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         return switch (self.kind) {
             .cmpl_final => self.finalToJson(a),
             .cmpl_partial => self.partialToJson(a),
@@ -426,7 +425,7 @@ pub const Result = struct {
     // server_task_result_cmpl_final
 
     /// Ports `server_task_result_cmpl_final`'s `update` (server-task.h:453 @b1b770d90).
-    fn updateFinal(self: *Result, state: *mod.task.TaskResultState) mod.common.Error!void {
+    fn updateFinal(self: *Result, state: *mod.task.TaskResultState) common_chat.exception.Error!void {
         const ar = self.alloc();
         const f = &self.kind.cmpl_final;
         f.is_updated = true;
@@ -439,9 +438,9 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_final`'s `to_json` (server-task.cpp:312 @b1b770d90).
-    fn finalToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn finalToJson(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const f = &self.kind.cmpl_final;
-        tools.ggml.ggmlAssert(f.is_updated, "server-task.cpp", 313, "is_updated && \"update() must be called before to_json()\"");
+        tools_common.ggml.ggmlAssert(f.is_updated, "server-task.cpp", 313, "is_updated && \"update() must be called before to_json()\"");
         return switch (f.res_type) {
             .none => self.finalNonOaicompat(a),
             .oai_cmpl => self.finalOaicompat(a),
@@ -450,14 +449,14 @@ pub const Result = struct {
             .oai_asr => self.finalOaicompatAsr(a),
             .anthropic => if (f.stream) self.finalAnthropicStream(a) else self.finalAnthropic(a),
             else => {
-                tools.ggml.ggmlAssert(false, "server-task.cpp", 328, "false && \"Invalid task_response_type\"");
+                tools_common.ggml.ggmlAssert(false, "server-task.cpp", 328, "false && \"Invalid task_response_type\"");
                 unreachable;
             },
         };
     }
 
     /// Ports `server_task_result_cmpl_final`'s `to_json_non_oaicompat` (server-task.cpp:332 @b1b770d90).
-    fn finalNonOaicompat(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn finalNonOaicompat(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const f = &self.kind.cmpl_final;
         var res = mod.common.Obj.init(a);
         errdefer res.deinit();
@@ -487,7 +486,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_final`'s `usage_json_oaicompat` (server-task.cpp:357 @b1b770d90).
-    fn finalUsageJsonOaicompat(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn finalUsageJsonOaicompat(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const f = &self.kind.cmpl_final;
         var o = mod.common.Obj.init(a);
         errdefer o.deinit();
@@ -502,7 +501,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat` (server-task.cpp:366 @b1b770d90).
-    fn finalOaicompat(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn finalOaicompat(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const f = &self.kind.cmpl_final;
         const t = stdlib.clock.timeSeconds();
         var logprobs: json.Value = .null; // OAI default to null
@@ -552,7 +551,7 @@ pub const Result = struct {
 
     /// The message a non-streamed answer reports: the parsed one, or the raw
     /// text as an assistant message when nothing was parsed.
-    fn finalMsg(f: *const CmplFinal) chat.Msg {
+    fn finalMsg(f: *const CmplFinal) common_chat.Msg {
         if (!f.oaicompat_msg.empty()) {
             return f.oaicompat_msg;
         }
@@ -560,7 +559,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat_chat` (server-task.cpp:406 @b1b770d90).
-    fn finalOaicompatChat(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn finalOaicompatChat(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const f = &self.kind.cmpl_final;
         var finish_reason: []const u8 = "length";
         const msg = finalMsg(f);
@@ -609,7 +608,7 @@ pub const Result = struct {
     }
 
     /// One `chat.completion.chunk`, as both stream formatters build it.
-    fn chunk(self: *Result, a: Allocator, t: i64, finish_reason: json.Value, delta: json.Value, cmpl_id: []const u8, model: []const u8) mod.common.Error!json.Value {
+    fn chunk(self: *Result, a: std.mem.Allocator, t: i64, finish_reason: json.Value, delta: json.Value, cmpl_id: []const u8, model: []const u8) common_chat.exception.Error!json.Value {
         var fr = finish_reason;
         var d = delta;
         errdefer fr.deinit(a);
@@ -637,7 +636,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat_chat_stream` (server-task.cpp:454 @b1b770d90).
-    fn finalOaicompatChatStream(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn finalOaicompatChatStream(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const f = &self.kind.cmpl_final;
         const t = stdlib.clock.timeSeconds();
         var finish_reason: []const u8 = "length";
@@ -681,7 +680,7 @@ pub const Result = struct {
     }
 
     /// `{"type": "output_text", "annotations": [], "logprobs": [], "text": text}`.
-    fn outputText(a: Allocator, text: []const u8) mod.common.Error!json.Value {
+    fn outputText(a: std.mem.Allocator, text: []const u8) common_chat.exception.Error!json.Value {
         var o = mod.common.Obj.init(a);
         errdefer o.deinit();
         try o.put("type", "output_text");
@@ -692,7 +691,7 @@ pub const Result = struct {
     }
 
     /// `{"text": text, "type": "reasoning_text"}` in an array.
-    fn reasoningContent(a: Allocator, text: []const u8) mod.common.Error!json.Value {
+    fn reasoningContent(a: std.mem.Allocator, text: []const u8) common_chat.exception.Error!json.Value {
         var o = mod.common.Obj.init(a);
         errdefer o.deinit();
         try o.put("text", text);
@@ -703,7 +702,7 @@ pub const Result = struct {
         return arr;
     }
 
-    fn functionCallItem(a: Allocator, tool_call: chat.ToolCall) mod.common.Error!json.Value {
+    fn functionCallItem(a: std.mem.Allocator, tool_call: common_chat.ToolCall) common_chat.exception.Error!json.Value {
         var o = mod.common.Obj.init(a);
         errdefer o.deinit();
         const fc_id = try std.mem.concat(a, u8, &.{ "fc_", tool_call.id });
@@ -719,7 +718,7 @@ pub const Result = struct {
         return o.done();
     }
 
-    fn respUsage(f: *const CmplFinal, a: Allocator) mod.common.Error!json.Value {
+    fn respUsage(f: *const CmplFinal, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         var u = mod.common.Obj.init(a);
         errdefer u.deinit();
         try u.put("input_tokens", f.n_prompt_tokens);
@@ -733,7 +732,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat_resp` (server-task.cpp:520 @b1b770d90).
-    fn finalOaicompatResp(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn finalOaicompatResp(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const f = &self.kind.cmpl_final;
         const msg = finalMsg(f);
 
@@ -795,7 +794,7 @@ pub const Result = struct {
         return res.done();
     }
 
-    fn outputItemDone(a: Allocator, item: *const json.Value, output_index: usize) mod.common.Error!json.Value {
+    fn outputItemDone(a: std.mem.Allocator, item: *const json.Value, output_index: usize) common_chat.exception.Error!json.Value {
         var d = mod.common.Obj.init(a);
         errdefer d.deinit();
         try d.put("type", "response.output_item.done");
@@ -805,7 +804,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat_resp_stream` (server-task.cpp:591 @b1b770d90).
-    fn finalOaicompatRespStream(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn finalOaicompatRespStream(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const f = &self.kind.cmpl_final;
         var server_sent_events = json.Value.emptyArray();
         errdefer server_sent_events.deinit(a);
@@ -909,7 +908,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat_asr` (server-task.cpp:719 @b1b770d90).
-    fn finalOaicompatAsr(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn finalOaicompatAsr(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const f = &self.kind.cmpl_final;
         var usage = mod.common.Obj.init(a);
         errdefer usage.deinit();
@@ -929,12 +928,12 @@ pub const Result = struct {
         return ev.done();
     }
 
-    fn stopSequence(a: Allocator, stopping_word: []const u8) mod.common.Error!json.Value {
+    fn stopSequence(a: std.mem.Allocator, stopping_word: []const u8) common_chat.exception.Error!json.Value {
         return if (stopping_word.len == 0) .null else json.Value.initString(a, stopping_word);
     }
 
     /// Ports `server_task_result_cmpl_final`'s `to_json_anthropic` (server-task.cpp:734 @b1b770d90).
-    fn finalAnthropic(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn finalAnthropic(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const f = &self.kind.cmpl_final;
         var stop_reason: []const u8 = "max_tokens";
         if (f.stop == .word or f.stop == .eos) {
@@ -1002,7 +1001,7 @@ pub const Result = struct {
     }
 
     /// `content_block_start`.
-    fn blockStart(a: Allocator, index: usize, block: json.Value) mod.common.Error!json.Value {
+    fn blockStart(a: std.mem.Allocator, index: usize, block: json.Value) common_chat.exception.Error!json.Value {
         var d = mod.common.Obj.init(a);
         errdefer d.deinit();
         try d.put("type", "content_block_start");
@@ -1012,7 +1011,7 @@ pub const Result = struct {
     }
 
     /// `content_block_delta`.
-    fn blockDelta(a: Allocator, index: usize, delta: json.Value) mod.common.Error!json.Value {
+    fn blockDelta(a: std.mem.Allocator, index: usize, delta: json.Value) common_chat.exception.Error!json.Value {
         var d = mod.common.Obj.init(a);
         errdefer d.deinit();
         try d.put("type", "content_block_delta");
@@ -1022,7 +1021,7 @@ pub const Result = struct {
     }
 
     /// `content_block_stop`.
-    fn blockStop(a: Allocator, index: usize) mod.common.Error!json.Value {
+    fn blockStop(a: std.mem.Allocator, index: usize) common_chat.exception.Error!json.Value {
         var d = mod.common.Obj.init(a);
         errdefer d.deinit();
         try d.put("type", "content_block_stop");
@@ -1030,7 +1029,7 @@ pub const Result = struct {
         return event(a, "content_block_stop", d.done());
     }
 
-    fn pair(a: Allocator, k1: []const u8, v1: []const u8, k2: []const u8, v2: []const u8) mod.common.Error!json.Value {
+    fn pair(a: std.mem.Allocator, k1: []const u8, v1: []const u8, k2: []const u8, v2: []const u8) common_chat.exception.Error!json.Value {
         var o = mod.common.Obj.init(a);
         errdefer o.deinit();
         try o.put(k1, v1);
@@ -1038,7 +1037,7 @@ pub const Result = struct {
         return o.done();
     }
 
-    fn toolUseBlock(a: Allocator, id: []const u8, name: []const u8) mod.common.Error!json.Value {
+    fn toolUseBlock(a: std.mem.Allocator, id: []const u8, name: []const u8) common_chat.exception.Error!json.Value {
         var o = mod.common.Obj.init(a);
         errdefer o.deinit();
         try o.put("type", "tool_use");
@@ -1048,7 +1047,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_final`'s `to_json_anthropic_stream` (server-task.cpp:800 @b1b770d90).
-    fn finalAnthropicStream(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn finalAnthropicStream(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const f = &self.kind.cmpl_final;
         var events = json.Value.emptyArray();
         errdefer events.deinit(a);
@@ -1093,7 +1092,7 @@ pub const Result = struct {
             }
 
             // handle tool calls
-            if (diff.tool_call_index != chat.msg.npos) {
+            if (diff.tool_call_index != common_chat.msg.npos) {
                 const content_block_index: usize = @as(usize, @intFromBool(has_thinking)) + @as(usize, @intFromBool(has_text)) + diff.tool_call_index;
 
                 if (!tool_calls_started.contains(diff.tool_call_index)) {
@@ -1158,7 +1157,7 @@ pub const Result = struct {
     /// Ports `server_task_result_cmpl_partial`'s `update` (server-task.cpp:991 @b1b770d90): the
     /// state as it was before this chunk is copied in, then advanced for
     /// the next one.
-    fn updatePartial(self: *Result, state: *mod.task.TaskResultState) mod.common.Error!void {
+    fn updatePartial(self: *Result, state: *mod.task.TaskResultState) common_chat.exception.Error!void {
         const ar = self.alloc();
         const p = &self.kind.cmpl_partial;
         p.is_updated = true;
@@ -1199,9 +1198,9 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_partial`'s `to_json` (server-task.cpp:1029 @b1b770d90).
-    fn partialToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn partialToJson(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const p = &self.kind.cmpl_partial;
-        tools.ggml.ggmlAssert(p.is_updated, "server-task.cpp", 1030, "is_updated && \"update() must be called before to_json()\"");
+        tools_common.ggml.ggmlAssert(p.is_updated, "server-task.cpp", 1030, "is_updated && \"update() must be called before to_json()\"");
         if (p.is_begin) {
             return .null; // simply signal to HTTP handler to send the headers and status code
         }
@@ -1213,14 +1212,14 @@ pub const Result = struct {
             .oai_asr => self.partialOaicompatAsr(a),
             .anthropic => self.partialAnthropic(a),
             else => {
-                tools.ggml.ggmlAssert(false, "server-task.cpp", 1048, "false && \"Invalid task_response_type\"");
+                tools_common.ggml.ggmlAssert(false, "server-task.cpp", 1048, "false && \"Invalid task_response_type\"");
                 unreachable;
             },
         };
     }
 
     /// Ports `server_task_result_cmpl_partial`'s `to_json_non_oaicompat` (server-task.cpp:1052 @b1b770d90).
-    fn partialNonOaicompat(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn partialNonOaicompat(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const p = &self.kind.cmpl_partial;
         // non-OAI-compat JSON
         var res = mod.common.Obj.init(a);
@@ -1246,7 +1245,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_partial`'s `to_json_oaicompat` (server-task.cpp:1076 @b1b770d90).
-    fn partialOaicompat(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn partialOaicompat(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const p = &self.kind.cmpl_partial;
         const t = stdlib.clock.timeSeconds();
         var logprobs: json.Value = .null; // OAI default to null
@@ -1292,7 +1291,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_partial`'s `to_json_oaicompat_chat` (server-task.cpp:1114 @b1b770d90).
-    fn partialOaicompatChat(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn partialOaicompatChat(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const p = &self.kind.cmpl_partial;
         const first = p.n_decoded == 1;
         const t = stdlib.clock.timeSeconds();
@@ -1314,7 +1313,7 @@ pub const Result = struct {
 
         if (!deltas.empty()) {
             const last_json = try deltas.back();
-            tools.ggml.ggmlAssert((try last_json.at("choices")).size() >= 1, "server-task.cpp", 1150, "last_json.at(\"choices\").size() >= 1");
+            tools_common.ggml.ggmlAssert((try last_json.at("choices")).size() >= 1, "server-task.cpp", 1150, "last_json.at(\"choices\").size() >= 1");
 
             if (p.prob_output.probs.len > 0) {
                 var o = mod.common.Obj.init(a);
@@ -1334,7 +1333,7 @@ pub const Result = struct {
         return deltas;
     }
 
-    fn inProgress(a: Allocator, name: []const u8, id: []const u8) mod.common.Error!json.Value {
+    fn inProgress(a: std.mem.Allocator, name: []const u8, id: []const u8) common_chat.exception.Error!json.Value {
         var r = mod.common.Obj.init(a);
         errdefer r.deinit();
         try r.put("id", id);
@@ -1349,12 +1348,12 @@ pub const Result = struct {
 
     /// The output index of a tool call in a stream: after the reasoning and
     /// the text. `size_t` arithmetic, as the C++'s.
-    fn toolOutputIndex(p: *const CmplPartial, diff: *const chat.MsgDiff) usize {
+    fn toolOutputIndex(p: *const CmplPartial, diff: *const common_chat.MsgDiff) usize {
         return @as(usize, if (p.anthropic_has_reasoning) 1 else 0) +% @as(usize, if (p.text_block_started) 1 else 0) +% diff.tool_call_index;
     }
 
     /// Ports `server_task_result_cmpl_partial`'s `to_json_oaicompat_resp` (server-task.cpp:1169 @b1b770d90).
-    fn partialOaicompatResp(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn partialOaicompatResp(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const p = &self.kind.cmpl_partial;
         var events = json.Value.emptyArray();
         errdefer events.deinit(a);
@@ -1484,13 +1483,13 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_partial`'s `to_json_oaicompat_asr` (server-task.cpp:1329 @b1b770d90).
-    fn partialOaicompatAsr(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn partialOaicompatAsr(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const p = &self.kind.cmpl_partial;
         return pair(a, "type", "transcript.text.delta", "delta", p.content.text.items);
     }
 
     /// Ports `server_task_result_cmpl_partial`'s `to_json_anthropic` (server-task.cpp:1337 @b1b770d90).
-    fn partialAnthropic(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn partialAnthropic(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const p = &self.kind.cmpl_partial;
         var events = json.Value.emptyArray();
         errdefer events.deinit(a);
@@ -1553,7 +1552,7 @@ pub const Result = struct {
             }
 
             // handle tool calls
-            if (diff.tool_call_index != chat.msg.npos) {
+            if (diff.tool_call_index != common_chat.msg.npos) {
                 // use anthropic_has_reasoning for thinking block count (persists across calls)
                 const content_block_index: usize = @as(usize, @intFromBool(p.anthropic_has_reasoning)) + @as(usize, @intFromBool(text_started)) + diff.tool_call_index;
 
@@ -1575,7 +1574,7 @@ pub const Result = struct {
 
     /// Ports `server_task_result_embd`'s `to_json` (server-task.cpp:1479 @b1b770d90)
     /// and its two formatters.
-    fn embdToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn embdToJson(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const e = &self.kind.embd;
         var o = mod.common.Obj.init(a);
         errdefer o.deinit();
@@ -1593,7 +1592,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_rerank`'s `to_json` (server-task.cpp:1503 @b1b770d90).
-    fn rerankToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn rerankToJson(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const r = &self.kind.rerank;
         var o = mod.common.Obj.init(a);
         errdefer o.deinit();
@@ -1604,7 +1603,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_realtime`'s `to_json` (server-task.cpp:1514 @b1b770d90).
-    fn realtimeToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn realtimeToJson(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const r = &self.kind.realtime;
         var o = mod.common.Obj.init(a);
         errdefer o.deinit();
@@ -1617,7 +1616,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_tts`'s `to_json` (server-task.cpp:1524 @b1b770d90).
-    fn ttsToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn ttsToJson(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const r = &self.kind.tts;
         var o = mod.common.Obj.init(a);
         errdefer o.deinit();
@@ -1628,7 +1627,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_decision`'s `to_json` (server-task.cpp:1535 @b1b770d90).
-    fn decisionToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn decisionToJson(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const r = &self.kind.decision;
         var o = mod.common.Obj.init(a);
         errdefer o.deinit();
@@ -1639,7 +1638,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_error`'s `to_json` (server-task.cpp:1546 @b1b770d90).
-    fn errorToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn errorToJson(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const e = &self.kind.err;
         var res = try mod.common.formatErrorResponse(a, e.err_msg, e.err_type);
         errdefer res.deinit(a);
@@ -1654,7 +1653,7 @@ pub const Result = struct {
     /// Prometheus text for `/metrics`.
     ///
     /// Return: owned by `a`.
-    pub fn toMetrics(self: *Result, a: Allocator) mod.common.Error![]u8 {
+    pub fn toMetrics(self: *Result, a: std.mem.Allocator) common_chat.exception.Error![]u8 {
         const m = &self.kind.metrics;
         const metrics = &m.metrics;
         const counters = [_]MetricItem{
@@ -1697,7 +1696,7 @@ pub const Result = struct {
         return prometheus.toOwnedSlice(a);
     }
 
-    fn addItems(a: Allocator, prometheus: *std.ArrayList(u8), ty: []const u8, items: []const MetricItem) mod.common.Error!void {
+    fn addItems(a: std.mem.Allocator, prometheus: *std.ArrayList(u8), ty: []const u8, items: []const MetricItem) common_chat.exception.Error!void {
         for (items) |item| {
             var buf: [64]u8 = undefined;
             const v = ostreamDouble(&buf, item.value);
@@ -1708,7 +1707,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_slot_save_load`'s `to_json` (server-task.cpp:1667 @b1b770d90).
-    fn slotSaveLoadToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn slotSaveLoadToJson(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const s = &self.kind.slot_save_load;
         var timings = mod.common.Obj.init(a);
         errdefer timings.deinit();
@@ -1724,7 +1723,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_slot_erase`'s `to_json` (server-task.cpp:1694 @b1b770d90).
-    fn slotEraseToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn slotEraseToJson(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         var o = mod.common.Obj.init(a);
         errdefer o.deinit();
         try o.put("id_slot", self.id_slot);
@@ -1733,7 +1732,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_control`'s `to_json` (server-task.h:664 @b1b770d90).
-    fn controlToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn controlToJson(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         const ctl = &self.kind.control;
         var out = mod.common.Obj.init(a);
         errdefer out.deinit();
@@ -1745,7 +1744,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_get_lora`'s `to_json` (server-task.cpp:1705 @b1b770d90).
-    fn getLoraToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
+    fn getLoraToJson(self: *Result, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         var result = json.Value.emptyArray();
         errdefer result.deinit(a);
         for (self.kind.get_lora.loras, 0..) |lora, i| {
@@ -1766,7 +1765,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_apply_lora`'s `to_json` (server-task.cpp:1729 @b1b770d90).
-    fn applyLoraToJson(a: Allocator) mod.common.Error!json.Value {
+    fn applyLoraToJson(a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         var o = mod.common.Obj.init(a);
         errdefer o.deinit();
         try o.put("success", true);

@@ -149,10 +149,10 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             b.cb(cur, "attn_out", il);
         }
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -177,10 +177,10 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         }, il);
         b.cb(cur_moe, "ffn_moe_out", il);
 
-        const ffn_out: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur_moe, cur_mlp);
+        const ffn_out: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur_moe, cur_mlp);
         b.cb(ffn_out, "ffn_out", il);
 
-        cur = llama.impl.c.ggml_add(ctx, ffn_out, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, ffn_out, ffn_inp);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

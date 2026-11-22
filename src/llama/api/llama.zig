@@ -27,30 +27,30 @@ fn oom() noreturn {
 
 /// Ports `llama_flash_attn_type_name` (src/llama.cpp:38 @b1b770d90); the table
 /// is `context.flashAttnTypeName`'s.
-pub fn llama_flash_attn_type_name(flash_attn_type: llama.impl.c.enum_llama_flash_attn_type) callconv(.c) [*c]const u8 {
+pub fn llama_flash_attn_type_name(flash_attn_type: llama.impl.llama_c.enum_llama_flash_attn_type) callconv(.c) [*c]const u8 {
     return llama.context.flashAttnTypeName(flash_attn_type).ptr;
 }
 
 /// Ports `llama_load_mode_name` (src/llama.cpp:50 @b1b770d90); the table is
 /// `model.loadModeName`'s.
-pub fn llama_load_mode_name(load_mode: llama.impl.c.enum_llama_load_mode) callconv(.c) [*c]const u8 {
+pub fn llama_load_mode_name(load_mode: llama.impl.llama_c.enum_llama_load_mode) callconv(.c) [*c]const u8 {
     return llama.model.loadModeName(load_mode).ptr;
 }
 
 /// Ports `llama_load_mode_from_str` (src/llama.cpp:68 @b1b770d90). An unknown
 /// name aborts, `GGML_ABORT`.
-pub fn llama_load_mode_from_str(str: [*c]const u8) callconv(.c) llama.impl.c.enum_llama_load_mode {
-    if (std.mem.orderZ(u8, str, "auto") == .eq) return llama.impl.c.LLAMA_LOAD_MODE_AUTO;
-    if (std.mem.orderZ(u8, str, "none") == .eq) return llama.impl.c.LLAMA_LOAD_MODE_NONE;
-    if (std.mem.orderZ(u8, str, "mmap") == .eq) return llama.impl.c.LLAMA_LOAD_MODE_MMAP;
-    if (std.mem.orderZ(u8, str, "mlock") == .eq) return llama.impl.c.LLAMA_LOAD_MODE_MLOCK;
-    if (std.mem.orderZ(u8, str, "mmap+mlock") == .eq) return llama.impl.c.LLAMA_LOAD_MODE_MMAP_MLOCK;
-    if (std.mem.orderZ(u8, str, "dio") == .eq) return llama.impl.c.LLAMA_LOAD_MODE_DIRECT_IO;
-    llama.impl.c.ggml_abort("llama.cpp", 75, "unknown load mode: %s", str);
+pub fn llama_load_mode_from_str(str: [*c]const u8) callconv(.c) llama.impl.llama_c.enum_llama_load_mode {
+    if (std.mem.orderZ(u8, str, "auto") == .eq) return llama.impl.llama_c.LLAMA_LOAD_MODE_AUTO;
+    if (std.mem.orderZ(u8, str, "none") == .eq) return llama.impl.llama_c.LLAMA_LOAD_MODE_NONE;
+    if (std.mem.orderZ(u8, str, "mmap") == .eq) return llama.impl.llama_c.LLAMA_LOAD_MODE_MMAP;
+    if (std.mem.orderZ(u8, str, "mlock") == .eq) return llama.impl.llama_c.LLAMA_LOAD_MODE_MLOCK;
+    if (std.mem.orderZ(u8, str, "mmap+mlock") == .eq) return llama.impl.llama_c.LLAMA_LOAD_MODE_MMAP_MLOCK;
+    if (std.mem.orderZ(u8, str, "dio") == .eq) return llama.impl.llama_c.LLAMA_LOAD_MODE_DIRECT_IO;
+    llama.impl.llama_c.ggml_abort("llama.cpp", 75, "unknown load mode: %s", str);
 }
 
 /// Ports `llama_sampler_chain_default_params` (src/llama.cpp:78 @b1b770d90).
-pub fn llama_sampler_chain_default_params() callconv(.c) llama.impl.c.struct_llama_sampler_chain_params {
+pub fn llama_sampler_chain_default_params() callconv(.c) llama.impl.llama_c.struct_llama_sampler_chain_params {
     return .{ .no_perf = true };
 }
 
@@ -94,39 +94,39 @@ pub fn llama_version() callconv(.c) [*c]const u8 {
 /// Ports `llama_backend_init` (src/llama.cpp:122 @b1b770d90): ggml's clock, its
 /// f16 tables through a throwaway context, and every backend.
 pub fn llama_backend_init() callconv(.c) void {
-    llama.impl.c.ggml_time_init();
+    llama.impl.llama_c.ggml_time_init();
 
     // needed to initialize f16 tables
     {
-        const params: llama.impl.c.struct_ggml_init_params = .{ .mem_size = 0, .mem_buffer = null, .no_alloc = false };
-        const ctx = llama.impl.c.ggml_init(params);
-        llama.impl.c.ggml_free(ctx);
+        const params: llama.impl.llama_c.struct_ggml_init_params = .{ .mem_size = 0, .mem_buffer = null, .no_alloc = false };
+        const ctx = llama.impl.llama_c.ggml_init(params);
+        llama.impl.llama_c.ggml_free(ctx);
     }
 
-    if (llama.impl.c.ggml_backend_reg_count() == 0) llama.impl.c.ggml_backend_load_all();
+    if (llama.impl.llama_c.ggml_backend_reg_count() == 0) llama.impl.llama_c.ggml_backend_load_all();
 }
 
 /// Ports `llama_numa_init` (src/llama.cpp:137 @b1b770d90): the CPU backend's
 /// own NUMA setup, found by name.
-pub fn llama_numa_init(numa: llama.impl.c.enum_ggml_numa_strategy) callconv(.c) void {
-    if (numa != llama.impl.c.GGML_NUMA_STRATEGY_DISABLED) {
-        const dev = llama.impl.c.ggml_backend_dev_by_type(llama.impl.c.GGML_BACKEND_DEVICE_TYPE_CPU);
+pub fn llama_numa_init(numa: llama.impl.llama_c.enum_ggml_numa_strategy) callconv(.c) void {
+    if (numa != llama.impl.llama_c.GGML_NUMA_STRATEGY_DISABLED) {
+        const dev = llama.impl.llama_c.ggml_backend_dev_by_type(llama.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_CPU);
         llama.impl.assert(dev != null, "llama.cpp", 140, "dev && \"CPU backend is not loaded\"");
-        const reg = llama.impl.c.ggml_backend_dev_backend_reg(dev);
-        const numa_init_fn: ?*const fn (llama.impl.c.enum_ggml_numa_strategy) callconv(.c) void =
-            @ptrCast(@alignCast(llama.impl.c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_cpu_numa_init")));
+        const reg = llama.impl.llama_c.ggml_backend_dev_backend_reg(dev);
+        const numa_init_fn: ?*const fn (llama.impl.llama_c.enum_ggml_numa_strategy) callconv(.c) void =
+            @ptrCast(@alignCast(llama.impl.llama_c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_cpu_numa_init")));
         if (numa_init_fn) |f| f(numa);
     }
 }
 
 /// Ports `llama_backend_free` (src/llama.cpp:149 @b1b770d90).
 pub fn llama_backend_free() callconv(.c) void {
-    llama.impl.c.ggml_quantize_free();
+    llama.impl.llama_c.ggml_quantize_free();
 }
 
 /// Ports `llama_time_us` (src/llama.cpp:153 @b1b770d90).
 pub fn llama_time_us() callconv(.c) i64 {
-    return llama.impl.c.ggml_time_us();
+    return llama.impl.llama_c.ggml_time_us();
 }
 
 /// The shared tail of the loading entry points, which the C++ spells as
@@ -144,14 +144,14 @@ pub fn llama_time_us() callconv(.c) i64 {
 ///
 /// Return: the model, or null.
 fn loadImpl(
-    metadata: ?*llama.impl.c.struct_gguf_context,
-    set_tensor_data: llama.impl.c.llama_model_set_tensor_data_t,
+    metadata: ?*llama.impl.llama_c.struct_gguf_context,
+    set_tensor_data: llama.impl.llama_c.llama_model_set_tensor_data_t,
     set_tensor_data_ud: ?*anyopaque,
     path: [:0]const u8,
     splits: *std.ArrayList([:0]const u8),
-    file: ?*llama.impl.c.FILE,
-    params: llama.impl.c.struct_llama_model_params,
-) ?*llama.impl.c.struct_llama_model {
+    file: ?*llama.impl.llama_c.FILE,
+    params: llama.impl.llama_c.struct_llama_model_params,
+) ?*llama.impl.llama_c.struct_llama_model {
     var n_sources_defined: c_int = 0;
     if (metadata != null) n_sources_defined += 1;
     if (path.len != 0) n_sources_defined += 1;
@@ -175,22 +175,22 @@ fn freeSplits(splits: *std.ArrayList([:0]const u8)) void {
 /// Ports `llama_model_init_from_user` (src/llama.cpp:446 @b1b770d90): a model
 /// from metadata, its tensors' data supplied by the caller, never mapped.
 pub fn llama_model_init_from_user(
-    metadata: ?*llama.impl.c.struct_gguf_context,
-    set_tensor_data: llama.impl.c.llama_model_set_tensor_data_t,
+    metadata: ?*llama.impl.llama_c.struct_gguf_context,
+    set_tensor_data: llama.impl.llama_c.llama_model_set_tensor_data_t,
     set_tensor_data_ud: ?*anyopaque,
-    params_: llama.impl.c.struct_llama_model_params,
-) callconv(.c) ?*llama.impl.c.struct_llama_model {
+    params_: llama.impl.llama_c.struct_llama_model_params,
+) callconv(.c) ?*llama.impl.llama_c.struct_llama_model {
     llama.impl.assert(metadata != null, "llama.cpp", 451, "metadata != nullptr");
     var params = params_;
     var splits: std.ArrayList([:0]const u8) = .empty;
     defer freeSplits(&splits);
-    params.load_mode = llama.impl.c.LLAMA_LOAD_MODE_NONE;
+    params.load_mode = llama.impl.llama_c.LLAMA_LOAD_MODE_NONE;
     params.use_extra_bufts = false;
     return loadImpl(metadata, set_tensor_data, set_tensor_data_ud, "", &splits, null, params);
 }
 
 /// Ports `llama_model_load_from_file` (src/llama.cpp:459 @b1b770d90).
-pub fn llama_model_load_from_file(path_model: [*c]const u8, params: llama.impl.c.struct_llama_model_params) callconv(.c) ?*llama.impl.c.struct_llama_model {
+pub fn llama_model_load_from_file(path_model: [*c]const u8, params: llama.impl.llama_c.struct_llama_model_params) callconv(.c) ?*llama.impl.llama_c.struct_llama_model {
     var splits: std.ArrayList([:0]const u8) = .empty;
     defer freeSplits(&splits);
     return loadImpl(null, null, null, std.mem.span(@as([*:0]const u8, @ptrCast(path_model))), &splits, null, params);
@@ -198,7 +198,7 @@ pub fn llama_model_load_from_file(path_model: [*c]const u8, params: llama.impl.c
 
 /// Ports `llama_model_load_from_splits` (src/llama.cpp:466 @b1b770d90): the
 /// first path is the model, and the list replaces the naming scheme.
-pub fn llama_model_load_from_splits(paths: [*c][*c]const u8, n_paths: usize, params: llama.impl.c.struct_llama_model_params) callconv(.c) ?*llama.impl.c.struct_llama_model {
+pub fn llama_model_load_from_splits(paths: [*c][*c]const u8, n_paths: usize, params: llama.impl.llama_c.struct_llama_model_params) callconv(.c) ?*llama.impl.llama_c.struct_llama_model {
     if (n_paths == 0) {
         llama.impl.logError("%s: list of splits is empty\n", .{"llama_model_load_from_splits"});
         return null;
@@ -215,7 +215,7 @@ pub fn llama_model_load_from_splits(paths: [*c][*c]const u8, n_paths: usize, par
 
 /// Ports `llama_model_load_from_file_ptr` (src/llama.cpp:482 @b1b770d90): a
 /// model read from an open file, which stays the caller's.
-pub fn llama_model_load_from_file_ptr(file: ?*llama.impl.c.FILE, params: llama.impl.c.struct_llama_model_params) callconv(.c) ?*llama.impl.c.struct_llama_model {
+pub fn llama_model_load_from_file_ptr(file: ?*llama.impl.llama_c.FILE, params: llama.impl.llama_c.struct_llama_model_params) callconv(.c) ?*llama.impl.llama_c.struct_llama_model {
     if (file == null) {
         llama.impl.logError("%s: file is NULL\n", .{"llama_model_load_from_file_ptr"});
         return null;
@@ -235,14 +235,14 @@ pub fn llama_model_load_from_file_ptr(file: ?*llama.impl.c.FILE, params: llama.i
 /// nothing matches, with `buf` untouched.
 pub fn llama_chat_apply_template(
     tmpl: [*c]const u8,
-    chat_msgs: [*c]const llama.impl.c.struct_llama_chat_message,
+    chat_msgs: [*c]const llama.impl.llama_c.struct_llama_chat_message,
     n_msg: usize,
     add_ass: bool,
     buf: [*c]u8,
     length: i32,
 ) callconv(.c) i32 {
     const curr_tmpl: []const u8 = if (tmpl == null) "chatml" else std.mem.span(@as([*:0]const u8, @ptrCast(tmpl)));
-    const msgs: []const llama.impl.c.llama_chat_message = if (n_msg == 0) &.{} else chat_msgs[0..n_msg];
+    const msgs: []const llama.impl.llama_c.llama_chat_message = if (n_msg == 0) &.{} else chat_msgs[0..n_msg];
 
     var formatted_chat: std.ArrayList(u8) = .empty;
     defer formatted_chat.deinit(std.heap.c_allocator);
@@ -268,7 +268,7 @@ pub fn llama_chat_apply_template(
 ///
 /// Return: the length written, or 0 when it did not fit.
 pub fn llama_split_path(split_path: [*c]u8, maxlen: usize, path_prefix: [*c]const u8, split_no: i32, split_count: i32) callconv(.c) i32 {
-    const written = llama.impl.c.snprintf(split_path, maxlen, "%s-%05d-of-%05d.gguf", path_prefix, split_no +% 1, split_count);
+    const written = llama.impl.llama_c.snprintf(split_path, maxlen, "%s-%05d-of-%05d.gguf", path_prefix, split_no +% 1, split_count);
     if (written < 0 or @as(usize, @intCast(written)) >= maxlen) return 0;
     return written;
 }
@@ -283,14 +283,14 @@ pub fn llama_split_prefix(split_prefix: [*c]u8, maxlen: usize, split_path: [*c]c
     const str_split_path = std.mem.span(@as([*:0]const u8, @ptrCast(split_path)));
 
     var postfix: [32]u8 = undefined;
-    _ = llama.impl.c.snprintf(&postfix, postfix.len, "-%05d-of-%05d.gguf", split_no +% 1, split_count);
+    _ = llama.impl.llama_c.snprintf(&postfix, postfix.len, "-%05d-of-%05d.gguf", split_no +% 1, split_count);
     const str_postfix = std.mem.sliceTo(&postfix, 0);
     if (str_split_path.len <= str_postfix.len) return 0;
 
     const size_prefix = str_split_path.len - str_postfix.len;
     if (std.mem.eql(u8, str_split_path[size_prefix..], str_postfix)) {
         const copy_len = @min(size_prefix + 1, maxlen);
-        _ = llama.impl.c.snprintf(split_prefix, copy_len, "%s", split_path);
+        _ = llama.impl.llama_c.snprintf(split_prefix, copy_len, "%s", split_path);
         return @truncate(@as(i64, @intCast(size_prefix)));
     }
     return 0;
@@ -307,12 +307,12 @@ pub fn llama_print_system_info() callconv(.c) [*c]const u8 {
     const s = &system_info;
     s.clearRetainingCapacity();
     var i: usize = 0;
-    while (i < llama.impl.c.ggml_backend_reg_count()) : (i += 1) {
-        const reg = llama.impl.c.ggml_backend_reg_get(i);
-        const get_features_fn: llama.impl.c.ggml_backend_get_features_t = @ptrCast(@alignCast(llama.impl.c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_get_features")));
+    while (i < llama.impl.llama_c.ggml_backend_reg_count()) : (i += 1) {
+        const reg = llama.impl.llama_c.ggml_backend_reg_get(i);
+        const get_features_fn: llama.impl.llama_c.ggml_backend_get_features_t = @ptrCast(@alignCast(llama.impl.llama_c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_get_features")));
         if (get_features_fn) |f| {
             var features = f(reg);
-            s.appendSlice(std.heap.c_allocator, std.mem.span(llama.impl.c.ggml_backend_reg_name(reg))) catch oom();
+            s.appendSlice(std.heap.c_allocator, std.mem.span(llama.impl.llama_c.ggml_backend_reg_name(reg))) catch oom();
             s.appendSlice(std.heap.c_allocator, " : ") catch oom();
             while (features.*.name != null) : (features += 1) {
                 s.appendSlice(std.heap.c_allocator, std.mem.span(features.*.name)) catch oom();
@@ -345,6 +345,6 @@ test "split names round-trip, and a short buffer gives 0" {
 }
 
 test "load mode names round-trip" {
-    try std.testing.expectEqual(@as(llama.impl.c.enum_llama_load_mode, llama.impl.c.LLAMA_LOAD_MODE_MMAP_MLOCK), llama_load_mode_from_str("mmap+mlock"));
-    try std.testing.expectEqualStrings("dio", std.mem.span(llama_load_mode_name(llama.impl.c.LLAMA_LOAD_MODE_DIRECT_IO)));
+    try std.testing.expectEqual(@as(llama.impl.llama_c.enum_llama_load_mode, llama.impl.llama_c.LLAMA_LOAD_MODE_MMAP_MLOCK), llama_load_mode_from_str("mmap+mlock"));
+    try std.testing.expectEqualStrings("dio", std.mem.span(llama_load_mode_name(llama.impl.llama_c.LLAMA_LOAD_MODE_DIRECT_IO)));
 }

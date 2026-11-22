@@ -9,6 +9,7 @@
 //! began at.
 
 const std = @import("std");
+const llama = @import("llama");
 const mtmd = @import("../module.zig");
 
 /// The `add_pos` lambda (mimo-audio.cpp:46 @b1b770d90) of `build`. `ctx` is
@@ -16,7 +17,7 @@ const mtmd = @import("../module.zig");
 fn addPos(ctx: ?*anyopaque, g: *mtmd.graph.Graph, x: mtmd.graph.T, layer: *const mtmd.model.Layer) mtmd.graph.T {
     _ = layer;
     const inp_pos: mtmd.graph.T = @ptrCast(@alignCast(ctx));
-    return mtmd.impl.c.ggml_rope_ext(g.ctx0, x, inp_pos, null, g.d_head, mtmd.impl.c.GGML_ROPE_TYPE_NEOX, 0, g.hparams.rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
+    return llama.impl.llama_c.ggml_rope_ext(g.ctx0, x, inp_pos, null, g.d_head, llama.impl.llama_c.GGML_ROPE_TYPE_NEOX, 0, g.hparams.rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
 }
 
 /// `skip_capture_il` (mimo-audio.cpp:37 @b1b770d90): encoder_skip_layer_id=3
@@ -34,12 +35,12 @@ fn captureSkip(ctx: ?*anyopaque, g: *mtmd.graph.Graph, layer_cur: mtmd.graph.T, 
 
 /// The `apply_local_rope` lambda (mimo-audio.cpp:151 @b1b770d90) of `build`.
 fn applyLocalRope(g: *const mtmd.graph.Graph, x: mtmd.graph.T, local_pos: mtmd.graph.T, local_rope_theta: f32) mtmd.graph.T {
-    return mtmd.impl.c.ggml_rope_ext(g.ctx0, x, local_pos, null, g.d_head, mtmd.impl.c.GGML_ROPE_TYPE_NEOX, 0, local_rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
+    return llama.impl.llama_c.ggml_rope_ext(g.ctx0, x, local_pos, null, g.d_head, llama.impl.llama_c.GGML_ROPE_TYPE_NEOX, 0, local_rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
 }
 
 /// Ports `build` (mimo-audio.cpp:3 @b1b770d90), a member of
 /// `mtmd_graph_mimo_audio`.
-pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*llama.impl.llama_c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
     const model = g.model;
@@ -51,23 +52,23 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
 
     const inp = g.buildInpRaw(1); // [n_frames, n_mel, 1]
 
-    var cur = mtmd.impl.c.ggml_conv_1d_ph(ctx0, model.conv1d_1_w, inp, 1, 1);
-    cur = mtmd.impl.c.ggml_add(ctx0, cur, model.conv1d_1_b);
-    cur = mtmd.impl.c.ggml_gelu_erf(ctx0, cur);
+    var cur = llama.impl.llama_c.ggml_conv_1d_ph(ctx0, model.conv1d_1_w, inp, 1, 1);
+    cur = llama.impl.llama_c.ggml_add(ctx0, cur, model.conv1d_1_b);
+    cur = llama.impl.llama_c.ggml_gelu_erf(ctx0, cur);
 
-    cur = mtmd.impl.c.ggml_conv_1d_ph(ctx0, model.conv1d_2_w, cur, 2, 1);
-    cur = mtmd.impl.c.ggml_add(ctx0, cur, model.conv1d_2_b);
-    cur = mtmd.impl.c.ggml_gelu_erf(ctx0, cur);
+    cur = llama.impl.llama_c.ggml_conv_1d_ph(ctx0, model.conv1d_2_w, cur, 2, 1);
+    cur = llama.impl.llama_c.ggml_add(ctx0, cur, model.conv1d_2_b);
+    cur = llama.impl.llama_c.ggml_gelu_erf(ctx0, cur);
 
-    var inpL = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, cur)); // [n_embd, n_pos]
+    var inpL = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, cur)); // [n_embd, n_pos]
     const n_pos = mtmd.graph.ne(inpL, 1);
     g.cb(inpL, "after_conv1d", -1);
 
     mtmd.impl.ggmlAssert(@as(c_int, @intCast(hparams.wa_pattern_mode.items.len)) == n_layer, "mimo-audio.cpp", 18, "(int) hparams.wa_pattern_mode.size() == n_layer");
 
-    const inp_pos = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, n_pos);
-    _ = mtmd.impl.c.ggml_set_name(inp_pos, "mimo_audio_positions");
-    mtmd.impl.c.ggml_set_input(inp_pos);
+    const inp_pos = llama.impl.llama_c.ggml_new_tensor_1d(ctx0, llama.impl.llama_c.GGML_TYPE_I32, n_pos);
+    _ = llama.impl.llama_c.ggml_set_name(inp_pos, "mimo_audio_positions");
+    llama.impl.llama_c.ggml_set_input(inp_pos);
 
     const full_mask = g.buildInpAttnMask(n_pos, n_pos, 0);
     const window_mask = g.buildInpAttnMask(n_pos, n_pos, 1);
@@ -90,20 +91,20 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     };
 
     inpL = g.buildVit(inpL, n_pos, .normal, hparams.ffn_op, null, .{ .ctx = inp_pos, .f = addPos }, opts);
-    inpL = mtmd.impl.c.ggml_reshape_2d(ctx0, inpL, n_embd, n_pos); // build_vit restores a (size-1) batch dim
+    inpL = llama.impl.llama_c.ggml_reshape_2d(ctx0, inpL, n_embd, n_pos); // build_vit restores a (size-1) batch dim
 
     mtmd.impl.ggmlAssert(skip_hidden != null, "mimo-audio.cpp", 54, "skip_hidden != nullptr");
-    inpL = mtmd.impl.c.ggml_add(ctx0, inpL, skip_hidden);
+    inpL = llama.impl.llama_c.ggml_add(ctx0, inpL, skip_hidden);
 
     inpL = g.buildNorm(inpL, model.post_ln_w, model.post_ln_b, .normal, g.eps, -1);
     g.cb(inpL, "after_transformer", -1);
 
     // downsample: strided conv (no bias) + gelu + layernorm
     {
-        var ds = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, inpL)); // [n_pos, n_embd]
-        ds = mtmd.impl.c.ggml_conv_1d(ctx0, model.downsample_conv_w, ds, 2, 0, 1);
-        ds = mtmd.impl.c.ggml_gelu_erf(ctx0, ds);
-        ds = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, ds)); // [n_embd, n_pos/2]
+        var ds = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, inpL)); // [n_pos, n_embd]
+        ds = llama.impl.llama_c.ggml_conv_1d(ctx0, model.downsample_conv_w, ds, 2, 0, 1);
+        ds = llama.impl.llama_c.ggml_gelu_erf(ctx0, ds);
+        ds = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, ds)); // [n_embd, n_pos/2]
         ds = g.buildNorm(ds, model.downsample_norm_w, model.downsample_norm_b, .normal, g.eps, -1);
         inpL = ds;
     }
@@ -123,20 +124,20 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
 
         for (hparams.rvq_codebook_size.items, 0..) |bins_q, q| {
             const bins: i64 = bins_q;
-            var codebook_q = mtmd.impl.c.ggml_view_2d(ctx0, model.rvq_codebook, dim, bins, mtmd.graph.nb(model.rvq_codebook, 1), q * mtmd.graph.nb(model.rvq_codebook, 2));
-            codebook_q = mtmd.impl.c.ggml_cont(ctx0, codebook_q);
+            var codebook_q = llama.impl.llama_c.ggml_view_2d(ctx0, model.rvq_codebook, dim, bins, mtmd.graph.nb(model.rvq_codebook, 1), q * mtmd.graph.nb(model.rvq_codebook, 2));
+            codebook_q = llama.impl.llama_c.ggml_cont(ctx0, codebook_q);
 
-            var codebook_norm = mtmd.impl.c.ggml_sum_rows(ctx0, mtmd.impl.c.ggml_sqr(ctx0, codebook_q)); // [1, bins]
-            codebook_norm = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, codebook_norm)); // [bins, 1]
+            var codebook_norm = llama.impl.llama_c.ggml_sum_rows(ctx0, llama.impl.llama_c.ggml_sqr(ctx0, codebook_q)); // [1, bins]
+            codebook_norm = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, codebook_norm)); // [bins, 1]
 
-            const dot = mtmd.impl.c.ggml_mul_mat(ctx0, codebook_q, residual); // [bins, n_pos_ds]
-            const scores = mtmd.impl.c.ggml_sub(ctx0, mtmd.impl.c.ggml_scale(ctx0, dot, 2.0), codebook_norm);
+            const dot = llama.impl.llama_c.ggml_mul_mat(ctx0, codebook_q, residual); // [bins, n_pos_ds]
+            const scores = llama.impl.llama_c.ggml_sub(ctx0, llama.impl.llama_c.ggml_scale(ctx0, dot, 2.0), codebook_norm);
 
-            const idx = mtmd.impl.c.ggml_argmax(ctx0, scores); // [n_pos_ds]
+            const idx = llama.impl.llama_c.ggml_argmax(ctx0, scores); // [n_pos_ds]
             codes.append(std.heap.c_allocator, idx) catch oom();
 
-            const quant = mtmd.impl.c.ggml_get_rows(ctx0, codebook_q, idx); // [dim, n_pos_ds]
-            residual = mtmd.impl.c.ggml_sub(ctx0, residual, quant);
+            const quant = llama.impl.llama_c.ggml_get_rows(ctx0, codebook_q, idx); // [dim, n_pos_ds]
+            residual = llama.impl.llama_c.ggml_sub(ctx0, residual, quant);
             g.cb(idx, "rvq_code", @intCast(q));
         }
     }
@@ -151,11 +152,11 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
         mtmd.impl.ggmlAssert(dim == mtmd.graph.ne(inpL, 0), "mimo-audio.cpp", 110, "dim == inpL->ne[0]");
 
         for (codes.items, 0..) |code_i, i| {
-            var table_i = mtmd.impl.c.ggml_view_2d(ctx0, model.mm_a_code_embd, dim, vocab, mtmd.graph.nb(model.mm_a_code_embd, 1), i * mtmd.graph.nb(model.mm_a_code_embd, 2));
-            table_i = mtmd.impl.c.ggml_cont(ctx0, table_i);
+            var table_i = llama.impl.llama_c.ggml_view_2d(ctx0, model.mm_a_code_embd, dim, vocab, mtmd.graph.nb(model.mm_a_code_embd, 1), i * mtmd.graph.nb(model.mm_a_code_embd, 2));
+            table_i = llama.impl.llama_c.ggml_cont(ctx0, table_i);
 
-            const embd_i = mtmd.impl.c.ggml_get_rows(ctx0, table_i, code_i); // [dim, n_pos_ds]
-            code_embd_sum = if (code_embd_sum != null) mtmd.impl.c.ggml_add(ctx0, code_embd_sum, embd_i) else embd_i;
+            const embd_i = llama.impl.llama_c.ggml_get_rows(ctx0, table_i, code_i); // [dim, n_pos_ds]
+            code_embd_sum = if (code_embd_sum != null) llama.impl.llama_c.ggml_add(ctx0, code_embd_sum, embd_i) else embd_i;
         }
         g.cb(code_embd_sum, "code_embd_sum", -1);
     }
@@ -178,12 +179,12 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
 
         var cur_local = code_embd_sum;
         if (n_padded != n_pos_ds) {
-            cur_local = mtmd.impl.c.ggml_pad(ctx0, cur_local, 0, @truncate(n_padded - n_pos_ds), 0, 0);
+            cur_local = llama.impl.llama_c.ggml_pad(ctx0, cur_local, 0, @truncate(n_padded - n_pos_ds), 0, 0);
         }
 
-        const local_pos = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, n_padded);
-        _ = mtmd.impl.c.ggml_set_name(local_pos, "mimo_audio_local_positions");
-        mtmd.impl.c.ggml_set_input(local_pos);
+        const local_pos = llama.impl.llama_c.ggml_new_tensor_1d(ctx0, llama.impl.llama_c.GGML_TYPE_I32, n_padded);
+        _ = llama.impl.llama_c.ggml_set_name(local_pos, "mimo_audio_local_positions");
+        llama.impl.llama_c.ggml_set_input(local_pos);
 
         const local_mask = g.buildInpAttnMask(n_padded, n_padded, 2);
 
@@ -197,30 +198,30 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
 
             var Qcur = g.buildMm(layer.q_w, attn_in);
             if (layer.q_b != null) {
-                Qcur = mtmd.impl.c.ggml_add(ctx0, Qcur, layer.q_b);
+                Qcur = llama.impl.llama_c.ggml_add(ctx0, Qcur, layer.q_b);
             }
             var Kcur = g.buildMm(layer.k_w, attn_in);
             if (layer.k_b != null) {
-                Kcur = mtmd.impl.c.ggml_add(ctx0, Kcur, layer.k_b);
+                Kcur = llama.impl.llama_c.ggml_add(ctx0, Kcur, layer.k_b);
             }
             var Vcur = g.buildMm(layer.v_w, attn_in);
             if (layer.v_b != null) {
-                Vcur = mtmd.impl.c.ggml_add(ctx0, Vcur, layer.v_b);
+                Vcur = llama.impl.llama_c.ggml_add(ctx0, Vcur, layer.v_b);
             }
 
-            Qcur = mtmd.impl.c.ggml_reshape_3d(ctx0, Qcur, d_head, n_head, n_padded);
-            Kcur = mtmd.impl.c.ggml_reshape_3d(ctx0, Kcur, d_head, n_head, n_padded);
-            Vcur = mtmd.impl.c.ggml_reshape_3d(ctx0, Vcur, d_head, n_head, n_padded);
+            Qcur = llama.impl.llama_c.ggml_reshape_3d(ctx0, Qcur, d_head, n_head, n_padded);
+            Kcur = llama.impl.llama_c.ggml_reshape_3d(ctx0, Kcur, d_head, n_head, n_padded);
+            Vcur = llama.impl.llama_c.ggml_reshape_3d(ctx0, Vcur, d_head, n_head, n_padded);
 
             Qcur = applyLocalRope(g, Qcur, local_pos, local_rope_theta);
             Kcur = applyLocalRope(g, Kcur, local_pos, local_rope_theta);
 
             const attn_out = g.buildAttn(layer.o_w, null, Qcur, Kcur, Vcur, local_mask, g.kq_scale, il, null);
-            cur_local = mtmd.impl.c.ggml_add(ctx0, cur_local, attn_out);
+            cur_local = llama.impl.llama_c.ggml_add(ctx0, cur_local, attn_out);
 
             const ffn_in = g.buildNorm(cur_local, layer.ln_2_w, null, .rms, g.eps, il);
             const ffn_out = g.buildFfn(ffn_in, layer.ff_up_w, null, layer.ff_gate_w, null, layer.ff_down_w, null, .silu, il);
-            cur_local = mtmd.impl.c.ggml_add(ctx0, cur_local, ffn_out);
+            cur_local = llama.impl.llama_c.ggml_add(ctx0, cur_local, ffn_out);
         }
 
         cur_local = g.buildNorm(cur_local, model.mm_a_local_norm_w, null, .rms, g.eps, -1);
@@ -228,14 +229,14 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
 
         // flatten each group of `group_size` frames into one (group_size*n_embd)-dim vector
         // (matching AudioProjection's flattened input)
-        const grouped = mtmd.impl.c.ggml_reshape_2d(ctx0, cur_local, @as(i64, n_embd) * group_size, n_groups);
+        const grouped = llama.impl.llama_c.ggml_reshape_2d(ctx0, cur_local, @as(i64, n_embd) * group_size, n_groups);
 
         // AudioProjection: Linear (no bias) -> GELU -> Linear (no bias)
         projected = g.buildFfn(grouped, model.mm_1_w, null, null, null, model.mm_2_w, null, .gelu_erf, -1);
         g.cb(projected, "after_projection", -1);
     }
 
-    mtmd.impl.c.ggml_build_forward_expand(g.gf, projected);
+    llama.impl.llama_c.ggml_build_forward_expand(g.gf, projected);
     return g.gf;
 }
 

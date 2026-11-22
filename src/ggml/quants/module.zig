@@ -38,22 +38,6 @@ pub const testing = @import("testing.zig");
 
 pub const iq_test = @import("iq_test.zig");
 
-comptime {
-    // Ported translation units export C symbols nothing in Zig references, so
-    // they need forcing into the compilation.
-    _ = legacy;
-    _ = k;
-    _ = ternary;
-    _ = iq_dequant;
-    _ = iq4;
-    _ = chunks;
-    _ = codebook;
-    _ = validate;
-    _ = iq1;
-    _ = iq2;
-    _ = iq3;
-}
-
 // -----------------------------------------------------------------------------
 // Unit Tests
 

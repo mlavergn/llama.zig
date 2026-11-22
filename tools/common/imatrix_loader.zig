@@ -14,9 +14,9 @@
 //! path's pairing map, also a `std::map`, is walked in that order too.
 
 const std = @import("std");
+const llama = @import("llama");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const c = @import("tools_h");
 
 /// `LLM_KV_IMATRIX_DATASETS`, `LLM_KV_IMATRIX_CHUNK_COUNT`, `LLM_KV_IMATRIX_CHUNK_SIZE`
 /// (imatrix-loader.h:8, 9, 10 @b1b770d90).
@@ -201,51 +201,51 @@ fn loadLegacy(fname: [:0]const u8, imatrix: *Imatrix) !bool {
 /// Return: whether it loaded. Failures are logged as the C logs them.
 pub fn load(fname: [:0]const u8, imatrix: *Imatrix) !bool {
     const func = "common_imatrix_load";
-    var ctx: ?*c.ggml_context = null;
-    const meta_gguf_params: c.gguf_init_params = .{ .no_alloc = false, .ctx = &ctx };
-    const ctx_gguf = c.gguf_init_from_file(fname.ptr, meta_gguf_params) orelse return loadLegacy(fname, imatrix);
+    var ctx: ?*llama.impl.llama_c.ggml_context = null;
+    const meta_gguf_params: llama.impl.llama_c.gguf_init_params = .{ .no_alloc = false, .ctx = &ctx };
+    const ctx_gguf = llama.impl.llama_c.gguf_init_from_file(fname.ptr, meta_gguf_params) orelse return loadLegacy(fname, imatrix);
     defer {
-        c.gguf_free(ctx_gguf);
-        c.ggml_free(ctx);
+        llama.impl.llama_c.gguf_free(ctx_gguf);
+        llama.impl.llama_c.ggml_free(ctx);
     }
 
-    const n_entries: i32 = @truncate(c.gguf_get_n_tensors(ctx_gguf));
+    const n_entries: i32 = @truncate(llama.impl.llama_c.gguf_get_n_tensors(ctx_gguf));
     if (n_entries < 1) {
         mod.log.err("%s: no data in file %s\n", .{ func, fname.ptr });
         return false;
     }
 
     const a = imatrix.allocator;
-    const datasets_key = c.gguf_find_key(ctx_gguf, kv_datasets);
-    const chunk_count_key = c.gguf_find_key(ctx_gguf, kv_chunk_count);
-    const chunk_size_key = c.gguf_find_key(ctx_gguf, kv_chunk_size);
-    const nextn_key = c.gguf_find_key(ctx_gguf, kv_n_layer_nextn);
+    const datasets_key = llama.impl.llama_c.gguf_find_key(ctx_gguf, kv_datasets);
+    const chunk_count_key = llama.impl.llama_c.gguf_find_key(ctx_gguf, kv_chunk_count);
+    const chunk_size_key = llama.impl.llama_c.gguf_find_key(ctx_gguf, kv_chunk_size);
+    const nextn_key = llama.impl.llama_c.gguf_find_key(ctx_gguf, kv_n_layer_nextn);
 
-    if (datasets_key != -1 and c.gguf_get_kv_type(ctx_gguf, datasets_key) == c.GGUF_TYPE_ARRAY and
-        c.gguf_get_arr_type(ctx_gguf, datasets_key) == c.GGUF_TYPE_STRING)
+    if (datasets_key != -1 and llama.impl.llama_c.gguf_get_kv_type(ctx_gguf, datasets_key) == llama.impl.llama_c.GGUF_TYPE_ARRAY and
+        llama.impl.llama_c.gguf_get_arr_type(ctx_gguf, datasets_key) == llama.impl.llama_c.GGUF_TYPE_STRING)
     {
-        const n = c.gguf_get_arr_n(ctx_gguf, datasets_key);
+        const n = llama.impl.llama_c.gguf_get_arr_n(ctx_gguf, datasets_key);
         var i: usize = 0;
         while (i < n) : (i += 1) {
-            try imatrix.datasets.append(a, try a.dupe(u8, std.mem.span(c.gguf_get_arr_str(ctx_gguf, datasets_key, i))));
+            try imatrix.datasets.append(a, try a.dupe(u8, std.mem.span(llama.impl.llama_c.gguf_get_arr_str(ctx_gguf, datasets_key, i))));
         }
     }
 
     imatrix.has_metadata = (datasets_key != -1 and chunk_count_key != -1 and chunk_size_key != -1);
-    imatrix.chunk_count = if (chunk_count_key != -1) @bitCast(c.gguf_get_val_u32(ctx_gguf, chunk_count_key)) else 0;
-    imatrix.chunk_size = if (chunk_size_key != -1) @bitCast(c.gguf_get_val_u32(ctx_gguf, chunk_size_key)) else 0;
-    imatrix.n_layer_nextn = if (nextn_key != -1) @bitCast(c.gguf_get_val_u32(ctx_gguf, nextn_key)) else 0;
+    imatrix.chunk_count = if (chunk_count_key != -1) @bitCast(llama.impl.llama_c.gguf_get_val_u32(ctx_gguf, chunk_count_key)) else 0;
+    imatrix.chunk_size = if (chunk_size_key != -1) @bitCast(llama.impl.llama_c.gguf_get_val_u32(ctx_gguf, chunk_size_key)) else 0;
+    imatrix.n_layer_nextn = if (nextn_key != -1) @bitCast(llama.impl.llama_c.gguf_get_val_u32(ctx_gguf, nextn_key)) else 0;
 
     // `sums_counts_for`: name -> `sum_tensors`, walked in name order.
-    const Pair = struct { in_sum: ?*c.ggml_tensor = null, sums: ?*c.ggml_tensor = null, counts: ?*c.ggml_tensor = null };
+    const Pair = struct { in_sum: ?*llama.impl.llama_c.ggml_tensor = null, sums: ?*llama.impl.llama_c.ggml_tensor = null, counts: ?*llama.impl.llama_c.ggml_tensor = null };
     var sums_counts_for: std.StringArrayHashMapUnmanaged(Pair) = .empty;
     defer {
         for (sums_counts_for.keys()) |k| a.free(k);
         sums_counts_for.deinit(a);
     }
 
-    var cur = c.ggml_get_first_tensor(ctx);
-    while (cur) |t| : (cur = c.ggml_get_next_tensor(ctx, t)) {
+    var cur = llama.impl.llama_c.ggml_get_first_tensor(ctx);
+    while (cur) |t| : (cur = llama.impl.llama_c.ggml_get_next_tensor(ctx, t)) {
         const name = std.mem.sliceTo(&t.*.name, 0);
         if (name.len == 0) continue;
 
@@ -286,20 +286,20 @@ pub fn load(fname: [:0]const u8, imatrix: *Imatrix) !bool {
         const in_sum2 = sc.sums;
         const counts = sc.counts;
 
-        if (in_sum2 == null or counts == null or (in_sum != null and c.ggml_nelements(in_sum) != c.ggml_nelements(in_sum2))) {
+        if (in_sum2 == null or counts == null or (in_sum != null and llama.impl.llama_c.ggml_nelements(in_sum) != llama.impl.llama_c.ggml_nelements(in_sum2))) {
             mod.log.err("%s: mismatched sums and counts for %.*s\n", .{ func, @as(c_int, @intCast(name.len)), name.ptr });
             return false;
         }
 
-        if (in_sum2.?.*.type != c.GGML_TYPE_F32 or counts.?.*.type != c.GGML_TYPE_F32) {
+        if (in_sum2.?.*.type != llama.impl.llama_c.GGML_TYPE_F32 or counts.?.*.type != llama.impl.llama_c.GGML_TYPE_F32) {
             mod.log.err("%s: sums and counts for %.*s must be F32\n", .{ func, @as(c_int, @intCast(name.len)), name.ptr });
             return false;
         }
 
         const e = try imatrix.entry(name);
 
-        const nval: usize = @intCast(c.ggml_nelements(in_sum2));
-        const ncounts: usize = @intCast(c.ggml_nelements(counts));
+        const nval: usize = @intCast(llama.impl.llama_c.ggml_nelements(in_sum2));
+        const ncounts: usize = @intCast(llama.impl.llama_c.ggml_nelements(counts));
 
         const sums_data: [*]const f32 = @ptrCast(@alignCast(in_sum2.?.*.data));
         try e.sums.resize(a, nval);
@@ -311,7 +311,7 @@ pub fn load(fname: [:0]const u8, imatrix: *Imatrix) !bool {
         for (e.counts.items, counts_data[0..ncounts]) |*dst, v| dst.* = @intFromFloat(@round(v));
 
         if (in_sum) |t| {
-            if (c.ggml_nelements(t) == @as(i64, @intCast(nval))) {
+            if (llama.impl.llama_c.ggml_nelements(t) == @as(i64, @intCast(nval))) {
                 const act_data: [*]const f32 = @ptrCast(@alignCast(t.*.data));
                 try e.activations.resize(a, nval);
                 @memcpy(e.activations.items, act_data[0..nval]);

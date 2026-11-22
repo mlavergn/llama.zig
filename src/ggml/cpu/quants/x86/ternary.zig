@@ -48,7 +48,7 @@ inline fn times9_128(q: ggml.cpu.quants.arch.avx2.m128i) ggml.cpu.quants.arch.av
 /// Five trits a byte, extracted by multiplying by powers of three and taking
 /// the top two bits; then four more a byte from `qh`, multiplied in sixteen
 /// bits because AVX2 has no byte multiply.
-pub export fn ggml_vec_dot_tq1_0_q8_K(
+pub fn ggml_vec_dot_tq1_0_q8_K(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -57,14 +57,14 @@ pub export fn ggml_vec_dot_tq1_0_q8_K(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
+) callconv(.c) void {
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
     const x = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.TQ1_0, vx);
     const y = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK_K));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK_K));
 
     var sumf = ggml.cpu.quants.arch.avx2.mm256_setzero_ps();
 
@@ -162,7 +162,7 @@ pub export fn ggml_vec_dot_tq1_0_q8_K(
 ///
 /// Four two-bit weights a byte, each plane against its own 32 `q8_K`
 /// values.
-pub export fn ggml_vec_dot_tq2_0_q8_K(
+pub fn ggml_vec_dot_tq2_0_q8_K(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -171,14 +171,14 @@ pub export fn ggml_vec_dot_tq2_0_q8_K(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
+) callconv(.c) void {
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
     const x = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.TQ2_0, vx);
     const y = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK_K));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK_K));
 
     var sumf = ggml.cpu.quants.arch.avx2.mm256_setzero_ps();
 

@@ -63,7 +63,7 @@ inline fn reduceMax(maxAbs: cpu.quants.arch.avx2.m256) f32 {
 
 /// Ports `ggml_quantize_mat_q8_0_4x8` (arch/x86/repack.cpp:178 @b1b770d90),
 /// the `__AVX2__ || __AVX__` arm with its `__AVX2__` pack.
-pub export fn ggml_quantize_mat_q8_0_4x8(x: [*]const f32, vy: *anyopaque, k: i64) callconv(.c) void {
+pub fn ggml_quantize_mat_q8_0_4x8(x: [*]const f32, vy: *anyopaque, k: i64) callconv(.c) void {
     std.debug.assert(@rem(k, QK8_0) == 0);
     const nb: usize = @intCast(@divTrunc(k, QK8_0));
     const ku: usize = @intCast(k);
@@ -120,7 +120,7 @@ pub export fn ggml_quantize_mat_q8_0_4x8(x: [*]const f32, vy: *anyopaque, k: i64
 /// the signed max. The `bsums` are summed from the interleaved quants with
 /// shuffles and blends that pick two values from each of four sub-blocks at
 /// a time.
-pub export fn ggml_quantize_mat_q8_K_4x8(x: [*]const f32, vy: *anyopaque, k: i64) callconv(.c) void {
+pub fn ggml_quantize_mat_q8_K_4x8(x: [*]const f32, vy: *anyopaque, k: i64) callconv(.c) void {
     std.debug.assert(@rem(k, QK_K) == 0);
     const nb: usize = @intCast(@divTrunc(k, QK_K));
     const ku: usize = @intCast(k);

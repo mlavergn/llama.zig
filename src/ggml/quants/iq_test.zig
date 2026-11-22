@@ -27,7 +27,7 @@ const DeqFn = *const fn (?*const anyopaque, [*c]f32, i64) callconv(.c) void;
 const Case = struct {
     name: []const u8,
     /// The ggml type, so the codebook can be initialised.
-    type: ggml.impl.c.enum_ggml_type,
+    type: ggml.impl.ggml_c.enum_ggml_type,
     /// `quantize_row_*_ref`, wrapped to a common signature. Null when the C
     /// has none -- the imatrix-only formats.
     ref: ?*const fn ([*c]const f32, ?*anyopaque, i64) void = null,
@@ -50,46 +50,46 @@ fn wrapDeq(comptime f: anytype) DeqFn {
 const cases = [_]Case{
     .{
         .name = "IQ2_XXS",
-        .type = ggml.impl.c.GGML_TYPE_IQ2_XXS,
+        .type = ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS,
         .chunk = ggml.quants.iq2.quantize_iq2_xxs,
         .dequant = wrapDeq(ggml.quants.iq_dequant.dequantize_row_iq2_xxs),
     },
     .{
         .name = "IQ2_XS",
-        .type = ggml.impl.c.GGML_TYPE_IQ2_XS,
+        .type = ggml.impl.ggml_c.GGML_TYPE_IQ2_XS,
         .chunk = ggml.quants.iq2.quantize_iq2_xs,
         .dequant = wrapDeq(ggml.quants.iq_dequant.dequantize_row_iq2_xs),
     },
     .{
         .name = "IQ2_S",
-        .type = ggml.impl.c.GGML_TYPE_IQ2_S,
+        .type = ggml.impl.ggml_c.GGML_TYPE_IQ2_S,
         .ref = wrapRef(ggml.quants.iq2.quantize_row_iq2_s_ref),
         .chunk = ggml.quants.iq2.quantize_iq2_s,
         .dequant = wrapDeq(ggml.quants.iq_dequant.dequantize_row_iq2_s),
     },
     .{
         .name = "IQ3_XXS",
-        .type = ggml.impl.c.GGML_TYPE_IQ3_XXS,
+        .type = ggml.impl.ggml_c.GGML_TYPE_IQ3_XXS,
         .ref = wrapRef(ggml.quants.iq3.quantize_row_iq3_xxs_ref),
         .chunk = ggml.quants.iq3.quantize_iq3_xxs,
         .dequant = wrapDeq(ggml.quants.iq_dequant.dequantize_row_iq3_xxs),
     },
     .{
         .name = "IQ3_S",
-        .type = ggml.impl.c.GGML_TYPE_IQ3_S,
+        .type = ggml.impl.ggml_c.GGML_TYPE_IQ3_S,
         .ref = wrapRef(ggml.quants.iq3.quantize_row_iq3_s_ref),
         .chunk = ggml.quants.iq3.quantize_iq3_s,
         .dequant = wrapDeq(ggml.quants.iq_dequant.dequantize_row_iq3_s),
     },
     .{
         .name = "IQ1_S",
-        .type = ggml.impl.c.GGML_TYPE_IQ1_S,
+        .type = ggml.impl.ggml_c.GGML_TYPE_IQ1_S,
         .chunk = ggml.quants.iq1.quantize_iq1_s,
         .dequant = wrapDeq(ggml.quants.iq_dequant.dequantize_row_iq1_s),
     },
     .{
         .name = "IQ1_M",
-        .type = ggml.impl.c.GGML_TYPE_IQ1_M,
+        .type = ggml.impl.ggml_c.GGML_TYPE_IQ1_M,
         .chunk = ggml.quants.iq1.quantize_iq1_m,
         .dequant = wrapDeq(ggml.quants.iq_dequant.dequantize_row_iq1_m),
     },

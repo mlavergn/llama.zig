@@ -95,12 +95,12 @@ fn conv3dLaunchImplicitGemm(
 /// - `ctx`: the backend context whose stream, pool and cuBLAS handle are used.
 /// - `dst`: the `CONV_3D` node; `src[0]` the F16 or F32 kernel, `src[1]` the
 ///   F32 input.
-pub fn opConv3d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const kernel = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const input = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    ggml.impl.assert(input.type == ggml.impl.c.GGML_TYPE_F32 and dst.type == ggml.impl.c.GGML_TYPE_F32, "input->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32");
-    ggml.impl.assert(kernel.type == ggml.impl.c.GGML_TYPE_F16 or kernel.type == ggml.impl.c.GGML_TYPE_F32, "kernel->type == GGML_TYPE_F16 || kernel->type == GGML_TYPE_F32");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(input) and ggml.impl.c.ggml_is_contiguous(kernel) and ggml.impl.c.ggml_is_contiguous(dst), "ggml_is_contiguous(input) && ggml_is_contiguous(kernel) && ggml_is_contiguous(dst)");
+pub fn opConv3d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const kernel = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const input = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    ggml.impl.assert(input.type == ggml.impl.ggml_c.GGML_TYPE_F32 and dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "input->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(kernel.type == ggml.impl.ggml_c.GGML_TYPE_F16 or kernel.type == ggml.impl.ggml_c.GGML_TYPE_F32, "kernel->type == GGML_TYPE_F16 || kernel->type == GGML_TYPE_F32");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(input) and ggml.impl.ggml_c.ggml_is_contiguous(kernel) and ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(input) && ggml_is_contiguous(kernel) && ggml_is_contiguous(dst)");
 
     var p: [12]i32 = undefined;
     for (&p, 0..) |*v, i| v.* = ggml.impl.getOpParamsI32(dst, i);
@@ -118,7 +118,7 @@ pub fn opConv3d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) v
     const OC: i64 = p[11];
     ggml.impl.assert(IC > 0 and B > 0 and OC > 0 and input.ne[3] == IC * B and kernel.ne[3] == IC * OC, "IC > 0 && B > 0 && OC > 0 && input->ne[3] == IC * B && kernel->ne[3] == IC * OC");
     ggml.impl.assert(dst.ne[3] == OC * B and p[0] > 0 and p[1] > 0 and p[2] > 0 and p[6] > 0 and p[7] > 0 and p[8] > 0, "dst->ne[3] == OC * B && p[0] > 0 && p[1] > 0 && p[2] > 0 && p[6] > 0 && p[7] > 0 && p[8] > 0");
-    const total: i64 = ggml.impl.c.ggml_nelements(dst);
+    const total: i64 = ggml.impl.ggml_c.ggml_nelements(dst);
     const params: Conv3dParams = .{
         .IW = IW,
         .IH = IH,
@@ -157,8 +157,8 @@ pub fn opConv3d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) v
     const pd: i64 = ID + 2 * @as(i64, p[5]);
     const padded_fits = pw > 0 and pw <= limit and ph > 0 and ph <= limit and pd > 0 and pd <= limit and
         pw * ph <= @divTrunc(limit, pd) and IC * B <= @divTrunc(limit, pw * ph * pd);
-    if (kernel.type == ggml.impl.c.GGML_TYPE_F16 and KW > 0 and KH > 0 and KD > 0 and ggml.impl.c.ggml_nelements(input) <= limit and
-        ggml.impl.c.ggml_nelements(kernel) <= limit and total <= limit and padded_fits and p[3] >= 0 and p[4] >= 0 and p[5] >= 0 and
+    if (kernel.type == ggml.impl.ggml_c.GGML_TYPE_F16 and KW > 0 and KH > 0 and KD > 0 and ggml.impl.ggml_c.ggml_nelements(input) <= limit and
+        ggml.impl.ggml_c.ggml_nelements(kernel) <= limit and total <= limit and padded_fits and p[3] >= 0 and p[4] >= 0 and p[5] >= 0 and
         (OW - 1) * p[0] + (KW - 1) * p[6] < pw and (OH - 1) * p[1] + (KH - 1) * p[7] < ph and
         (OD - 1) * p[2] + (KD - 1) * p[8] < pd and @divTrunc(OC + 63, 64) <= 65535 and B <= 65535)
     {
@@ -270,7 +270,7 @@ pub fn opConv3d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) v
     }
     const blocks: c_int = @intCast(@min(@as(i64, 65535), @divTrunc(total + 255, 256)));
     const lp: ggml.cuda.kernels.LaunchParams = .{ .grid = .{ .x = @bitCast(blocks) }, .block = .{ .x = 256 }, .shmem = 0, .stream = stream };
-    if (kernel.type == ggml.impl.c.GGML_TYPE_F16) {
+    if (kernel.type == ggml.impl.ggml_c.GGML_TYPE_F16) {
         ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv3d", ggml.cuda.kernels.tmpl("conv3d_kernel", &.{ggml.cuda.kernels.typeName(ggml.cuda.kernels.half)})), lp, .{ x, w, y, params });
     } else {
         ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv3d", ggml.cuda.kernels.tmpl("conv3d_kernel", &.{ggml.cuda.kernels.typeName(f32)})), lp, .{ x, w, y, params });

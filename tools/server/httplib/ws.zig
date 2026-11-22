@@ -546,19 +546,17 @@ pub const WebSocketClient = struct {
     strm: ?*mod.socket.SocketStream = null,
     ws: ?*WebSocket = null,
 
-    const client = @import("client.zig");
-
     /// Ports `WebSocketClient` (httplib.cpp:18949 @b1b770d90), the
     /// constructor: a scheme other than `ws` throws in the C, which no
     /// caller here reaches; this leaves the client invalid.
     pub fn init(a: std.mem.Allocator, scheme_host_port_path: []const u8, headers: mod.detail.Headers) WebSocketClient {
         var self: WebSocketClient = .{ .a = a, .headers = headers };
-        var uc: client.UrlComponents = undefined;
-        if (client.parseUrl(scheme_host_port_path, &uc) and uc.scheme.len != 0 and uc.host.len != 0 and uc.path.len != 0) {
+        var uc: mod.client.UrlComponents = undefined;
+        if (mod.client.parseUrl(scheme_host_port_path, &uc) and uc.scheme.len != 0 and uc.host.len != 0 and uc.path.len != 0) {
             if (!std.mem.eql(u8, uc.scheme, "ws")) return self;
             self.host = uc.host;
             self.port = 80;
-            if (uc.port.len != 0 and !client.parsePort(uc.port, &self.port)) return self;
+            if (uc.port.len != 0 and !mod.client.parsePort(uc.port, &self.port)) return self;
             self.path = uc.path;
             if (uc.query.len != 0) {
                 self.path = std.mem.concat(a, u8, &.{ uc.path, uc.query }) catch return self;
@@ -607,9 +605,9 @@ pub const WebSocketClient = struct {
 
         var arena = std.heap.ArenaAllocator.init(self.a);
         defer arena.deinit();
-        var impl = client.ClientImpl.init(arena.allocator(), self.host, self.port);
+        var impl = mod.client.ClientImpl.init(arena.allocator(), self.host, self.port);
         impl.read_timeout_sec = 0;
-        var err: client.Error = .success;
+        var err: mod.client.Error = .success;
         self.sock = try impl.createClientSocket(&err);
         if (self.sock == mod.socket.invalid_socket) return false;
 
@@ -651,10 +649,10 @@ pub const WebSocketClient = struct {
 
         var headers = try self.headers.clone(ar);
         if (headers.find("Host") == null) {
-            _ = try headers.emplace(ar, "Host", try client.makeHostAndPortString(ar, self.host, self.port, false));
+            _ = try headers.emplace(ar, "Host", try mod.client.makeHostAndPortString(ar, self.host, self.port, false));
         }
         if (headers.find("User-Agent") == null) {
-            _ = try headers.emplace(ar, "User-Agent", "cpp-httplib/" ++ client.cpphttplib_version);
+            _ = try headers.emplace(ar, "User-Agent", "cpp-httplib/" ++ mod.client.cpphttplib_version);
         }
 
         // Generate a random 16-byte Sec-WebSocket-Key (RFC 6455 Section 4.1)
@@ -692,7 +690,7 @@ pub const WebSocketClient = struct {
         var reason: []const u8 = "";
         var status: c_int = -1;
         var res_headers: mod.detail.Headers = .{};
-        if (try client.parseStatusLine(ar, lr.cstr(), &version, &status, &reason)) {
+        if (try mod.client.parseStatusLine(ar, lr.cstr(), &version, &status, &reason)) {
             if (!try mod.message.readHeaders(ar, strm, &res_headers)) return false;
         }
 

@@ -32,9 +32,6 @@ const stdlib = @import("stdlib");
 const json = @import("json");
 const peg = @import("peg");
 
-const Allocator = std.mem.Allocator;
-const Prompt = @import("prompt.zig").Prompt;
-
 /// One `chat_template_kwargs` entry: a name and the JSON text of its value.
 pub const KwArg = struct { key: []const u8, value: []const u8 };
 
@@ -82,7 +79,7 @@ pub const ModelInfo = struct {
 /// `special` arm: a token's text through libllama's port.
 ///
 /// Return: owned by `a`.
-fn tokenToPiece(a: Allocator, vocab: anytype, token: i32) mod.exception.Error![]u8 {
+fn tokenToPiece(a: std.mem.Allocator, vocab: anytype, token: i32) mod.exception.Error![]u8 {
     const api = @import("llama").api;
     var buf = try a.alloc(u8, 16);
     var n = api.vocab.llama_token_to_piece(vocab, token, buf.ptr, @intCast(buf.len), 0, true);
@@ -101,7 +98,7 @@ fn tokenToPiece(a: Allocator, vocab: anytype, token: i32) mod.exception.Error![]
 /// - `a`: owns the strings returned.
 /// - `model`: a `llama_model *`, from whichever `llama.h` import the
 ///   caller has; it is only passed through.
-pub fn modelInfo(a: Allocator, model: *const anyopaque) mod.exception.Error!ModelInfo {
+pub fn modelInfo(a: std.mem.Allocator, model: *const anyopaque) mod.exception.Error!ModelInfo {
     const api = @import("llama").api;
     const ModelPtr = @typeInfo(@TypeOf(api.model.llama_model_chat_template)).@"fn".param_types[0].?;
     const m: ModelPtr = @ptrCast(@alignCast(model));
@@ -130,7 +127,7 @@ pub const chatml_template_src =
 
 /// Ports `common_chat_templates` (chat.cpp:314 @b1b770d90).
 pub const Templates = struct {
-    gpa: Allocator,
+    gpa: std.mem.Allocator,
     add_bos: bool,
     add_eos: bool,
     /// Model had builtin template or template overridden was specified.
@@ -163,7 +160,7 @@ pub const Templates = struct {
 /// Return: `error.RuntimeError` when the default template does not parse,
 /// its `what()` "std::exception", as the C++'s `throw e;` of a
 /// `const std::exception &` slices it.
-pub fn init(gpa: Allocator, model: ?*const ModelInfo, chat_template_override: []const u8, bos_token_override: []const u8, eos_token_override: []const u8) mod.exception.Error!Templates {
+pub fn init(gpa: std.mem.Allocator, model: ?*const ModelInfo, chat_template_override: []const u8, bos_token_override: []const u8, eos_token_override: []const u8) mod.exception.Error!Templates {
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
     const a = arena_state.allocator();
@@ -307,7 +304,7 @@ fn capsOf(tmpls: *const Templates) *const mod.caps.Caps {
 /// `getCaps`'s members, then `reasoning_effort_levels`.
 ///
 /// Return: an object owned by `a`.
-pub fn getCapsJson(a: Allocator, tmpls: *const Templates) mod.exception.Error!json.Value {
+pub fn getCapsJson(a: std.mem.Allocator, tmpls: *const Templates) mod.exception.Error!json.Value {
     const caps = capsOf(tmpls);
     var result = json.Value.emptyObject();
     for (caps.toMap()) |e| try result.set(a, e.name, .{ .boolean = e.value });
@@ -327,7 +324,7 @@ pub fn capsValue(entries: [9]mod.caps.Caps.Entry, name: []const u8) bool {
 /// Ports `common_chat_templates_support_enable_thinking` (chat.cpp:336
 /// @b1b770d90): whether one user turn applied with thinking on reports
 /// that the template thinks.
-pub fn supportEnableThinking(gpa: Allocator, tmpls: *const Templates) mod.exception.Error!bool {
+pub fn supportEnableThinking(gpa: std.mem.Allocator, tmpls: *const Templates) mod.exception.Error!bool {
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
     const a = arena_state.allocator();
@@ -354,7 +351,7 @@ pub const PromptPreset = struct {
 /// normalization helpers `tts_norm_scan()` and `tts_norm_sub()`.
 ///
 /// Return: the text, owned by `a`.
-fn templateRender(a: Allocator, tmpl: *const mod.template.Template, vars: *const json.Value) mod.exception.Error![]u8 {
+fn templateRender(a: std.mem.Allocator, tmpl: *const mod.template.Template, vars: *const json.Value) mod.exception.Error![]u8 {
     var r: mod.template.Render = undefined;
     r.init(a, false);
     defer r.deinit();
@@ -375,7 +372,7 @@ fn isLfm3Template(src: []const u8) bool {
 
 /// Ports `lfm3_language_name` (chat.cpp:831 @b1b770d90): LFM3-Audio, a
 /// language code to its name; an unknown code is kept as given.
-fn lfm3LanguageName(a: Allocator, language: []const u8) mod.exception.Error![]const u8 {
+fn lfm3LanguageName(a: std.mem.Allocator, language: []const u8) mod.exception.Error![]const u8 {
     const names = [_]struct { []const u8, []const u8 }{
         .{ "ar", "Arabic" },   .{ "da", "Danish" },  .{ "de", "German" },  .{ "el", "Greek" },  .{ "en", "English" },
         .{ "es", "Spanish" },  .{ "fi", "Finnish" }, .{ "fr", "French" },  .{ "he", "Hebrew" }, .{ "it", "Italian" },
@@ -394,7 +391,7 @@ fn lfm3LanguageName(a: Allocator, language: []const u8) mod.exception.Error![]co
 /// language lets the model detect it.
 ///
 /// Return: owned by `a`.
-fn lfm3AsrSystemPrompt(a: Allocator, language: []const u8) mod.exception.Error![]const u8 {
+fn lfm3AsrSystemPrompt(a: std.mem.Allocator, language: []const u8) mod.exception.Error![]const u8 {
     if (language.len == 0) return "Perform ASR.";
     return std.mem.concat(a, u8, &.{ "Perform ASR in ", try lfm3LanguageName(a, language), "." });
 }
@@ -405,7 +402,7 @@ fn lfm3AsrSystemPrompt(a: Allocator, language: []const u8) mod.exception.Error![
 /// - `a`: owns what the preset holds.
 /// - `tmpls`: the templates, or null.
 /// - `language`: the requested language, or "".
-pub fn getAsrPrompt(a: Allocator, tmpls: ?*const Templates, language: []const u8) mod.exception.Error!PromptPreset {
+pub fn getAsrPrompt(a: std.mem.Allocator, tmpls: ?*const Templates, language: []const u8) mod.exception.Error!PromptPreset {
     if (tmpls) |t| {
         const src = t.template_default.source();
         if (mod.parsers.lfm2.isLfm2Template(src)) {
@@ -427,7 +424,7 @@ pub fn getAsrPrompt(a: Allocator, tmpls: ?*const Templates, language: []const u8
 /// - `text`, `language`, `voice`: what the template is given.
 ///
 /// Return: the prompt, empty if the model has no such template.
-pub fn getTtsPrompt(a: Allocator, tmpls: ?*const Templates, text: []const u8, language: []const u8, voice: []const u8) mod.exception.Error![]const u8 {
+pub fn getTtsPrompt(a: std.mem.Allocator, tmpls: ?*const Templates, text: []const u8, language: []const u8, voice: []const u8) mod.exception.Error![]const u8 {
     const t = tmpls orelse return "";
     const tts = if (t.template_tts) |*x| x else return "";
     var message = json.Value.emptyObject();
@@ -452,7 +449,7 @@ pub fn getTtsPrompt(a: Allocator, tmpls: ?*const Templates, text: []const u8, la
 /// - `language`, `voice`: the requested language and voice, or "".
 ///
 /// Return: the line, empty when the model does not use one.
-pub fn getSpeechSystemPrompt(a: Allocator, tmpls: ?*const Templates, language: []const u8, voice: []const u8) mod.exception.Error![]const u8 {
+pub fn getSpeechSystemPrompt(a: std.mem.Allocator, tmpls: ?*const Templates, language: []const u8, voice: []const u8) mod.exception.Error![]const u8 {
     const t = tmpls orelse return "";
     if (!isLfm3Template(t.template_default.source())) return "";
     // same voices as the "tts" template
@@ -477,7 +474,7 @@ pub fn getSpeechSystemPrompt(a: Allocator, tmpls: ?*const Templates, language: [
 /// Ports `common_chat_verify_template` (chat.cpp:715 @b1b770d90): whether
 /// one user turn applies, through Jinja or through libllama's built-in
 /// template families.
-pub fn verifyTemplate(gpa: Allocator, tmpl: []const u8, use_jinja: bool) mod.exception.Error!bool {
+pub fn verifyTemplate(gpa: std.mem.Allocator, tmpl: []const u8, use_jinja: bool) mod.exception.Error!bool {
     if (use_jinja) {
         verifyJinja(gpa, tmpl) catch |e| {
             if (e == error.OutOfMemory) return error.OutOfMemory;
@@ -496,7 +493,7 @@ pub fn verifyTemplate(gpa: Allocator, tmpl: []const u8, use_jinja: bool) mod.exc
 }
 
 /// The `try` block of `common_chat_verify_template`'s Jinja arm.
-fn verifyJinja(gpa: Allocator, tmpl: []const u8) mod.exception.Error!void {
+fn verifyJinja(gpa: std.mem.Allocator, tmpl: []const u8) mod.exception.Error!void {
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
     var tmpls = try init(gpa, null, tmpl, "", "");
@@ -510,7 +507,7 @@ fn verifyJinja(gpa: Allocator, tmpl: []const u8) mod.exception.Error!void {
 /// `new_msg` to `past_msg` adds to the rendered conversation.
 ///
 /// Return: owned by the arena `a`.
-pub fn formatSingle(a: Allocator, tmpls: *const Templates, past_msg: []const mod.msg.Msg, new_msg: mod.msg.Msg, add_ass: bool, use_jinja: bool) mod.exception.Error![]const u8 {
+pub fn formatSingle(a: std.mem.Allocator, tmpls: *const Templates, past_msg: []const mod.msg.Msg, new_msg: mod.msg.Msg, add_ass: bool, use_jinja: bool) mod.exception.Error![]const u8 {
     var inputs: TemplatesInputs = .{
         .use_jinja = use_jinja,
         .add_bos = tmpls.add_bos,
@@ -543,7 +540,7 @@ pub fn formatSingle(a: Allocator, tmpls: *const Templates, past_msg: []const mod
 /// fixed conversation rendered, for the log.
 ///
 /// Return: owned by the arena `a`.
-pub fn formatExample(a: Allocator, tmpls: *const Templates, use_jinja: bool, chat_template_kwargs: []const KwArg) mod.exception.Error![]const u8 {
+pub fn formatExample(a: std.mem.Allocator, tmpls: *const Templates, use_jinja: bool, chat_template_kwargs: []const KwArg) mod.exception.Error![]const u8 {
     const msgs = [_]mod.msg.Msg{
         .{ .role = "system", .content = "You are a helpful assistant" },
         .{ .role = "user", .content = "Hello" },
@@ -569,7 +566,7 @@ fn isStr(v: *const json.Value, s: []const u8) bool {
 }
 
 /// Ports `workaround`'s `map_developer_role_to_system` (chat.cpp:1186 @b1b770d90).
-fn mapDeveloperRoleToSystem(a: Allocator, messages: *json.Value) mod.exception.Error!void {
+fn mapDeveloperRoleToSystem(a: std.mem.Allocator, messages: *json.Value) mod.exception.Error!void {
     var it = messages.items();
     while (it.next()) |item| {
         const message = item.value;
@@ -583,7 +580,7 @@ fn mapDeveloperRoleToSystem(a: Allocator, messages: *json.Value) mod.exception.E
 /// Ports `workaround`'s `system_message_not_supported` (chat.cpp:1198
 /// @b1b770d90): a leading system message merged into the next one, or
 /// dropped when it is alone.
-fn systemMessageNotSupported(a: Allocator, messages: *json.Value) mod.exception.Error!void {
+fn systemMessageNotSupported(a: std.mem.Allocator, messages: *json.Value) mod.exception.Error!void {
     if (messages.empty()) return;
     const first = messages.front() catch |e| return mod.util.fromJson(e);
     const role = first.at("role") catch |e| return mod.util.fromJson(e);
@@ -604,7 +601,7 @@ fn systemMessageNotSupported(a: Allocator, messages: *json.Value) mod.exception.
 }
 
 /// Ports `workaround`'s `requires_non_null_content` (chat.cpp:1214 @b1b770d90).
-fn requiresNonNullContent(a: Allocator, messages: *json.Value) mod.exception.Error!void {
+fn requiresNonNullContent(a: std.mem.Allocator, messages: *json.Value) mod.exception.Error!void {
     @import("llama").impl.assert(messages.isArray(), "common/chat.cpp", 1215, "messages.is_array()");
     var it = messages.items();
     while (it.next()) |item| {
@@ -619,7 +616,7 @@ fn requiresNonNullContent(a: Allocator, messages: *json.Value) mod.exception.Err
 /// Ports `workaround`'s `func_args_not_string` (chat.cpp:1223 @b1b770d90): a
 /// tool call's string arguments parsed, for a template that reads them as
 /// an object.
-fn funcArgsNotString(a: Allocator, messages: *json.Value) mod.exception.Error!void {
+fn funcArgsNotString(a: std.mem.Allocator, messages: *json.Value) mod.exception.Error!void {
     @import("llama").impl.assert(messages.isArray(), "common/chat.cpp", 1224, "messages.is_array()");
     var it = messages.items();
     while (it.next()) |item| {
@@ -647,7 +644,7 @@ fn funcArgsNotString(a: Allocator, messages: *json.Value) mod.exception.Error!vo
 /// message's content, reasoning and text parts trimmed.
 ///
 /// Return: copies owned by `a`.
-fn trimAllContent(a: Allocator, messages: []const mod.msg.Msg) mod.exception.Error![]mod.msg.Msg {
+fn trimAllContent(a: std.mem.Allocator, messages: []const mod.msg.Msg) mod.exception.Error![]mod.msg.Msg {
     const helpers = mod.autoparser.helpers;
     const out = try a.alloc(mod.msg.Msg, messages.len);
     for (messages, out) |m, *o| {
@@ -668,12 +665,12 @@ fn trimAllContent(a: Allocator, messages: []const mod.msg.Msg) mod.exception.Err
 // apply
 
 /// Ports `common_chat_params_init_lfm2_tokens` (chat.cpp:1272 @b1b770d90).
-fn initLfm2Tokens(a: Allocator, tmpl: *const mod.template.Template, inputs: *const mod.template.GenerationParams) mod.exception.Error!mod.params.ChatParams {
+fn initLfm2Tokens(a: std.mem.Allocator, tmpl: *const mod.template.Template, inputs: *const mod.template.GenerationParams) mod.exception.Error!mod.params.ChatParams {
     return mod.parsers.lfm2.init(a, tmpl, inputs, true);
 }
 
 /// Ports `common_chat_params_init_lfm2_5` (chat.cpp:1276 @b1b770d90).
-fn initLfm25(a: Allocator, tmpl: *const mod.template.Template, inputs: *const mod.template.GenerationParams) mod.exception.Error!mod.params.ChatParams {
+fn initLfm25(a: std.mem.Allocator, tmpl: *const mod.template.Template, inputs: *const mod.template.GenerationParams) mod.exception.Error!mod.params.ChatParams {
     return mod.parsers.lfm2.init(a, tmpl, inputs, false);
 }
 
@@ -861,14 +858,14 @@ pub fn detectParamsInit(src: []const u8) ?mod.template.ParamsInitFn {
 /// @b1b770d90): the template's dedicated handler, run, when it has one.
 ///
 /// Return: null when it has none.
-pub fn trySpecializedTemplate(a: Allocator, tmpl: *const mod.template.Template, params: *const mod.template.GenerationParams) mod.exception.Error!?mod.params.ChatParams {
+pub fn trySpecializedTemplate(a: std.mem.Allocator, tmpl: *const mod.template.Template, params: *const mod.template.GenerationParams) mod.exception.Error!?mod.params.ChatParams {
     const init_fn = tmpl.params_init orelse return null;
     return try init_fn(a, tmpl, params);
 }
 
 /// `std::map<std::string, std::string>`'s iteration: by key, bytewise; a
 /// repeated key keeps its last value.
-fn sortedKwargs(a: Allocator, kwargs: []const KwArg) mod.exception.Error![]KwArg {
+fn sortedKwargs(a: std.mem.Allocator, kwargs: []const KwArg) mod.exception.Error![]KwArg {
     const out = try a.alloc(KwArg, kwargs.len);
     var n: usize = 0;
     outer: for (kwargs) |kv| {
@@ -889,7 +886,7 @@ fn sortedKwargs(a: Allocator, kwargs: []const KwArg) mod.exception.Error![]KwArg
 }
 
 /// Ports `common_chat_templates_apply_jinja` (chat.cpp:1486 @b1b770d90).
-fn applyJinja(a: Allocator, tmpls: *const Templates, inputs: *const TemplatesInputs) mod.exception.Error!mod.params.ChatParams {
+fn applyJinja(a: std.mem.Allocator, tmpls: *const Templates, inputs: *const TemplatesInputs) mod.exception.Error!mod.params.ChatParams {
     var params: mod.template.GenerationParams = .{};
     params.tools = try mod.msg.toolsToJsonOaicompat(a, inputs.tools);
     const tmpl = if (params.tools.isArray() and tmpls.template_tool_use != null) &tmpls.template_tool_use.? else &tmpls.template_default;
@@ -1011,7 +1008,7 @@ fn pureContentParser(generation_prompt: []const u8, p: *mod.chat_peg.ChatBuilder
 
 /// The `try` block of `common_chat_templates_apply_jinja`: the differential
 /// auto-parser, the message delimiters it found and the thinking tags.
-fn autoParse(a: Allocator, tmpl: *const mod.template.Template, params: *const mod.template.GenerationParams, ap: *const mod.autoparser.Autoparser) mod.exception.Error!mod.params.ChatParams {
+fn autoParse(a: std.mem.Allocator, tmpl: *const mod.template.Template, params: *const mod.template.GenerationParams, ap: *const mod.autoparser.Autoparser) mod.exception.Error!mod.params.ChatParams {
     mod.log.dbg("{s}: using differential autoparser\n", .{"common_chat_templates_apply_jinja"});
     var auto_params = try mod.autoparser.generateParserAnalyzed(a, tmpl, params, ap);
 
@@ -1046,7 +1043,7 @@ fn autoParse(a: Allocator, tmpl: *const mod.template.Template, params: *const mo
 /// Ports `common_chat_templates_apply_legacy` (chat.cpp:1633 @b1b770d90):
 /// the conversation through libllama's built-in template families, and the
 /// grammar from the JSON schema.
-fn applyLegacy(a: Allocator, tmpls: *const Templates, inputs: *const TemplatesInputs) mod.exception.Error!mod.params.ChatParams {
+fn applyLegacy(a: std.mem.Allocator, tmpls: *const Templates, inputs: *const TemplatesInputs) mod.exception.Error!mod.params.ChatParams {
     const api = @import("llama").api;
     const Message = std.meta.Child(@typeInfo(@TypeOf(api.llama.llama_chat_apply_template)).@"fn".param_types[1].?);
     var alloc_size: usize = 0;
@@ -1100,7 +1097,7 @@ fn applyLegacy(a: Allocator, tmpls: *const Templates, inputs: *const TemplatesIn
     }
 
     var params: mod.params.ChatParams = .{};
-    params.prompt = try Prompt.fromText(a, buf[0..@intCast(res)]);
+    params.prompt = try mod.prompt.Prompt.fromText(a, buf[0..@intCast(res)]);
     if (inputs.json_schema.len != 0) {
         const schema = json.parse(a, inputs.json_schema) catch |e| return mod.util.fromJson(e);
         params.grammar = json.schema_to_grammar.jsonSchemaToGrammar(a, &schema, false) catch |e| return mod.util.fromSchema(e);
@@ -1117,7 +1114,7 @@ fn applyLegacy(a: Allocator, tmpls: *const Templates, inputs: *const TemplatesIn
 /// - `a`: an arena; the result and every temporary are its.
 /// - `tmpls`: from `init`.
 /// - `inputs`: borrowed for the call.
-pub fn apply(a: Allocator, tmpls: *const Templates, inputs: *const TemplatesInputs) mod.exception.Error!mod.params.ChatParams {
+pub fn apply(a: std.mem.Allocator, tmpls: *const Templates, inputs: *const TemplatesInputs) mod.exception.Error!mod.params.ChatParams {
     return if (inputs.use_jinja) applyJinja(a, tmpls, inputs) else applyLegacy(a, tmpls, inputs);
 }
 

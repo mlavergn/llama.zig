@@ -32,7 +32,7 @@ const block_nm = 8;
 const block_rows = 8;
 
 const int_max = std.math.maxInt(c_int);
-const max_dims: usize = ggml.impl.c.GGML_MAX_DIMS;
+const max_dims: usize = ggml.impl.ggml_c.GGML_MAX_DIMS;
 const ushrt_max = std.math.maxInt(c_ushort);
 
 /// A `dim3` member from an `int64_t`: C++ converts modulo 2^32.
@@ -184,15 +184,15 @@ const Memcpy2d = struct {
 /// Ports `ggml_cuda_cpy_as_memcpy_2d` (cpy.cu:391 @b1b770d90): whether a
 /// same-type copy reduces to `height` rows of `width` contiguous bytes, so
 /// it can use `cudaMemcpy2DAsync` instead of the scalar kernel.
-fn cpyAsMemcpy2d(src0: *const ggml.impl.c.ggml_tensor, src1: *const ggml.impl.c.ggml_tensor, m: *Memcpy2d) bool {
+fn cpyAsMemcpy2d(src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, m: *Memcpy2d) bool {
     // require matching shape: a reshaped copy maps elements by flat order,
     // which the prefix walk below does not handle
-    if (src0.type != src1.type or !ggml.impl.c.ggml_are_same_shape(src0, src1)) {
+    if (src0.type != src1.type or !ggml.impl.ggml_c.ggml_are_same_shape(src0, src1)) {
         return false;
     }
 
     // grow the contiguous prefix block shared by both tensors
-    var block_nb: usize = ggml.impl.c.ggml_element_size(src0);
+    var block_nb: usize = ggml.impl.ggml_c.ggml_element_size(src0);
     var d: usize = 0;
     while (d < max_dims) : (d += 1) {
         if (src0.nb[d] != block_nb or src1.nb[d] != block_nb) {
@@ -228,9 +228,9 @@ fn cpyAsMemcpy2d(src0: *const ggml.impl.c.ggml_tensor, src1: *const ggml.impl.c.
 /// - `ctx`: the backend context whose stream is used.
 /// - `src0`: the tensor copied from.
 /// - `src1`: the tensor copied into; same element count as `src0`.
-pub fn cpy(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.c.ggml_tensor, src1: *ggml.impl.c.ggml_tensor) void {
-    const ne = ggml.impl.c.ggml_nelements(src0);
-    ggml.impl.assert(ne == ggml.impl.c.ggml_nelements(src1), "ne == ggml_nelements(src1)");
+pub fn cpy(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *ggml.impl.ggml_c.ggml_tensor) void {
+    const ne = ggml.impl.ggml_c.ggml_nelements(src0);
+    ggml.impl.assert(ne == ggml.impl.ggml_c.ggml_nelements(src1), "ne == ggml_nelements(src1)");
 
     const ne00 = src0.ne[0];
     const ne01 = src0.ne[1];
@@ -255,10 +255,10 @@ pub fn cpy(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.c.ggml_tensor,
     const src0_ddc: ?*const anyopaque = src0.data;
     const src1_ddc: ?*anyopaque = src1.data;
 
-    const contiguous_srcs = ggml.impl.c.ggml_is_contiguous(src0) and ggml.impl.c.ggml_is_contiguous(src1);
-    const esize: i64 = @intCast(ggml.impl.c.ggml_element_size(src0));
+    const contiguous_srcs = ggml.impl.ggml_c.ggml_is_contiguous(src0) and ggml.impl.ggml_c.ggml_is_contiguous(src1);
+    const esize: i64 = @intCast(ggml.impl.ggml_c.ggml_element_size(src0));
     const can_be_transposed = nb01 == esize and src0.ne[3] == 1 and nb02 == ne00 * ne01 * esize and
-        ggml.impl.c.ggml_is_contiguous(src1);
+        ggml.impl.ggml_c.ggml_is_contiguous(src1);
 
     var mc: Memcpy2d = .{};
 
@@ -282,16 +282,16 @@ pub fn cpy(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.c.ggml_tensor,
 
     const t0 = src0.type;
     const t1 = src1.type;
-    const F32 = ggml.impl.c.GGML_TYPE_F32;
-    const F16 = ggml.impl.c.GGML_TYPE_F16;
-    const BF16 = ggml.impl.c.GGML_TYPE_BF16;
-    const I32 = ggml.impl.c.GGML_TYPE_I32;
-    const I16 = ggml.impl.c.GGML_TYPE_I16;
-    const F8 = ggml.impl.c.GGML_TYPE_F8_E4M3;
+    const F32 = ggml.impl.ggml_c.GGML_TYPE_F32;
+    const F16 = ggml.impl.ggml_c.GGML_TYPE_F16;
+    const BF16 = ggml.impl.ggml_c.GGML_TYPE_BF16;
+    const I32 = ggml.impl.ggml_c.GGML_TYPE_I32;
+    const I16 = ggml.impl.ggml_c.GGML_TYPE_I16;
+    const F8 = ggml.impl.ggml_c.GGML_TYPE_F8_E4M3;
 
     if (t0 == t1 and contiguous_srcs) {
-        ggml.impl.assert(ggml.impl.c.ggml_nbytes(src0) == ggml.impl.c.ggml_nbytes(src1), "ggml_nbytes(src0) == ggml_nbytes(src1)");
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(src1_ddc, src0_ddc, ggml.impl.c.ggml_nbytes(src0), ggml.cuda.common.cu.cudaMemcpyDeviceToDevice, main_stream), "cudaMemcpyAsync(src1_ddc, src0_ddc, ggml_nbytes(src0), cudaMemcpyDeviceToDevice, main_stream)", @src());
+        ggml.impl.assert(ggml.impl.ggml_c.ggml_nbytes(src0) == ggml.impl.ggml_c.ggml_nbytes(src1), "ggml_nbytes(src0) == ggml_nbytes(src1)");
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(src1_ddc, src0_ddc, ggml.impl.ggml_c.ggml_nbytes(src0), ggml.cuda.common.cu.cudaMemcpyDeviceToDevice, main_stream), "cudaMemcpyAsync(src1_ddc, src0_ddc, ggml_nbytes(src0), cudaMemcpyDeviceToDevice, main_stream)", @src());
     } else if (cpyAsMemcpy2d(src0, src1, &mc)) {
         ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpy2DAsync(src1_ddc, mc.dpitch, src0_ddc, mc.spitch, mc.width, mc.height, ggml.cuda.common.cu.cudaMemcpyDeviceToDevice, main_stream), "cudaMemcpy2DAsync(src1_ddc, mc_dpitch, src0_ddc, mc_spitch, mc_width, mc_height, cudaMemcpyDeviceToDevice, main_stream)", @src());
     } else if (t0 == F8 and t1 == F8) {
@@ -338,27 +338,27 @@ pub fn cpy(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.c.ggml_tensor,
         } else {
             cpyScalarCuda(f32, ggml.cuda.kernels.half, false, src0_ddc, src1_ddc, a, main_stream);
         }
-    } else if (t0 == F32 and t1 == ggml.impl.c.GGML_TYPE_Q8_0) {
+    } else if (t0 == F32 and t1 == ggml.impl.ggml_c.GGML_TYPE_Q8_0) {
         cpyF32QCuda("cpy_blck_f32_q8_0", 32, "QK8_0", src0_ddc, src1_ddc, a, main_stream);
-    } else if (t0 == ggml.impl.c.GGML_TYPE_Q8_0 and t1 == F32) {
+    } else if (t0 == ggml.impl.ggml_c.GGML_TYPE_Q8_0 and t1 == F32) {
         cpyQF32Cuda("cpy_blck_q8_0_f32", 32, src0_ddc, src1_ddc, a, main_stream);
-    } else if (t0 == F32 and t1 == ggml.impl.c.GGML_TYPE_Q4_0) {
+    } else if (t0 == F32 and t1 == ggml.impl.ggml_c.GGML_TYPE_Q4_0) {
         cpyF32QCuda("cpy_blck_f32_q4_0", 32, "QK4_0", src0_ddc, src1_ddc, a, main_stream);
-    } else if (t0 == ggml.impl.c.GGML_TYPE_Q4_0 and t1 == F32) {
+    } else if (t0 == ggml.impl.ggml_c.GGML_TYPE_Q4_0 and t1 == F32) {
         cpyQF32Cuda(comptime blckQF32("dequantize_q4_0"), 32, src0_ddc, src1_ddc, a, main_stream);
-    } else if (t0 == F32 and t1 == ggml.impl.c.GGML_TYPE_Q4_1) {
+    } else if (t0 == F32 and t1 == ggml.impl.ggml_c.GGML_TYPE_Q4_1) {
         cpyF32QCuda("cpy_blck_f32_q4_1", 32, "QK4_1", src0_ddc, src1_ddc, a, main_stream);
-    } else if (t0 == ggml.impl.c.GGML_TYPE_Q4_1 and t1 == F32) {
+    } else if (t0 == ggml.impl.ggml_c.GGML_TYPE_Q4_1 and t1 == F32) {
         cpyQF32Cuda(comptime blckQF32("dequantize_q4_1"), 32, src0_ddc, src1_ddc, a, main_stream);
-    } else if (t0 == F32 and t1 == ggml.impl.c.GGML_TYPE_Q5_0) {
+    } else if (t0 == F32 and t1 == ggml.impl.ggml_c.GGML_TYPE_Q5_0) {
         cpyF32QCuda("cpy_blck_f32_q5_0", 32, "QK5_0", src0_ddc, src1_ddc, a, main_stream);
-    } else if (t0 == ggml.impl.c.GGML_TYPE_Q5_0 and t1 == F32) {
+    } else if (t0 == ggml.impl.ggml_c.GGML_TYPE_Q5_0 and t1 == F32) {
         cpyQF32Cuda(comptime blckQF32("dequantize_q5_0"), 32, src0_ddc, src1_ddc, a, main_stream);
-    } else if (t0 == F32 and t1 == ggml.impl.c.GGML_TYPE_IQ4_NL) {
+    } else if (t0 == F32 and t1 == ggml.impl.ggml_c.GGML_TYPE_IQ4_NL) {
         cpyF32QCuda("cpy_blck_f32_iq4_nl", 32, "QK4_NL", src0_ddc, src1_ddc, a, main_stream);
-    } else if (t0 == F32 and t1 == ggml.impl.c.GGML_TYPE_Q5_1) {
+    } else if (t0 == F32 and t1 == ggml.impl.ggml_c.GGML_TYPE_Q5_1) {
         cpyF32QCuda("cpy_blck_f32_q5_1", 32, "QK5_1", src0_ddc, src1_ddc, a, main_stream);
-    } else if (t0 == ggml.impl.c.GGML_TYPE_Q5_1 and t1 == F32) {
+    } else if (t0 == ggml.impl.ggml_c.GGML_TYPE_Q5_1 and t1 == F32) {
         cpyQF32Cuda(comptime blckQF32("dequantize_q5_1"), 32, src0_ddc, src1_ddc, a, main_stream);
     } else if (t0 == F16 and t1 == F16) {
         if (can_be_transposed) {
@@ -421,13 +421,13 @@ pub fn cpy(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.c.ggml_tensor,
             cpyScalarCuda(i32, f32, false, src0_ddc, src1_ddc, a, main_stream);
         }
     } else {
-        ggml.impl.c.ggml_abort(@src().file.ptr, @intCast(@src().line), "%s: unsupported type combination (%s to %s)\n", "ggml_cuda_cpy", ggml.impl.c.ggml_type_name(t0), ggml.impl.c.ggml_type_name(t1));
+        ggml.impl.ggml_c.ggml_abort(@src().file.ptr, @intCast(@src().line), "%s: unsupported type combination (%s to %s)\n", "ggml_cuda_cpy", ggml.impl.ggml_c.ggml_type_name(t0), ggml.impl.ggml_c.ggml_type_name(t1));
     }
 }
 
 /// Ports `ggml_cuda_dup` (cpy.cu:658 @b1b770d90), which serves `DUP` and
 /// `CONT`.
-pub fn dup(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn dup(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
     cpy(ctx, src0, dst);
 }

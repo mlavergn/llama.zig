@@ -28,7 +28,7 @@ pub const Options = struct {
     sdk: ?[]const u8,
     reference: llamacpp.Artifacts,
     cuda: ?llamacpp.Cuda = null,
-    /// `zigjinja`, for `cli/common_chat/`'s templates, which the data
+    /// `jinja`, for `cli/common_chat/`'s templates, which the data
     /// layer's chat conversion renders through.
     jinja: ?*std.Build.Module = null,
 };
@@ -55,7 +55,7 @@ pub const Modules = struct {
 ///
 /// Parameters:
 /// - `b`: the build graph.
-/// - `opts`: target, libraries and `zigjinja`; `opts.optimize` builds the
+/// - `opts`: target, libraries and `jinja`; `opts.optimize` builds the
 ///   translated headers and libmtmd.
 /// - `optimize`: the mode of the Zig modules themselves.
 ///

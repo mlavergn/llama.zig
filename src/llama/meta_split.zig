@@ -29,11 +29,11 @@ pub const Userdata = extern struct {
     model: ?*const mod.model.Model = null,
 };
 
-const axis_0: c_uint = mod.impl.c.GGML_BACKEND_SPLIT_AXIS_0;
-const axis_1: c_uint = mod.impl.c.GGML_BACKEND_SPLIT_AXIS_1;
-const axis_2: c_uint = mod.impl.c.GGML_BACKEND_SPLIT_AXIS_2;
-const axis_mirrored: c_uint = mod.impl.c.GGML_BACKEND_SPLIT_AXIS_MIRRORED;
-const axis_partial: c_uint = mod.impl.c.GGML_BACKEND_SPLIT_AXIS_PARTIAL;
+const axis_0: c_uint = mod.impl.llama_c.GGML_BACKEND_SPLIT_AXIS_0;
+const axis_1: c_uint = mod.impl.llama_c.GGML_BACKEND_SPLIT_AXIS_1;
+const axis_2: c_uint = mod.impl.llama_c.GGML_BACKEND_SPLIT_AXIS_2;
+const axis_mirrored: c_uint = mod.impl.llama_c.GGML_BACKEND_SPLIT_AXIS_MIRRORED;
+const axis_partial: c_uint = mod.impl.llama_c.GGML_BACKEND_SPLIT_AXIS_PARTIAL;
 
 /// The function-local `static const std::regex`es, in declaration order.
 const pattern_sources = [_][]const u8{
@@ -159,7 +159,7 @@ fn getPatterns() *const [pattern_sources.len]mod.regex.Regex {
 }
 
 const Ctx = struct {
-    tensor: *const mod.impl.c.ggml_tensor,
+    tensor: *const mod.impl.llama_c.ggml_tensor,
     name: []const u8,
     ud: *const Userdata,
     model: *const mod.model.Model,
@@ -176,7 +176,7 @@ const Ctx = struct {
 /// `tensor_config` (llama-model.cpp:474 @b1b770d90).
 const TensorConfig = struct {
     axis: c_uint,
-    tensor_axis_0: *const mod.impl.c.ggml_tensor,
+    tensor_axis_0: *const mod.impl.llama_c.ggml_tensor,
     il: u32,
     rotation: usize,
 };
@@ -245,7 +245,7 @@ fn configImpl(cx: *const Ctx, axis: c_uint, suffix: []const u8, suffix_fallback:
         rotation = hparams.nLayer() % n_devices;
     }
 
-    var tensor_axis_0: ?*const mod.impl.c.ggml_tensor = null;
+    var tensor_axis_0: ?*const mod.impl.llama_c.ggml_tensor = null;
     var nb: [160]u8 = undefined;
     if (suffix.len == 0) {
         tensor_axis_0 = cx.tensor;
@@ -623,7 +623,7 @@ fn splitGranularity(cx: *const Ctx, blck_size: i64, il: u32, n_segments: usize, 
 /// - `userdata`: a `*Userdata`.
 ///
 /// Return: the split state, by value as the C callback returns it.
-pub fn getSplitState(tensor: ?*const mod.impl.c.ggml_tensor, userdata: ?*anyopaque) callconv(.c) mod.impl.c.struct_ggml_backend_meta_split_state {
+pub fn getSplitState(tensor: ?*const mod.impl.llama_c.ggml_tensor, userdata: ?*anyopaque) callconv(.c) mod.impl.llama_c.struct_ggml_backend_meta_split_state {
     const ud: *const Userdata = @ptrCast(@alignCast(userdata.?));
     const model = ud.model.?;
     const hparams = &model.hparams;
@@ -638,13 +638,13 @@ pub fn getSplitState(tensor: ?*const mod.impl.c.ggml_tensor, userdata: ?*anyopaq
     };
     const n_devices = ud.n_devices;
 
-    var split_state = std.mem.zeroes(mod.impl.c.struct_ggml_backend_meta_split_state);
+    var split_state = std.mem.zeroes(mod.impl.llama_c.struct_ggml_backend_meta_split_state);
     const tc = tensorConfig(&cx);
     split_state.axis = tc.axis;
-    if (split_state.axis < mod.impl.c.GGML_MAX_DIMS) {
-        const blck_size: i64 = mod.impl.c.ggml_blck_size(tc.tensor_axis_0.type);
+    if (split_state.axis < mod.impl.llama_c.GGML_MAX_DIMS) {
+        const blck_size: i64 = mod.impl.llama_c.ggml_blck_size(tc.tensor_axis_0.type);
         const tensor_split = model.params.tensor_split;
-        var tensor_split_scan: [mod.impl.c.GGML_BACKEND_META_MAX_DEVICES]f32 = undefined;
+        var tensor_split_scan: [mod.impl.llama_c.GGML_BACKEND_META_MAX_DEVICES]f32 = undefined;
         for (0..n_devices) |j| {
             tensor_split_scan[j] = if (tensor_split == null) 0.0 else tensor_split[(j + tc.rotation) % n_devices];
             if (j > 0) tensor_split_scan[j] += tensor_split_scan[j - 1];
@@ -682,7 +682,7 @@ pub fn getSplitState(tensor: ?*const mod.impl.c.ggml_tensor, userdata: ?*anyopaq
         if (split_state.axis == axis_partial) {
             mod.impl.assert(tc.tensor_axis_0 != t, "llama-model.cpp", 1002, "tc.tensor_axis_0 != tensor");
             const source = getSplitState(tc.tensor_axis_0, userdata);
-            mod.impl.assert(source.axis < mod.impl.c.GGML_MAX_DIMS, "llama-model.cpp", 1004, "source_split_state.axis >= 0 && source_split_state.axis < GGML_MAX_DIMS");
+            mod.impl.assert(source.axis < mod.impl.llama_c.GGML_MAX_DIMS, "llama-model.cpp", 1004, "source_split_state.axis >= 0 && source_split_state.axis < GGML_MAX_DIMS");
             for (0..n_devices) |j| {
                 for (0..source.n_segments) |is| {
                     split_state.ne[j] += source.ne[is * n_devices + j] * source.nr[is];

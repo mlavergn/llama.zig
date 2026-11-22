@@ -207,7 +207,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         var cur = b.buildNorm(inpL, layer.attn_norm, null, .rms, il);
         b.cb(cur, "attn_norm", il);
 
-        llama.impl.c.ggml_build_forward_expand(b.gf, cur);
+        llama.impl.llama_c.ggml_build_forward_expand(b.gf, cur);
 
         if (hp.isRecr(@intCast(il))) {
             // Linear attention (the gated delta net).
@@ -218,12 +218,12 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         }
 
         if (il == b.n_layer - 1 and b.cropBeforeNextn(inp_out_ids)) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
         // The residual connection.
-        cur = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(cur, "attn_residual", il);
 
         // Kept for the FFN's residual connection.
@@ -238,7 +238,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         b.cb(cur, "ffn_out", il);
 
         // The FFN's residual: what came before the post-attention norm.
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_residual);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_residual);
         b.cb(cur, "post_moe", il);
 
         cur = b.buildCvec(cur, il);
@@ -255,7 +255,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     b.cb(cur, "h_nextn", -1);
     b.res.t_h_nextn = cur;
 
-    if (b.cropAfterNextn(inp_out_ids)) cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+    if (b.cropAfterNextn(inp_out_ids)) cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
 
     b.cb(cur, "result_norm", -1);
     b.res.t_embd = cur;
@@ -268,16 +268,16 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 }
 
 /// Ports `llama_model_qwen3next::graph`'s `build_norm_gated` (models/qwen3next.cpp:223 @b1b770d90).
-fn buildNormGated(b: *const llama.graph.Builder, input: *llama.impl.c.ggml_tensor, weights: ?*llama.impl.c.ggml_tensor, gate: *llama.impl.c.ggml_tensor, layer: c_int) *llama.impl.c.ggml_tensor {
+fn buildNormGated(b: *const llama.graph.Builder, input: *llama.impl.llama_c.ggml_tensor, weights: ?*llama.impl.llama_c.ggml_tensor, gate: *llama.impl.llama_c.ggml_tensor, layer: c_int) *llama.impl.llama_c.ggml_tensor {
     const normalized = b.buildNorm(input, weights, null, .rms, layer);
-    const gated_silu = llama.impl.c.ggml_silu(b.ctx0, gate);
-    return llama.impl.c.ggml_mul(b.ctx0, normalized, gated_silu);
+    const gated_silu = llama.impl.llama_c.ggml_silu(b.ctx0, gate);
+    return llama.impl.llama_c.ggml_mul(b.ctx0, normalized, gated_silu);
 }
 
 /// Ports `llama_model_qwen3next::graph`'s `build_layer_attn` (models/qwen3next.cpp:234
 /// @b1b770d90): a joint Q and gate projection, the split, Q and K norms,
 /// RoPE, attention, and the sigmoid gate.
-fn buildLayerAttn(model: *const llama.model.Model, b: *const llama.graph.Builder, inp: *llama.graph.InpAttnKv, cur_: *llama.impl.c.ggml_tensor, inp_pos: *llama.impl.c.ggml_tensor, il: c_int) *llama.impl.c.ggml_tensor {
+fn buildLayerAttn(model: *const llama.model.Model, b: *const llama.graph.Builder, inp: *llama.graph.InpAttnKv, cur_: *llama.impl.llama_c.ggml_tensor, inp_pos: *llama.impl.llama_c.ggml_tensor, il: c_int) *llama.impl.llama_c.ggml_tensor {
     const ctx = b.ctx0;
     const layer = &model.layers[@intCast(il)];
     const hp = b.hparams;
@@ -296,17 +296,17 @@ fn buildLayerAttn(model: *const llama.model.Model, b: *const llama.graph.Builder
     b.cb(Kcur, "Kcur", il);
     b.cb(Vcur, "Vcur", il);
 
-    Qcur_full = llama.impl.c.ggml_reshape_4d(ctx, Qcur_full, n_embd_head * 2, n_head, n_tokens, 1);
+    Qcur_full = llama.impl.llama_c.ggml_reshape_4d(ctx, Qcur_full, n_embd_head * 2, n_head, n_tokens, 1);
 
     // The split into the query and the gate, along the feature dimension.
-    var Qcur = llama.impl.c.ggml_view_4d(ctx, Qcur_full, n_embd_head, n_head, n_tokens, 1, Qcur_full.*.nb[1], Qcur_full.*.nb[2], Qcur_full.*.nb[3], 0);
+    var Qcur = llama.impl.llama_c.ggml_view_4d(ctx, Qcur_full, n_embd_head, n_head, n_tokens, 1, Qcur_full.*.nb[1], Qcur_full.*.nb[2], Qcur_full.*.nb[3], 0);
     b.cb(Qcur, "Qcur_view", il);
 
-    var gate = llama.impl.c.ggml_view_4d(ctx, Qcur_full, n_embd_head, n_head, n_tokens, 1, Qcur_full.*.nb[1], Qcur_full.*.nb[2], Qcur_full.*.nb[3], @as(usize, @intCast(n_embd_head)) * llama.impl.c.ggml_element_size(Qcur_full));
+    var gate = llama.impl.llama_c.ggml_view_4d(ctx, Qcur_full, n_embd_head, n_head, n_tokens, 1, Qcur_full.*.nb[1], Qcur_full.*.nb[2], Qcur_full.*.nb[3], @as(usize, @intCast(n_embd_head)) * llama.impl.llama_c.ggml_element_size(Qcur_full));
     b.cb(gate, "gate", il);
 
-    Kcur = llama.impl.c.ggml_reshape_3d(ctx, Kcur, n_embd_head, n_head_kv, n_tokens);
-    Vcur = llama.impl.c.ggml_reshape_3d(ctx, Vcur, n_embd_head, n_head_kv, n_tokens);
+    Kcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Kcur, n_embd_head, n_head_kv, n_tokens);
+    Vcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Vcur, n_embd_head, n_head_kv, n_tokens);
 
     Qcur = b.buildNorm(Qcur, layer.attn_q_norm, null, .rms, il);
     b.cb(Qcur, "Qcur_normed", il);
@@ -326,12 +326,12 @@ fn buildLayerAttn(model: *const llama.model.Model, b: *const llama.graph.Builder
     var cur = b.buildAttn(inp, null, null, null, Qcur, Kcur, Vcur, null, null, null, kq_scale, il);
     b.cb(cur, "attn_pregate", il);
 
-    gate = llama.impl.c.ggml_cont_2d(ctx, gate, n_embd_head * n_head, n_tokens);
+    gate = llama.impl.llama_c.ggml_cont_2d(ctx, gate, n_embd_head * n_head, n_tokens);
 
-    gate = llama.impl.c.ggml_sigmoid(ctx, gate);
+    gate = llama.impl.llama_c.ggml_sigmoid(ctx, gate);
     b.cb(gate, "gate_sigmoid", il);
 
-    cur = llama.impl.c.ggml_mul(ctx, cur, gate);
+    cur = llama.impl.llama_c.ggml_mul(ctx, cur, gate);
     b.cb(cur, "attn_gated", il);
 
     cur = b.buildLoraMm(layer.wo.?, cur, layer.wo_s);
@@ -343,7 +343,7 @@ fn buildLayerAttn(model: *const llama.model.Model, b: *const llama.graph.Builder
 /// Ports `llama_model_qwen3next::graph`'s `build_qkvz` (models/qwen3next.cpp:304
 /// @b1b770d90): the separate QKV and gate projections, or the legacy joint
 /// one split four ways.
-fn buildQkvz(model: *const llama.model.Model, b: *const llama.graph.Builder, input: *llama.impl.c.ggml_tensor, il: c_int) struct { *llama.impl.c.ggml_tensor, *llama.impl.c.ggml_tensor } {
+fn buildQkvz(model: *const llama.model.Model, b: *const llama.graph.Builder, input: *llama.impl.llama_c.ggml_tensor, il: c_int) struct { *llama.impl.llama_c.ggml_tensor, *llama.impl.llama_c.ggml_tensor } {
     const ctx = b.ctx0;
     const layer = &model.layers[@intCast(il)];
     const hp = b.hparams;
@@ -358,7 +358,7 @@ fn buildQkvz(model: *const llama.model.Model, b: *const llama.graph.Builder, inp
     if (layer.wqkv) |wqkv| {
         // The optimized path.
         var qkv_mixed = b.buildLoraMm(wqkv, input, layer.wqkv_s);
-        qkv_mixed = llama.impl.c.ggml_reshape_3d(ctx, qkv_mixed, qkv_mixed.*.ne[0], n_seq_tokens, n_seqs);
+        qkv_mixed = llama.impl.llama_c.ggml_reshape_3d(ctx, qkv_mixed, qkv_mixed.*.ne[0], n_seq_tokens, n_seqs);
         b.cb(qkv_mixed, "linear_attn_qkv_mixed", il);
 
         const z = b.buildLoraMm(layer.wqkv_gate.?, input, layer.wqkv_gate_s);
@@ -372,7 +372,7 @@ fn buildQkvz(model: *const llama.model.Model, b: *const llama.graph.Builder, inp
     b.cb(mixed_qkvz, "linear_attn_mixed_qkvz", il);
 
     const qkvz_new_dim = 2 * head_k_dim + 2 * head_v_dim * @divTrunc(num_v_heads, num_k_heads);
-    const mixed_qkvz_reshaped: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_4d(ctx, mixed_qkvz, qkvz_new_dim, num_k_heads, n_seq_tokens, n_seqs);
+    const mixed_qkvz_reshaped: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_reshape_4d(ctx, mixed_qkvz, qkvz_new_dim, num_k_heads, n_seq_tokens, n_seqs);
 
     // The split into query, key, value and z.
     const split_sizes_qkvz = [4]i64{
@@ -384,35 +384,35 @@ fn buildQkvz(model: *const llama.model.Model, b: *const llama.graph.Builder, inp
     const nb1 = mixed_qkvz_reshaped.nb[1];
     const nb2 = mixed_qkvz_reshaped.nb[2];
     const nb3 = mixed_qkvz_reshaped.nb[3];
-    const es = llama.impl.c.ggml_element_size(mixed_qkvz_reshaped);
+    const es = llama.impl.llama_c.ggml_element_size(mixed_qkvz_reshaped);
 
-    const query = llama.impl.c.ggml_view_4d(ctx, mixed_qkvz_reshaped, split_sizes_qkvz[0], num_k_heads, n_seq_tokens, n_seqs, nb1, nb2, nb3, 0);
+    const query = llama.impl.llama_c.ggml_view_4d(ctx, mixed_qkvz_reshaped, split_sizes_qkvz[0], num_k_heads, n_seq_tokens, n_seqs, nb1, nb2, nb3, 0);
     b.cb(query, "q", il);
 
-    const key = llama.impl.c.ggml_view_4d(ctx, mixed_qkvz_reshaped, split_sizes_qkvz[1], num_k_heads, n_seq_tokens, n_seqs, nb1, nb2, nb3, @as(usize, @intCast(split_sizes_qkvz[0])) * es);
+    const key = llama.impl.llama_c.ggml_view_4d(ctx, mixed_qkvz_reshaped, split_sizes_qkvz[1], num_k_heads, n_seq_tokens, n_seqs, nb1, nb2, nb3, @as(usize, @intCast(split_sizes_qkvz[0])) * es);
     b.cb(key, "k", il);
 
-    const value = llama.impl.c.ggml_view_4d(ctx, mixed_qkvz_reshaped, split_sizes_qkvz[2], num_k_heads, n_seq_tokens, n_seqs, nb1, nb2, nb3, @as(usize, @intCast(split_sizes_qkvz[0] + split_sizes_qkvz[1])) * es);
+    const value = llama.impl.llama_c.ggml_view_4d(ctx, mixed_qkvz_reshaped, split_sizes_qkvz[2], num_k_heads, n_seq_tokens, n_seqs, nb1, nb2, nb3, @as(usize, @intCast(split_sizes_qkvz[0] + split_sizes_qkvz[1])) * es);
     b.cb(value, "v", il);
 
-    var z = llama.impl.c.ggml_view_4d(ctx, mixed_qkvz_reshaped, split_sizes_qkvz[3], num_k_heads, n_seq_tokens, n_seqs, nb1, nb2, nb3, @as(usize, @intCast(split_sizes_qkvz[0] + split_sizes_qkvz[1] + split_sizes_qkvz[2])) * es);
-    z = llama.impl.c.ggml_cont(ctx, z);
+    var z = llama.impl.llama_c.ggml_view_4d(ctx, mixed_qkvz_reshaped, split_sizes_qkvz[3], num_k_heads, n_seq_tokens, n_seqs, nb1, nb2, nb3, @as(usize, @intCast(split_sizes_qkvz[0] + split_sizes_qkvz[1] + split_sizes_qkvz[2])) * es);
+    z = llama.impl.llama_c.ggml_cont(ctx, z);
     b.cb(z, "z", il);
 
     // Each flattened over its heads:
     // [head_dim, num_heads, n_tokens, n_seqs] -> [head_dim * num_heads, n_tokens, n_seqs]
-    const query_flat = llama.impl.c.ggml_cont_3d(ctx, query, head_k_dim * num_k_heads, n_seq_tokens, n_seqs);
+    const query_flat = llama.impl.llama_c.ggml_cont_3d(ctx, query, head_k_dim * num_k_heads, n_seq_tokens, n_seqs);
     b.cb(query_flat, "query_flat", il);
 
-    const key_flat = llama.impl.c.ggml_cont_3d(ctx, key, head_k_dim * num_k_heads, n_seq_tokens, n_seqs);
+    const key_flat = llama.impl.llama_c.ggml_cont_3d(ctx, key, head_k_dim * num_k_heads, n_seq_tokens, n_seqs);
     b.cb(key_flat, "key_flat", il);
 
-    const value_flat = llama.impl.c.ggml_cont_3d(ctx, value, head_v_dim * num_v_heads, n_seq_tokens, n_seqs);
+    const value_flat = llama.impl.llama_c.ggml_cont_3d(ctx, value, head_v_dim * num_v_heads, n_seq_tokens, n_seqs);
     b.cb(value_flat, "value_flat", il);
 
     // Concatenated along the feature dimension: [conv_dim, n_tokens, n_seqs].
-    var qkv_mixed = llama.impl.c.ggml_concat(ctx, query_flat, key_flat, 0);
-    qkv_mixed = llama.impl.c.ggml_concat(ctx, qkv_mixed, value_flat, 0);
+    var qkv_mixed = llama.impl.llama_c.ggml_concat(ctx, query_flat, key_flat, 0);
+    qkv_mixed = llama.impl.llama_c.ggml_concat(ctx, qkv_mixed, value_flat, 0);
     b.cb(qkv_mixed, "qkv_mixed", il);
 
     return .{ qkv_mixed, z };
@@ -420,7 +420,7 @@ fn buildQkvz(model: *const llama.model.Model, b: *const llama.graph.Builder, inp
 
 /// Ports `llama_model_qwen3next::graph`'s `build_layer_attn_linear` (models/qwen3next.cpp:385
 /// @b1b770d90): the gated delta net layer.
-fn buildLayerAttnLinear(model: *const llama.model.Model, b: *const llama.graph.Builder, inp: *llama.graph.InpRs, cur_: *llama.impl.c.ggml_tensor, il: c_int) *llama.impl.c.ggml_tensor {
+fn buildLayerAttnLinear(model: *const llama.model.Model, b: *const llama.graph.Builder, inp: *llama.graph.InpRs, cur_: *llama.impl.llama_c.ggml_tensor, il: c_int) *llama.impl.llama_c.ggml_tensor {
     const ctx = b.ctx0;
     const layer = &model.layers[@intCast(il)];
     const hp = b.hparams;
@@ -446,7 +446,7 @@ fn buildLayerAttnLinear(model: *const llama.model.Model, b: *const llama.graph.B
 
     // [batch, seq_len, hidden_size] -> [batch, seq_len, num_k_heads, 2*num_v_heads/num_k_heads]
     const ba_new_dim = @divTrunc(2 * num_v_heads, num_k_heads);
-    const mixed_ba_reshaped: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_4d(ctx, mixed_ba, ba_new_dim, num_k_heads, n_seq_tokens, n_seqs);
+    const mixed_ba_reshaped: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_reshape_4d(ctx, mixed_ba, ba_new_dim, num_k_heads, n_seq_tokens, n_seqs);
 
     // The split into beta and alpha.
     const split_sizes_ba = [2]i64{
@@ -454,27 +454,27 @@ fn buildLayerAttnLinear(model: *const llama.model.Model, b: *const llama.graph.B
         @divTrunc(num_v_heads, num_k_heads), // alpha
     };
 
-    const bt = llama.impl.c.ggml_view_4d(ctx, mixed_ba_reshaped, split_sizes_ba[0], num_k_heads, n_seq_tokens, n_seqs, mixed_ba_reshaped.nb[1], mixed_ba_reshaped.nb[2], mixed_ba_reshaped.nb[3], 0);
+    const bt = llama.impl.llama_c.ggml_view_4d(ctx, mixed_ba_reshaped, split_sizes_ba[0], num_k_heads, n_seq_tokens, n_seqs, mixed_ba_reshaped.nb[1], mixed_ba_reshaped.nb[2], mixed_ba_reshaped.nb[3], 0);
     b.cb(bt, "b", il);
 
-    const a = llama.impl.c.ggml_view_4d(ctx, mixed_ba_reshaped, split_sizes_ba[1], num_k_heads, n_seq_tokens, n_seqs, mixed_ba_reshaped.nb[1], mixed_ba_reshaped.nb[2], mixed_ba_reshaped.nb[3], @as(usize, @intCast(split_sizes_ba[0])) * llama.impl.c.ggml_element_size(mixed_ba_reshaped));
+    const a = llama.impl.llama_c.ggml_view_4d(ctx, mixed_ba_reshaped, split_sizes_ba[1], num_k_heads, n_seq_tokens, n_seqs, mixed_ba_reshaped.nb[1], mixed_ba_reshaped.nb[2], mixed_ba_reshaped.nb[3], @as(usize, @intCast(split_sizes_ba[0])) * llama.impl.llama_c.ggml_element_size(mixed_ba_reshaped));
     b.cb(a, "a", il);
 
-    var beta = llama.impl.c.ggml_sigmoid(ctx, bt);
+    var beta = llama.impl.llama_c.ggml_sigmoid(ctx, bt);
 
     // a with its head dimensions merged:
     // [batch, seq_len, num_k_heads, num_v_heads/num_k_heads] -> [batch, seq_len, num_v_heads]
-    const alpha = llama.impl.c.ggml_cont_3d(ctx, a, num_v_heads, n_seq_tokens, n_seqs);
+    const alpha = llama.impl.llama_c.ggml_cont_3d(ctx, a, num_v_heads, n_seq_tokens, n_seqs);
 
-    const alpha_biased = llama.impl.c.ggml_add(ctx, alpha, layer.ssm_dt);
-    const alpha_softplus = llama.impl.c.ggml_softplus(ctx, alpha_biased);
+    const alpha_biased = llama.impl.llama_c.ggml_add(ctx, alpha, layer.ssm_dt);
+    const alpha_softplus = llama.impl.llama_c.ggml_softplus(ctx, alpha_biased);
     b.cb(alpha_softplus, "a_softplus", il);
 
-    var gate = llama.impl.c.ggml_mul(ctx, alpha_softplus, layer.ssm_a); // -A_log.exp() * softplus
+    var gate = llama.impl.llama_c.ggml_mul(ctx, alpha_softplus, layer.ssm_a); // -A_log.exp() * softplus
     b.cb(gate, "gate", il);
 
-    beta = llama.impl.c.ggml_reshape_4d(ctx, beta, 1, num_v_heads, n_seq_tokens, n_seqs);
-    gate = llama.impl.c.ggml_reshape_4d(ctx, gate, 1, num_v_heads, n_seq_tokens, n_seqs);
+    beta = llama.impl.llama_c.ggml_reshape_4d(ctx, beta, 1, num_v_heads, n_seq_tokens, n_seqs);
+    gate = llama.impl.llama_c.ggml_reshape_4d(ctx, gate, 1, num_v_heads, n_seq_tokens, n_seqs);
 
     const conv_states_all = mctx_cur.getRL(il);
     const ssm_states_all = mctx_cur.getSL(il);
@@ -486,26 +486,26 @@ fn buildLayerAttnLinear(model: *const llama.model.Model, b: *const llama.graph.B
     const conv_input = llama.models.delta_net.buildConvState(b, inp, conv_states_all, qkv_mixed, conv_kernel_size, conv_channels, il);
 
     var state = b.buildRs(inp, ssm_states_all, @intCast(hp.nEmbdS()), @intCast(n_seqs), null);
-    state = llama.impl.c.ggml_reshape_4d(ctx, state, head_v_dim, head_v_dim, num_v_heads, n_seqs);
+    state = llama.impl.llama_c.ggml_reshape_4d(ctx, state, head_v_dim, head_v_dim, num_v_heads, n_seqs);
     b.cb(state, "state_predelta", il);
 
-    const conv_output_proper = llama.impl.c.ggml_ssm_conv(ctx, conv_input, conv_kernel);
+    const conv_output_proper = llama.impl.llama_c.ggml_ssm_conv(ctx, conv_input, conv_kernel);
     b.cb(conv_output_proper, "conv_output_raw", il);
 
-    const conv_output_silu = llama.impl.c.ggml_silu(ctx, conv_output_proper);
+    const conv_output_silu = llama.impl.llama_c.ggml_silu(ctx, conv_output_proper);
     b.cb(conv_output_silu, "conv_output_silu", il);
 
     const conv_qkv_mix = conv_output_silu;
 
     // The whole conv dimension.
     const qkv_dim = head_k_dim * num_k_heads * 2 + head_v_dim * num_v_heads;
-    const nb1_qkv = llama.impl.c.ggml_row_size(conv_qkv_mix.*.type, qkv_dim);
+    const nb1_qkv = llama.impl.llama_c.ggml_row_size(conv_qkv_mix.*.type, qkv_dim);
     const ty = conv_qkv_mix.*.type;
 
     // The convolved Q, K and V.
-    var q_conv = llama.impl.c.ggml_view_4d(ctx, conv_qkv_mix, head_k_dim, num_k_heads, n_seq_tokens, n_seqs, llama.impl.c.ggml_row_size(ty, head_k_dim), nb1_qkv, nb1_qkv * @as(usize, @intCast(n_seq_tokens)), 0);
-    var k_conv = llama.impl.c.ggml_view_4d(ctx, conv_qkv_mix, head_k_dim, num_k_heads, n_seq_tokens, n_seqs, llama.impl.c.ggml_row_size(ty, head_k_dim), nb1_qkv, nb1_qkv * @as(usize, @intCast(n_seq_tokens)), @as(usize, @intCast(head_k_dim * num_k_heads)) * llama.impl.c.ggml_element_size(conv_qkv_mix));
-    const v_conv = llama.impl.c.ggml_view_4d(ctx, conv_qkv_mix, head_v_dim, num_v_heads, n_seq_tokens, n_seqs, llama.impl.c.ggml_row_size(ty, head_v_dim), nb1_qkv, nb1_qkv * @as(usize, @intCast(n_seq_tokens)), llama.impl.c.ggml_row_size(ty, 2 * head_k_dim * num_k_heads));
+    var q_conv = llama.impl.llama_c.ggml_view_4d(ctx, conv_qkv_mix, head_k_dim, num_k_heads, n_seq_tokens, n_seqs, llama.impl.llama_c.ggml_row_size(ty, head_k_dim), nb1_qkv, nb1_qkv * @as(usize, @intCast(n_seq_tokens)), 0);
+    var k_conv = llama.impl.llama_c.ggml_view_4d(ctx, conv_qkv_mix, head_k_dim, num_k_heads, n_seq_tokens, n_seqs, llama.impl.llama_c.ggml_row_size(ty, head_k_dim), nb1_qkv, nb1_qkv * @as(usize, @intCast(n_seq_tokens)), @as(usize, @intCast(head_k_dim * num_k_heads)) * llama.impl.llama_c.ggml_element_size(conv_qkv_mix));
+    const v_conv = llama.impl.llama_c.ggml_view_4d(ctx, conv_qkv_mix, head_v_dim, num_v_heads, n_seq_tokens, n_seqs, llama.impl.llama_c.ggml_row_size(ty, head_v_dim), nb1_qkv, nb1_qkv * @as(usize, @intCast(n_seq_tokens)), llama.impl.llama_c.ggml_row_size(ty, 2 * head_k_dim * num_k_heads));
 
     b.cb(q_conv, "q_conv", il);
     b.cb(k_conv, "k_conv", il);
@@ -523,17 +523,17 @@ fn buildLayerAttnLinear(model: *const llama.model.Model, b: *const llama.graph.B
 
         // A repeat interleave: reshape to (repeat part, 1, the rest), repeat,
         // reshape back.
-        const q_reshaped = llama.impl.c.ggml_reshape_4d(ctx, q_conv, head_k_dim, 1, num_k_heads, n_seq_tokens * n_seqs);
-        const k_reshaped = llama.impl.c.ggml_reshape_4d(ctx, k_conv, head_k_dim, 1, num_k_heads, n_seq_tokens * n_seqs);
+        const q_reshaped = llama.impl.llama_c.ggml_reshape_4d(ctx, q_conv, head_k_dim, 1, num_k_heads, n_seq_tokens * n_seqs);
+        const k_reshaped = llama.impl.llama_c.ggml_reshape_4d(ctx, k_conv, head_k_dim, 1, num_k_heads, n_seq_tokens * n_seqs);
 
         // Repeated along the new dimension of size 1.
-        const q_repeated = llama.impl.c.ggml_repeat_4d(ctx, q_reshaped, head_k_dim, repeat_factor, num_k_heads, n_seq_tokens * n_seqs);
-        const k_repeated = llama.impl.c.ggml_repeat_4d(ctx, k_reshaped, head_k_dim, repeat_factor, num_k_heads, n_seq_tokens * n_seqs);
+        const q_repeated = llama.impl.llama_c.ggml_repeat_4d(ctx, q_reshaped, head_k_dim, repeat_factor, num_k_heads, n_seq_tokens * n_seqs);
+        const k_repeated = llama.impl.llama_c.ggml_repeat_4d(ctx, k_reshaped, head_k_dim, repeat_factor, num_k_heads, n_seq_tokens * n_seqs);
 
         // [head_dim, repeat_factor, num_k_heads, n_seq_tokens * n_seqs] ->
         // [head_dim, repeat_factor * num_k_heads, n_seq_tokens, n_seqs]
-        q_conv = llama.impl.c.ggml_reshape_4d(ctx, q_repeated, head_k_dim, num_k_heads * repeat_factor, n_seq_tokens, n_seqs);
-        k_conv = llama.impl.c.ggml_reshape_4d(ctx, k_repeated, head_k_dim, num_k_heads * repeat_factor, n_seq_tokens, n_seqs);
+        q_conv = llama.impl.llama_c.ggml_reshape_4d(ctx, q_repeated, head_k_dim, num_k_heads * repeat_factor, n_seq_tokens, n_seqs);
+        k_conv = llama.impl.llama_c.ggml_reshape_4d(ctx, k_repeated, head_k_dim, num_k_heads * repeat_factor, n_seq_tokens, n_seqs);
     }
 
     b.cb(q_conv, "q_conv_predelta", il);
@@ -543,13 +543,13 @@ fn buildLayerAttnLinear(model: *const llama.model.Model, b: *const llama.graph.B
     const output = llama.models.delta_net.buildRecurrentAttn(b, inp, ssm_states_all, q_conv, k_conv, v_conv, gate, beta, state, il);
 
     // z: [head_dim, n_heads, n_tokens, n_seqs] -> [n_heads * n_tokens * n_seqs, head_dim]
-    const z_2d = llama.impl.c.ggml_reshape_4d(ctx, z, head_v_dim, num_v_heads, n_seq_tokens, n_seqs);
+    const z_2d = llama.impl.llama_c.ggml_reshape_4d(ctx, z, head_v_dim, num_v_heads, n_seq_tokens, n_seqs);
 
     // The gated norm, self.norm(core_attn_out, z).
     const attn_out_norm = buildNormGated(b, output, layer.ssm_norm, z_2d, il);
 
     // [head_dim, n_heads, n_tokens, n_seqs] -> [n_heads * head_dim, n_tokens * n_seqs]
-    const final_output = llama.impl.c.ggml_reshape_2d(ctx, attn_out_norm, head_v_dim * num_v_heads, n_seq_tokens * n_seqs);
+    const final_output = llama.impl.llama_c.ggml_reshape_2d(ctx, attn_out_norm, head_v_dim * num_v_heads, n_seq_tokens * n_seqs);
     b.cb(final_output, "final_output", il);
 
     // The output projection.
@@ -562,7 +562,7 @@ fn buildLayerAttnLinear(model: *const llama.model.Model, b: *const llama.graph.B
 /// Ports `llama_model_qwen3next::graph`'s `build_layer_ffn` (models/qwen3next.cpp:549
 /// @b1b770d90): the routed experts plus the gated shared expert, or a
 /// dense FFN for a layer without a router.
-fn buildLayerFfn(model: *const llama.model.Model, b: *const llama.graph.Builder, cur_: *llama.impl.c.ggml_tensor, il: c_int) *llama.impl.c.ggml_tensor {
+fn buildLayerFfn(model: *const llama.model.Model, b: *const llama.graph.Builder, cur_: *llama.impl.llama_c.ggml_tensor, il: c_int) *llama.impl.llama_c.ggml_tensor {
     const ctx = b.ctx0;
     const layer = &model.layers[@intCast(il)];
 
@@ -601,13 +601,13 @@ fn buildLayerFfn(model: *const llama.model.Model, b: *const llama.graph.Builder,
     var shared_gate = b.buildLoraMm(layer.ffn_gate_inp_shexp.?, cur_, null);
     b.cb(shared_gate, "shared_expert_gate", il);
 
-    shared_gate = llama.impl.c.ggml_sigmoid(ctx, shared_gate);
+    shared_gate = llama.impl.llama_c.ggml_sigmoid(ctx, shared_gate);
     b.cb(shared_gate, "shared_expert_gate_sigmoid", il);
 
-    ffn_shexp = llama.impl.c.ggml_mul(ctx, ffn_shexp, shared_gate);
+    ffn_shexp = llama.impl.llama_c.ggml_mul(ctx, ffn_shexp, shared_gate);
     b.cb(ffn_shexp, "ffn_shexp_gated", il);
 
-    const cur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, moe_out, ffn_shexp);
+    const cur: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, moe_out, ffn_shexp);
     b.cb(cur, "ffn_out", il);
     return cur;
 }
@@ -634,17 +634,17 @@ fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder)
     const inp = std.heap.c_allocator.create(llama.graph.InpEmbdH) catch llama.impl.abort("models/qwen3next.cpp", 629, "out of memory");
     inp.* = .{ .n_embd = hp.nEmbdInp(), .n_embd_state = hp.n_embd };
 
-    inp.tokens = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_I32, b.n_tokens);
-    llama.impl.c.ggml_set_input(inp.tokens);
+    inp.tokens = llama.impl.llama_c.ggml_new_tensor_1d(ctx, llama.impl.llama_c.GGML_TYPE_I32, b.n_tokens);
+    llama.impl.llama_c.ggml_set_input(inp.tokens);
 
-    inp.embd = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_F32, hp.nEmbdInp(), b.n_tokens);
-    llama.impl.c.ggml_set_input(inp.embd);
+    inp.embd = llama.impl.llama_c.ggml_new_tensor_2d(ctx, llama.impl.llama_c.GGML_TYPE_F32, hp.nEmbdInp(), b.n_tokens);
+    llama.impl.llama_c.ggml_set_input(inp.embd);
 
-    var tok_embd: *llama.impl.c.ggml_tensor = undefined;
+    var tok_embd: *llama.impl.llama_c.ggml_tensor = undefined;
     b.ubatch.assertEmbdOrToken("models/qwen3next.cpp", 640);
     if (b.ubatch.token != null) {
         const tok_embd_w = layer.nextn.embed_tokens orelse model.tok_embd.?;
-        tok_embd = llama.impl.c.ggml_get_rows(ctx, tok_embd_w, inp.tokens);
+        tok_embd = llama.impl.llama_c.ggml_get_rows(ctx, tok_embd_w, inp.tokens);
     } else {
         tok_embd = inp.embd.?;
     }
@@ -667,7 +667,7 @@ fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder)
     const e_norm = b.buildNorm(tok_embd, layer.nextn.enorm, null, .rms, il);
     b.cb(e_norm, "mtp_enorm", il);
 
-    const concat = llama.impl.c.ggml_concat(ctx, e_norm, h_norm, 0);
+    const concat = llama.impl.llama_c.ggml_concat(ctx, e_norm, h_norm, 0);
     b.cb(concat, "mtp_concat", il);
 
     var cur = b.buildLoraMm(layer.nextn.eh_proj.?, concat, layer.nextn.eh_proj_s);
@@ -682,21 +682,21 @@ fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder)
     const Qcur_full = qkv.q;
     b.cb(Qcur_full, "mtp_Qcur_full", il);
 
-    const es = llama.impl.c.ggml_element_size(Qcur_full);
+    const es = llama.impl.llama_c.ggml_element_size(Qcur_full);
     const head_sz: usize = @intCast(n_embd_head);
     const n_head: usize = @intCast(b.n_head);
 
-    var Qcur = llama.impl.c.ggml_view_3d(ctx, Qcur_full, n_embd_head, b.n_head, b.n_tokens, es * head_sz * 2, es * head_sz * 2 * n_head, 0);
+    var Qcur = llama.impl.llama_c.ggml_view_3d(ctx, Qcur_full, n_embd_head, b.n_head, b.n_tokens, es * head_sz * 2, es * head_sz * 2 * n_head, 0);
     Qcur = b.buildNorm(Qcur, layer.attn_q_norm, null, .rms, il);
     b.cb(Qcur, "mtp_Qcur_normed", il);
 
     var Kcur = qkv.k;
-    Kcur = llama.impl.c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, b.n_tokens);
+    Kcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, b.n_tokens);
     Kcur = b.buildNorm(Kcur, layer.attn_k_norm, null, .rms, il);
     b.cb(Kcur, "mtp_Kcur_normed", il);
 
     var Vcur = qkv.v;
-    Vcur = llama.impl.c.ggml_reshape_3d(ctx, Vcur, n_embd_head, b.n_head_kv, b.n_tokens);
+    Vcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Vcur, n_embd_head, b.n_head_kv, b.n_tokens);
 
     Qcur = b.buildRope(Qcur, inp_pos, il);
     Kcur = b.buildRope(Kcur, inp_pos, il);
@@ -710,19 +710,19 @@ fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder)
     cur = b.buildAttn(inp_attn, null, null, null, Qcur, Kcur, Vcur, null, null, null, kq_scale, il);
     b.cb(cur, "mtp_attn_pregate", il);
 
-    var gate = llama.impl.c.ggml_view_3d(ctx, Qcur_full, n_embd_head, b.n_head, b.n_tokens, es * head_sz * 2, es * head_sz * 2 * n_head, es * head_sz);
+    var gate = llama.impl.llama_c.ggml_view_3d(ctx, Qcur_full, n_embd_head, b.n_head, b.n_tokens, es * head_sz * 2, es * head_sz * 2 * n_head, es * head_sz);
 
-    gate = llama.impl.c.ggml_cont_2d(ctx, gate, n_embd_head * b.n_head, b.n_tokens);
+    gate = llama.impl.llama_c.ggml_cont_2d(ctx, gate, n_embd_head * b.n_head, b.n_tokens);
     b.cb(gate, "mtp_gate", il);
 
-    cur = llama.impl.c.ggml_mul(ctx, cur, llama.impl.c.ggml_sigmoid(ctx, gate));
+    cur = llama.impl.llama_c.ggml_mul(ctx, cur, llama.impl.llama_c.ggml_sigmoid(ctx, gate));
     cur = b.buildLoraMm(layer.wo.?, cur, layer.wo_s);
     b.cb(cur, "mtp_attn_out", il);
 
-    cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-    inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+    cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+    inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
 
-    cur = llama.impl.c.ggml_add(ctx, cur, inpSA);
+    cur = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
     b.cb(cur, "mtp_attn_residual", il);
 
     const ffn_residual = cur;
@@ -754,19 +754,19 @@ fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder)
         b.cb(ffn_shexp, "mtp_ffn_shexp", il);
 
         var shared_gate = b.buildLoraMm(layer.ffn_gate_inp_shexp.?, cur, null);
-        shared_gate = llama.impl.c.ggml_sigmoid(ctx, shared_gate);
+        shared_gate = llama.impl.llama_c.ggml_sigmoid(ctx, shared_gate);
         b.cb(shared_gate, "mtp_shared_expert_gate_sigmoid", il);
 
-        ffn_shexp = llama.impl.c.ggml_mul(ctx, ffn_shexp, shared_gate);
+        ffn_shexp = llama.impl.llama_c.ggml_mul(ctx, ffn_shexp, shared_gate);
         b.cb(ffn_shexp, "mtp_ffn_shexp_gated", il);
 
-        cur = llama.impl.c.ggml_add(ctx, moe_out, ffn_shexp);
+        cur = llama.impl.llama_c.ggml_add(ctx, moe_out, ffn_shexp);
     } else {
         cur = moe_out;
     }
     b.cb(cur, "mtp_ffn_out", il);
 
-    cur = llama.impl.c.ggml_add(ctx, cur, ffn_residual);
+    cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_residual);
     b.cb(cur, "mtp_post_ffn", il);
 
     const head_norm_w = layer.nextn.shared_head_norm orelse model.output_norm;

@@ -13,8 +13,6 @@ const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
 
-const Allocator = std.mem.Allocator;
-
 const sep = "<|sep|>";
 const msg_start = "<|open|>message role=\"assistant\"<|sep|>";
 const think_start = "<|open|>think<|sep|>";
@@ -31,7 +29,7 @@ const msg_end = "<|close|>message<|sep|>";
 const eom_token = "<|end_of_msg|>";
 
 const Build = struct {
-    a: Allocator,
+    a: std.mem.Allocator,
     inputs: *const common_chat.template.GenerationParams,
     has_tools: bool,
     extract_reasoning: bool,
@@ -157,7 +155,7 @@ const Build = struct {
 /// Ports `common_chat_params_init_kimi_k3` (parsers/kimi-k3.cpp:8 @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
-pub fn init(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
+pub fn init(a: std.mem.Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
     var data: common_chat.params.ChatParams = .{};
 
     data.prompt = try common_chat.template.directApplyImpl(a, tmpl, inputs, null, null, null);

@@ -26,7 +26,7 @@ const ggml = @import("../../../module.zig");
 /// `dmin` before any weight is read; the weights follow, fused with `d`. Two
 /// `fmadd`s into one `acc` per super-block, in that order. The C asserts
 /// only `nrc == 1` here, not `n % QK_K == 0`.
-pub export fn ggml_vec_dot_q2_K_q8_K(
+pub fn ggml_vec_dot_q2_K_q8_K(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -35,14 +35,14 @@ pub export fn ggml_vec_dot_q2_K_q8_K(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
+) callconv(.c) void {
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
     const x = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.Q2_K, vx);
     const y = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK_K));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK_K));
 
     const m3 = ggml.cpu.quants.arch.avx2.mm256_set1_epi8(3);
     const m4 = ggml.cpu.quants.arch.avx2.mm_set1_epi8(0xF);
@@ -71,7 +71,7 @@ pub export fn ggml_vec_dot_q2_K_q8_K(
 
         var sumi = ggml.cpu.quants.arch.avx2.mm256_setzero_si256();
 
-        for (0..ggml.impl.c.QK_K / 128) |j| {
+        for (0..ggml.impl.ggml_c.QK_K / 128) |j| {
             const q2bits = ggml.cpu.quants.arch.avx2.mm256_loadu_si256(q2);
             q2 += 32;
 
@@ -119,7 +119,7 @@ pub export fn ggml_vec_dot_q2_K_q8_K(
 /// clear and 0 where it is set. **`is` is never advanced** in this arm --
 /// every 128-weight half takes shuffles 0 to 3 of its own `scales[j]` -- and
 /// the port keeps it that way, since it is what the C computes.
-pub export fn ggml_vec_dot_q3_K_q8_K(
+pub fn ggml_vec_dot_q3_K_q8_K(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -128,8 +128,8 @@ pub export fn ggml_vec_dot_q3_K_q8_K(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
+) callconv(.c) void {
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
@@ -139,7 +139,7 @@ pub export fn ggml_vec_dot_q3_K_q8_K(
     const x = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.Q3_K, vx);
     const y = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK_K));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK_K));
 
     const m3 = ggml.cpu.quants.arch.avx2.mm256_set1_epi8(3);
     const mone = ggml.cpu.quants.arch.avx2.mm256_set1_epi8(1);
@@ -178,7 +178,7 @@ pub export fn ggml_vec_dot_q3_K_q8_K(
         var bit: u32 = 0;
         const is: usize = 0;
 
-        for (0..ggml.impl.c.QK_K / 128) |j| {
+        for (0..ggml.impl.ggml_c.QK_K / 128) |j| {
             // load low 2 bits
             const q3bits = ggml.cpu.quants.arch.avx2.mm256_loadu_si256(q3);
             q3 += 32;
@@ -252,7 +252,7 @@ pub export fn ggml_vec_dot_q3_K_q8_K(
 /// `q5_K` without the fifth bit, and with the mins kept as four lanes,
 /// `acc_m`, folded once at the end -- `(m0 + m2) + (m1 + m3)` -- where
 /// `q5_K` folds each super-block's to a scalar first.
-pub export fn ggml_vec_dot_q4_K_q8_K(
+pub fn ggml_vec_dot_q4_K_q8_K(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -261,15 +261,15 @@ pub export fn ggml_vec_dot_q4_K_q8_K(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
+) callconv(.c) void {
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
     const x = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.Q4_K, vx);
     const y = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK_K));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK_K));
 
     const m4 = ggml.cpu.quants.arch.avx2.mm256_set1_epi8(0xF);
 
@@ -302,7 +302,7 @@ pub export fn ggml_vec_dot_q4_K_q8_K(
 
         var sumi = ggml.cpu.quants.arch.avx2.mm256_setzero_si256();
 
-        for (0..ggml.impl.c.QK_K / 64) |j| {
+        for (0..ggml.impl.ggml_c.QK_K / 64) |j| {
             const scale_l = ggml.cpu.quants.arch.avx2.mm256_shuffle_epi8(scales, ggml.cpu.quants.arch.common.get_scale_shuffle_k4(2 * j + 0));
             const scale_h = ggml.cpu.quants.arch.avx2.mm256_shuffle_epi8(scales, ggml.cpu.quants.arch.common.get_scale_shuffle_k4(2 * j + 1));
 
@@ -345,7 +345,7 @@ pub export fn ggml_vec_dot_q4_K_q8_K(
 /// `summs += dmin * hsum` is one `vfnmadd231ss` in the reference: `dmin` is
 /// negated, so `-(y.d * x.dmin) * hsum + summs`, which `@mulAdd` with the
 /// negated factor computes to the same bits.
-pub export fn ggml_vec_dot_q5_K_q8_K(
+pub fn ggml_vec_dot_q5_K_q8_K(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -354,15 +354,15 @@ pub export fn ggml_vec_dot_q5_K_q8_K(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
+) callconv(.c) void {
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
     const x = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.Q5_K, vx);
     const y = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK_K));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK_K));
 
     const m4 = ggml.cpu.quants.arch.avx2.mm256_set1_epi8(0xF);
     const mzero = ggml.cpu.quants.arch.avx2.mm_setzero_si128();
@@ -404,7 +404,7 @@ pub export fn ggml_vec_dot_q5_K_q8_K(
 
         var bit: u32 = 0;
 
-        for (0..ggml.impl.c.QK_K / 64) |j| {
+        for (0..ggml.impl.ggml_c.QK_K / 64) |j| {
             const scale_0 = ggml.cpu.quants.arch.avx2.mm256_shuffle_epi8(scales, ggml.cpu.quants.arch.common.get_scale_shuffle_k4(2 * j + 0));
             const scale_1 = ggml.cpu.quants.arch.avx2.mm256_shuffle_epi8(scales, ggml.cpu.quants.arch.common.get_scale_shuffle_k4(2 * j + 1));
 
@@ -451,7 +451,7 @@ pub export fn ggml_vec_dot_q5_K_q8_K(
 /// scales. The bias of 32 comes off once per super-block, as `bsums`
 /// against the scales shifted left by five, subtracted in integers before
 /// the one fused multiply-add.
-pub export fn ggml_vec_dot_q6_K_q8_K(
+pub fn ggml_vec_dot_q6_K_q8_K(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -460,15 +460,15 @@ pub export fn ggml_vec_dot_q6_K_q8_K(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
+) callconv(.c) void {
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
     const x = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.Q6_K, vx);
     const y = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK_K));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK_K));
 
     const m3 = ggml.cpu.quants.arch.avx2.mm256_set1_epi8(3);
     const m15 = ggml.cpu.quants.arch.avx2.mm256_set1_epi8(15);
@@ -491,7 +491,7 @@ pub export fn ggml_vec_dot_q6_K_q8_K(
 
         var is: usize = 0;
 
-        for (0..ggml.impl.c.QK_K / 128) |_| {
+        for (0..ggml.impl.ggml_c.QK_K / 128) |_| {
             const q4bits1 = ggml.cpu.quants.arch.avx2.mm256_loadu_si256(q4);
             q4 += 32;
             const q4bits2 = ggml.cpu.quants.arch.avx2.mm256_loadu_si256(q4);

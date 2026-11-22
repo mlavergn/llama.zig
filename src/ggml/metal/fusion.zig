@@ -38,8 +38,6 @@ const std = @import("std");
 const ggml = @import("../module.zig");
 
 /// The allocator ported ggml uses — libc's, as in the rest of `metal/`.
-const allocator = std.heap.c_allocator;
-
 /// Ports `GGML_METAL_FUSION_MAX` (ggml-metal-fusion.h:23 @b1b770d90): the
 /// most nodes one kernel fuses, and the longest run the optimizer packs.
 pub const max = 16;
@@ -85,7 +83,7 @@ pub const Id = enum(c_uint) {
 /// non-empty node; `node_idxs[idx + j]` is its raw graph index.
 pub const CheckFn = *const fn (
     fusion: *const Fusion,
-    nodes: [*]const *const ggml.impl.c.ggml_tensor,
+    nodes: [*]const *const ggml.impl.ggml_c.ggml_tensor,
     gf: *const ggml.impl.CGraph,
     node_idxs: [*]const c_int,
     idx: c_int,
@@ -101,9 +99,9 @@ pub const Fusion = struct {
     id: Id,
 
     /// non-empty op sequence, derived from `ops_all`
-    ops: []const ggml.impl.c.enum_ggml_op,
+    ops: []const ggml.impl.ggml_c.enum_ggml_op,
     /// full raw op sequence (may include empty RESHAPE/VIEW nodes)
-    ops_all: []const ggml.impl.c.enum_ggml_op,
+    ops_all: []const ggml.impl.ggml_c.enum_ggml_op,
     /// additional fused output nodes, relative to `ops`
     outs: []const c_int,
 
@@ -120,9 +118,9 @@ pub const Fusion = struct {
 /// Ports `ggml_metal_fusion_filter_ops` (ggml-metal-fusion.cpp:16
 /// @b1b770d90): the non-empty op sequence of a raw one. The table is a
 /// constant, so this runs at compile time.
-fn filterOps(comptime ops_all: []const ggml.impl.c.enum_ggml_op) []const ggml.impl.c.enum_ggml_op {
+fn filterOps(comptime ops_all: []const ggml.impl.ggml_c.enum_ggml_op) []const ggml.impl.ggml_c.enum_ggml_op {
     comptime {
-        var ops: [ops_all.len]ggml.impl.c.enum_ggml_op = undefined;
+        var ops: [ops_all.len]ggml.impl.ggml_c.enum_ggml_op = undefined;
         var n: usize = 0;
         for (ops_all) |op| {
             if (!ggml.impl.opIsEmpty(op)) {
@@ -137,7 +135,7 @@ fn filterOps(comptime ops_all: []const ggml.impl.c.enum_ggml_op) []const ggml.im
 
 /// Ports `ggml_metal_fusion_get_id` (ggml-metal-fusion.cpp:69 @b1b770d90):
 /// the pattern's identifier, for callers that see the struct as opaque.
-pub export fn ggml_metal_fusion_get_id(fusion: *const Fusion) callconv(.c) Id {
+pub fn ggml_metal_fusion_get_id(fusion: *const Fusion) callconv(.c) Id {
     return fusion.id;
 }
 
@@ -146,23 +144,23 @@ pub export fn ggml_metal_fusion_get_id(fusion: *const Fusion) callconv(.c) Id {
 
 /// `src[i]`, narrowed: a `[*c]` must go through `impl.one` before an array
 /// field is indexed through it (Zig miscompiles `p.*.arr[i]`).
-inline fn src(t: *const ggml.impl.c.ggml_tensor, i: usize) *const ggml.impl.c.ggml_tensor {
-    return ggml.impl.one(ggml.impl.c.ggml_tensor, t.src[i]);
+inline fn src(t: *const ggml.impl.ggml_c.ggml_tensor, i: usize) *const ggml.impl.ggml_c.ggml_tensor {
+    return ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, t.src[i]);
 }
 
 /// `gf->nodes[i]`.
-inline fn gnode(gf: *const ggml.impl.CGraph, i: c_int) *const ggml.impl.c.ggml_tensor {
+inline fn gnode(gf: *const ggml.impl.CGraph, i: c_int) *const ggml.impl.ggml_c.ggml_tensor {
     return gf.nodes[@intCast(i)].?;
 }
 
 /// Ports `ggml_metal_fusion_same_buffer` (ggml-metal-fusion.cpp:76
 /// @b1b770d90): true if two tensors live in the same Metal buffer.
-fn sameBuffer(a_opt: ?*const ggml.impl.c.ggml_tensor, b_opt: ?*const ggml.impl.c.ggml_tensor) bool {
+fn sameBuffer(a_opt: ?*const ggml.impl.ggml_c.ggml_tensor, b_opt: ?*const ggml.impl.ggml_c.ggml_tensor) bool {
     const a = a_opt orelse return false;
     const b = b_opt orelse return false;
 
-    const ba = ggml.impl.one(ggml.impl.c.ggml_backend_buffer, if (a.view_src != null) ggml.impl.one(ggml.impl.c.ggml_tensor, a.view_src).buffer else a.buffer);
-    const bb = ggml.impl.one(ggml.impl.c.ggml_backend_buffer, if (b.view_src != null) ggml.impl.one(ggml.impl.c.ggml_tensor, b.view_src).buffer else b.buffer);
+    const ba = ggml.impl.one(ggml.impl.ggml_c.ggml_backend_buffer, if (a.view_src != null) ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, a.view_src).buffer else a.buffer);
+    const bb = ggml.impl.one(ggml.impl.ggml_c.ggml_backend_buffer, if (b.view_src != null) ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, b.view_src).buffer else b.buffer);
 
     const ca: *ggml.metal.device_c.Buffer = @ptrCast(@alignCast(ba.context.?));
     const cb: *ggml.metal.device_c.Buffer = @ptrCast(@alignCast(bb.context.?));
@@ -173,9 +171,9 @@ fn sameBuffer(a_opt: ?*const ggml.impl.c.ggml_tensor, b_opt: ?*const ggml.impl.c
 /// Ports `ggml_metal_fusion_overlap` (ggml-metal-fusion.cpp:91
 /// @b1b770d90): true if the memory of two tensors overlaps in the same
 /// Metal buffer.
-fn overlap(a: *const ggml.impl.c.ggml_tensor, b: *const ggml.impl.c.ggml_tensor) bool {
-    const ba = ggml.impl.one(ggml.impl.c.ggml_backend_buffer, if (a.view_src != null) ggml.impl.one(ggml.impl.c.ggml_tensor, a.view_src).buffer else a.buffer);
-    const bb = ggml.impl.one(ggml.impl.c.ggml_backend_buffer, if (b.view_src != null) ggml.impl.one(ggml.impl.c.ggml_tensor, b.view_src).buffer else b.buffer);
+fn overlap(a: *const ggml.impl.ggml_c.ggml_tensor, b: *const ggml.impl.ggml_c.ggml_tensor) bool {
+    const ba = ggml.impl.one(ggml.impl.ggml_c.ggml_backend_buffer, if (a.view_src != null) ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, a.view_src).buffer else a.buffer);
+    const bb = ggml.impl.one(ggml.impl.ggml_c.ggml_backend_buffer, if (b.view_src != null) ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, b.view_src).buffer else b.buffer);
 
     const bid_a = ggml.metal.device_c.ggml_metal_buffer_get_id(@ptrCast(@alignCast(ba.context.?)), a);
     const bid_b = ggml.metal.device_c.ggml_metal_buffer_get_id(@ptrCast(@alignCast(bb.context.?)), b);
@@ -185,9 +183,9 @@ fn overlap(a: *const ggml.impl.c.ggml_tensor, b: *const ggml.impl.c.ggml_tensor)
     }
 
     return if (bid_a.offs <= bid_b.offs)
-        bid_b.offs - bid_a.offs < ggml.impl.c.ggml_nbytes(a)
+        bid_b.offs - bid_a.offs < ggml.impl.ggml_c.ggml_nbytes(a)
     else
-        bid_a.offs - bid_b.offs < ggml.impl.c.ggml_nbytes(b);
+        bid_a.offs - bid_b.offs < ggml.impl.ggml_c.ggml_nbytes(b);
 }
 
 // -----------------------------------------------------------------------------
@@ -199,7 +197,7 @@ fn overlap(a: *const ggml.impl.c.ggml_tensor, b: *const ggml.impl.c.ggml_tensor)
 /// NORM/RMS_NORM + MUL + ADD: the weight/bias of each fused step must match
 /// the norm input width, be contiguous rows, and the fused outputs must
 /// stay F32. NORM/RMS_NORM + SCALE: a plain F32 scale of the norm.
-fn checkNorm(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_tensor, gf: *const ggml.impl.CGraph, node_idxs: [*]const c_int, idx: c_int, mode: Mode) bool {
+fn checkNorm(fusion: *const Fusion, nodes: [*]const *const ggml.impl.ggml_c.ggml_tensor, gf: *const ggml.impl.CGraph, node_idxs: [*]const c_int, idx: c_int, mode: Mode) bool {
     _ = mode;
     _ = gf;
     _ = node_idxs;
@@ -211,8 +209,8 @@ fn checkNorm(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_tens
         ggml.impl.assert(fusion.ops.len == 2, "fusion->ops.size() == 2");
 
         const scale = nodes[1];
-        if (scale.op != ggml.impl.c.GGML_OP_SCALE or scale.src[0] != nodes[0] or scale.src[1] != null or
-            scale.type != ggml.impl.c.GGML_TYPE_F32)
+        if (scale.op != ggml.impl.ggml_c.GGML_OP_SCALE or scale.src[0] != nodes[0] or scale.src[1] != null or
+            scale.type != ggml.impl.ggml_c.GGML_TYPE_F32)
         {
             return false;
         }
@@ -236,7 +234,7 @@ fn checkNorm(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_tens
             return false;
         }
 
-        if (nodes[j].type != ggml.impl.c.GGML_TYPE_F32) {
+        if (nodes[j].type != ggml.impl.ggml_c.GGML_TYPE_F32) {
             return false;
         }
     }
@@ -246,7 +244,7 @@ fn checkNorm(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_tens
 
 /// Ports `ggml_metal_fusion_check_ssm_conv_silu` (ggml-metal-fusion.cpp:161
 /// @b1b770d90): SSM_CONV + UNARY (silu).
-fn checkSsmConvSilu(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_tensor, gf: *const ggml.impl.CGraph, node_idxs: [*]const c_int, idx: c_int, mode: Mode) bool {
+fn checkSsmConvSilu(fusion: *const Fusion, nodes: [*]const *const ggml.impl.ggml_c.ggml_tensor, gf: *const ggml.impl.CGraph, node_idxs: [*]const c_int, idx: c_int, mode: Mode) bool {
     _ = fusion;
     _ = gf;
     _ = node_idxs;
@@ -256,15 +254,15 @@ fn checkSsmConvSilu(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.gg
     const conv = nodes[0];
     const un = nodes[1];
 
-    if (conv.op != ggml.impl.c.GGML_OP_SSM_CONV or un.op != ggml.impl.c.GGML_OP_UNARY or un.src[0] != conv or un.src[1] != null) {
+    if (conv.op != ggml.impl.ggml_c.GGML_OP_SSM_CONV or un.op != ggml.impl.ggml_c.GGML_OP_UNARY or un.src[0] != conv or un.src[1] != null) {
         return false;
     }
 
-    if (ggml.types.ggml_get_unary_op(un) != ggml.impl.c.GGML_UNARY_OP_SILU) {
+    if (ggml.types.ggml_get_unary_op(un) != ggml.impl.ggml_c.GGML_UNARY_OP_SILU) {
         return false;
     }
 
-    if (conv.type != ggml.impl.c.GGML_TYPE_F32 or un.type != ggml.impl.c.GGML_TYPE_F32 or !ggml.types.ggml_is_contiguous_rows(un)) {
+    if (conv.type != ggml.impl.ggml_c.GGML_TYPE_F32 or un.type != ggml.impl.ggml_c.GGML_TYPE_F32 or !ggml.types.ggml_is_contiguous_rows(un)) {
         return false;
     }
 
@@ -276,7 +274,7 @@ fn checkSsmConvSilu(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.gg
 ///
 /// ADD x N: each ADD reads the previous ADD as src0, and all addends must
 /// share layout (and, in FULL mode, live in the same Metal buffer).
-fn checkAddChain(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_tensor, gf: *const ggml.impl.CGraph, node_idxs: [*]const c_int, idx: c_int, mode: Mode) bool {
+fn checkAddChain(fusion: *const Fusion, nodes: [*]const *const ggml.impl.ggml_c.ggml_tensor, gf: *const ggml.impl.CGraph, node_idxs: [*]const c_int, idx: c_int, mode: Mode) bool {
     _ = gf;
     _ = node_idxs;
     _ = idx;
@@ -311,7 +309,7 @@ fn checkAddChain(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_
 /// consumers (the attn scores view), so unlike the other patterns this is
 /// not an elision chain: the structural checks live entirely here
 /// (`unsafe = true`).
-fn checkGdnCache(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_tensor, gf: *const ggml.impl.CGraph, node_idxs: [*]const c_int, idx: c_int, mode: Mode) bool {
+fn checkGdnCache(fusion: *const Fusion, nodes: [*]const *const ggml.impl.ggml_c.ggml_tensor, gf: *const ggml.impl.CGraph, node_idxs: [*]const c_int, idx: c_int, mode: Mode) bool {
     _ = fusion;
     _ = gf;
     _ = node_idxs;
@@ -321,11 +319,11 @@ fn checkGdnCache(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_
     const cpy = nodes[1];
 
     // the kernel skips the snapshot tail, so the gdn output must not be a graph output
-    if (gdn.type != ggml.impl.c.GGML_TYPE_F32 or (gdn.flags & ggml.impl.c.GGML_TENSOR_FLAG_OUTPUT) != 0) {
+    if (gdn.type != ggml.impl.ggml_c.GGML_TYPE_F32 or (gdn.flags & ggml.impl.ggml_c.GGML_TENSOR_FLAG_OUTPUT) != 0) {
         return false;
     }
 
-    if (cpy.op != ggml.impl.c.GGML_OP_CPY or (cpy.flags & ggml.impl.c.GGML_TENSOR_FLAG_OUTPUT) != 0) {
+    if (cpy.op != ggml.impl.ggml_c.GGML_OP_CPY or (cpy.flags & ggml.impl.ggml_c.GGML_TENSOR_FLAG_OUTPUT) != 0) {
         return false;
     }
 
@@ -335,7 +333,7 @@ fn checkGdnCache(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_
     const n_tokens: i64 = g2.ne[2];
     const n_seqs: i64 = g2.ne[3];
     const K: i64 = ggml.impl.getOpParamsI32(gdn, 0);
-    const tail_off: usize = ggml.types.ggml_row_size(ggml.impl.c.GGML_TYPE_F32, S_v * H * n_tokens * n_seqs);
+    const tail_off: usize = ggml.types.ggml_row_size(ggml.impl.ggml_c.GGML_TYPE_F32, S_v * H * n_tokens * n_seqs);
 
     const D: i64 = S_v * S_v * H;
     const n_written: i64 = @min(n_tokens, K);
@@ -344,17 +342,17 @@ fn checkGdnCache(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_
     const dst = src(cpy, 1); // cache view
 
     // src must be this gdn's snapshot tail (contiguous, at the tail offset)
-    if (s.op != ggml.impl.c.GGML_OP_VIEW or s.view_src != gdn or
-        s.view_offs != tail_off or !ggml.impl.c.ggml_is_contiguous(s))
+    if (s.op != ggml.impl.ggml_c.GGML_OP_VIEW or s.view_src != gdn or
+        s.view_offs != tail_off or !ggml.impl.ggml_c.ggml_is_contiguous(s))
     {
         return false;
     }
 
-    const expected_ne = [ggml.impl.c.GGML_MAX_DIMS]i64{ D, n_seqs, n_written, 1 };
-    if (dst.type != ggml.impl.c.GGML_TYPE_F32 or
+    const expected_ne = [ggml.impl.ggml_c.GGML_MAX_DIMS]i64{ D, n_seqs, n_written, 1 };
+    if (dst.type != ggml.impl.ggml_c.GGML_TYPE_F32 or
         !std.mem.eql(i64, &expected_ne, &dst.ne) or
-        dst.nb[0] != ggml.types.ggml_type_size(ggml.impl.c.GGML_TYPE_F32) or
-        dst.nb[1] != ggml.types.ggml_row_size(ggml.impl.c.GGML_TYPE_F32, D))
+        dst.nb[0] != ggml.types.ggml_type_size(ggml.impl.ggml_c.GGML_TYPE_F32) or
+        dst.nb[1] != ggml.types.ggml_row_size(ggml.impl.ggml_c.GGML_TYPE_F32, D))
     {
         return false;
     }
@@ -371,7 +369,7 @@ fn checkGdnCache(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_
 
 /// Ports `ggml_metal_fusion_check_snake` (ggml-metal-fusion.cpp:292
 /// @b1b770d90): MUL + SIN + SQR + MUL + ADD (snake activation).
-fn checkSnake(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_tensor, gf: *const ggml.impl.CGraph, node_idxs: [*]const c_int, idx: c_int, mode: Mode) bool {
+fn checkSnake(fusion: *const Fusion, nodes: [*]const *const ggml.impl.ggml_c.ggml_tensor, gf: *const ggml.impl.CGraph, node_idxs: [*]const c_int, idx: c_int, mode: Mode) bool {
     _ = fusion;
     _ = mode;
     _ = gf;
@@ -385,7 +383,7 @@ fn checkSnake(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_ten
     const add = nodes[4];
 
     // x carries the full activation shape, a is the broadcast operand
-    const x = if (ggml.impl.c.ggml_are_same_shape(mul0, src(mul0, 0))) src(mul0, 0) else src(mul0, 1);
+    const x = if (ggml.impl.ggml_c.ggml_are_same_shape(mul0, src(mul0, 0))) src(mul0, 0) else src(mul0, 1);
     const a = if (x == src(mul0, 0)) src(mul0, 1) else src(mul0, 0);
 
     // mul1 reads sqr and inv_b in either operand order
@@ -397,14 +395,14 @@ fn checkSnake(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_ten
     // x is in the supported whitelist and every chain intermediate shares x's type.
     // a and inv_b bind as device const float * in the kernel, so they stay F32.
     const types_ok =
-        (x.type == ggml.impl.c.GGML_TYPE_F32 or x.type == ggml.impl.c.GGML_TYPE_F16 or x.type == ggml.impl.c.GGML_TYPE_BF16) and
-        (a.type == ggml.impl.c.GGML_TYPE_F32) and (inv_b.type == ggml.impl.c.GGML_TYPE_F32) and
+        (x.type == ggml.impl.ggml_c.GGML_TYPE_F32 or x.type == ggml.impl.ggml_c.GGML_TYPE_F16 or x.type == ggml.impl.ggml_c.GGML_TYPE_BF16) and
+        (a.type == ggml.impl.ggml_c.GGML_TYPE_F32) and (inv_b.type == ggml.impl.ggml_c.GGML_TYPE_F32) and
         (mul0.type == x.type) and (sin_node.type == x.type) and
         (sqr.type == x.type) and (mul1.type == x.type) and
         (add.type == x.type);
 
     // a / inv_b collapse to [1, C, 1, 1], x and add stay 2D
-    const shape_ok = ggml.impl.c.ggml_are_same_shape(a, inv_b) and a.ne[0] == 1 and a.ne[1] == x.ne[1];
+    const shape_ok = ggml.impl.ggml_c.ggml_are_same_shape(a, inv_b) and a.ne[0] == 1 and a.ne[1] == x.ne[1];
     const dim_ok =
         (x.ne[2] == 1) and (x.ne[3] == 1) and
         (add.ne[2] == 1) and (add.ne[3] == 1) and
@@ -413,8 +411,8 @@ fn checkSnake(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_ten
 
     // kernel reads x[idx] and a[c] / inv_b[c] linearly, so every operand is contiguous
     const contig_ok =
-        ggml.impl.c.ggml_is_contiguous(x) and ggml.impl.c.ggml_is_contiguous(add) and
-        ggml.impl.c.ggml_is_contiguous(a) and ggml.impl.c.ggml_is_contiguous(inv_b);
+        ggml.impl.ggml_c.ggml_is_contiguous(x) and ggml.impl.ggml_c.ggml_is_contiguous(add) and
+        ggml.impl.ggml_c.ggml_is_contiguous(a) and ggml.impl.ggml_c.ggml_is_contiguous(inv_b);
 
     return types_ok and shape_ok and dim_ok and contig_ok and x_in_add == x;
 }
@@ -431,48 +429,48 @@ const topk_moe_max_experts = 1024;
 // kernel writes both the selected expert ids and the gathered/normalized
 // routing weights. The `_bias` norms adjust the sum with a
 // `SCALE`'s bias where the others clamp it.
-const ops_topk_moe = [_]ggml.impl.c.enum_ggml_op{
-    ggml.impl.c.GGML_OP_SOFT_MAX, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_ARGSORT, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_GET_ROWS,
+const ops_topk_moe = [_]ggml.impl.ggml_c.enum_ggml_op{
+    ggml.impl.ggml_c.GGML_OP_SOFT_MAX, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_ARGSORT, ggml.impl.ggml_c.GGML_OP_VIEW, ggml.impl.ggml_c.GGML_OP_GET_ROWS,
 };
-const ops_topk_moe_scale = [_]ggml.impl.c.enum_ggml_op{
-    ggml.impl.c.GGML_OP_SOFT_MAX, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_ARGSORT, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_GET_ROWS, ggml.impl.c.GGML_OP_SCALE,
+const ops_topk_moe_scale = [_]ggml.impl.ggml_c.enum_ggml_op{
+    ggml.impl.ggml_c.GGML_OP_SOFT_MAX, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_ARGSORT, ggml.impl.ggml_c.GGML_OP_VIEW, ggml.impl.ggml_c.GGML_OP_GET_ROWS, ggml.impl.ggml_c.GGML_OP_SCALE,
 };
-const ops_topk_moe_norm = [_]ggml.impl.c.enum_ggml_op{
-    ggml.impl.c.GGML_OP_SOFT_MAX, ggml.impl.c.GGML_OP_RESHAPE,  ggml.impl.c.GGML_OP_ARGSORT, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_GET_ROWS,
-    ggml.impl.c.GGML_OP_RESHAPE,  ggml.impl.c.GGML_OP_SUM_ROWS, ggml.impl.c.GGML_OP_CLAMP,   ggml.impl.c.GGML_OP_DIV,  ggml.impl.c.GGML_OP_RESHAPE,
+const ops_topk_moe_norm = [_]ggml.impl.ggml_c.enum_ggml_op{
+    ggml.impl.ggml_c.GGML_OP_SOFT_MAX, ggml.impl.ggml_c.GGML_OP_RESHAPE,  ggml.impl.ggml_c.GGML_OP_ARGSORT, ggml.impl.ggml_c.GGML_OP_VIEW, ggml.impl.ggml_c.GGML_OP_GET_ROWS,
+    ggml.impl.ggml_c.GGML_OP_RESHAPE,  ggml.impl.ggml_c.GGML_OP_SUM_ROWS, ggml.impl.ggml_c.GGML_OP_CLAMP,   ggml.impl.ggml_c.GGML_OP_DIV,  ggml.impl.ggml_c.GGML_OP_RESHAPE,
 };
-const ops_topk_moe_norm_scale = [_]ggml.impl.c.enum_ggml_op{
-    ggml.impl.c.GGML_OP_SOFT_MAX, ggml.impl.c.GGML_OP_RESHAPE,  ggml.impl.c.GGML_OP_ARGSORT, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_GET_ROWS,
-    ggml.impl.c.GGML_OP_RESHAPE,  ggml.impl.c.GGML_OP_SUM_ROWS, ggml.impl.c.GGML_OP_CLAMP,   ggml.impl.c.GGML_OP_DIV,  ggml.impl.c.GGML_OP_RESHAPE,
-    ggml.impl.c.GGML_OP_SCALE,
+const ops_topk_moe_norm_scale = [_]ggml.impl.ggml_c.enum_ggml_op{
+    ggml.impl.ggml_c.GGML_OP_SOFT_MAX, ggml.impl.ggml_c.GGML_OP_RESHAPE,  ggml.impl.ggml_c.GGML_OP_ARGSORT, ggml.impl.ggml_c.GGML_OP_VIEW, ggml.impl.ggml_c.GGML_OP_GET_ROWS,
+    ggml.impl.ggml_c.GGML_OP_RESHAPE,  ggml.impl.ggml_c.GGML_OP_SUM_ROWS, ggml.impl.ggml_c.GGML_OP_CLAMP,   ggml.impl.ggml_c.GGML_OP_DIV,  ggml.impl.ggml_c.GGML_OP_RESHAPE,
+    ggml.impl.ggml_c.GGML_OP_SCALE,
 };
 
-const ops_topk_moe_norm_bias = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_SOFT_MAX, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_ARGSORT, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_GET_ROWS, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_SUM_ROWS, ggml.impl.c.GGML_OP_SCALE, ggml.impl.c.GGML_OP_DIV, ggml.impl.c.GGML_OP_RESHAPE };
-const ops_topk_moe_norm_scale_bias = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_SOFT_MAX, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_ARGSORT, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_GET_ROWS, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_SUM_ROWS, ggml.impl.c.GGML_OP_SCALE, ggml.impl.c.GGML_OP_DIV, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_SCALE };
+const ops_topk_moe_norm_bias = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_SOFT_MAX, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_ARGSORT, ggml.impl.ggml_c.GGML_OP_VIEW, ggml.impl.ggml_c.GGML_OP_GET_ROWS, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_SUM_ROWS, ggml.impl.ggml_c.GGML_OP_SCALE, ggml.impl.ggml_c.GGML_OP_DIV, ggml.impl.ggml_c.GGML_OP_RESHAPE };
+const ops_topk_moe_norm_scale_bias = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_SOFT_MAX, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_ARGSORT, ggml.impl.ggml_c.GGML_OP_VIEW, ggml.impl.ggml_c.GGML_OP_GET_ROWS, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_SUM_ROWS, ggml.impl.ggml_c.GGML_OP_SCALE, ggml.impl.ggml_c.GGML_OP_DIV, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_SCALE };
 
 // Ports `ops_topk_moe_sp`, `ops_topk_moe_sp_scale`, `ops_topk_moe_sp_norm`,
 // `ops_topk_moe_sp_norm_scale`, `ops_topk_moe_sp_norm_bias` and
 // `ops_topk_moe_sp_norm_scale_bias` (ggml-metal-fusion.cpp:371, 374, 377,
 // 381, 385, 389 @b1b770d90) (#31615): DeepSeek-V4's
 // `sqrt(softplus)` gating, ranked with an added selection bias.
-const ops_topk_moe_sp = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_UNARY, ggml.impl.c.GGML_OP_SQRT, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_ADD, ggml.impl.c.GGML_OP_ARGSORT, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_GET_ROWS };
-const ops_topk_moe_sp_scale = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_UNARY, ggml.impl.c.GGML_OP_SQRT, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_ADD, ggml.impl.c.GGML_OP_ARGSORT, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_GET_ROWS, ggml.impl.c.GGML_OP_SCALE };
-const ops_topk_moe_sp_norm = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_UNARY, ggml.impl.c.GGML_OP_SQRT, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_ADD, ggml.impl.c.GGML_OP_ARGSORT, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_GET_ROWS, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_SUM_ROWS, ggml.impl.c.GGML_OP_CLAMP, ggml.impl.c.GGML_OP_DIV, ggml.impl.c.GGML_OP_RESHAPE };
-const ops_topk_moe_sp_norm_scale = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_UNARY, ggml.impl.c.GGML_OP_SQRT, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_ADD, ggml.impl.c.GGML_OP_ARGSORT, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_GET_ROWS, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_SUM_ROWS, ggml.impl.c.GGML_OP_CLAMP, ggml.impl.c.GGML_OP_DIV, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_SCALE };
-const ops_topk_moe_sp_norm_bias = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_UNARY, ggml.impl.c.GGML_OP_SQRT, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_ADD, ggml.impl.c.GGML_OP_ARGSORT, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_GET_ROWS, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_SUM_ROWS, ggml.impl.c.GGML_OP_SCALE, ggml.impl.c.GGML_OP_DIV, ggml.impl.c.GGML_OP_RESHAPE };
-const ops_topk_moe_sp_norm_scale_bias = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_UNARY, ggml.impl.c.GGML_OP_SQRT, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_ADD, ggml.impl.c.GGML_OP_ARGSORT, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_GET_ROWS, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_SUM_ROWS, ggml.impl.c.GGML_OP_SCALE, ggml.impl.c.GGML_OP_DIV, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_SCALE };
+const ops_topk_moe_sp = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_UNARY, ggml.impl.ggml_c.GGML_OP_SQRT, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_ADD, ggml.impl.ggml_c.GGML_OP_ARGSORT, ggml.impl.ggml_c.GGML_OP_VIEW, ggml.impl.ggml_c.GGML_OP_GET_ROWS };
+const ops_topk_moe_sp_scale = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_UNARY, ggml.impl.ggml_c.GGML_OP_SQRT, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_ADD, ggml.impl.ggml_c.GGML_OP_ARGSORT, ggml.impl.ggml_c.GGML_OP_VIEW, ggml.impl.ggml_c.GGML_OP_GET_ROWS, ggml.impl.ggml_c.GGML_OP_SCALE };
+const ops_topk_moe_sp_norm = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_UNARY, ggml.impl.ggml_c.GGML_OP_SQRT, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_ADD, ggml.impl.ggml_c.GGML_OP_ARGSORT, ggml.impl.ggml_c.GGML_OP_VIEW, ggml.impl.ggml_c.GGML_OP_GET_ROWS, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_SUM_ROWS, ggml.impl.ggml_c.GGML_OP_CLAMP, ggml.impl.ggml_c.GGML_OP_DIV, ggml.impl.ggml_c.GGML_OP_RESHAPE };
+const ops_topk_moe_sp_norm_scale = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_UNARY, ggml.impl.ggml_c.GGML_OP_SQRT, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_ADD, ggml.impl.ggml_c.GGML_OP_ARGSORT, ggml.impl.ggml_c.GGML_OP_VIEW, ggml.impl.ggml_c.GGML_OP_GET_ROWS, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_SUM_ROWS, ggml.impl.ggml_c.GGML_OP_CLAMP, ggml.impl.ggml_c.GGML_OP_DIV, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_SCALE };
+const ops_topk_moe_sp_norm_bias = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_UNARY, ggml.impl.ggml_c.GGML_OP_SQRT, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_ADD, ggml.impl.ggml_c.GGML_OP_ARGSORT, ggml.impl.ggml_c.GGML_OP_VIEW, ggml.impl.ggml_c.GGML_OP_GET_ROWS, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_SUM_ROWS, ggml.impl.ggml_c.GGML_OP_SCALE, ggml.impl.ggml_c.GGML_OP_DIV, ggml.impl.ggml_c.GGML_OP_RESHAPE };
+const ops_topk_moe_sp_norm_scale_bias = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_UNARY, ggml.impl.ggml_c.GGML_OP_SQRT, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_ADD, ggml.impl.ggml_c.GGML_OP_ARGSORT, ggml.impl.ggml_c.GGML_OP_VIEW, ggml.impl.ggml_c.GGML_OP_GET_ROWS, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_SUM_ROWS, ggml.impl.ggml_c.GGML_OP_SCALE, ggml.impl.ggml_c.GGML_OP_DIV, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_SCALE };
 
 // Ports `ops_topk_moe_sig`, `ops_topk_moe_sig_scale`, `ops_topk_moe_sig_norm`,
 // `ops_topk_moe_sig_norm_scale`, `ops_topk_moe_sig_norm_bias` and
 // `ops_topk_moe_sig_norm_scale_bias` (ggml-metal-fusion.cpp:394, 397, 400,
 // 404, 408, 412 @b1b770d90): GLM's sigmoid gating, ranked
 // with an added selection bias.
-const ops_topk_moe_sig = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_UNARY, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_ADD, ggml.impl.c.GGML_OP_ARGSORT, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_GET_ROWS };
-const ops_topk_moe_sig_scale = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_UNARY, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_ADD, ggml.impl.c.GGML_OP_ARGSORT, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_GET_ROWS, ggml.impl.c.GGML_OP_SCALE };
-const ops_topk_moe_sig_norm = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_UNARY, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_ADD, ggml.impl.c.GGML_OP_ARGSORT, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_GET_ROWS, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_SUM_ROWS, ggml.impl.c.GGML_OP_CLAMP, ggml.impl.c.GGML_OP_DIV, ggml.impl.c.GGML_OP_RESHAPE };
-const ops_topk_moe_sig_norm_scale = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_UNARY, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_ADD, ggml.impl.c.GGML_OP_ARGSORT, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_GET_ROWS, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_SUM_ROWS, ggml.impl.c.GGML_OP_CLAMP, ggml.impl.c.GGML_OP_DIV, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_SCALE };
-const ops_topk_moe_sig_norm_bias = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_UNARY, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_ADD, ggml.impl.c.GGML_OP_ARGSORT, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_GET_ROWS, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_SUM_ROWS, ggml.impl.c.GGML_OP_SCALE, ggml.impl.c.GGML_OP_DIV, ggml.impl.c.GGML_OP_RESHAPE };
-const ops_topk_moe_sig_norm_scale_bias = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_UNARY, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_ADD, ggml.impl.c.GGML_OP_ARGSORT, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_GET_ROWS, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_SUM_ROWS, ggml.impl.c.GGML_OP_SCALE, ggml.impl.c.GGML_OP_DIV, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_SCALE };
+const ops_topk_moe_sig = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_UNARY, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_ADD, ggml.impl.ggml_c.GGML_OP_ARGSORT, ggml.impl.ggml_c.GGML_OP_VIEW, ggml.impl.ggml_c.GGML_OP_GET_ROWS };
+const ops_topk_moe_sig_scale = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_UNARY, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_ADD, ggml.impl.ggml_c.GGML_OP_ARGSORT, ggml.impl.ggml_c.GGML_OP_VIEW, ggml.impl.ggml_c.GGML_OP_GET_ROWS, ggml.impl.ggml_c.GGML_OP_SCALE };
+const ops_topk_moe_sig_norm = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_UNARY, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_ADD, ggml.impl.ggml_c.GGML_OP_ARGSORT, ggml.impl.ggml_c.GGML_OP_VIEW, ggml.impl.ggml_c.GGML_OP_GET_ROWS, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_SUM_ROWS, ggml.impl.ggml_c.GGML_OP_CLAMP, ggml.impl.ggml_c.GGML_OP_DIV, ggml.impl.ggml_c.GGML_OP_RESHAPE };
+const ops_topk_moe_sig_norm_scale = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_UNARY, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_ADD, ggml.impl.ggml_c.GGML_OP_ARGSORT, ggml.impl.ggml_c.GGML_OP_VIEW, ggml.impl.ggml_c.GGML_OP_GET_ROWS, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_SUM_ROWS, ggml.impl.ggml_c.GGML_OP_CLAMP, ggml.impl.ggml_c.GGML_OP_DIV, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_SCALE };
+const ops_topk_moe_sig_norm_bias = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_UNARY, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_ADD, ggml.impl.ggml_c.GGML_OP_ARGSORT, ggml.impl.ggml_c.GGML_OP_VIEW, ggml.impl.ggml_c.GGML_OP_GET_ROWS, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_SUM_ROWS, ggml.impl.ggml_c.GGML_OP_SCALE, ggml.impl.ggml_c.GGML_OP_DIV, ggml.impl.ggml_c.GGML_OP_RESHAPE };
+const ops_topk_moe_sig_norm_scale_bias = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_UNARY, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_ADD, ggml.impl.ggml_c.GGML_OP_ARGSORT, ggml.impl.ggml_c.GGML_OP_VIEW, ggml.impl.ggml_c.GGML_OP_GET_ROWS, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_SUM_ROWS, ggml.impl.ggml_c.GGML_OP_SCALE, ggml.impl.ggml_c.GGML_OP_DIV, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_SCALE };
 
 /// Ports `ggml_metal_fusion_check_topk_moe` (ggml-metal-fusion.cpp:417
 /// @b1b770d90).
@@ -484,7 +482,7 @@ const ops_topk_moe_sig_norm_scale_bias = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.
 /// while gathering the unbiased ones, and adjust the norm's sum with a
 /// `SCALE` of factor 1 (an additive bias) instead of a clamp. The variant is
 /// read off the ops, not the chain's length.
-fn checkTopkMoe(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_tensor, gf: *const ggml.impl.CGraph, node_idxs: [*]const c_int, idx: c_int, mode: Mode) bool {
+fn checkTopkMoe(fusion: *const Fusion, nodes: [*]const *const ggml.impl.ggml_c.ggml_tensor, gf: *const ggml.impl.CGraph, node_idxs: [*]const c_int, idx: c_int, mode: Mode) bool {
     ggml.impl.assert(fusion.ops.len >= 3, "fusion->ops.size() >= 3");
     _ = nodes;
 
@@ -492,9 +490,9 @@ fn checkTopkMoe(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_t
 
     var with_norm = false;
     for (fusion.ops) |op| {
-        with_norm = with_norm or op == ggml.impl.c.GGML_OP_SUM_ROWS;
+        with_norm = with_norm or op == ggml.impl.ggml_c.GGML_OP_SUM_ROWS;
     }
-    const with_scale = fusion.ops[@intCast(n_ops - 1)] == ggml.impl.c.GGML_OP_SCALE;
+    const with_scale = fusion.ops[@intCast(n_ops - 1)] == ggml.impl.ggml_c.GGML_OP_SCALE;
 
     // the fusion table operates on the non-empty node sequence; the raw graph also
     // contains the RESHAPE/VIEW nodes that the fused kernel elides.
@@ -510,7 +508,7 @@ fn checkTopkMoe(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_t
             return false;
         }
         const trailing_reshape = gnode(gf, raw_end + 1);
-        if (trailing_reshape.op != ggml.impl.c.GGML_OP_RESHAPE or trailing_reshape.src[0] != gnode(gf, raw_end)) {
+        if (trailing_reshape.op != ggml.impl.ggml_c.GGML_OP_RESHAPE or trailing_reshape.src[0] != gnode(gf, raw_end)) {
             return false;
         }
         raw_end += 1;
@@ -534,20 +532,20 @@ fn checkTopkMoe(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_t
     const out = gnode(gf, raw_end);
 
     // the unary chains start at the sigmoid or the softplus node and rank biased scores
-    const with_unary = first.op == ggml.impl.c.GGML_OP_UNARY;
-    const with_sp = with_unary and ggml.impl.c.ggml_get_unary_op(first) == ggml.impl.c.GGML_UNARY_OP_SOFTPLUS;
-    const with_sig = with_unary and ggml.impl.c.ggml_get_unary_op(first) == ggml.impl.c.GGML_UNARY_OP_SIGMOID;
+    const with_unary = first.op == ggml.impl.ggml_c.GGML_OP_UNARY;
+    const with_sp = with_unary and ggml.impl.ggml_c.ggml_get_unary_op(first) == ggml.impl.ggml_c.GGML_UNARY_OP_SOFTPLUS;
+    const with_sig = with_unary and ggml.impl.ggml_c.ggml_get_unary_op(first) == ggml.impl.ggml_c.GGML_UNARY_OP_SIGMOID;
 
     if (with_unary and !with_sp and !with_sig) {
         return false;
     }
 
-    var probs: *const ggml.impl.c.ggml_tensor = undefined; // the scoring output
-    var scores: *const ggml.impl.c.ggml_tensor = undefined; // the node the argsort ranks (adds the bias for the unary chains)
-    var probs_reshaped: *const ggml.impl.c.ggml_tensor = undefined;
-    var argsort: *const ggml.impl.c.ggml_tensor = undefined;
-    var ids: *const ggml.impl.c.ggml_tensor = undefined;
-    var get_rows: *const ggml.impl.c.ggml_tensor = undefined;
+    var probs: *const ggml.impl.ggml_c.ggml_tensor = undefined; // the scoring output
+    var scores: *const ggml.impl.ggml_c.ggml_tensor = undefined; // the node the argsort ranks (adds the bias for the unary chains)
+    var probs_reshaped: *const ggml.impl.ggml_c.ggml_tensor = undefined;
+    var argsort: *const ggml.impl.ggml_c.ggml_tensor = undefined;
+    var ids: *const ggml.impl.ggml_c.ggml_tensor = undefined;
+    var get_rows: *const ggml.impl.ggml_c.ggml_tensor = undefined;
     const logits = src(first, 0);
     var ids_off: c_int = undefined;
 
@@ -563,15 +561,15 @@ fn checkTopkMoe(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_t
         get_rows = gnode(gf, raw_start + base + 5);
         ids_off = base + 4;
 
-        if (scores.op != ggml.impl.c.GGML_OP_ADD or scores.src[0] != probs or
-            (with_sp and (probs.op != ggml.impl.c.GGML_OP_SQRT or probs.src[0] != first)))
+        if (scores.op != ggml.impl.ggml_c.GGML_OP_ADD or scores.src[0] != probs or
+            (with_sp and (probs.op != ggml.impl.ggml_c.GGML_OP_SQRT or probs.src[0] != first)))
         {
             return false;
         }
 
         // the selection bias is a per-expert vector shared by all rows
         const bias = src(scores, 1);
-        if (bias.type != ggml.impl.c.GGML_TYPE_F32 or scores.type != ggml.impl.c.GGML_TYPE_F32 or !ggml.impl.c.ggml_is_contiguous(bias) or
+        if (bias.type != ggml.impl.ggml_c.GGML_TYPE_F32 or scores.type != ggml.impl.ggml_c.GGML_TYPE_F32 or !ggml.impl.ggml_c.ggml_is_contiguous(bias) or
             bias.ne[0] != probs.ne[0] or bias.ne[1] != 1 or bias.ne[2] != 1 or bias.ne[3] != 1)
         {
             return false;
@@ -593,8 +591,8 @@ fn checkTopkMoe(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_t
         }
     }
 
-    if (logits.type != ggml.impl.c.GGML_TYPE_F32 or probs.type != ggml.impl.c.GGML_TYPE_F32 or
-        out.type != ggml.impl.c.GGML_TYPE_F32 or ids.type != ggml.impl.c.GGML_TYPE_I32)
+    if (logits.type != ggml.impl.ggml_c.GGML_TYPE_F32 or probs.type != ggml.impl.ggml_c.GGML_TYPE_F32 or
+        out.type != ggml.impl.ggml_c.GGML_TYPE_F32 or ids.type != ggml.impl.ggml_c.GGML_TYPE_I32)
     {
         return false;
     }
@@ -617,9 +615,9 @@ fn checkTopkMoe(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_t
         return false;
     }
 
-    if (!ggml.impl.c.ggml_is_contiguous(logits) or !ggml.impl.c.ggml_is_contiguous(out) or
-        ids.nb[0] != ggml.types.ggml_type_size(ggml.impl.c.GGML_TYPE_I32) or
-        ids.nb[1] != ggml.types.ggml_type_size(ggml.impl.c.GGML_TYPE_I32) *% @as(usize, @bitCast(n_expert)))
+    if (!ggml.impl.ggml_c.ggml_is_contiguous(logits) or !ggml.impl.ggml_c.ggml_is_contiguous(out) or
+        ids.nb[0] != ggml.types.ggml_type_size(ggml.impl.ggml_c.GGML_TYPE_I32) or
+        ids.nb[1] != ggml.types.ggml_type_size(ggml.impl.ggml_c.GGML_TYPE_I32) *% @as(usize, @bitCast(n_expert)))
     {
         return false;
     }
@@ -648,7 +646,7 @@ fn checkTopkMoe(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_t
         }
 
         // the kernel applies the sum adjustment as a lower clamp or an additive bias, never a scale
-        if (denom.op == ggml.impl.c.GGML_OP_SCALE and ggml.impl.getOpParamsF32(denom, 0) != 1.0) {
+        if (denom.op == ggml.impl.ggml_c.GGML_OP_SCALE and ggml.impl.getOpParamsF32(denom, 0) != 1.0) {
             return false;
         }
 
@@ -680,9 +678,9 @@ const moe_reduce_max_experts = 8;
 /// Ports `struct ggml_metal_moe_reduce_match` (ggml-metal-fusion.cpp:607
 /// @b1b770d90).
 const MoeReduceMatch = struct {
-    experts: *const ggml.impl.c.ggml_tensor,
-    weights: *const ggml.impl.c.ggml_tensor,
-    dst: *const ggml.impl.c.ggml_tensor,
+    experts: *const ggml.impl.ggml_c.ggml_tensor,
+    weights: *const ggml.impl.ggml_c.ggml_tensor,
+    dst: *const ggml.impl.ggml_c.ggml_tensor,
     node_count: c_int,
 };
 
@@ -691,13 +689,13 @@ const MoeReduceMatch = struct {
 /// one ADD per additional expert summing the views in order.
 ///
 /// Return: the match, or null.
-fn matchMoeReduce(gf: *const ggml.impl.CGraph, node_idx: c_int, ops_all: []const ggml.impl.c.enum_ggml_op) ?MoeReduceMatch {
+fn matchMoeReduce(gf: *const ggml.impl.CGraph, node_idx: c_int, ops_all: []const ggml.impl.ggml_c.enum_ggml_op) ?MoeReduceMatch {
     if (node_idx < 0 or node_idx + @as(c_int, @intCast(ops_all.len)) > gf.n_nodes) {
         return null;
     }
 
     const mul = gnode(gf, node_idx);
-    if (mul.op != ggml.impl.c.GGML_OP_MUL or mul.type != ggml.impl.c.GGML_TYPE_F32) {
+    if (mul.op != ggml.impl.ggml_c.GGML_OP_MUL or mul.type != ggml.impl.ggml_c.GGML_TYPE_F32) {
         return null;
     }
 
@@ -713,7 +711,7 @@ fn matchMoeReduce(gf: *const ggml.impl.CGraph, node_idx: c_int, ops_all: []const
 
     var n_views: c_int = 0;
     while (node_idx + 1 + n_views < gf.n_nodes and
-        gnode(gf, node_idx + 1 + n_views).op == ggml.impl.c.GGML_OP_VIEW)
+        gnode(gf, node_idx + 1 + n_views).op == ggml.impl.ggml_c.GGML_OP_VIEW)
     {
         n_views += 1;
     }
@@ -724,7 +722,7 @@ fn matchMoeReduce(gf: *const ggml.impl.CGraph, node_idx: c_int, ops_all: []const
 
     var i: c_int = n_expert_used + 1;
     while (i < raw_count) : (i += 1) {
-        if (gnode(gf, node_idx + i).op != ggml.impl.c.GGML_OP_ADD) {
+        if (gnode(gf, node_idx + i).op != ggml.impl.ggml_c.GGML_OP_ADD) {
             return null;
         }
     }
@@ -742,7 +740,7 @@ fn matchMoeReduce(gf: *const ggml.impl.CGraph, node_idx: c_int, ops_all: []const
     const weights = src(mul, 1);
     const dst = gnode(gf, node_idx + raw_count - 1);
 
-    if (experts.type != ggml.impl.c.GGML_TYPE_F32 or weights.type != ggml.impl.c.GGML_TYPE_F32 or dst.type != ggml.impl.c.GGML_TYPE_F32) {
+    if (experts.type != ggml.impl.ggml_c.GGML_TYPE_F32 or weights.type != ggml.impl.ggml_c.GGML_TYPE_F32 or dst.type != ggml.impl.ggml_c.GGML_TYPE_F32) {
         return null;
     }
 
@@ -757,7 +755,7 @@ fn matchMoeReduce(gf: *const ggml.impl.CGraph, node_idx: c_int, ops_all: []const
         return null;
     }
 
-    if (!ggml.impl.c.ggml_is_contiguous(experts) or !ggml.impl.c.ggml_is_contiguous(weights) or !ggml.impl.c.ggml_is_contiguous(dst)) {
+    if (!ggml.impl.ggml_c.ggml_is_contiguous(experts) or !ggml.impl.ggml_c.ggml_is_contiguous(weights) or !ggml.impl.ggml_c.ggml_is_contiguous(dst)) {
         return null;
     }
 
@@ -773,12 +771,12 @@ fn matchMoeReduce(gf: *const ggml.impl.CGraph, node_idx: c_int, ops_all: []const
         }
     }
 
-    var prev_add: ?*const ggml.impl.c.ggml_tensor = null;
+    var prev_add: ?*const ggml.impl.ggml_c.ggml_tensor = null;
     var j: c_int = 1;
     while (j < n_expert_used) : (j += 1) {
         const add = gnode(gf, node_idx + n_expert_used + j);
         const rhs = gnode(gf, node_idx + j + 1);
-        const lhs: ?*const ggml.impl.c.ggml_tensor = if (j == 1) gnode(gf, node_idx + 1) else prev_add;
+        const lhs: ?*const ggml.impl.ggml_c.ggml_tensor = if (j == 1) gnode(gf, node_idx + 1) else prev_add;
         if (add.src[0] != lhs or add.src[1] != rhs) {
             return null;
         }
@@ -800,7 +798,7 @@ fn matchMoeReduce(gf: *const ggml.impl.CGraph, node_idx: c_int, ops_all: []const
 
 /// Ports `ggml_metal_fusion_check_moe_reduce` (ggml-metal-fusion.cpp:714
 /// @b1b770d90).
-fn checkMoeReduce(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_tensor, gf: *const ggml.impl.CGraph, node_idxs: [*]const c_int, idx: c_int, mode: Mode) bool {
+fn checkMoeReduce(fusion: *const Fusion, nodes: [*]const *const ggml.impl.ggml_c.ggml_tensor, gf: *const ggml.impl.CGraph, node_idxs: [*]const c_int, idx: c_int, mode: Mode) bool {
     _ = nodes;
 
     const match = matchMoeReduce(gf, node_idxs[@intCast(idx)], fusion.ops_all) orelse return false;
@@ -836,23 +834,23 @@ fn checkMoeReduce(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml
 /// weights, such as a bias. The model loader marks its buffers before any
 /// graph is optimized, and tensors in unmarked or not yet allocated
 /// buffers count as non-weights in both phases.
-fn tensorIsWeight(t: *const ggml.impl.c.ggml_tensor) bool {
-    const base: *const ggml.impl.c.ggml_tensor = if (t.view_src != null) ggml.impl.one(ggml.impl.c.ggml_tensor, t.view_src) else t;
+fn tensorIsWeight(t: *const ggml.impl.ggml_c.ggml_tensor) bool {
+    const base: *const ggml.impl.ggml_c.ggml_tensor = if (t.view_src != null) ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, t.view_src) else t;
 
-    return base.buffer != null and ggml.impl.c.ggml_backend_buffer_get_usage(base.buffer) == ggml.impl.c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS;
+    return base.buffer != null and ggml.impl.ggml_c.ggml_backend_buffer_get_usage(base.buffer) == ggml.impl.ggml_c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS;
 }
 
 /// Ports `ggml_metal_mul_mat_add_operand` (ggml-metal-fusion.cpp:759
 /// @b1b770d90): the `ADD`'s other operand when exactly one of its sources
 /// is `mm`, and that operand is an F32 non-weight into an F32 sum.
-fn mulMatAddOperand(mm: *const ggml.impl.c.ggml_tensor, add: *const ggml.impl.c.ggml_tensor) ?*const ggml.impl.c.ggml_tensor {
-    if (add.op != ggml.impl.c.GGML_OP_ADD or ((add.src[0] == mm) == (add.src[1] == mm))) {
+fn mulMatAddOperand(mm: *const ggml.impl.ggml_c.ggml_tensor, add: *const ggml.impl.ggml_c.ggml_tensor) ?*const ggml.impl.ggml_c.ggml_tensor {
+    if (add.op != ggml.impl.ggml_c.GGML_OP_ADD or ((add.src[0] == mm) == (add.src[1] == mm))) {
         return null;
     }
 
     const other = if (add.src[0] == mm) src(add, 1) else src(add, 0);
 
-    const ok = other.type == ggml.impl.c.GGML_TYPE_F32 and add.type == ggml.impl.c.GGML_TYPE_F32 and !tensorIsWeight(other);
+    const ok = other.type == ggml.impl.ggml_c.GGML_TYPE_F32 and add.type == ggml.impl.ggml_c.GGML_TYPE_F32 and !tensorIsWeight(other);
 
     return if (ok) other else null;
 }
@@ -860,11 +858,11 @@ fn mulMatAddOperand(mm: *const ggml.impl.c.ggml_tensor, add: *const ggml.impl.c.
 /// Ports `ggml_metal_mul_mat_add_residual` (ggml-metal-fusion.cpp:771
 /// @b1b770d90): the operand, when it is a same-shape contiguous residual
 /// the MMA store can add.
-fn mulMatAddResidual(mm: *const ggml.impl.c.ggml_tensor, add: *const ggml.impl.c.ggml_tensor) ?*const ggml.impl.c.ggml_tensor {
+fn mulMatAddResidual(mm: *const ggml.impl.ggml_c.ggml_tensor, add: *const ggml.impl.ggml_c.ggml_tensor) ?*const ggml.impl.ggml_c.ggml_tensor {
     const res = mulMatAddOperand(mm, add);
 
-    const ok = res != null and ggml.impl.c.ggml_are_same_shape(res.?, mm) and
-        ggml.impl.c.ggml_is_contiguous(res.?) and ggml.impl.c.ggml_is_contiguous(mm) and ggml.impl.c.ggml_is_contiguous(add);
+    const ok = res != null and ggml.impl.ggml_c.ggml_are_same_shape(res.?, mm) and
+        ggml.impl.ggml_c.ggml_is_contiguous(res.?) and ggml.impl.ggml_c.ggml_is_contiguous(mm) and ggml.impl.ggml_c.ggml_is_contiguous(add);
 
     return if (ok) res else null;
 }
@@ -877,7 +875,7 @@ fn mulMatAddResidual(mm: *const ggml.impl.c.ggml_tensor, add: *const ggml.impl.c
 /// checks), so ubatch sizes share one node order; the encoder fuses only
 /// a same-shape residual on the few-row MMA path, which the sum may
 /// overlap only in place.
-fn checkMulMatAdd(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_tensor, gf: *const ggml.impl.CGraph, node_idxs: [*]const c_int, idx: c_int, mode: Mode) bool {
+fn checkMulMatAdd(fusion: *const Fusion, nodes: [*]const *const ggml.impl.ggml_c.ggml_tensor, gf: *const ggml.impl.CGraph, node_idxs: [*]const c_int, idx: c_int, mode: Mode) bool {
     _ = gf;
     _ = node_idxs;
     _ = idx;
@@ -914,35 +912,35 @@ fn checkMulMatAdd(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml
 // @b1b770d90), `ops_snake` (ggml-metal-fusion.cpp:831 @b1b770d90),
 // `ops_gdn_cache` (ggml-metal-fusion.cpp:833 @b1b770d90) and
 // `ops_ssm_conv_silu` (ggml-metal-fusion.cpp:835 @b1b770d90).
-const ops_norm_mul = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_NORM, ggml.impl.c.GGML_OP_MUL };
-const ops_norm_mul_add = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_NORM, ggml.impl.c.GGML_OP_MUL, ggml.impl.c.GGML_OP_ADD };
-const ops_norm_scale = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_NORM, ggml.impl.c.GGML_OP_SCALE };
-const ops_rms_norm_mul = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_RMS_NORM, ggml.impl.c.GGML_OP_MUL };
-const ops_rms_norm_mul_add = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_RMS_NORM, ggml.impl.c.GGML_OP_MUL, ggml.impl.c.GGML_OP_ADD };
-const ops_rms_norm_scale = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_RMS_NORM, ggml.impl.c.GGML_OP_SCALE };
+const ops_norm_mul = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_NORM, ggml.impl.ggml_c.GGML_OP_MUL };
+const ops_norm_mul_add = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_NORM, ggml.impl.ggml_c.GGML_OP_MUL, ggml.impl.ggml_c.GGML_OP_ADD };
+const ops_norm_scale = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_NORM, ggml.impl.ggml_c.GGML_OP_SCALE };
+const ops_rms_norm_mul = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_RMS_NORM, ggml.impl.ggml_c.GGML_OP_MUL };
+const ops_rms_norm_mul_add = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_RMS_NORM, ggml.impl.ggml_c.GGML_OP_MUL, ggml.impl.ggml_c.GGML_OP_ADD };
+const ops_rms_norm_scale = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_RMS_NORM, ggml.impl.ggml_c.GGML_OP_SCALE };
 
-const ops_add_2: [2]ggml.impl.c.enum_ggml_op = @splat(ggml.impl.c.GGML_OP_ADD);
-const ops_add_3: [3]ggml.impl.c.enum_ggml_op = @splat(ggml.impl.c.GGML_OP_ADD);
-const ops_add_4: [4]ggml.impl.c.enum_ggml_op = @splat(ggml.impl.c.GGML_OP_ADD);
-const ops_add_5: [5]ggml.impl.c.enum_ggml_op = @splat(ggml.impl.c.GGML_OP_ADD);
-const ops_add_6: [6]ggml.impl.c.enum_ggml_op = @splat(ggml.impl.c.GGML_OP_ADD);
-const ops_add_7: [7]ggml.impl.c.enum_ggml_op = @splat(ggml.impl.c.GGML_OP_ADD);
-const ops_snake = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_MUL, ggml.impl.c.GGML_OP_SIN, ggml.impl.c.GGML_OP_SQR, ggml.impl.c.GGML_OP_MUL, ggml.impl.c.GGML_OP_ADD };
+const ops_add_2: [2]ggml.impl.ggml_c.enum_ggml_op = @splat(ggml.impl.ggml_c.GGML_OP_ADD);
+const ops_add_3: [3]ggml.impl.ggml_c.enum_ggml_op = @splat(ggml.impl.ggml_c.GGML_OP_ADD);
+const ops_add_4: [4]ggml.impl.ggml_c.enum_ggml_op = @splat(ggml.impl.ggml_c.GGML_OP_ADD);
+const ops_add_5: [5]ggml.impl.ggml_c.enum_ggml_op = @splat(ggml.impl.ggml_c.GGML_OP_ADD);
+const ops_add_6: [6]ggml.impl.ggml_c.enum_ggml_op = @splat(ggml.impl.ggml_c.GGML_OP_ADD);
+const ops_add_7: [7]ggml.impl.ggml_c.enum_ggml_op = @splat(ggml.impl.ggml_c.GGML_OP_ADD);
+const ops_snake = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_MUL, ggml.impl.ggml_c.GGML_OP_SIN, ggml.impl.ggml_c.GGML_OP_SQR, ggml.impl.ggml_c.GGML_OP_MUL, ggml.impl.ggml_c.GGML_OP_ADD };
 
-const ops_gdn_cache = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_GATED_DELTA_NET, ggml.impl.c.GGML_OP_CPY };
+const ops_gdn_cache = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_GATED_DELTA_NET, ggml.impl.ggml_c.GGML_OP_CPY };
 
-const ops_ssm_conv_silu = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_SSM_CONV, ggml.impl.c.GGML_OP_UNARY };
+const ops_ssm_conv_silu = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_SSM_CONV, ggml.impl.ggml_c.GGML_OP_UNARY };
 
 /// Ports `ops_moe_reduce_2`, `ops_moe_reduce_3`, `ops_moe_reduce_4`,
 /// `ops_moe_reduce_5`, `ops_moe_reduce_6`, `ops_moe_reduce_7` and
 /// `ops_moe_reduce_8` (ggml-metal-fusion.cpp:837, 840, 843, 847, 851, 855,
 /// 859 @b1b770d90): MUL, `n` VIEWs, `n - 1` ADDs. The C spells each out; they are one
 /// shape, so one comptime function writes them.
-fn opsMoeReduce(comptime n: usize) [2 * n]ggml.impl.c.enum_ggml_op {
-    var ops: [2 * n]ggml.impl.c.enum_ggml_op = undefined;
-    ops[0] = ggml.impl.c.GGML_OP_MUL;
-    for (1..n + 1) |i| ops[i] = ggml.impl.c.GGML_OP_VIEW;
-    for (n + 1..2 * n) |i| ops[i] = ggml.impl.c.GGML_OP_ADD;
+fn opsMoeReduce(comptime n: usize) [2 * n]ggml.impl.ggml_c.enum_ggml_op {
+    var ops: [2 * n]ggml.impl.ggml_c.enum_ggml_op = undefined;
+    ops[0] = ggml.impl.ggml_c.GGML_OP_MUL;
+    for (1..n + 1) |i| ops[i] = ggml.impl.ggml_c.GGML_OP_VIEW;
+    for (n + 1..2 * n) |i| ops[i] = ggml.impl.ggml_c.GGML_OP_ADD;
     return ops;
 }
 const ops_moe_reduce_2 = opsMoeReduce(2);
@@ -954,13 +952,13 @@ const ops_moe_reduce_7 = opsMoeReduce(7);
 const ops_moe_reduce_8 = opsMoeReduce(8);
 
 /// Ports `ops_mul_mat_add` (ggml-metal-fusion.cpp:865 @b1b770d90).
-const ops_mul_mat_add = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_MUL_MAT, ggml.impl.c.GGML_OP_ADD };
+const ops_mul_mat_add = [_]ggml.impl.ggml_c.enum_ggml_op{ ggml.impl.ggml_c.GGML_OP_MUL_MAT, ggml.impl.ggml_c.GGML_OP_ADD };
 
 const out_1 = [_]c_int{1};
 const out_2 = [_]c_int{2};
 const out_3 = [_]c_int{3};
 
-fn entry(id: Id, comptime ops_all: []const ggml.impl.c.enum_ggml_op, outs: []const c_int, unsafe: bool, check: CheckFn) Fusion {
+fn entry(id: Id, comptime ops_all: []const ggml.impl.ggml_c.enum_ggml_op, outs: []const c_int, unsafe: bool, check: CheckFn) Fusion {
     return .{
         .id = id,
         .ops = filterOps(ops_all),
@@ -1031,7 +1029,7 @@ comptime {
 
 /// Ports `ggml_metal_fusion_match_raw_pattern` (ggml-metal-fusion.cpp:920
 /// @b1b770d90): whether the raw nodes from `node_idx` have exactly `ops`.
-fn matchRawPattern(gf: *const ggml.impl.CGraph, node_idx: c_int, ops: []const ggml.impl.c.enum_ggml_op) bool {
+fn matchRawPattern(gf: *const ggml.impl.CGraph, node_idx: c_int, ops: []const ggml.impl.ggml_c.enum_ggml_op) bool {
     if (node_idx < 0 or node_idx + @as(c_int, @intCast(ops.len)) > gf.n_nodes) {
         return false;
     }
@@ -1046,7 +1044,7 @@ fn matchRawPattern(gf: *const ggml.impl.CGraph, node_idx: c_int, ops: []const gg
 }
 
 /// The C's `void (*add_alloc_dep)(void *, ggml_tensor *, ggml_tensor *)`.
-pub const AddAllocDepFn = *const fn (?*anyopaque, ?*ggml.impl.c.ggml_tensor, ?*ggml.impl.c.ggml_tensor) callconv(.c) void;
+pub const AddAllocDepFn = *const fn (?*anyopaque, ?*ggml.impl.ggml_c.ggml_tensor, ?*ggml.impl.ggml_c.ggml_tensor) callconv(.c) void;
 
 /// Ports `ggml_metal_fusion_add_pattern_alloc_deps`
 /// (ggml-metal-fusion.cpp:935 @b1b770d90): keep every external input of
@@ -1061,21 +1059,21 @@ fn addPatternAllocDeps(user_data: ?*anyopaque, add_alloc_dep: AddAllocDepFn, gf:
     const last_node = node_idx + @as(c_int, @intCast(fusion.ops_all.len)) - 1;
 
     // keep all external inputs alive until the fused output
-    var seen: [max * (ggml.impl.c.GGML_MAX_SRC + 1)]*const ggml.impl.c.ggml_tensor = undefined;
+    var seen: [max * (ggml.impl.ggml_c.GGML_MAX_SRC + 1)]*const ggml.impl.ggml_c.ggml_tensor = undefined;
     var n_seen: usize = 0;
     for (0..fusion.ops_all.len) |j| {
         const node = gf.nodes[@intCast(node_idx + @as(c_int, @intCast(j)))].?;
-        for (0..ggml.impl.c.GGML_MAX_SRC) |s| {
+        for (0..ggml.impl.ggml_c.GGML_MAX_SRC) |s| {
             const sp = node.src[s];
             if (sp == null) continue;
-            const t = ggml.impl.one(ggml.impl.c.ggml_tensor, sp);
-            if (std.mem.indexOfScalar(*const ggml.impl.c.ggml_tensor, seen[0..n_seen], t) == null) {
+            const t = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, sp);
+            if (std.mem.indexOfScalar(*const ggml.impl.ggml_c.ggml_tensor, seen[0..n_seen], t) == null) {
                 seen[n_seen] = t;
                 n_seen += 1;
                 add_alloc_dep(user_data, t, gf.nodes[@intCast(last_node)]);
             }
         }
-        if (std.mem.indexOfScalar(*const ggml.impl.c.ggml_tensor, seen[0..n_seen], node) == null) {
+        if (std.mem.indexOfScalar(*const ggml.impl.ggml_c.ggml_tensor, seen[0..n_seen], node) == null) {
             seen[n_seen] = node;
             n_seen += 1;
         }
@@ -1091,7 +1089,7 @@ fn addPatternAllocDeps(user_data: ?*anyopaque, add_alloc_dep: AddAllocDepFn, gf:
 /// its last node, and the scan resumes past it. Only the op sequence is
 /// matched, not the checks, so a pattern that would be refused still pins
 /// its inputs: harmless, and the C's choice.
-pub export fn ggml_metal_fusion_add_alloc_deps(
+pub fn ggml_metal_fusion_add_alloc_deps(
     user_data: ?*anyopaque,
     add_alloc_dep: AddAllocDepFn,
     gf: *ggml.impl.CGraph,
@@ -1145,12 +1143,12 @@ fn label(fusion: *const Fusion) [:0]u8 {
     var j: usize = 0;
     while (j < fusion.ops.len) : (j += 1) {
         if (j > 0) {
-            buf.append(allocator, '+') catch ggml.impl.abort("metal: out of memory building a fusion label");
+            buf.append(std.heap.c_allocator, '+') catch ggml.impl.abort("metal: out of memory building a fusion label");
         }
-        buf.appendSlice(allocator, std.mem.span(ggml.types.ggml_op_name(fusion.ops[j]))) catch
+        buf.appendSlice(std.heap.c_allocator, std.mem.span(ggml.types.ggml_op_name(fusion.ops[j]))) catch
             ggml.impl.abort("metal: out of memory building a fusion label");
     }
-    return buf.toOwnedSliceSentinel(allocator, 0) catch ggml.impl.abort("metal: out of memory building a fusion label");
+    return buf.toOwnedSliceSentinel(std.heap.c_allocator, 0) catch ggml.impl.abort("metal: out of memory building a fusion label");
 }
 
 /// Ports `ggml_metal_fusion_info_init` (ggml-metal-fusion.cpp:1006
@@ -1162,8 +1160,8 @@ fn label(fusion: *const Fusion) [:0]u8 {
 ///
 /// Return: a new info, owned by the caller and freed with
 /// `ggml_metal_fusion_info_free`.
-pub export fn ggml_metal_fusion_info_init(enabled: bool, debug: c_int) callconv(.c) *Info {
-    const finfo = allocator.create(Info) catch ggml.impl.abort("metal: out of memory allocating the fusion info");
+pub fn ggml_metal_fusion_info_init(enabled: bool, debug: c_int) callconv(.c) *Info {
+    const finfo = std.heap.c_allocator.create(Info) catch ggml.impl.abort("metal: out of memory allocating the fusion info");
     finfo.* = .{
         .enabled = enabled,
         .stats = debug > 0,
@@ -1180,41 +1178,41 @@ pub export fn ggml_metal_fusion_info_init(enabled: bool, debug: c_int) callconv(
 
 /// Ports `ggml_metal_fusion_info_free` (ggml-metal-fusion.cpp:1020
 /// @b1b770d90).
-pub export fn ggml_metal_fusion_info_free(finfo: ?*Info) callconv(.c) void {
+pub fn ggml_metal_fusion_info_free(finfo: ?*Info) callconv(.c) void {
     const self = finfo orelse return; // `delete nullptr` is a no-op
     freeLabels(self);
-    allocator.destroy(self);
+    std.heap.c_allocator.destroy(self);
 }
 
 fn freeLabels(finfo: *Info) void {
-    for (finfo.labels) |l| allocator.free(l);
-    if (finfo.labels.len > 0) allocator.free(finfo.labels);
-    if (finfo.counts.len > 0) allocator.free(finfo.counts);
+    for (finfo.labels) |l| std.heap.c_allocator.free(l);
+    if (finfo.labels.len > 0) std.heap.c_allocator.free(finfo.labels);
+    if (finfo.counts.len > 0) std.heap.c_allocator.free(finfo.counts);
     finfo.labels = &.{};
     finfo.counts = &.{};
 }
 
 /// Ports `ggml_metal_fusion_info_enabled` (ggml-metal-fusion.cpp:1024
 /// @b1b770d90).
-pub export fn ggml_metal_fusion_info_enabled(finfo: *const Info) callconv(.c) bool {
+pub fn ggml_metal_fusion_info_enabled(finfo: *const Info) callconv(.c) bool {
     return finfo.enabled;
 }
 
 /// Ports `ggml_metal_fusion_info_stats` (ggml-metal-fusion.cpp:1028
 /// @b1b770d90).
-pub export fn ggml_metal_fusion_info_stats(finfo: *const Info) callconv(.c) bool {
+pub fn ggml_metal_fusion_info_stats(finfo: *const Info) callconv(.c) bool {
     return finfo.stats;
 }
 
 /// Ports `ggml_metal_fusion_info_debug` (ggml-metal-fusion.cpp:1032
 /// @b1b770d90).
-pub export fn ggml_metal_fusion_info_debug(finfo: *const Info) callconv(.c) c_int {
+pub fn ggml_metal_fusion_info_debug(finfo: *const Info) callconv(.c) c_int {
     return finfo.debug;
 }
 
 /// Ports `ggml_metal_fusion_info_n_fusions` (ggml-metal-fusion.cpp:1036
 /// @b1b770d90). Zero until the labels are built.
-pub export fn ggml_metal_fusion_info_n_fusions(finfo: *const Info) callconv(.c) c_int {
+pub fn ggml_metal_fusion_info_n_fusions(finfo: *const Info) callconv(.c) c_int {
     return @intCast(finfo.labels.len);
 }
 
@@ -1222,14 +1220,14 @@ pub export fn ggml_metal_fusion_info_n_fusions(finfo: *const Info) callconv(.c) 
 /// @b1b770d90).
 ///
 /// Return: the label of table entry `idx`, borrowed from `finfo`.
-pub export fn ggml_metal_fusion_info_label(finfo: *const Info, idx: c_int) callconv(.c) [*:0]const u8 {
+pub fn ggml_metal_fusion_info_label(finfo: *const Info, idx: c_int) callconv(.c) [*:0]const u8 {
     ggml.impl.assert(idx >= 0 and idx < @as(c_int, @intCast(finfo.labels.len)), "idx >= 0 && idx < (int) finfo->labels.size()");
     return finfo.labels[@intCast(idx)].ptr;
 }
 
 /// Ports `ggml_metal_fusion_info_count` (ggml-metal-fusion.cpp:1045
 /// @b1b770d90).
-pub export fn ggml_metal_fusion_info_count(finfo: *const Info, idx: c_int) callconv(.c) u64 {
+pub fn ggml_metal_fusion_info_count(finfo: *const Info, idx: c_int) callconv(.c) u64 {
     ggml.impl.assert(idx >= 0 and idx < @as(c_int, @intCast(finfo.counts.len)), "idx >= 0 && idx < (int) finfo->counts.size()");
     return finfo.counts[@intCast(idx)];
 }
@@ -1241,7 +1239,7 @@ pub export fn ggml_metal_fusion_info_count(finfo: *const Info, idx: c_int) callc
 ///
 /// The C subtracts the pointers whatever `fusion` is; a pointer from
 /// outside the table lands out of range and is ignored, and so here.
-pub export fn ggml_metal_fusion_info_count_fusion(finfo: *Info, fusion: ?*const Fusion) callconv(.c) void {
+pub fn ggml_metal_fusion_info_count_fusion(finfo: *Info, fusion: ?*const Fusion) callconv(.c) void {
     if (!finfo.stats or fusion == null) {
         return;
     }
@@ -1259,13 +1257,13 @@ pub export fn ggml_metal_fusion_info_count_fusion(finfo: *Info, fusion: ?*const 
 
 /// Ports `ggml_metal_fusion_info_set_enabled` (ggml-metal-fusion.cpp:1061
 /// @b1b770d90).
-pub export fn ggml_metal_fusion_info_set_enabled(finfo: *Info, enabled: bool) callconv(.c) void {
+pub fn ggml_metal_fusion_info_set_enabled(finfo: *Info, enabled: bool) callconv(.c) void {
     finfo.enabled = enabled;
 }
 
 /// Ports `ggml_metal_fusion_info_labels_init` (ggml-metal-fusion.cpp:1065
 /// @b1b770d90): one label and one zeroed counter per table entry, once.
-pub export fn ggml_metal_fusion_info_labels_init(finfo: *Info) callconv(.c) void {
+pub fn ggml_metal_fusion_info_labels_init(finfo: *Info) callconv(.c) void {
     if (finfo.labels_set) {
         return;
     }
@@ -1274,9 +1272,9 @@ pub export fn ggml_metal_fusion_info_labels_init(finfo: *Info) callconv(.c) void
     const len: usize = all.len;
 
     freeLabels(finfo);
-    finfo.counts = allocator.alloc(u64, len) catch ggml.impl.abort("metal: out of memory allocating the fusion counters");
+    finfo.counts = std.heap.c_allocator.alloc(u64, len) catch ggml.impl.abort("metal: out of memory allocating the fusion counters");
     @memset(finfo.counts, 0);
-    finfo.labels = allocator.alloc([:0]u8, len) catch ggml.impl.abort("metal: out of memory allocating the fusion labels");
+    finfo.labels = std.heap.c_allocator.alloc([:0]u8, len) catch ggml.impl.abort("metal: out of memory allocating the fusion labels");
 
     for (0..len) |i| {
         finfo.labels[i] = label(&all[i]);
@@ -1287,14 +1285,14 @@ pub export fn ggml_metal_fusion_info_labels_init(finfo: *Info) callconv(.c) void
 
 /// Ports `ggml_metal_fusion_info_stats_init` (ggml-metal-fusion.cpp:1081
 /// @b1b770d90).
-pub export fn ggml_metal_fusion_info_stats_init(finfo: *Info) callconv(.c) void {
+pub fn ggml_metal_fusion_info_stats_init(finfo: *Info) callconv(.c) void {
     finfo.stats = true;
     ggml_metal_fusion_info_labels_init(finfo);
 }
 
 /// Ports `ggml_metal_fusion_info_stats_reset` (ggml-metal-fusion.cpp:1086
 /// @b1b770d90).
-pub export fn ggml_metal_fusion_info_stats_reset(finfo: *Info) callconv(.c) void {
+pub fn ggml_metal_fusion_info_stats_reset(finfo: *Info) callconv(.c) void {
     @memset(finfo.counts, 0);
 }
 
@@ -1309,7 +1307,7 @@ pub export fn ggml_metal_fusion_info_stats_reset(finfo: *Info) callconv(.c) void
 ///
 /// Return: the number of fusions when `labels` is null, else how many
 /// entries were filled.
-pub export fn ggml_metal_fusion_info_stats_get(finfo: *const Info, labels: ?[*][*:0]const u8, counts: ?[*]u64, n: c_int) callconv(.c) c_int {
+pub fn ggml_metal_fusion_info_stats_get(finfo: *const Info, labels: ?[*][*:0]const u8, counts: ?[*]u64, n: c_int) callconv(.c) c_int {
     const n_fusions: c_int = @intCast(finfo.labels.len);
 
     const out = labels orelse return n_fusions;
@@ -1333,16 +1331,16 @@ pub export fn ggml_metal_fusion_info_stats_get(finfo: *const Info, labels: ?[*][
 /// The `same_memory` lambda of `ggml_metal_fusion_check_memory_ranges`
 /// (ggml-metal-fusion.cpp:1113 @b1b770d90): one tensor's data is the
 /// other's, or either is a view (at any depth) of the other.
-fn sameMemory(a: *const ggml.impl.c.ggml_tensor, b: *const ggml.impl.c.ggml_tensor) bool {
+fn sameMemory(a: *const ggml.impl.ggml_c.ggml_tensor, b: *const ggml.impl.ggml_c.ggml_tensor) bool {
     if (a.data != null and b.data != null and a.data == b.data) {
         return true;
     }
-    var v: ?*const ggml.impl.c.ggml_tensor = a;
-    while (v) |t| : (v = if (t.view_src == null) null else ggml.impl.one(ggml.impl.c.ggml_tensor, t.view_src)) {
+    var v: ?*const ggml.impl.ggml_c.ggml_tensor = a;
+    while (v) |t| : (v = if (t.view_src == null) null else ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, t.view_src)) {
         if (t == b) return true;
     }
     v = b;
-    while (v) |t| : (v = if (t.view_src == null) null else ggml.impl.one(ggml.impl.c.ggml_tensor, t.view_src)) {
+    while (v) |t| : (v = if (t.view_src == null) null else ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, t.view_src)) {
         if (t == a) return true;
     }
     return false;
@@ -1350,7 +1348,7 @@ fn sameMemory(a: *const ggml.impl.c.ggml_tensor, b: *const ggml.impl.c.ggml_tens
 
 /// The `nodes_overlap` lambda of the same function: both allocated, in the
 /// same buffer, with intersecting `[data, data + alloc_size)` intervals.
-fn nodesOverlap(a: *const ggml.impl.c.ggml_tensor, b: *const ggml.impl.c.ggml_tensor) bool {
+fn nodesOverlap(a: *const ggml.impl.ggml_c.ggml_tensor, b: *const ggml.impl.ggml_c.ggml_tensor) bool {
     if (a.data == null or b.data == null or a.buffer == null or b.buffer == null) {
         return false;
     }
@@ -1360,9 +1358,9 @@ fn nodesOverlap(a: *const ggml.impl.c.ggml_tensor, b: *const ggml.impl.c.ggml_te
     }
 
     const a_start: i64 = @bitCast(@as(u64, @intFromPtr(a.data)));
-    const a_end: i64 = a_start +% @as(i64, @bitCast(@as(u64, ggml.backend.ggml_backend_buft_get_alloc_size(ggml.impl.one(ggml.impl.c.ggml_backend_buffer, a.buffer).buft, a))));
+    const a_end: i64 = a_start +% @as(i64, @bitCast(@as(u64, ggml.backend.ggml_backend_buft_get_alloc_size(ggml.impl.one(ggml.impl.ggml_c.ggml_backend_buffer, a.buffer).buft, a))));
     const b_start: i64 = @bitCast(@as(u64, @intFromPtr(b.data)));
-    const b_end: i64 = b_start +% @as(i64, @bitCast(@as(u64, ggml.backend.ggml_backend_buft_get_alloc_size(ggml.impl.one(ggml.impl.c.ggml_backend_buffer, b.buffer).buft, b))));
+    const b_end: i64 = b_start +% @as(i64, @bitCast(@as(u64, ggml.backend.ggml_backend_buft_get_alloc_size(ggml.impl.one(ggml.impl.ggml_c.ggml_backend_buffer, b.buffer).buft, b))));
 
     return (b_start <= a_start and a_start < b_end) or
         (a_start <= b_start and b_start < a_end);
@@ -1370,13 +1368,13 @@ fn nodesOverlap(a: *const ggml.impl.c.ggml_tensor, b: *const ggml.impl.c.ggml_te
 
 /// The `is_intermediate` lambda: `s` is, or is a view of, one of the
 /// pattern's nodes before `j`.
-fn isIntermediate(s: *const ggml.impl.c.ggml_tensor, nodes: [*]const *const ggml.impl.c.ggml_tensor, j: usize) bool {
+fn isIntermediate(s: *const ggml.impl.ggml_c.ggml_tensor, nodes: [*]const *const ggml.impl.ggml_c.ggml_tensor, j: usize) bool {
     for (0..j) |k| {
         if (s == nodes[k]) {
             return true;
         }
-        var view_src: ?*const ggml.impl.c.ggml_tensor = if (s.view_src == null) null else ggml.impl.one(ggml.impl.c.ggml_tensor, s.view_src);
-        while (view_src) |v| : (view_src = if (v.view_src == null) null else ggml.impl.one(ggml.impl.c.ggml_tensor, v.view_src)) {
+        var view_src: ?*const ggml.impl.ggml_c.ggml_tensor = if (s.view_src == null) null else ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, s.view_src);
+        while (view_src) |v| : (view_src = if (v.view_src == null) null else ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, v.view_src)) {
             if (v == nodes[k]) {
                 return true;
             }
@@ -1386,13 +1384,13 @@ fn isIntermediate(s: *const ggml.impl.c.ggml_tensor, nodes: [*]const *const ggml
 }
 
 /// The `check_dst` lambda: no external source of any node overlaps `dst`.
-fn checkDst(nodes: [*]const *const ggml.impl.c.ggml_tensor, node_count: usize, dst: *const ggml.impl.c.ggml_tensor) bool {
+fn checkDst(nodes: [*]const *const ggml.impl.ggml_c.ggml_tensor, node_count: usize, dst: *const ggml.impl.ggml_c.ggml_tensor) bool {
     for (0..node_count) |j| {
-        for (0..ggml.impl.c.GGML_MAX_SRC) |s| {
+        for (0..ggml.impl.ggml_c.GGML_MAX_SRC) |s| {
             const sp = nodes[j].src[s];
             if (sp == null) continue;
-            const t = ggml.impl.one(ggml.impl.c.ggml_tensor, sp);
-            if (t.op == ggml.impl.c.GGML_OP_NONE or sameMemory(t, dst)) {
+            const t = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, sp);
+            if (t.op == ggml.impl.ggml_c.GGML_OP_NONE or sameMemory(t, dst)) {
                 continue;
             }
 
@@ -1414,7 +1412,7 @@ fn checkDst(nodes: [*]const *const ggml.impl.c.ggml_tensor, node_count: usize, d
 /// cpy), so a source that *is* the output's memory is not an external
 /// read. Only the compute phase has allocated tensors, so only FULL mode
 /// asks.
-fn checkMemoryRanges(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.ggml_tensor, node_count: usize) bool {
+fn checkMemoryRanges(fusion: *const Fusion, nodes: [*]const *const ggml.impl.ggml_c.ggml_tensor, node_count: usize) bool {
     if (!checkDst(nodes, node_count, nodes[node_count - 1])) {
         return false;
     }
@@ -1443,7 +1441,7 @@ fn checkMemoryRanges(fusion: *const Fusion, nodes: [*]const *const ggml.impl.c.g
 ///
 /// Return: the longest matching table entry, the first of equal length
 /// wins; null when nothing fuses.
-pub export fn ggml_metal_fusion_next(
+pub fn ggml_metal_fusion_next(
     gf: *const ggml.impl.CGraph,
     node_idxs: [*]const c_int,
     n_idxs: c_int,
@@ -1465,7 +1463,7 @@ pub export fn ggml_metal_fusion_next(
             continue;
         }
 
-        var nodes: [max]*const ggml.impl.c.ggml_tensor = undefined;
+        var nodes: [max]*const ggml.impl.ggml_c.ggml_tensor = undefined;
         const nu: usize = fusion.ops.len;
         const base: usize = @intCast(idx);
 
@@ -1491,7 +1489,7 @@ pub export fn ggml_metal_fusion_next(
                     ok = false;
                     break;
                 }
-                if (!ggml.impl.c.ggml_are_same_shape(nodes[j], nodes[j - 1])) {
+                if (!ggml.impl.ggml_c.ggml_are_same_shape(nodes[j], nodes[j - 1])) {
                     ok = false;
                     break;
                 }
@@ -1548,7 +1546,7 @@ pub export fn ggml_metal_fusion_next(
 /// counterpart, so a no-output ubatch gets the same node order.
 ///
 /// Return: at least 1.
-pub export fn ggml_metal_fusion_max(gf: *const ggml.impl.CGraph, idx: c_int) callconv(.c) c_int {
+pub fn ggml_metal_fusion_max(gf: *const ggml.impl.CGraph, idx: c_int) callconv(.c) c_int {
     // a view node cannot start a pattern - pack it alone
     const first = gf.nodes[@intCast(idx)].?;
     if (ggml.impl.opIsEmpty(first.op)) {

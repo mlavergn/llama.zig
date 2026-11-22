@@ -811,10 +811,8 @@ pub fn processEscapes(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
 // -----------------------------------------------------------------------------
 // Unit Tests
 
-const testing = std.testing;
-
 test {
-    testing.refAllDecls(@This());
+    std.testing.refAllDecls(@This());
 }
 
 /// Parses into a `Result` with a throwaway writer, for the tests below.
@@ -827,87 +825,87 @@ fn parseForTest(argv: []const []const u8) !Result {
 test "a minimal command line yields upstream's defaults" {
     const r = try parseForTest(&.{ "llamazig", "-m", "model.gguf" });
     const a = r.ok;
-    try testing.expectEqualStrings("model.gguf", a.model);
+    try std.testing.expectEqualStrings("model.gguf", a.model);
     // These are `common_params` / `common_params_sampling` values, not ours.
     // If upstream's defaults move, this test is how we find out.
-    try testing.expectEqual(@as(i32, -1), a.n_predict);
-    try testing.expectEqual(@as(i32, 0), a.n_ctx);
-    try testing.expectEqual(@as(i32, 2048), a.n_batch);
-    try testing.expectEqual(@as(f32, 0.80), a.temp);
-    try testing.expectEqual(@as(i32, 40), a.top_k);
-    try testing.expectEqual(@as(f32, 0.95), a.top_p);
-    try testing.expectEqual(@as(f32, 0.05), a.min_p);
-    try testing.expectEqual(@as(i32, 64), a.penalty_last_n);
-    try testing.expectEqual(@as(f32, 1.00), a.penalty_repeat);
-    try testing.expect(a.escape);
-    try testing.expect(a.display_prompt);
-    try testing.expect(a.show_timings);
-    try testing.expect(a.fit);
-    try testing.expectEqual(@as(u32, 4096), a.fit_min_ctx);
-    try testing.expectEqual(@as(usize, 1024 * 1024 * 1024), a.fit_target[max_devices - 1]);
+    try std.testing.expectEqual(@as(i32, -1), a.n_predict);
+    try std.testing.expectEqual(@as(i32, 0), a.n_ctx);
+    try std.testing.expectEqual(@as(i32, 2048), a.n_batch);
+    try std.testing.expectEqual(@as(f32, 0.80), a.temp);
+    try std.testing.expectEqual(@as(i32, 40), a.top_k);
+    try std.testing.expectEqual(@as(f32, 0.95), a.top_p);
+    try std.testing.expectEqual(@as(f32, 0.05), a.min_p);
+    try std.testing.expectEqual(@as(i32, 64), a.penalty_last_n);
+    try std.testing.expectEqual(@as(f32, 1.00), a.penalty_repeat);
+    try std.testing.expect(a.escape);
+    try std.testing.expect(a.display_prompt);
+    try std.testing.expect(a.show_timings);
+    try std.testing.expect(a.fit);
+    try std.testing.expectEqual(@as(u32, 4096), a.fit_min_ctx);
+    try std.testing.expectEqual(@as(usize, 1024 * 1024 * 1024), a.fit_target[max_devices - 1]);
 }
 
 test "max_devices is libllama's" {
-    try testing.expectEqual(@as(usize, max_devices), @import("llama").api.llama.llama_max_devices());
+    try std.testing.expectEqual(@as(usize, max_devices), @import("llama").api.llama.llama_max_devices());
 }
 
 test "--fit takes upstream's truthy and falsey words and nothing else" {
     for ([_][]const u8{ "on", "enabled", "true", "1" }) |v| {
         const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-fit", "off", "--fit", v });
-        try testing.expect(r.ok.fit);
+        try std.testing.expect(r.ok.fit);
     }
     for ([_][]const u8{ "off", "disabled", "false", "0" }) |v| {
         const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-fit", v });
-        try testing.expect(!r.ok.fit);
+        try std.testing.expect(!r.ok.fit);
     }
     const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-fit", "yes" });
-    try testing.expectEqual(error.BadNumber, r.fail.err);
+    try std.testing.expectEqual(error.BadNumber, r.fail.err);
 }
 
 test "an explicit -c 0 forbids --fit from shrinking, and the later flag wins" {
     var r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-c", "0" });
-    try testing.expectEqual(@as(u32, std.math.maxInt(u32)), r.ok.fit_min_ctx);
+    try std.testing.expectEqual(@as(u32, std.math.maxInt(u32)), r.ok.fit_min_ctx);
     r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-c", "0", "-fitc", "2048" });
-    try testing.expectEqual(@as(u32, 2048), r.ok.fit_min_ctx);
+    try std.testing.expectEqual(@as(u32, 2048), r.ok.fit_min_ctx);
     r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "--fit-ctx", "2048", "-c", "0" });
-    try testing.expectEqual(@as(u32, std.math.maxInt(u32)), r.ok.fit_min_ctx);
+    try std.testing.expectEqual(@as(u32, std.math.maxInt(u32)), r.ok.fit_min_ctx);
     r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-c", "512" });
-    try testing.expectEqual(@as(u32, 4096), r.ok.fit_min_ctx);
+    try std.testing.expectEqual(@as(u32, 4096), r.ok.fit_min_ctx);
     r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-fitc", "-1" });
-    try testing.expectEqual(@as(u32, std.math.maxInt(u32)), r.ok.fit_min_ctx);
+    try std.testing.expectEqual(@as(u32, std.math.maxInt(u32)), r.ok.fit_min_ctx);
 }
 
 test "--fit-target splits as upstream's regex does and reads values as std::stoull" {
     const mib: usize = 1024 * 1024;
     var r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-fitt", "512" });
-    for (r.ok.fit_target) |t| try testing.expectEqual(512 * mib, t);
+    for (r.ok.fit_target) |t| try std.testing.expectEqual(512 * mib, t);
     r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "--fit-target", " +256,,/128x," });
-    try testing.expectEqual(256 * mib, r.ok.fit_target[0]);
-    try testing.expectEqual(128 * mib, r.ok.fit_target[1]);
-    try testing.expectEqual(1024 * mib, r.ok.fit_target[2]);
+    try std.testing.expectEqual(256 * mib, r.ok.fit_target[0]);
+    try std.testing.expectEqual(128 * mib, r.ok.fit_target[1]);
+    try std.testing.expectEqual(1024 * mib, r.ok.fit_target[2]);
     r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-fitt", "-1" });
-    try testing.expectEqual(@as(usize, 0) -% mib, r.ok.fit_target[0]);
+    try std.testing.expectEqual(@as(usize, 0) -% mib, r.ok.fit_target[0]);
     for ([_][]const u8{ "", ",512", "x", "512,y", "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16", "99999999999999999999" }) |v| {
         r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-fitt", v });
-        try testing.expectEqual(error.BadNumber, r.fail.err);
+        try std.testing.expectEqual(error.BadNumber, r.fail.err);
     }
     r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-fitt", "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15" });
-    try testing.expectEqual(15 * mib, r.ok.fit_target[14]);
-    try testing.expectEqual(1024 * mib, r.ok.fit_target[15]);
+    try std.testing.expectEqual(15 * mib, r.ok.fit_target[14]);
+    try std.testing.expectEqual(1024 * mib, r.ok.fit_target[15]);
 }
 
 test "every alias of a flag reaches the same field" {
     for ([_][]const u8{ "-n", "--predict", "--n-predict" }) |flag| {
         const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", flag, "7" });
-        try testing.expectEqual(@as(i32, 7), r.ok.n_predict);
+        try std.testing.expectEqual(@as(i32, 7), r.ok.n_predict);
     }
     for ([_][]const u8{ "-ngl", "--gpu-layers", "--n-gpu-layers" }) |flag| {
         const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", flag, "33" });
-        try testing.expectEqual(@as(i32, 33), r.ok.n_gpu_layers);
+        try std.testing.expectEqual(@as(i32, 33), r.ok.n_gpu_layers);
     }
     for ([_][]const u8{ "--temp", "--temperature" }) |flag| {
         const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", flag, "0" });
-        try testing.expectEqual(@as(f32, 0.0), r.ok.temp);
+        try std.testing.expectEqual(@as(f32, 0.0), r.ok.temp);
     }
 }
 
@@ -915,10 +913,10 @@ test "a real upstream flag is refused differently from a typo" {
     // The distinction refusal exists for: one of these is the user's
     // mistake, the other is ours.
     const known = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "--mirostat", "2" });
-    try testing.expectEqual(Error.UnsupportedFlag, known.fail.err);
+    try std.testing.expectEqual(Error.UnsupportedFlag, known.fail.err);
 
     const typo = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "--mirostatt" });
-    try testing.expectEqual(Error.UnknownFlag, typo.fail.err);
+    try std.testing.expectEqual(Error.UnknownFlag, typo.fail.err);
 }
 
 test "upstream flags this CLI does not take are reported as unsupported" {
@@ -927,7 +925,7 @@ test "upstream flags this CLI does not take are reported as unsupported" {
     // not as typos: cli/upstream_flags.zig lists them at b1b770d90.
     for ([_][]const u8{ "--spec-draft-sampling", "--rpc", "--nextn" }) |f| {
         const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", f, "x" });
-        try testing.expectEqual(Error.UnsupportedFlag, r.fail.err);
+        try std.testing.expectEqual(Error.UnsupportedFlag, r.fail.err);
     }
 }
 
@@ -936,8 +934,8 @@ test "every spelling of interactive mode is accepted, and implies chat" {
     // flag turns templating on rather than leaving it to be asked for twice.
     for ([_][]const u8{ "-cnv", "--conversation", "-i", "--interactive" }) |flag| {
         const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", flag });
-        try testing.expect(r.ok.interactive);
-        try testing.expect(r.ok.useChatTemplate());
+        try std.testing.expect(r.ok.interactive);
+        try std.testing.expect(r.ok.useChatTemplate());
     }
 }
 
@@ -947,7 +945,7 @@ test "interactive spellings we do not implement are still refused" {
     // question from the one asked.
     for ([_][]const u8{ "-if", "-mli" }) |flag| {
         const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", flag });
-        try testing.expectEqual(Error.UnsupportedFlag, r.fail.err);
+        try std.testing.expectEqual(Error.UnsupportedFlag, r.fail.err);
     }
 }
 
@@ -957,11 +955,11 @@ test "every upstream spelling of one-shot is accepted" {
     // would break a command line that works against one of them.
     for ([_][]const u8{ "-st", "--single-turn", "-no-cnv", "--no-conversation" }) |flag| {
         const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", flag });
-        try testing.expect(r.ok.one_shot);
+        try std.testing.expect(r.ok.one_shot);
     }
     // Absent, it stays false -- that is what makes `main` warn.
     const bare = try parseForTest(&.{ "llamazig", "-m", "m.gguf" });
-    try testing.expect(!bare.ok.one_shot);
+    try std.testing.expect(!bare.ok.one_shot);
 }
 
 test "no flag is both supported and reported as unsupported" {
@@ -970,7 +968,7 @@ test "no flag is both supported and reported as unsupported" {
     // be unreachable -- or worse, the other way around.
     for (specs) |s| {
         for (s.names) |n| {
-            try testing.expect(supported(n));
+            try std.testing.expect(supported(n));
         }
     }
     // Everything we support that upstream also has must spell it identically,
@@ -988,30 +986,30 @@ test "no flag is both supported and reported as unsupported" {
 
 test "a missing value is caught rather than swallowing the next flag" {
     const r = try parseForTest(&.{ "llamazig", "-m" });
-    try testing.expectEqual(Error.MissingValue, r.fail.err);
-    try testing.expectEqualStrings("-m", r.fail.arg);
+    try std.testing.expectEqual(Error.MissingValue, r.fail.err);
+    try std.testing.expectEqualStrings("-m", r.fail.arg);
 }
 
 test "a model is required" {
     const r = try parseForTest(&.{ "llamazig", "-p", "hello" });
-    try testing.expectEqual(Error.MissingModel, r.fail.err);
+    try std.testing.expectEqual(Error.MissingModel, r.fail.err);
 }
 
 test "a bare word is refused rather than taken as a positional" {
     // Upstream's llama-cli has no positional arguments, so accepting one would
     // invent behaviour that then has to be supported forever.
     const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "stray" });
-    try testing.expectEqual(Error.UnknownFlag, r.fail.err);
+    try std.testing.expectEqual(Error.UnknownFlag, r.fail.err);
 }
 
 test "help and version consume the command line and ask to exit" {
     for ([_][]const u8{ "-h", "--help", "--usage", "--version" }) |flag| {
         const r = try parseForTest(&.{ "llamazig", flag });
-        try testing.expect(r.ok.done);
+        try std.testing.expect(r.ok.done);
     }
     // ...even without a model, which would otherwise be an error.
     const r = try parseForTest(&.{ "llamazig", "--help" });
-    try testing.expect(r.ok.done);
+    try std.testing.expect(r.ok.done);
 }
 
 test "escape processing matches what upstream's -e handles" {
@@ -1029,19 +1027,19 @@ test "escape processing matches what upstream's -e handles" {
         .{ .in = "no escapes", .want = "no escapes" },
     };
     for (cases) |case| {
-        const got = try processEscapes(testing.allocator, case.in);
-        defer testing.allocator.free(got);
-        try testing.expectEqualStrings(case.want, got);
+        const got = try processEscapes(std.testing.allocator, case.in);
+        defer std.testing.allocator.free(got);
+        try std.testing.expectEqualStrings(case.want, got);
     }
 }
 
 test "escape processing releases its buffer on every path" {
     // Called twice so the leak check has something to prove: the first
     // allocation must be gone before the second is made.
-    const a = try processEscapes(testing.allocator, "one\\ntwo");
-    testing.allocator.free(a);
-    const b = try processEscapes(testing.allocator, "three\\tfour");
-    testing.allocator.free(b);
+    const a = try processEscapes(std.testing.allocator, "one\\ntwo");
+    std.testing.allocator.free(a);
+    const b = try processEscapes(std.testing.allocator, "three\\tfour");
+    std.testing.allocator.free(b);
 }
 
 test "help lists every supported flag" {
@@ -1061,43 +1059,43 @@ test "help lists every supported flag" {
 
 test "the last grammar flag wins, whichever kind it is" {
     const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "--grammar", "root ::= \"a\"", "-j", "{}" });
-    try testing.expectEqualStrings("{}", r.ok.grammar_source.schema);
+    try std.testing.expectEqualStrings("{}", r.ok.grammar_source.schema);
     const f = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "-jf", "s.json", "--grammar-file", "g.gbnf" });
-    try testing.expectEqualStrings("g.gbnf", f.ok.grammar_source.gbnf_file);
-    try testing.expectEqualStrings("--grammar-file", f.ok.grammar_source.flag());
+    try std.testing.expectEqualStrings("g.gbnf", f.ok.grammar_source.gbnf_file);
+    try std.testing.expectEqualStrings("--grammar-file", f.ok.grammar_source.flag());
     const m = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "--json-schema" });
-    try testing.expectEqual(Error.MissingValue, m.fail.err);
+    try std.testing.expectEqual(Error.MissingValue, m.fail.err);
 }
 
 test "timings default on, and both spellings of the switch work" {
     // Upstream's `common_params::show_timings` defaults to true, so a bare
     // command line prints the line.
     const on = try parseForTest(&.{ "llamazig", "-m", "m.gguf" });
-    try testing.expect(on.ok.show_timings);
+    try std.testing.expect(on.ok.show_timings);
 
     const off = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "--no-show-timings" });
-    try testing.expect(!off.ok.show_timings);
+    try std.testing.expect(!off.ok.show_timings);
 
     // Later flags win, as with every other option here.
     const back_on = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "--no-show-timings", "--show-timings" });
-    try testing.expect(back_on.ok.show_timings);
+    try std.testing.expect(back_on.ok.show_timings);
 }
 
 test "the reasoning flags take upstream's values, imply chat, and refuse the rest" {
     const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "--reasoning-format", "none", "-rea", "off", "--reasoning-budget", "0", "--skip-chat-parsing" });
-    try testing.expectEqual(common_chat.ReasoningFormat.none, r.ok.reasoning_format);
-    try testing.expectEqual(@as(i8, 0), r.ok.enable_reasoning);
-    try testing.expectEqual(@as(i32, 0), r.ok.reasoning_budget);
-    try testing.expect(r.ok.skip_chat_parsing);
-    try testing.expect(r.ok.useChatTemplate());
+    try std.testing.expectEqual(common_chat.ReasoningFormat.none, r.ok.reasoning_format);
+    try std.testing.expectEqual(@as(i8, 0), r.ok.enable_reasoning);
+    try std.testing.expectEqual(@as(i32, 0), r.ok.reasoning_budget);
+    try std.testing.expect(r.ok.skip_chat_parsing);
+    try std.testing.expect(r.ok.useChatTemplate());
     // `--reasoning off` writes the kwarg as well as the switch.
-    try testing.expectEqualStrings("enable_thinking", r.ok.kwargOps()[0].set.key);
-    try testing.expectEqualStrings("false", r.ok.kwargOps()[0].set.value);
+    try std.testing.expectEqualStrings("enable_thinking", r.ok.kwargOps()[0].set.key);
+    try std.testing.expectEqualStrings("false", r.ok.kwargOps()[0].set.value);
 
     const defaults = try parseForTest(&.{ "llamazig", "-m", "m.gguf" });
-    try testing.expectEqual(common_chat.ReasoningFormat.deepseek, defaults.ok.reasoning_format);
-    try testing.expectEqual(@as(i8, -1), defaults.ok.enable_reasoning);
-    try testing.expectEqual(Color.auto, defaults.ok.color);
+    try std.testing.expectEqual(common_chat.ReasoningFormat.deepseek, defaults.ok.reasoning_format);
+    try std.testing.expectEqual(@as(i8, -1), defaults.ok.enable_reasoning);
+    try std.testing.expectEqual(Color.auto, defaults.ok.color);
 
     for ([_][2][]const u8{
         .{ "--reasoning-format", "bogus" },
@@ -1106,20 +1104,20 @@ test "the reasoning flags take upstream's values, imply chat, and refuse the res
         .{ "--color", "sometimes" },
     }) |fv| {
         const f = try parseForTest(&.{ "llamazig", "-m", "m.gguf", fv[0], fv[1] });
-        try testing.expectEqual(Error.BadArgument, f.fail.err);
+        try std.testing.expectEqual(Error.BadArgument, f.fail.err);
     }
     var buf: [256]u8 = undefined;
     var w: std.Io.Writer = .fixed(&buf);
     const f = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "--reasoning", "maybe" });
     try f.fail.report(&w);
-    try testing.expectEqualStrings("error while handling argument \"--reasoning\": error: unknown value for --reasoning: 'maybe'\n\n", w.buffered());
+    try std.testing.expectEqualStrings("error while handling argument \"--reasoning\": error: unknown value for --reasoning: 'maybe'\n\n", w.buffered());
 }
 
 test "the kwarg flags are kept in command-line order" {
     const r = try parseForTest(&.{ "llamazig", "-m", "m.gguf", "--chat-template-kwargs", "{\"a\":1}", "--reasoning-effort", "high", "--no-reasoning-preserve", "--reasoning", "auto" });
     const ops = r.ok.kwargOps();
-    try testing.expectEqual(@as(usize, 3), ops.len);
-    try testing.expectEqualStrings("{\"a\":1}", ops[0].object);
-    try testing.expectEqualStrings("high", ops[1].effort);
-    try testing.expectEqualStrings("false", ops[2].set.value);
+    try std.testing.expectEqual(@as(usize, 3), ops.len);
+    try std.testing.expectEqualStrings("{\"a\":1}", ops[0].object);
+    try std.testing.expectEqualStrings("high", ops[1].effort);
+    try std.testing.expectEqualStrings("false", ops[2].set.value);
 }

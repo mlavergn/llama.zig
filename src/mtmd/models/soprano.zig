@@ -9,6 +9,7 @@
 //! and the line it began at.
 
 const std = @import("std");
+const llama = @import("llama");
 const mtmd = @import("../module.zig");
 
 /// `upscale` (mtmd/models/models.h:544 @b1b770d90), a member of `mtmd_graph_soprano`:
@@ -18,7 +19,7 @@ const upscale: c_int = 4;
 /// Ports `build` (soprano.cpp:5 @b1b770d90), a member of `mtmd_graph_soprano`,
 /// with `n_frames` derived as mtmd_get_graph_builder's `PROJECTOR_TYPE_SOPRANO`
 /// arm does (mtmd-graph.cpp:1030 @b1b770d90).
-pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*llama.impl.llama_c.ggml_cgraph {
     const ctx0 = g.ctx0;
     const hparams = g.hparams;
     const v = &g.model.vocos;
@@ -29,56 +30,56 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
 
     const n_inp = hparams.projection_dim;
     const n_up = upscale * (n_frames - 1) + 1;
-    var cur = mtmd.impl.c.ggml_new_tensor_2d(ctx0, mtmd.impl.c.GGML_TYPE_F32, n_inp, n_frames);
-    _ = mtmd.impl.c.ggml_set_name(cur, "inp_feats");
-    mtmd.impl.c.ggml_set_input(cur);
+    var cur = llama.impl.llama_c.ggml_new_tensor_2d(ctx0, llama.impl.llama_c.GGML_TYPE_F32, n_inp, n_frames);
+    _ = llama.impl.llama_c.ggml_set_name(cur, "inp_feats");
+    llama.impl.llama_c.ggml_set_input(cur);
 
-    cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, cur));
-    cur = mtmd.impl.c.ggml_interpolate(ctx0, cur, n_up, n_inp, 1, 1, mtmd.impl.c.GGML_SCALE_MODE_BILINEAR | mtmd.impl.c.GGML_SCALE_FLAG_ALIGN_CORNERS);
-    if (mtmd.impl.c.ggml_n_dims(v.input_w) == 3) {
+    cur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, cur));
+    cur = llama.impl.llama_c.ggml_interpolate(ctx0, cur, n_up, n_inp, 1, 1, llama.impl.llama_c.GGML_SCALE_MODE_BILINEAR | llama.impl.llama_c.GGML_SCALE_FLAG_ALIGN_CORNERS);
+    if (llama.impl.llama_c.ggml_n_dims(v.input_w) == 3) {
         const k: c_int = @intCast(mtmd.graph.ne(v.input_w, 0));
-        cur = mtmd.impl.c.ggml_conv_1d(ctx0, v.input_w, cur, 1, @divTrunc(k, 2), 1);
-        cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, cur));
+        cur = llama.impl.llama_c.ggml_conv_1d(ctx0, v.input_w, cur, 1, @divTrunc(k, 2), 1);
+        cur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, cur));
     } else {
-        cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, cur));
+        cur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, cur));
         cur = g.buildMm(v.input_w, cur);
     }
-    cur = mtmd.impl.c.ggml_add(ctx0, cur, v.input_b);
+    cur = llama.impl.llama_c.ggml_add(ctx0, cur, v.input_b);
     cur = g.buildNorm(cur, v.norm_w, v.norm_b, .normal, g.eps, -1);
 
     for (v.blocks.items, 0..) |*b, il_u| {
         const il: c_int = @intCast(il_u);
         const k: c_int = @intCast(mtmd.graph.ne(b.dwconv_w, 0));
         const residual = cur;
-        cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, cur));
-        cur = mtmd.impl.c.ggml_conv_1d_dw(ctx0, b.dwconv_w, cur, 1, @divTrunc(k, 2), 1);
-        cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, cur));
-        cur = mtmd.impl.c.ggml_add(ctx0, cur, b.dwconv_b);
+        cur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, cur));
+        cur = llama.impl.llama_c.ggml_conv_1d_dw(ctx0, b.dwconv_w, cur, 1, @divTrunc(k, 2), 1);
+        cur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, cur));
+        cur = llama.impl.llama_c.ggml_add(ctx0, cur, b.dwconv_b);
         cur = g.buildNorm(cur, b.norm_w, b.norm_b, .normal, g.eps, il);
-        cur = mtmd.impl.c.ggml_add(ctx0, g.buildMm(b.pw1_w, cur), b.pw1_b);
-        cur = mtmd.impl.c.ggml_gelu_erf(ctx0, cur);
-        cur = mtmd.impl.c.ggml_add(ctx0, g.buildMm(b.pw2_w, cur), b.pw2_b);
-        cur = mtmd.impl.c.ggml_add(ctx0, residual, mtmd.impl.c.ggml_mul(ctx0, cur, b.gamma));
+        cur = llama.impl.llama_c.ggml_add(ctx0, g.buildMm(b.pw1_w, cur), b.pw1_b);
+        cur = llama.impl.llama_c.ggml_gelu_erf(ctx0, cur);
+        cur = llama.impl.llama_c.ggml_add(ctx0, g.buildMm(b.pw2_w, cur), b.pw2_b);
+        cur = llama.impl.llama_c.ggml_add(ctx0, residual, llama.impl.llama_c.ggml_mul(ctx0, cur, b.gamma));
         g.cb(cur, "vocos_block", il);
     }
     cur = g.buildNorm(cur, v.output_norm_w, v.output_norm_b, .normal, g.eps, -1);
-    cur = mtmd.impl.c.ggml_add(ctx0, g.buildMm(v.output_w, cur), v.output_b);
+    cur = llama.impl.llama_c.ggml_add(ctx0, g.buildMm(v.output_w, cur), v.output_b);
     g.cb(cur, "vocos_head", -1);
 
     // the head holds n_fft/2+1 log-magnitudes followed by n_fft/2+1 phases
     const n_bins = @divTrunc(mtmd.graph.ne(v.output_w, 1), 2);
-    var mag = mtmd.impl.c.ggml_view_2d(ctx0, cur, n_bins, n_up, mtmd.graph.nb(cur, 1), 0);
-    var phase = mtmd.impl.c.ggml_view_2d(ctx0, cur, n_bins, n_up, mtmd.graph.nb(cur, 1), @as(usize, @intCast(n_bins)) * @sizeOf(f32));
-    mag = mtmd.impl.c.ggml_clamp(ctx0, mtmd.impl.c.ggml_exp(ctx0, mtmd.impl.c.ggml_cont(ctx0, mag)), 0.0, 100.0);
-    phase = mtmd.impl.c.ggml_cont(ctx0, phase);
-    var re = mtmd.impl.c.ggml_mul(ctx0, mag, mtmd.impl.c.ggml_cos(ctx0, phase));
-    var im = mtmd.impl.c.ggml_mul(ctx0, mag, mtmd.impl.c.ggml_sin(ctx0, phase));
-    re = mtmd.impl.c.ggml_reshape_3d(ctx0, re, 1, n_bins, n_up);
-    im = mtmd.impl.c.ggml_reshape_3d(ctx0, im, 1, n_bins, n_up);
-    cur = mtmd.impl.c.ggml_concat(ctx0, re, im, 0);
-    _ = mtmd.impl.c.ggml_set_name(cur, "out_audio");
-    mtmd.impl.c.ggml_set_output(cur);
-    mtmd.impl.c.ggml_build_forward_expand(g.gf, cur);
+    var mag = llama.impl.llama_c.ggml_view_2d(ctx0, cur, n_bins, n_up, mtmd.graph.nb(cur, 1), 0);
+    var phase = llama.impl.llama_c.ggml_view_2d(ctx0, cur, n_bins, n_up, mtmd.graph.nb(cur, 1), @as(usize, @intCast(n_bins)) * @sizeOf(f32));
+    mag = llama.impl.llama_c.ggml_clamp(ctx0, llama.impl.llama_c.ggml_exp(ctx0, llama.impl.llama_c.ggml_cont(ctx0, mag)), 0.0, 100.0);
+    phase = llama.impl.llama_c.ggml_cont(ctx0, phase);
+    var re = llama.impl.llama_c.ggml_mul(ctx0, mag, llama.impl.llama_c.ggml_cos(ctx0, phase));
+    var im = llama.impl.llama_c.ggml_mul(ctx0, mag, llama.impl.llama_c.ggml_sin(ctx0, phase));
+    re = llama.impl.llama_c.ggml_reshape_3d(ctx0, re, 1, n_bins, n_up);
+    im = llama.impl.llama_c.ggml_reshape_3d(ctx0, im, 1, n_bins, n_up);
+    cur = llama.impl.llama_c.ggml_concat(ctx0, re, im, 0);
+    _ = llama.impl.llama_c.ggml_set_name(cur, "out_audio");
+    llama.impl.llama_c.ggml_set_output(cur);
+    llama.impl.llama_c.ggml_build_forward_expand(g.gf, cur);
     return g.gf;
 }
 

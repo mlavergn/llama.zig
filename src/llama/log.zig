@@ -22,7 +22,7 @@ const stdlib = @import("stdlib");
 
 /// Ports `llama_logger_state` (llama-impl.cpp:15 @b1b770d90).
 pub const LoggerState = struct {
-    log_callback: mod.impl.c.ggml_log_callback = callbackDefault,
+    log_callback: mod.impl.llama_c.ggml_log_callback = callbackDefault,
     log_callback_user_data: ?*anyopaque = null,
 };
 
@@ -45,7 +45,7 @@ pub var g_logger_state: LoggerState = .{};
 /// - `args`: C-compatible arguments for it.
 ///
 /// Return: nothing.
-pub fn logInternal(level: mod.impl.c.enum_ggml_log_level, comptime format: [:0]const u8, args: anytype) void {
+pub fn logInternal(level: mod.impl.llama_c.enum_ggml_log_level, comptime format: [:0]const u8, args: anytype) void {
     var buffer: [128]u8 = undefined;
     const len: c_int = @call(.auto, stdlib.libc.snprintf, .{ &buffer, @as(usize, 128), format.ptr } ++ args);
     const cb = g_logger_state.log_callback.?;
@@ -70,11 +70,11 @@ pub fn logInternal(level: mod.impl.c.enum_ggml_log_level, comptime format: [:0]c
 /// - `user_data`: ignored.
 ///
 /// Return: nothing.
-pub fn callbackDefault(level: mod.impl.c.enum_ggml_log_level, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
+pub fn callbackDefault(level: mod.impl.llama_c.enum_ggml_log_level, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
     _ = level;
     _ = user_data;
-    _ = mod.impl.c.fputs(text, mod.impl.cStderr());
-    _ = mod.impl.c.fflush(mod.impl.cStderr());
+    _ = mod.impl.llama_c.fputs(text, mod.impl.cStderr());
+    _ = mod.impl.llama_c.fflush(mod.impl.cStderr());
 }
 
 // -----------------------------------------------------------------------------
@@ -86,9 +86,9 @@ test {
 }
 
 var test_seen: std.ArrayList(u8) = .empty;
-var test_level: mod.impl.c.enum_ggml_log_level = mod.impl.c.GGML_LOG_LEVEL_NONE;
+var test_level: mod.impl.llama_c.enum_ggml_log_level = mod.impl.llama_c.GGML_LOG_LEVEL_NONE;
 
-fn testCapture(level: mod.impl.c.enum_ggml_log_level, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
+fn testCapture(level: mod.impl.llama_c.enum_ggml_log_level, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
     test_level = level;
     const tag: *const u8 = @ptrCast(user_data.?);
     std.debug.assert(tag.* == 'x');
@@ -102,13 +102,13 @@ test "a message past 128 bytes takes the heap path whole" {
     var tag: u8 = 'x';
     g_logger_state = .{ .log_callback = testCapture, .log_callback_user_data = &tag };
 
-    logInternal(mod.impl.c.GGML_LOG_LEVEL_WARN, "%s=%d\n", .{ @as([*:0]const u8, "short"), @as(c_int, 7) });
+    logInternal(mod.impl.llama_c.GGML_LOG_LEVEL_WARN, "%s=%d\n", .{ @as([*:0]const u8, "short"), @as(c_int, 7) });
     try std.testing.expectEqualStrings("short=7\n", test_seen.items);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_log_level, mod.impl.c.GGML_LOG_LEVEL_WARN), test_level);
+    try std.testing.expectEqual(@as(mod.impl.llama_c.enum_ggml_log_level, mod.impl.llama_c.GGML_LOG_LEVEL_WARN), test_level);
 
     test_seen.clearRetainingCapacity();
     const long: [200:0]u8 = @splat('a');
-    logInternal(mod.impl.c.GGML_LOG_LEVEL_INFO, "%s|%d", .{ @as([*:0]const u8, &long), @as(c_int, 12345) });
+    logInternal(mod.impl.llama_c.GGML_LOG_LEVEL_INFO, "%s|%d", .{ @as([*:0]const u8, &long), @as(c_int, 12345) });
     try std.testing.expectEqualStrings(&long, test_seen.items[0..200]);
     try std.testing.expectEqualStrings("|12345", test_seen.items[200..]);
 }

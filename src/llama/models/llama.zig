@@ -85,7 +85,7 @@ pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *
         layer.ffn_norm = try self.createTensor(.{ .tensor = .ffn_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, 0, exc);
 
         const rope_dup: u32 = if (i != 0) dup else 0;
-        if (hp.rope_scaling_type_train == llama.impl.c.LLAMA_ROPE_SCALING_TYPE_LONGROPE) {
+        if (hp.rope_scaling_type_train == llama.impl.llama_c.LLAMA_ROPE_SCALING_TYPE_LONGROPE) {
             layer.rope_long = try self.createTensor(.{ .tensor = .rope_factors_long, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, nr | rope_dup, exc);
             layer.rope_short = try self.createTensor(.{ .tensor = .rope_factors_short, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, nr | rope_dup, exc);
         } else {
@@ -178,8 +178,8 @@ fn buildGraph(comptime embed: bool, model: *const llama.model.Model, b: *const l
 
             if (hp.use_kq_norm) {
                 // Llama4TextL2Norm.
-                Qcur = llama.impl.c.ggml_rms_norm(ctx, Qcur, hp.f_norm_rms_eps);
-                Kcur = llama.impl.c.ggml_rms_norm(ctx, Kcur, hp.f_norm_rms_eps);
+                Qcur = llama.impl.llama_c.ggml_rms_norm(ctx, Qcur, hp.f_norm_rms_eps);
+                Kcur = llama.impl.llama_c.ggml_rms_norm(ctx, Kcur, hp.f_norm_rms_eps);
                 b.cb(Qcur, "Qcur_normed", il);
                 b.cb(Kcur, "Kcur_normed", il);
             }
@@ -187,10 +187,10 @@ fn buildGraph(comptime embed: bool, model: *const llama.model.Model, b: *const l
             b.cb(cur, "attn_out", il);
         }
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
-        const ffn_inp = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         if (layer.ffn_gate_inp == null) {
@@ -222,7 +222,7 @@ fn buildGraph(comptime embed: bool, model: *const llama.model.Model, b: *const l
             }, il);
             b.cb(cur, "ffn_moe_out", il);
         }
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
         b.cb(cur, "ffn_out", il);
 
         cur = b.buildCvec(cur, il);

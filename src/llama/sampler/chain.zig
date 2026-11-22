@@ -31,7 +31,7 @@ const stdlib = @import("stdlib");
 /// Ports `llama_sampler_chain`'s `info` (llama-sampler.h:20 @b1b770d90).
 const Info = struct {
     is_backend: bool,
-    ptr: [*c]llama.impl.c.struct_llama_sampler,
+    ptr: [*c]llama.impl.llama_c.struct_llama_sampler,
 };
 
 /// Ports `llama_sampler_chain` (llama-sampler.h:12 @b1b770d90).
@@ -40,24 +40,24 @@ const Info = struct {
 /// chain only through `llama_sampler_chain_get` and `_n`. That is what lets
 /// it be a Zig struct.
 pub const Chain = struct {
-    params: llama.impl.c.llama_sampler_chain_params,
+    params: llama.impl.llama_c.llama_sampler_chain_params,
     is_init: bool,
     n_nodes: u32,
     samplers: std.ArrayList(Info),
     /// The candidate buffer `llama_sampler_sample` reuses across calls.
-    cur: std.ArrayList(llama.impl.c.llama_token_data),
+    cur: std.ArrayList(llama.impl.llama_c.llama_token_data),
     t_sample_us: i64,
     n_sample: i32,
 };
 
 /// Ports `llama_sampler_chain_name` (llama-sampler.cpp:666 @b1b770d90).
-fn chainName(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]const u8 {
+fn chainName(smpl: [*c]const llama.impl.llama_c.struct_llama_sampler) callconv(.c) [*c]const u8 {
     _ = smpl;
     return "chain";
 }
 
 /// Ports `llama_sampler_chain_accept` (llama-sampler.cpp:670 @b1b770d90).
-fn chainAccept(smpl: [*c]llama.impl.c.struct_llama_sampler, token: llama.impl.c.llama_token) callconv(.c) void {
+fn chainAccept(smpl: [*c]llama.impl.llama_c.struct_llama_sampler, token: llama.impl.llama_c.llama_token) callconv(.c) void {
     const chain = llama.sampler.core.ctxOf(Chain, smpl);
 
     const tm = llama.impl.TimeMeas.init(&chain.t_sample_us, chain.params.no_perf);
@@ -72,7 +72,7 @@ fn chainAccept(smpl: [*c]llama.impl.c.struct_llama_sampler, token: llama.impl.c.
 ///
 /// After `backend_init`, the leading run of samplers that ran on the backend
 /// is skipped: the candidates arriving here are already their output.
-fn chainApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.impl.c.llama_token_data_array) callconv(.c) void {
+fn chainApply(smpl: [*c]llama.impl.llama_c.struct_llama_sampler, cur_p: [*c]llama.impl.llama_c.llama_token_data_array) callconv(.c) void {
     const chain = llama.sampler.core.ctxOf(Chain, smpl);
 
     const tm = llama.impl.TimeMeas.init(&chain.t_sample_us, chain.params.no_perf);
@@ -92,13 +92,13 @@ fn chainApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.impl
 }
 
 /// Ports `llama_sampler_chain_reset` (llama-sampler.cpp:704 @b1b770d90).
-fn chainReset(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+fn chainReset(smpl: [*c]llama.impl.llama_c.struct_llama_sampler) callconv(.c) void {
     const chain = llama.sampler.core.ctxOf(Chain, smpl);
     for (chain.samplers.items) |s| llama.sampler.core.llama_sampler_reset(s.ptr);
 }
 
 /// Ports `llama_sampler_chain_clone` (llama-sampler.cpp:712 @b1b770d90).
-fn chainClone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+fn chainClone(smpl: [*c]const llama.impl.llama_c.struct_llama_sampler) callconv(.c) [*c]llama.impl.llama_c.struct_llama_sampler {
     const chain_src = llama.sampler.core.ctxOf(Chain, smpl);
 
     const result = chainInit(chain_src.params);
@@ -111,7 +111,7 @@ fn chainClone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*
 }
 
 /// Ports `llama_sampler_chain_free` (llama-sampler.cpp:724 @b1b770d90).
-fn chainFree(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+fn chainFree(smpl: [*c]llama.impl.llama_c.struct_llama_sampler) callconv(.c) void {
     const chain = llama.sampler.core.ctxOf(Chain, smpl);
 
     for (chain.samplers.items) |s| llama.sampler.core.llama_sampler_free(s.ptr);
@@ -125,7 +125,7 @@ fn chainFree(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
 ///
 /// Marks the longest prefix of samplers that can run on the backend, then
 /// counts the nodes its graph needs.
-fn chainBackendInit(smpl: [*c]llama.impl.c.struct_llama_sampler, buft: llama.impl.c.ggml_backend_buffer_type_t, n_outputs_max_per_seq: u32) callconv(.c) bool {
+fn chainBackendInit(smpl: [*c]llama.impl.llama_c.struct_llama_sampler, buft: llama.impl.llama_c.ggml_backend_buffer_type_t, n_outputs_max_per_seq: u32) callconv(.c) bool {
     const chain = llama.sampler.core.ctxOf(Chain, smpl);
 
     llama.impl.assert(chain.is_init == false, llama.sampler.core.src, 740, "chain->is_init == false && \"llama_sampler_chain_backend_init() called twice\"");
@@ -152,7 +152,7 @@ fn chainBackendInit(smpl: [*c]llama.impl.c.struct_llama_sampler, buft: llama.imp
         res = res and cur_prefix;
     }
 
-    const probe = llama.sampler.core.probeGraph(smpl, 128 * 1024, llama.impl.c.GGML_DEFAULT_GRAPH_SIZE, false);
+    const probe = llama.sampler.core.probeGraph(smpl, 128 * 1024, llama.impl.llama_c.GGML_DEFAULT_GRAPH_SIZE, false);
     defer probe.deinit();
     chain.n_nodes = llama.sampler.core.probeNNodes(probe);
 
@@ -160,7 +160,7 @@ fn chainBackendInit(smpl: [*c]llama.impl.c.struct_llama_sampler, buft: llama.imp
 }
 
 /// Ports `llama_sampler_chain_backend_accept` (llama-sampler.cpp:774 @b1b770d90).
-fn chainBackendAccept(smpl: [*c]llama.impl.c.struct_llama_sampler, ctx: ?*llama.impl.c.struct_ggml_context, gf: ?*llama.impl.c.struct_ggml_cgraph, selected_token: [*c]llama.impl.c.struct_ggml_tensor) callconv(.c) void {
+fn chainBackendAccept(smpl: [*c]llama.impl.llama_c.struct_llama_sampler, ctx: ?*llama.impl.llama_c.struct_ggml_context, gf: ?*llama.impl.llama_c.struct_ggml_cgraph, selected_token: [*c]llama.impl.llama_c.struct_ggml_tensor) callconv(.c) void {
     const chain = llama.sampler.core.ctxOf(Chain, smpl);
 
     for (chain.samplers.items) |s| {
@@ -171,7 +171,7 @@ fn chainBackendAccept(smpl: [*c]llama.impl.c.struct_llama_sampler, ctx: ?*llama.
 }
 
 /// Ports `llama_sampler_chain_backend_apply` (llama-sampler.cpp:792 @b1b770d90).
-fn chainBackendApply(smpl: [*c]llama.impl.c.struct_llama_sampler, ctx: ?*llama.impl.c.struct_ggml_context, gf: ?*llama.impl.c.struct_ggml_cgraph, data: [*c]llama.impl.c.struct_llama_sampler_data) callconv(.c) void {
+fn chainBackendApply(smpl: [*c]llama.impl.llama_c.struct_llama_sampler, ctx: ?*llama.impl.llama_c.struct_ggml_context, gf: ?*llama.impl.llama_c.struct_ggml_cgraph, data: [*c]llama.impl.llama_c.struct_llama_sampler_data) callconv(.c) void {
     const chain = llama.sampler.core.ctxOf(Chain, smpl);
 
     llama.impl.assert(chain.is_init, llama.sampler.core.src, 799, "chain->is_init && \"llama_sampler_chain_backend_init() not called\"");
@@ -184,7 +184,7 @@ fn chainBackendApply(smpl: [*c]llama.impl.c.struct_llama_sampler, ctx: ?*llama.i
 }
 
 /// Ports `llama_sampler_chain_backend_set_input` (llama-sampler.cpp:812 @b1b770d90).
-fn chainBackendSetInput(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+fn chainBackendSetInput(smpl: [*c]llama.impl.llama_c.struct_llama_sampler) callconv(.c) void {
     const chain = llama.sampler.core.ctxOf(Chain, smpl);
 
     for (chain.samplers.items) |s| {
@@ -195,7 +195,7 @@ fn chainBackendSetInput(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c
 }
 
 /// Ports `llama_sampler_chain_backend_reset` (llama-sampler.cpp:826 @b1b770d90).
-fn chainBackendReset(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+fn chainBackendReset(smpl: [*c]llama.impl.llama_c.struct_llama_sampler) callconv(.c) void {
     const chain = llama.sampler.core.ctxOf(Chain, smpl);
 
     for (chain.samplers.items) |entry| {
@@ -205,7 +205,7 @@ fn chainBackendReset(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) v
 }
 
 /// Ports `llama_sampler_chain_copy_state` (llama-sampler.cpp:839 @b1b770d90).
-fn chainCopyState(src_smpl: [*c]const llama.impl.c.struct_llama_sampler, dst_smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+fn chainCopyState(src_smpl: [*c]const llama.impl.llama_c.struct_llama_sampler, dst_smpl: [*c]llama.impl.llama_c.struct_llama_sampler) callconv(.c) void {
     const src_chain = llama.sampler.core.ctxOf(Chain, src_smpl);
     const dst_chain = llama.sampler.core.ctxOf(Chain, dst_smpl);
 
@@ -227,7 +227,7 @@ fn chainCopyState(src_smpl: [*c]const llama.impl.c.struct_llama_sampler, dst_smp
 ///
 /// Compared by address in `llama_sampler_sample`, `llama_sampler_chain_get`
 /// and elsewhere, so it is a single `var`, never copied.
-pub var chain_iface: llama.impl.c.struct_llama_sampler_i = .{
+pub var chain_iface: llama.impl.llama_c.struct_llama_sampler_i = .{
     .name = chainName,
     .accept = chainAccept,
     .apply = chainApply,
@@ -249,7 +249,7 @@ pub var chain_iface: llama.impl.c.struct_llama_sampler_i = .{
 /// - `params`: the chain's parameters.
 ///
 /// Return: an empty chain, owned by the caller.
-pub fn chainInit(params: llama.impl.c.llama_sampler_chain_params) [*c]llama.impl.c.struct_llama_sampler {
+pub fn chainInit(params: llama.impl.llama_c.llama_sampler_chain_params) [*c]llama.impl.llama_c.struct_llama_sampler {
     return llama.sampler.core.llama_sampler_init(&chain_iface, llama.sampler.core.create(Chain, .{
         .params = params,
         .is_init = false,
@@ -269,8 +269,8 @@ pub fn chainInit(params: llama.impl.c.llama_sampler_chain_params) [*c]llama.impl
 /// - `params_bits`: `struct llama_sampler_chain_params`, as its byte.
 ///
 /// Return: an empty chain.
-pub export fn llama_sampler_chain_init(params_bits: u8) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
-    const params = std.mem.bytesToValue(llama.impl.c.llama_sampler_chain_params, std.mem.asBytes(&params_bits));
+pub fn llama_sampler_chain_init(params_bits: u8) callconv(.c) [*c]llama.impl.llama_c.struct_llama_sampler {
+    const params = std.mem.bytesToValue(llama.impl.llama_c.llama_sampler_chain_params, std.mem.asBytes(&params_bits));
     return chainInit(params);
 }
 
@@ -282,7 +282,7 @@ pub export fn llama_sampler_chain_init(params_bits: u8) callconv(.c) [*c]llama.i
 /// - `sampler`: a chain that has been through `backend_init`.
 ///
 /// Return: the node count its backend graph needs.
-fn backendNNodes(sampler: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) u32 {
+pub fn backendNNodes(sampler: [*c]const llama.impl.llama_c.struct_llama_sampler) callconv(.c) u32 {
     llama.impl.assert(sampler != null, llama.sampler.core.src, 887, "sampler != nullptr");
     llama.impl.assert(sampler.*.iface == &chain_iface, llama.sampler.core.src, 888, "sampler->iface == &llama_sampler_chain_i");
 
@@ -305,13 +305,13 @@ fn backendNNodes(sampler: [*c]const llama.impl.c.struct_llama_sampler) callconv(
 /// - `idx`: the output's position in the batch; negative counts from the end.
 ///
 /// Return: the sampled token.
-pub export fn llama_sampler_sample(smpl: [*c]llama.impl.c.struct_llama_sampler, ctx: ?*llama.impl.c.struct_llama_context, idx: i32) callconv(.c) llama.impl.c.llama_token {
+pub fn llama_sampler_sample(smpl: [*c]llama.impl.llama_c.struct_llama_sampler, ctx: ?*llama.impl.llama_c.struct_llama_context, idx: i32) callconv(.c) llama.impl.llama_c.llama_token {
     const sampled_token = llama.api.context.llama_get_sampled_token_ith(ctx, idx);
     const sampled_probs = llama.api.context.llama_get_sampled_probs_ith(ctx, idx);
     const sampled_logits = llama.api.context.llama_get_sampled_logits_ith(ctx, idx);
     const sampled_ids = llama.api.context.llama_get_sampled_candidates_ith(ctx, idx);
 
-    if (sampled_token != llama.impl.c.LLAMA_TOKEN_NULL) {
+    if (sampled_token != llama.impl.llama_c.LLAMA_TOKEN_NULL) {
         llama.impl.logDebug("%s: Backend sampler selected token for idx %d. Skipping CPU samplers\n", .{ "llama_sampler_sample", idx });
         llama.sampler.core.llama_sampler_accept(smpl, sampled_token);
         return sampled_token;
@@ -323,10 +323,10 @@ pub export fn llama_sampler_sample(smpl: [*c]llama.impl.c.struct_llama_sampler, 
     const n_vocab = llama.api.vocab.llama_vocab_n_tokens(vocab);
 
     // The chain's own buffer when there is one, otherwise a local.
-    var cur_local: std.ArrayList(llama.impl.c.llama_token_data) = .empty;
+    var cur_local: std.ArrayList(llama.impl.llama_c.llama_token_data) = .empty;
     defer cur_local.deinit(std.heap.c_allocator);
 
-    const cur: *std.ArrayList(llama.impl.c.llama_token_data) = if (smpl.*.iface == &chain_iface)
+    const cur: *std.ArrayList(llama.impl.llama_c.llama_token_data) = if (smpl.*.iface == &chain_iface)
         &llama.sampler.core.ctxOf(Chain, smpl).cur
     else
         &cur_local;
@@ -352,7 +352,7 @@ pub export fn llama_sampler_sample(smpl: [*c]llama.impl.c.struct_llama_sampler, 
         }
     }
 
-    var cur_p: llama.impl.c.llama_token_data_array = .{
+    var cur_p: llama.impl.llama_c.llama_token_data_array = .{
         .data = cur.items.ptr,
         .size = cur.items.len,
         .selected = -1,
@@ -377,7 +377,7 @@ pub export fn llama_sampler_sample(smpl: [*c]llama.impl.c.struct_llama_sampler, 
 /// - `smpl`: the sampler to append.
 ///
 /// Return: nothing.
-pub export fn llama_sampler_chain_add(chain: [*c]llama.impl.c.struct_llama_sampler, smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+pub fn llama_sampler_chain_add(chain: [*c]llama.impl.llama_c.struct_llama_sampler, smpl: [*c]llama.impl.llama_c.struct_llama_sampler) callconv(.c) void {
     const p = llama.sampler.core.ctxOf(Chain, chain);
     p.samplers.append(std.heap.c_allocator, .{ .is_backend = false, .ptr = smpl }) catch llama.impl.abort(llama.sampler.core.src, 968, "out of memory");
 }
@@ -390,7 +390,7 @@ pub export fn llama_sampler_chain_add(chain: [*c]llama.impl.c.struct_llama_sampl
 ///
 /// Return: the sampler, or null when `chain` is null or not a chain, or `i`
 /// is out of range.
-pub export fn llama_sampler_chain_get(chain: [*c]llama.impl.c.struct_llama_sampler, i: i32) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+pub fn llama_sampler_chain_get(chain: [*c]llama.impl.llama_c.struct_llama_sampler, i: i32) callconv(.c) [*c]llama.impl.llama_c.struct_llama_sampler {
     if (chain == null) return null;
 
     if (chain.*.iface != &chain_iface) return null;
@@ -412,7 +412,7 @@ pub export fn llama_sampler_chain_get(chain: [*c]llama.impl.c.struct_llama_sampl
 ///
 /// Return: the removed sampler, now owned by the caller; null when out of
 /// range.
-pub export fn llama_sampler_chain_remove(chain: [*c]llama.impl.c.struct_llama_sampler, i: i32) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+pub fn llama_sampler_chain_remove(chain: [*c]llama.impl.llama_c.struct_llama_sampler, i: i32) callconv(.c) [*c]llama.impl.llama_c.struct_llama_sampler {
     const p = llama.sampler.core.ctxOf(Chain, chain);
 
     if (i < 0 or @as(usize, @intCast(i)) >= p.samplers.items.len) return null;
@@ -426,7 +426,7 @@ pub export fn llama_sampler_chain_remove(chain: [*c]llama.impl.c.struct_llama_sa
 /// Ports `llama_sampler_chain_n` (llama-sampler.cpp:1010 @b1b770d90).
 ///
 /// Return: the number of samplers in the chain.
-pub export fn llama_sampler_chain_n(chain: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) i32 {
+pub fn llama_sampler_chain_n(chain: [*c]const llama.impl.llama_c.struct_llama_sampler) callconv(.c) i32 {
     const p = llama.sampler.core.ctxOf(Chain, chain);
     return @intCast(p.samplers.items.len);
 }
@@ -441,7 +441,7 @@ pub export fn llama_sampler_chain_n(chain: [*c]const llama.impl.c.struct_llama_s
 /// - `sampler`: a chain, or a sampler within one.
 ///
 /// Return: nothing.
-fn backendBegin(sampler: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+pub fn backendBegin(sampler: [*c]llama.impl.llama_c.struct_llama_sampler) callconv(.c) void {
     llama.impl.assert(sampler != null, llama.sampler.core.src, 1425, "sampler != nullptr");
 
     if (sampler.*.iface == &chain_iface) {
@@ -460,12 +460,6 @@ fn backendBegin(sampler: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) voi
     }
 }
 
-comptime {
-    // Mangled names from `nm` on the reference `llama-sampler.o`.
-    @export(&backendBegin, .{ .name = "_Z27llama_sampler_backend_beginP13llama_sampler" });
-    @export(&backendNNodes, .{ .name = "_Z29llama_sampler_backend_n_nodesPK13llama_sampler" });
-}
-
 /// Ports `llama_sampler_copy` (llama-sampler.cpp:4295 @b1b770d90).
 ///
 /// Carries `src_smpl`'s state into `dst_smpl`: through `copy_state` where the
@@ -476,8 +470,8 @@ comptime {
 /// - `dst_smpl`: a sampler of the same type.
 ///
 /// Return: nothing.
-pub export fn llama_sampler_copy(src_smpl: [*c]const llama.impl.c.struct_llama_sampler, dst_smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
-    if (src_smpl == null or dst_smpl == null or src_smpl == @as([*c]const llama.impl.c.struct_llama_sampler, dst_smpl)) return;
+pub fn llama_sampler_copy(src_smpl: [*c]const llama.impl.llama_c.struct_llama_sampler, dst_smpl: [*c]llama.impl.llama_c.struct_llama_sampler) callconv(.c) void {
+    if (src_smpl == null or dst_smpl == null or src_smpl == @as([*c]const llama.impl.llama_c.struct_llama_sampler, dst_smpl)) return;
 
     llama.impl.assert(src_smpl.*.iface == dst_smpl.*.iface, llama.sampler.core.src, 4334, "src->iface == dst->iface && \"llama_sampler_copy: cannot copy between different sampler types\"");
 
@@ -492,7 +486,7 @@ pub export fn llama_sampler_copy(src_smpl: [*c]const llama.impl.c.struct_llama_s
 
     dst_smpl.*.ctx = tmp.*.ctx;
     tmp.*.ctx = null;
-    llama.sampler.core.destroy(llama.impl.c.struct_llama_sampler, tmp);
+    llama.sampler.core.destroy(llama.impl.llama_c.struct_llama_sampler, tmp);
 }
 
 /// Ports `llama_sampler_get_seed` (llama-sampler.cpp:4323 @b1b770d90).
@@ -502,7 +496,7 @@ pub export fn llama_sampler_copy(src_smpl: [*c]const llama.impl.c.struct_llama_s
 ///
 /// Return: the seed `dist` or a mirostat is using, the last such in a chain,
 /// or `LLAMA_DEFAULT_SEED`.
-pub export fn llama_sampler_get_seed(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) u32 {
+pub fn llama_sampler_get_seed(smpl: [*c]const llama.impl.llama_c.struct_llama_sampler) callconv(.c) u32 {
     if (smpl.*.iface == &llama.sampler.basic.dist_iface) {
         return llama.sampler.core.ctxOf(llama.sampler.basic.Dist, smpl).seed_cur;
     }
@@ -521,11 +515,11 @@ pub export fn llama_sampler_get_seed(smpl: [*c]const llama.impl.c.struct_llama_s
         while (it > 0) {
             it -= 1;
             const seed = llama_sampler_get_seed(ctx.samplers.items[it].ptr);
-            if (seed != llama.impl.c.LLAMA_DEFAULT_SEED) return seed;
+            if (seed != llama.impl.llama_c.LLAMA_DEFAULT_SEED) return seed;
         }
     }
 
-    return llama.impl.c.LLAMA_DEFAULT_SEED;
+    return llama.impl.llama_c.LLAMA_DEFAULT_SEED;
 }
 
 /// Ports `llama_perf_sampler` (llama-sampler.cpp:4351 @b1b770d90).
@@ -534,11 +528,11 @@ pub export fn llama_sampler_get_seed(smpl: [*c]const llama.impl.c.struct_llama_s
 /// - `chain`: a chain; anything else aborts.
 ///
 /// Return: its accumulated time and sample count.
-pub export fn llama_perf_sampler(chain: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) llama.impl.c.struct_llama_perf_sampler_data {
-    var data: llama.impl.c.struct_llama_perf_sampler_data = .{};
+pub fn llama_perf_sampler(chain: [*c]const llama.impl.llama_c.struct_llama_sampler) callconv(.c) llama.impl.llama_c.struct_llama_perf_sampler_data {
+    var data: llama.impl.llama_c.struct_llama_perf_sampler_data = .{};
 
     if (chain == null or chain.*.iface != &chain_iface) {
-        llama.impl.c.ggml_abort(llama.sampler.core.src, 4359, "%s: invalid sampler passed - requires a sampler created with llama_sampler_chain_init()\n", "llama_perf_sampler");
+        llama.impl.llama_c.ggml_abort(llama.sampler.core.src, 4359, "%s: invalid sampler passed - requires a sampler created with llama_sampler_chain_init()\n", "llama_perf_sampler");
     }
 
     const ctx = llama.sampler.core.ctxOf(Chain, chain);
@@ -552,7 +546,7 @@ pub export fn llama_perf_sampler(chain: [*c]const llama.impl.c.struct_llama_samp
 /// Ports `llama_perf_sampler_print` (llama-sampler.cpp:4366 @b1b770d90).
 ///
 /// Return: nothing.
-pub export fn llama_perf_sampler_print(chain: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) void {
+pub fn llama_perf_sampler_print(chain: [*c]const llama.impl.llama_c.struct_llama_sampler) callconv(.c) void {
     const data = llama_perf_sampler(chain);
 
     llama.impl.logInfo("%s:    samplers time = %10.2f ms / %5d runs\n", .{ "llama_perf_sampler_print", data.t_sample_ms, data.n_sample });
@@ -561,9 +555,9 @@ pub export fn llama_perf_sampler_print(chain: [*c]const llama.impl.c.struct_llam
 /// Ports `llama_perf_sampler_reset` (llama-sampler.cpp:4372 @b1b770d90).
 ///
 /// Return: nothing.
-pub export fn llama_perf_sampler_reset(chain: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+pub fn llama_perf_sampler_reset(chain: [*c]llama.impl.llama_c.struct_llama_sampler) callconv(.c) void {
     if (chain == null or chain.*.iface != &chain_iface) {
-        llama.impl.c.ggml_abort(llama.sampler.core.src, 4378, "%s: invalid sampler passed - requires a sampler created with llama_sampler_chain_init()\n", "llama_perf_sampler_reset");
+        llama.impl.llama_c.ggml_abort(llama.sampler.core.src, 4378, "%s: invalid sampler passed - requires a sampler created with llama_sampler_chain_init()\n", "llama_perf_sampler_reset");
     }
 
     const ctx = llama.sampler.core.ctxOf(Chain, chain);

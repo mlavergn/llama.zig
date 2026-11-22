@@ -6,6 +6,7 @@
 //! Ports `llama.cpp/tools/mtmd/models/dotsocr.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
+const llama = @import("llama");
 const mtmd = @import("../module.zig");
 
 /// The `add_pos` lambda of a 4-section vision M-RoPE (dotsocr.cpp:14,
@@ -18,12 +19,12 @@ pub const MropeVision = struct {
     pub fn addPos(ctx: ?*anyopaque, g: *mtmd.graph.Graph, cur: mtmd.graph.T, layer: *const mtmd.model.Layer) mtmd.graph.T {
         _ = layer;
         const self: *MropeVision = @ptrCast(@alignCast(ctx.?));
-        return mtmd.impl.c.ggml_rope_multi(g.ctx0, cur, self.positions, null, @divTrunc(g.d_head, 2), &self.mrope_sections, mtmd.impl.c.GGML_ROPE_TYPE_VISION, 32768, 10000, 1, 0, 1, 32, 1);
+        return llama.impl.llama_c.ggml_rope_multi(g.ctx0, cur, self.positions, null, @divTrunc(g.d_head, 2), &self.mrope_sections, llama.impl.llama_c.GGML_ROPE_TYPE_VISION, 32768, 10000, 1, 0, 1, 32, 1);
     }
 };
 
 /// Ports `build` (dotsocr.cpp:3 @b1b770d90), a member of `mtmd_graph_dotsocr`.
-pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*llama.impl.llama_c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
     const model = g.model;
@@ -35,9 +36,9 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     const q = @divTrunc(g.d_head, 4);
     var rope: MropeVision = .{ .positions = null, .mrope_sections = .{ q, q, q, q } };
 
-    const positions = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, num_position_ids);
-    _ = mtmd.impl.c.ggml_set_name(positions, "positions");
-    mtmd.impl.c.ggml_set_input(positions);
+    const positions = llama.impl.llama_c.ggml_new_tensor_1d(ctx0, llama.impl.llama_c.GGML_TYPE_I32, num_position_ids);
+    _ = llama.impl.llama_c.ggml_set_name(positions, "positions");
+    llama.impl.llama_c.ggml_set_input(positions);
     rope.positions = positions;
 
     const inp = g.buildInp();
@@ -57,7 +58,7 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     }
 
     // build the graph
-    mtmd.impl.c.ggml_build_forward_expand(g.gf, cur);
+    llama.impl.llama_c.ggml_build_forward_expand(g.gf, cur);
     return g.gf;
 }
 

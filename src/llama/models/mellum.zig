@@ -162,7 +162,7 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
     llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/mellum.cpp", 124, "n_embd_head == hparams.n_embd_head_k()");
     llama.impl.assert(n_embd_head == b.n_rot, "models/mellum.cpp", 125, "n_embd_head == n_rot");
 
-    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.llama_c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
 
     // The positions.
     const inp_pos = b.buildInpPos();
@@ -204,10 +204,10 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
             cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
         }
         if (il == b.n_layer - 1 and b.cropBeforeNextn(inp_out_ids)) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The mixture of experts.
@@ -232,7 +232,7 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
         b.cb(moe_out, "ffn_moe_out", il);
         cur = moe_out;
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
         b.cb(cur, "ffn_out", il);
 
         cur = b.buildCvec(cur, il);
@@ -250,7 +250,7 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
     b.res.t_h_nextn = cur;
 
     if (b.cropAfterNextn(inp_out_ids)) {
-        cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+        cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
     }
 
     b.cb(cur, "result_norm", -1);
@@ -285,17 +285,17 @@ fn buildGraphMtp(comptime iswa: bool, model: *const llama.model.Model, b: *const
 
     const inp = std.heap.c_allocator.create(llama.graph.InpEmbdH) catch llama.impl.abort("models/mellum.cpp", 261, "out of memory");
     inp.* = .{ .n_embd = hp.nEmbdInp(), .n_embd_state = hp.n_embd };
-    inp.tokens = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_I32, b.n_tokens);
-    llama.impl.c.ggml_set_input(inp.tokens);
-    inp.embd = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_F32, hp.nEmbdInp(), b.n_tokens);
-    llama.impl.c.ggml_set_input(inp.embd);
+    inp.tokens = llama.impl.llama_c.ggml_new_tensor_1d(ctx, llama.impl.llama_c.GGML_TYPE_I32, b.n_tokens);
+    llama.impl.llama_c.ggml_set_input(inp.tokens);
+    inp.embd = llama.impl.llama_c.ggml_new_tensor_2d(ctx, llama.impl.llama_c.GGML_TYPE_F32, hp.nEmbdInp(), b.n_tokens);
+    llama.impl.llama_c.ggml_set_input(inp.embd);
     inp.h = b.buildInpEmbdState(inp, hp.n_embd);
 
     b.ubatch.assertEmbdOrToken("models/mellum.cpp", 274);
-    const tok_embd: *llama.impl.c.ggml_tensor = if (b.ubatch.token != null) llama.impl.c.ggml_get_rows(ctx, model.tok_embd, inp.tokens) else inp.embd.?;
+    const tok_embd: *llama.impl.llama_c.ggml_tensor = if (b.ubatch.token != null) llama.impl.llama_c.ggml_get_rows(ctx, model.tok_embd, inp.tokens) else inp.embd.?;
     b.cb(tok_embd, "mtp_tok_embd", il);
 
-    const h_embd: *llama.impl.c.ggml_tensor = inp.h.?;
+    const h_embd: *llama.impl.llama_c.ggml_tensor = inp.h.?;
 
     _ = b.res.addInput(llama.graph.InpEmbdH, inp);
 
@@ -310,7 +310,7 @@ fn buildGraphMtp(comptime iswa: bool, model: *const llama.model.Model, b: *const
     const h_norm = b.buildNorm(h_embd, layer.nextn.hnorm, null, .rms, il);
     b.cb(h_norm, "mtp_hnorm", il);
 
-    const concat: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_concat(ctx, e_norm, h_norm, 0);
+    const concat: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_concat(ctx, e_norm, h_norm, 0);
     b.cb(concat, "mtp_concat", il);
 
     var cur = b.buildLoraMm(layer.nextn.eh_proj.?, concat, layer.nextn.eh_proj_s);
@@ -345,7 +345,7 @@ fn buildGraphMtp(comptime iswa: bool, model: *const llama.model.Model, b: *const
         b.cb(cur, "mtp_attn_out", il);
     }
 
-    const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+    const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
     b.cb(ffn_inp, "mtp_ffn_inp", il);
 
     cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -368,7 +368,7 @@ fn buildGraphMtp(comptime iswa: bool, model: *const llama.model.Model, b: *const
     }, il);
     b.cb(cur, "mtp_ffn_moe_out", il);
 
-    cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+    cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
     b.cb(cur, "mtp_ffn_out", il);
 
     cur = b.buildNorm(cur, layer.nextn.shared_head_norm, null, .rms, -1);
@@ -376,7 +376,7 @@ fn buildGraphMtp(comptime iswa: bool, model: *const llama.model.Model, b: *const
     b.cb(cur, "h_nextn", -1);
     b.res.t_h_nextn = cur;
 
-    cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+    cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
     b.cb(cur, "mtp_shared_head_norm", -1);
 
     cur = b.buildLoraMm(model.output.?, cur, model.output_s);

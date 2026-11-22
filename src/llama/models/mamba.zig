@@ -111,7 +111,7 @@ pub fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder
 
     const inp_out_ids = b.buildInpOutIds();
 
-    var cur: *llama.impl.c.ggml_tensor = undefined;
+    var cur: *llama.impl.llama_c.ggml_tensor = undefined;
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
@@ -127,12 +127,12 @@ pub fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder
         }
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpL = llama.impl.llama_c.ggml_get_rows(ctx, inpL, inp_out_ids);
         }
 
         // The residual.
-        cur = llama.impl.c.ggml_add(ctx, cur, inpL);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, inpL);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

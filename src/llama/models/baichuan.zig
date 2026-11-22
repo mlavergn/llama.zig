@@ -74,7 +74,7 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
     // The positions, which only the 7B model rotates by.
-    const inp_pos: ?*llama.impl.c.ggml_tensor = if (model.type == .@"7b") b.buildInpPos() else null;
+    const inp_pos: ?*llama.impl.llama_c.ggml_tensor = if (model.type == .@"7b") b.buildInpPos() else null;
 
     const inp_attn = b.buildAttnInpKv();
 
@@ -106,11 +106,11 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
         }
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The feed-forward network.
@@ -122,7 +122,7 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
             b.cb(cur, "ffn_out", il);
         }
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

@@ -181,10 +181,10 @@ inline fn hsum(v: VF) f32 {
 // against `vec.o`. 65,536 entries each, one per `f16` bit pattern.
 
 /// Ports `ggml_table_gelu_f16` (vec.cpp:6 @b1b770d90).
-pub export var ggml_table_gelu_f16: [1 << 16]ggml.impl.c.ggml_fp16_t = undefined;
+pub export var ggml_table_gelu_f16: [1 << 16]ggml.impl.ggml_c.ggml_fp16_t = undefined;
 
 /// Ports `ggml_table_gelu_quick_f16` (vec.cpp:9 @b1b770d90).
-pub export var ggml_table_gelu_quick_f16: [1 << 16]ggml.impl.c.ggml_fp16_t = undefined;
+pub export var ggml_table_gelu_quick_f16: [1 << 16]ggml.impl.ggml_c.ggml_fp16_t = undefined;
 
 // -----------------------------------------------------------------------------
 // Dot products
@@ -201,7 +201,7 @@ pub export var ggml_table_gelu_quick_f16: [1 << 16]ggml.impl.c.ggml_fp16_t = und
 /// - `n`: element count.
 /// - `s`: the result.
 /// - `bs`, `bx`, `by`, `nrc`: unused on this path; `nrc` must be 1.
-pub export fn ggml_vec_dot_f32(
+pub fn ggml_vec_dot_f32(
     n: c_int,
     s: *f32,
     bs: usize,
@@ -255,13 +255,13 @@ pub export fn ggml_vec_dot_f32(
 /// runs instead: two `__m512` accumulators over steps of 32, unfused the same
 /// way, each reduced by `_mm512_reduce_add_ps` and added to the `double` in
 /// turn.
-pub export fn ggml_vec_dot_bf16(
+pub fn ggml_vec_dot_bf16(
     n: c_int,
     s: *f32,
     bs: usize,
-    x: [*]ggml.impl.c.ggml_bf16_t,
+    x: [*]ggml.impl.ggml_c.ggml_bf16_t,
     bx: usize,
-    y: [*]ggml.impl.c.ggml_bf16_t,
+    y: [*]ggml.impl.ggml_c.ggml_bf16_t,
     by: usize,
     nrc: c_int,
 ) callconv(.c) void {
@@ -277,7 +277,7 @@ pub export fn ggml_vec_dot_bf16(
         const V16 = @Vector(16, f32);
         // `LOAD`: widen sixteen `bf16` by a 16-bit shift, exactly.
         const load = struct {
-            inline fn f(p: [*]ggml.impl.c.ggml_bf16_t) V16 {
+            inline fn f(p: [*]ggml.impl.ggml_c.ggml_bf16_t) V16 {
                 const p16: [*]const u16 = @ptrCast(p);
                 const h: @Vector(16, u16) = p16[0..16].*;
                 return @bitCast(@as(@Vector(16, u32), h) << @splat(16));
@@ -296,7 +296,7 @@ pub export fn ggml_vec_dot_bf16(
         const V8 = @Vector(8, f32);
         // `LOAD`: widen eight `bf16` by a 16-bit shift, exactly.
         const load = struct {
-            inline fn f(p: [*]ggml.impl.c.ggml_bf16_t) V8 {
+            inline fn f(p: [*]ggml.impl.ggml_c.ggml_bf16_t) V8 {
                 const p16: [*]const u16 = @ptrCast(p);
                 const h: @Vector(8, u16) = p16[0..8].*;
                 return @bitCast(@as(@Vector(8, u32), h) << @splat(16));
@@ -335,13 +335,13 @@ pub export fn ggml_vec_dot_bf16(
 /// `aarch64-linux` baseline -- four `f32x4` over widened halves, step 16,
 /// accumulating in `f32`. Either way the remainder accumulates in `double`,
 /// unlike the `f32` kernel's `f32` tail.
-pub export fn ggml_vec_dot_f16(
+pub fn ggml_vec_dot_f16(
     n: c_int,
     s: *f32,
     bs: usize,
-    x: [*]ggml.impl.c.ggml_fp16_t,
+    x: [*]ggml.impl.ggml_c.ggml_fp16_t,
     bx: usize,
-    y: [*]ggml.impl.c.ggml_fp16_t,
+    y: [*]ggml.impl.ggml_c.ggml_fp16_t,
     by: usize,
     nrc: c_int,
 ) callconv(.c) void {
@@ -397,11 +397,11 @@ pub export fn ggml_vec_dot_f16(
 /// - `GGML_SIMD` (NEON): chunks of 64 widened into a stack buffer and handed
 ///   to `ggml_vec_dot_f32`, each chunk's result added to the `double`; the
 ///   last partial chunk goes the same way, so the scalar tail never runs.
-pub export fn ggml_vec_dot_f16_f32(
+pub fn ggml_vec_dot_f16_f32(
     n: c_int,
     s: *f32,
     bs: usize,
-    x: [*]const ggml.impl.c.ggml_fp16_t,
+    x: [*]const ggml.impl.ggml_c.ggml_fp16_t,
     bx: usize,
     y: [*]const f32,
     by: usize,
@@ -421,7 +421,7 @@ pub export fn ggml_vec_dot_f16_f32(
         const L = if (x86_arm == .avx512) 16 else 8;
         const V = @Vector(L, f32);
         const load = struct {
-            inline fn h(p: [*]const ggml.impl.c.ggml_fp16_t) V {
+            inline fn h(p: [*]const ggml.impl.ggml_c.ggml_fp16_t) V {
                 var r: V = undefined;
                 inline for (0..L) |k| r[k] = ggml.impl.fp16ToFp32(p[k]);
                 return r;
@@ -613,7 +613,7 @@ inline fn loadVF(p: [*]const f32) VF {
 /// Ports `ggml_vec_silu_f32` (vec.cpp:459 @b1b770d90), the
 /// `__ARM_NEON && __aarch64__` arm, the `__AVX512F__ && __AVX512DQ__` one
 /// and the `__AVX2__ && __FMA__` one.
-pub export fn ggml_vec_silu_f32(n: c_int, y: [*]f32, x: [*]const f32) callconv(.c) void {
+pub fn ggml_vec_silu_f32(n: c_int, y: [*]f32, x: [*]const f32) callconv(.c) void {
     var i: c_int = 0;
     while (i + (lanes - 1) < n) : (i += lanes) {
         const off: usize = @intCast(i);
@@ -628,7 +628,7 @@ pub export fn ggml_vec_silu_f32(n: c_int, y: [*]f32, x: [*]const f32) callconv(.
 
 /// Ports `ggml_vec_swiglu_f32` (vec.cpp:500 @b1b770d90), the NEON, AVX2 and
 /// AVX-512 arms.
-pub export fn ggml_vec_swiglu_f32(n: c_int, y: [*]f32, x: [*]const f32, g: [*]const f32) callconv(.c) void {
+pub fn ggml_vec_swiglu_f32(n: c_int, y: [*]f32, x: [*]const f32, g: [*]const f32) callconv(.c) void {
     var i: c_int = 0;
     while (i + (lanes - 1) < n) : (i += lanes) {
         const off: usize = @intCast(i);
@@ -644,7 +644,7 @@ pub export fn ggml_vec_swiglu_f32(n: c_int, y: [*]f32, x: [*]const f32, g: [*]co
 /// Ports `ggml_vec_gelu_quick_f32` (vec.cpp:544 @b1b770d90): the NEON,
 /// AVX2 and AVX-512 arms, computed in `f32` since `vec.h` does not define
 /// `GGML_GELU_QUICK_FP16`.
-pub export fn ggml_vec_gelu_quick_f32(n: c_int, y: [*]f32, x: [*]const f32) callconv(.c) void {
+pub fn ggml_vec_gelu_quick_f32(n: c_int, y: [*]f32, x: [*]const f32) callconv(.c) void {
     var i: c_int = 0;
     while (i + (lanes - 1) < n) : (i += lanes) {
         const off: usize = @intCast(i);
@@ -658,7 +658,7 @@ pub export fn ggml_vec_gelu_quick_f32(n: c_int, y: [*]f32, x: [*]const f32) call
 }
 
 /// Ports `ggml_vec_geglu_quick_f32` (vec.cpp:585 @b1b770d90): the NEON, AVX2 and AVX-512 arms.
-pub export fn ggml_vec_geglu_quick_f32(n: c_int, y: [*]f32, x: [*]const f32, g: [*]const f32) callconv(.c) void {
+pub fn ggml_vec_geglu_quick_f32(n: c_int, y: [*]f32, x: [*]const f32, g: [*]const f32) callconv(.c) void {
     var i: c_int = 0;
     while (i + (lanes - 1) < n) : (i += lanes) {
         const off: usize = @intCast(i);
@@ -682,7 +682,7 @@ pub export fn ggml_vec_geglu_quick_f32(n: c_int, y: [*]f32, x: [*]const f32, g: 
 /// AVX-512 arms.
 ///
 /// Writes `x - mean` into `y` and returns the mean of its squares.
-pub export fn ggml_vec_cvar_f32(n: c_int, y: [*]f32, x: [*]const f32, mean: f32) callconv(.c) GgmlFloat {
+pub fn ggml_vec_cvar_f32(n: c_int, y: [*]f32, x: [*]const f32, mean: f32) callconv(.c) GgmlFloat {
     var i: c_int = 0;
     var sum: GgmlFloat = 0;
 
@@ -710,7 +710,7 @@ pub export fn ggml_vec_cvar_f32(n: c_int, y: [*]f32, x: [*]const f32, mean: f32)
 /// Writes `exp(x - max)` into `y` and returns the sum. The vector path uses
 /// `vExpf` and the tail uses libm's `expf`; they differ in the last bit and
 /// the C uses each where it uses it.
-pub export fn ggml_vec_soft_max_f32(n: c_int, y: [*]f32, x: [*]const f32, max: f32) callconv(.c) GgmlFloat {
+pub fn ggml_vec_soft_max_f32(n: c_int, y: [*]f32, x: [*]const f32, max: f32) callconv(.c) GgmlFloat {
     var i: c_int = 0;
     var sum: GgmlFloat = 0;
 
@@ -733,7 +733,7 @@ pub export fn ggml_vec_soft_max_f32(n: c_int, y: [*]f32, x: [*]const f32, max: f
 /// Ports `ggml_vec_log_soft_max_f32` (vec.cpp:781 @b1b770d90).
 ///
 /// Scalar throughout — the C has no vector arm for this one on any target.
-pub export fn ggml_vec_log_soft_max_f32(n: c_int, y: [*]f32, x: [*]const f32, max: f32) callconv(.c) GgmlFloat {
+pub fn ggml_vec_log_soft_max_f32(n: c_int, y: [*]f32, x: [*]const f32, max: f32) callconv(.c) GgmlFloat {
     var sum: GgmlFloat = 0;
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {

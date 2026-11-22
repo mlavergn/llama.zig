@@ -114,7 +114,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
     llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/muse-spark.cpp", 82, "n_embd_head == hparams.n_embd_head_k()");
 
-    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.llama_c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
     inpL = b.buildNorm(inpL, null, null, .rms, -1);
     b.cb(inpL, "embd_norm", -1);
 
@@ -160,14 +160,14 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             b.cb(cur, "attn_out", il);
 
             // A weightless norm on the attention output, per head.
-            cur = llama.impl.c.ggml_reshape_3d(ctx, cur, n_embd_head, b.n_head, b.n_tokens);
-            cur = llama.impl.c.ggml_rms_norm(ctx, cur, hp.f_norm_rms_eps);
-            cur = llama.impl.c.ggml_reshape_2d(ctx, cur, n_embd_head * b.n_head, b.n_tokens);
+            cur = llama.impl.llama_c.ggml_reshape_3d(ctx, cur, n_embd_head, b.n_head, b.n_tokens);
+            cur = llama.impl.llama_c.ggml_rms_norm(ctx, cur, hp.f_norm_rms_eps);
+            cur = llama.impl.llama_c.ggml_reshape_2d(ctx, cur, n_embd_head * b.n_head, b.n_tokens);
             b.cb(cur, "attn_o_norm", il);
 
-            gate = llama.impl.c.ggml_sigmoid(ctx, gate);
+            gate = llama.impl.llama_c.ggml_sigmoid(ctx, gate);
             b.cb(gate, "attn_gate_sig", il);
-            cur = llama.impl.c.ggml_mul(ctx, cur, gate);
+            cur = llama.impl.llama_c.ggml_mul(ctx, cur, gate);
             b.cb(cur, "attn_gated", il);
 
             cur = b.buildLoraMm(layer.wo.?, cur, layer.wo_s);
@@ -175,15 +175,15 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         }
 
         // The post-attention norm holds no weight.
-        cur = llama.impl.c.ggml_rms_norm(ctx, cur, hp.f_post_norm_eps);
+        cur = llama.impl.llama_c.ggml_rms_norm(ctx, cur, hp.f_post_norm_eps);
         b.cb(cur, "attn_post_norm", il);
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, llama.impl.c.ggml_mul(ctx, inpSA, layer.attn_resid_alpha), llama.impl.c.ggml_mul(ctx, cur, layer.attn_resid_beta));
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, llama.impl.llama_c.ggml_mul(ctx, inpSA, layer.attn_resid_alpha), llama.impl.llama_c.ggml_mul(ctx, cur, layer.attn_resid_beta));
         b.cb(ffn_inp, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -222,11 +222,11 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         b.cb(cur, "ffn_latent_up", il);
 
         // The post-FFN norm scales the input, then normalizes.
-        cur = llama.impl.c.ggml_mul(ctx, cur, layer.ffn_post_norm);
-        cur = llama.impl.c.ggml_rms_norm(ctx, cur, hp.f_post_norm_eps);
+        cur = llama.impl.llama_c.ggml_mul(ctx, cur, layer.ffn_post_norm);
+        cur = llama.impl.llama_c.ggml_rms_norm(ctx, cur, hp.f_post_norm_eps);
         b.cb(cur, "ffn_post_norm", il);
 
-        cur = llama.impl.c.ggml_add(ctx, llama.impl.c.ggml_mul(ctx, ffn_inp, layer.ffn_resid_alpha), llama.impl.c.ggml_mul(ctx, cur, layer.ffn_resid_beta));
+        cur = llama.impl.llama_c.ggml_add(ctx, llama.impl.llama_c.ggml_mul(ctx, ffn_inp, layer.ffn_resid_alpha), llama.impl.llama_c.ggml_mul(ctx, cur, layer.ffn_resid_beta));
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
 
@@ -240,12 +240,12 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     b.res.t_embd = cur;
 
     cur = b.buildLoraMm(model.output.?, cur, model.output_s);
-    cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_logit_scale);
+    cur = llama.impl.llama_c.ggml_scale(ctx, cur, hp.f_logit_scale);
 
     if (hp.f_final_logit_softcapping != 0.0) {
-        cur = llama.impl.c.ggml_scale(ctx, cur, 1.0 / hp.f_final_logit_softcapping);
-        cur = llama.impl.c.ggml_tanh(ctx, cur);
-        cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_final_logit_softcapping);
+        cur = llama.impl.llama_c.ggml_scale(ctx, cur, 1.0 / hp.f_final_logit_softcapping);
+        cur = llama.impl.llama_c.ggml_tanh(ctx, cur);
+        cur = llama.impl.llama_c.ggml_scale(ctx, cur, hp.f_final_logit_softcapping);
     }
 
     b.cb(cur, "result_output", -1);

@@ -34,8 +34,6 @@ const WAIT_TIMEOUT: u32 = 0x102;
 const SEM_FAILCRITICALERRORS: u32 = 0x0001;
 const SEM_NOGPFAULTERRORBOX: u32 = 0x0002;
 
-const gpa = std.heap.smp_allocator;
-
 var counter: usize = 0;
 
 /// The child's side: `argv` is the harness's own; null unless it was
@@ -65,9 +63,9 @@ pub fn readFile(path: [*:0]const u8) ?[]u8 {
     while (true) {
         const n = fread(&chunk, 1, chunk.len, f);
         if (n == 0) break;
-        buf.appendSlice(gpa, chunk[0..n]) catch return null;
+        buf.appendSlice(std.heap.smp_allocator, chunk[0..n]) catch return null;
     }
-    return buf.toOwnedSlice(gpa) catch null;
+    return buf.toOwnedSlice(std.heap.smp_allocator) catch null;
 }
 
 /// Runs this executable as a child in `mode` over `input`, killing it
@@ -96,8 +94,8 @@ pub fn run(mode: [:0]const u8, input: []const u8, out: *std.ArrayList(u8), secon
     if (!writeFile(in_path.ptr, input)) return false;
     // `_spawnv` joins its arguments with spaces and quotes nothing, and the
     // executable's path has a space in it (the user's directory).
-    const quoted = std.fmt.allocPrintSentinel(gpa, "\"{s}\"", .{exe[0..n]}, 0) catch return false;
-    defer gpa.free(quoted);
+    const quoted = std.fmt.allocPrintSentinel(std.heap.smp_allocator, "\"{s}\"", .{exe[0..n]}, 0) catch return false;
+    defer std.heap.smp_allocator.free(quoted);
     const args = [_:null]?[*:0]const u8{ quoted.ptr, "--ref-child", mode.ptr, in_path.ptr, out_path.ptr };
     const h = _spawnv(P_NOWAIT, @ptrCast(&exe), &args);
     if (h == -1 or h == 0) return false;
@@ -111,7 +109,7 @@ pub fn run(mode: [:0]const u8, input: []const u8, out: *std.ArrayList(u8), secon
     var code: u32 = 1;
     if (GetExitCodeProcess(handle, &code) == 0 or code != 0) return false;
     const bytes = readFile(out_path.ptr) orelse return false;
-    defer gpa.free(bytes);
-    out.appendSlice(gpa, bytes) catch return false;
+    defer std.heap.smp_allocator.free(bytes);
+    out.appendSlice(std.heap.smp_allocator, bytes) catch return false;
     return true;
 }

@@ -11,8 +11,6 @@
 
 const std = @import("std");
 
-const Allocator = std.mem.Allocator;
-
 /// `path::is_absolute()` for a POSIX path.
 pub fn isAbsolute(p: []const u8) bool {
     return p.len != 0 and p[0] == '/';
@@ -22,7 +20,7 @@ pub fn isAbsolute(p: []const u8) bool {
 /// between them unless `p` is empty or already ends in one.
 ///
 /// Return: owned by `a`.
-pub fn join(a: Allocator, p: []const u8, q: []const u8) Allocator.Error![]u8 {
+pub fn join(a: std.mem.Allocator, p: []const u8, q: []const u8) std.mem.Allocator.Error![]u8 {
     if (isAbsolute(q)) return a.dupe(u8, q);
     if (p.len == 0 or p[p.len - 1] == '/') return std.mem.concat(a, u8, &.{ p, q });
     return std.mem.concat(a, u8, &.{ p, "/", q });
@@ -51,7 +49,7 @@ pub fn parent(p: []const u8) []const u8 {
 /// separator.
 ///
 /// Return: slices of `p` (and the literal `/`), in a list owned by `a`.
-pub fn elements(a: Allocator, p: []const u8) Allocator.Error![][]const u8 {
+pub fn elements(a: std.mem.Allocator, p: []const u8) std.mem.Allocator.Error![][]const u8 {
     var out: std.ArrayList([]const u8) = .empty;
     errdefer out.deinit(a);
     if (p.len == 0) return out.toOwnedSlice(a);
@@ -77,7 +75,7 @@ pub fn elements(a: Allocator, p: []const u8) Allocator.Error![][]const u8 {
 /// separator kept only after a name, `.` for nothing.
 ///
 /// Return: owned by `a`.
-pub fn normal(a: Allocator, p: []const u8) Allocator.Error![]u8 {
+pub fn normal(a: std.mem.Allocator, p: []const u8) std.mem.Allocator.Error![]u8 {
     if (p.len == 0) return a.dupe(u8, "");
     const PartKind = enum { root, name, dotdot };
     const Part = struct { s: []const u8, k: PartKind };
@@ -132,7 +130,7 @@ pub fn normal(a: Allocator, p: []const u8) Allocator.Error![]u8 {
 /// names `p`; empty when there is none.
 ///
 /// Return: owned by `a`.
-pub fn relative(a: Allocator, p: []const u8, base: []const u8) Allocator.Error![]u8 {
+pub fn relative(a: std.mem.Allocator, p: []const u8, base: []const u8) std.mem.Allocator.Error![]u8 {
     const pe = try elements(a, p);
     defer a.free(pe);
     const be = try elements(a, base);

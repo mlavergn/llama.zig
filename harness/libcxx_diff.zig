@@ -14,7 +14,7 @@
 //! sampler sees on a real vocabulary.
 
 const std = @import("std");
-const libcxx = @import("stdlib").libcxx;
+const stdlib = @import("stdlib");
 
 const TokenData = extern struct {
     id: i32,
@@ -128,7 +128,7 @@ pub fn main() !void {
                 r.shuffle(TokenData, ref_buf[0..n]);
                 @memcpy(zig_buf[0..n], ref_buf[0..n]);
                 ref_sort_td(ref_buf.ptr, n);
-                libcxx.sort(TokenData, zig_buf[0..n], {}, greaterLogit);
+                stdlib.libcxx.sort(TokenData, zig_buf[0..n], {}, greaterLogit);
                 expectTokens("sort", n, shape, ref_buf[0..n], zig_buf[0..n]);
 
                 const ks = [_]usize{ 0, 1, 2, 5, 40, 128, n / 2, n };
@@ -138,7 +138,7 @@ pub fn main() !void {
                     r.shuffle(TokenData, ref_buf[0..n]);
                     @memcpy(zig_buf[0..n], ref_buf[0..n]);
                     ref_partial_sort_td(ref_buf.ptr, n, k);
-                    libcxx.partialSort(TokenData, zig_buf[0..n], k, {}, greaterLogit);
+                    stdlib.libcxx.partialSort(TokenData, zig_buf[0..n], k, {}, greaterLogit);
                     // The whole array, not just the head: the tail's order is
                     // what the next sampler in a chain reads.
                     expectTokens("partial_sort", n, shape, ref_buf[0..n], zig_buf[0..n]);
@@ -175,7 +175,7 @@ pub fn main() !void {
                 for (0..n) |i| a[i] = i;
                 @memcpy(b[0..n], a[0..n]);
                 ref_sort_idx(a.ptr, n, scores.ptr);
-                libcxx.sort(usize, b[0..n], IdxCtx{ .scores = scores[0..n] }, lessScore);
+                stdlib.libcxx.sort(usize, b[0..n], IdxCtx{ .scores = scores[0..n] }, lessScore);
                 checks += 1;
                 if (!std.mem.eql(usize, a[0..n], b[0..n])) {
                     failures += 1;
@@ -192,7 +192,7 @@ pub fn main() !void {
                     r.shuffle(usize, a[0..n]);
                     @memcpy(b[0..n], a[0..n]);
                     ref_partial_sort_idx(a.ptr, n, k, scores.ptr);
-                    libcxx.partialSort(usize, b[0..n], k, IdxCtx{ .scores = scores[0..n] }, lessScore);
+                    stdlib.libcxx.partialSort(usize, b[0..n], k, IdxCtx{ .scores = scores[0..n] }, lessScore);
                     checks += 1;
                     if (!std.mem.eql(usize, a[0..n], b[0..n])) {
                         failures += 1;
@@ -210,7 +210,7 @@ pub fn main() !void {
         var rf: [3000]f32 = undefined;
         for ([_]u32{ 0, 1, 5, 42, 1234, 5489, 0xffffffff, 0x80000000 }) |seed| {
             ref_mt(seed, &ru, ru.len);
-            var g = libcxx.Mt19937.init(seed);
+            var g = stdlib.libcxx.Mt19937.init(seed);
             for (ru) |want| {
                 checks += 1;
                 if (g.next() != want) {
@@ -221,10 +221,10 @@ pub fn main() !void {
             }
 
             ref_uniform_f64(seed, &rd, rd.len);
-            g = libcxx.Mt19937.init(seed);
+            g = stdlib.libcxx.Mt19937.init(seed);
             for (rd) |want| {
                 checks += 1;
-                const got = libcxx.uniformF64(&g);
+                const got = stdlib.libcxx.uniformF64(&g);
                 if (@as(u64, @bitCast(got)) != @as(u64, @bitCast(want))) {
                     failures += 1;
                     std.debug.print("FAIL uniform<double> seed={d}\n", .{seed});
@@ -233,10 +233,10 @@ pub fn main() !void {
             }
 
             ref_uniform_f32(seed, &rf, rf.len);
-            g = libcxx.Mt19937.init(seed);
+            g = stdlib.libcxx.Mt19937.init(seed);
             for (rf) |want| {
                 checks += 1;
-                const got = libcxx.uniformF32(&g);
+                const got = stdlib.libcxx.uniformF32(&g);
                 if (@as(u32, @bitCast(got)) != @as(u32, @bitCast(want))) {
                     failures += 1;
                     std.debug.print("FAIL uniform<float> seed={d}\n", .{seed});
@@ -265,10 +265,10 @@ pub fn main() !void {
                     if (i % 7 == 0) t.p = 0.25;
                 }
                 ref_discrete(ref_buf.ptr, n, seed, out.len, &out);
-                var g = libcxx.Mt19937.init(seed);
+                var g = stdlib.libcxx.Mt19937.init(seed);
                 for (out) |want| {
                     checks += 1;
-                    const got = try libcxx.discreteDraw(gpa, Weights{ .d = ref_buf[0..n], .len = n }, &g);
+                    const got = try stdlib.libcxx.discreteDraw(gpa, Weights{ .d = ref_buf[0..n], .len = n }, &g);
                     if (got != @as(usize, @intCast(want))) {
                         failures += 1;
                         std.debug.print("FAIL discrete n={d} seed={d}: ref {d} zig {d}\n", .{ n, seed, want, got });
@@ -287,7 +287,7 @@ pub fn main() !void {
                 const s = randomString(r, &buf, len);
                 checks += 1;
                 const want = ref_hash_string(s.ptr, s.len);
-                const got = libcxx.hashString(s);
+                const got = stdlib.libcxx.hashString(s);
                 if (want != got) {
                     failures += 1;
                     if (failures <= 10) std.debug.print("FAIL hash len={d}: ref {x} zig {x}\n", .{ len, want, got });
@@ -301,14 +301,14 @@ pub fn main() !void {
         var n: usize = 0;
         while (n < 200000) : (n += 1) {
             checks += 1;
-            if (ref_next_prime(n) != libcxx.nextPrime(n)) {
+            if (ref_next_prime(n) != stdlib.libcxx.nextPrime(n)) {
                 failures += 1;
-                if (failures <= 10) std.debug.print("FAIL next_prime({d}): ref {d} zig {d}\n", .{ n, ref_next_prime(n), libcxx.nextPrime(n) });
+                if (failures <= 10) std.debug.print("FAIL next_prime({d}): ref {d} zig {d}\n", .{ n, ref_next_prime(n), stdlib.libcxx.nextPrime(n) });
             }
         }
         for ([_]usize{ 1 << 20, 1 << 22, 3_000_017, 16_777_216, 4294967291, 4294967292 }) |big| {
             checks += 1;
-            if (ref_next_prime(big) != libcxx.nextPrime(big)) {
+            if (ref_next_prime(big) != stdlib.libcxx.nextPrime(big)) {
                 failures += 1;
                 std.debug.print("FAIL next_prime({d})\n", .{big});
             }
@@ -343,7 +343,7 @@ pub fn main() !void {
                 var rbc: usize = 0;
                 const rn = ref_umap(blob.items.ptr, offs.items.ptr, n, reserve, out.ptr, &rbc);
 
-                var m = try libcxx.StringMap(c_int).init(gpa);
+                var m = try stdlib.libcxx.StringMap(c_int).init(gpa);
                 defer m.deinit();
                 if (reserve != std.math.maxInt(usize)) try m.reserve(reserve);
                 for (0..n) |i| {
@@ -385,7 +385,7 @@ pub fn main() !void {
             for (ops[0..n_ops]) |*o| o.* = if (r.uintLessThan(u8, 3) == 0) -1 else r.intRangeLessThan(c_int, 0, items.len);
             const rn = ref_pq(&items, &ops, n_ops, &rout);
 
-            var q: libcxx.PriorityQueue(PqItem, void, pqLess) = .{ .ctx = {} };
+            var q: stdlib.libcxx.PriorityQueue(PqItem, void, pqLess) = .{ .ctx = {} };
             defer q.deinit(gpa);
             var zout: [400]PqItem = undefined;
             var zn: usize = 0;

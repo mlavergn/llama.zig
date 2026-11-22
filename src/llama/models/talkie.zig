@@ -109,12 +109,12 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
         }
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
-            inp_skip = llama.impl.c.ggml_get_rows(ctx, inp_skip, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            inp_skip = llama.impl.llama_c.ggml_get_rows(ctx, inp_skip, inp_out_ids);
         }
 
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, null, null, .rms, il);
@@ -123,12 +123,12 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
         cur = b.buildFfn(cur, layer.ffn_up, null, null, layer.ffn_gate, null, null, layer.ffn_down, null, layer.ffn_down_s, null, .silu, .par, il);
         b.cb(cur, "ffn_out", il);
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
 
-        const skip: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul(ctx, inp_skip, layer.out_scale);
+        const skip: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_mul(ctx, inp_skip, layer.out_scale);
         b.cb(skip, "embd_skip", il);
 
-        cur = llama.impl.c.ggml_add(ctx, cur, skip);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, skip);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
@@ -145,7 +145,7 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
     b.res.t_embd = cur;
 
     cur = b.buildLoraMm(model.output.?, cur, null);
-    cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_logit_scale);
+    cur = llama.impl.llama_c.ggml_scale(ctx, cur, hp.f_logit_scale);
     b.cb(cur, "result_output", -1);
 
     b.res.t_logits = cur;

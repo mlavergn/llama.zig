@@ -209,7 +209,7 @@ pub fn loadArchTensors(self: *llama.model.Model, ml: *llama.loader.Loader, exc: 
 pub fn getRopeParamsIndexer(model: *const llama.model.Model, cparams: *const llama.cparams.Cparams, il: u32) llama.model.RopeParams {
     var res = model.getRopeParamsIndexerBase(cparams, il);
 
-    res.type = llama.impl.c.LLAMA_ROPE_TYPE_NORM;
+    res.type = llama.impl.llama_c.LLAMA_ROPE_TYPE_NORM;
 
     return res;
 }

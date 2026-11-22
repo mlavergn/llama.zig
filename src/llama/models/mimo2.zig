@@ -110,7 +110,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     const ctx = b.ctx0;
     const hp = b.hparams;
 
-    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.llama_c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
 
     const inp_pos = b.buildInpPos();
     const inp_attn = b.buildAttnInpKvIswa();
@@ -138,9 +138,9 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             cur = b.buildNorm(inpL, layer.attn_norm, null, .rms, il);
             b.cb(cur, "attn_norm", il);
 
-            var Qcur: *llama.impl.c.ggml_tensor = undefined;
-            var Kcur: *llama.impl.c.ggml_tensor = undefined;
-            var Vcur: *llama.impl.c.ggml_tensor = undefined;
+            var Qcur: *llama.impl.llama_c.ggml_tensor = undefined;
+            var Kcur: *llama.impl.llama_c.ggml_tensor = undefined;
+            var Vcur: *llama.impl.llama_c.ggml_tensor = undefined;
 
             if (layer.wqkv) |wqkv| {
                 // The fused qkv_proj: Q and K share head_dim_k, V has
@@ -148,15 +148,15 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
                 const qkv = b.buildLoraMm(wqkv, cur, null);
                 b.cb(qkv, "wqkv", il);
 
-                const row_k = llama.impl.c.ggml_row_size(qkv.type, b.n_embd_head_k);
-                const row_v = llama.impl.c.ggml_row_size(qkv.type, b.n_embd_head_v);
+                const row_k = llama.impl.llama_c.ggml_row_size(qkv.type, b.n_embd_head_k);
+                const row_v = llama.impl.llama_c.ggml_row_size(qkv.type, b.n_embd_head_v);
                 const row_full = qkv.nb[1];
                 const k_off = row_k * @as(usize, @intCast(n_head_l));
                 const v_off = k_off + row_k * @as(usize, @intCast(n_head_kv_l));
 
-                Qcur = llama.impl.c.ggml_view_3d(ctx, qkv, b.n_embd_head_k, n_head_l, b.n_tokens, row_k, row_full, 0);
-                Kcur = llama.impl.c.ggml_view_3d(ctx, qkv, b.n_embd_head_k, n_head_kv_l, b.n_tokens, row_k, row_full, k_off);
-                Vcur = llama.impl.c.ggml_view_3d(ctx, qkv, b.n_embd_head_v, n_head_kv_l, b.n_tokens, row_v, row_full, v_off);
+                Qcur = llama.impl.llama_c.ggml_view_3d(ctx, qkv, b.n_embd_head_k, n_head_l, b.n_tokens, row_k, row_full, 0);
+                Kcur = llama.impl.llama_c.ggml_view_3d(ctx, qkv, b.n_embd_head_k, n_head_kv_l, b.n_tokens, row_k, row_full, k_off);
+                Vcur = llama.impl.llama_c.ggml_view_3d(ctx, qkv, b.n_embd_head_v, n_head_kv_l, b.n_tokens, row_v, row_full, v_off);
             } else {
                 // The split path.
                 Qcur = b.buildLoraMm(layer.wq.?, cur, null);
@@ -168,9 +168,9 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
                 Vcur = b.buildLoraMm(layer.wv.?, cur, null);
                 b.cb(Vcur, "Vcur", il);
 
-                Qcur = llama.impl.c.ggml_reshape_3d(ctx, Qcur, b.n_embd_head_k, n_head_l, b.n_tokens);
-                Kcur = llama.impl.c.ggml_reshape_3d(ctx, Kcur, b.n_embd_head_k, n_head_kv_l, b.n_tokens);
-                Vcur = llama.impl.c.ggml_reshape_3d(ctx, Vcur, b.n_embd_head_v, n_head_kv_l, b.n_tokens);
+                Qcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Qcur, b.n_embd_head_k, n_head_l, b.n_tokens);
+                Kcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Kcur, b.n_embd_head_k, n_head_kv_l, b.n_tokens);
+                Vcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Vcur, b.n_embd_head_v, n_head_kv_l, b.n_tokens);
             }
 
             Qcur = b.buildRope(Qcur, inp_pos, il);
@@ -186,17 +186,17 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             b.cb(cur, "attn_out", il);
 
             if (v_scale != 0.0) {
-                cur = llama.impl.c.ggml_scale(ctx, cur, v_scale);
+                cur = llama.impl.llama_c.ggml_scale(ctx, cur, v_scale);
                 b.cb(cur, "attn_out_scaled", il);
             }
         }
 
         if (il == b.n_layer - 1 and b.cropBeforeNextn(inp_out_ids) and !extract_final_inp) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -225,7 +225,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             b.cb(cur, "ffn_moe_out", il);
         }
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
@@ -238,7 +238,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     if (extract_final_inp) {
         b.res.t_layer_inp[n_layer_u] = cur;
         if (b.cropBeforeNextn(inp_out_ids)) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
         }
     }
 
@@ -247,7 +247,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     b.res.t_h_nextn = cur;
 
     if (b.cropAfterNextn(inp_out_ids)) {
-        cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+        cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
     }
 
     cur = b.buildNorm(cur, model.output_norm, null, .rms, -1);
@@ -292,17 +292,17 @@ fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder)
     const inp = std.heap.c_allocator.create(llama.graph.InpEmbdH) catch llama.impl.abort("models/mimo2.cpp", 270, "out of memory");
     inp.* = .{ .n_embd = hp.nEmbdInp(), .n_embd_state = hp.n_embd };
 
-    inp.tokens = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_I32, b.n_tokens);
-    llama.impl.c.ggml_set_input(inp.tokens);
+    inp.tokens = llama.impl.llama_c.ggml_new_tensor_1d(ctx, llama.impl.llama_c.GGML_TYPE_I32, b.n_tokens);
+    llama.impl.llama_c.ggml_set_input(inp.tokens);
 
-    inp.embd = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_F32, hp.nEmbdInp(), b.n_tokens);
-    llama.impl.c.ggml_set_input(inp.embd);
+    inp.embd = llama.impl.llama_c.ggml_new_tensor_2d(ctx, llama.impl.llama_c.GGML_TYPE_F32, hp.nEmbdInp(), b.n_tokens);
+    llama.impl.llama_c.ggml_set_input(inp.embd);
 
     inp.h = b.buildInpEmbdState(inp, hp.n_embd);
 
     const tok_embd_w = layer.nextn.embed_tokens orelse model.tok_embd.?;
     const h_input = inp.h.?;
-    const tok_embd: *llama.impl.c.ggml_tensor = if (b.ubatch.token != null) llama.impl.c.ggml_get_rows(ctx, tok_embd_w, inp.tokens) else inp.embd.?;
+    const tok_embd: *llama.impl.llama_c.ggml_tensor = if (b.ubatch.token != null) llama.impl.llama_c.ggml_get_rows(ctx, tok_embd_w, inp.tokens) else inp.embd.?;
     b.cb(tok_embd, "mtp_tok_embd", il);
 
     _ = b.res.addInput(llama.graph.InpEmbdH, inp);
@@ -317,7 +317,7 @@ fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder)
     const e_norm = b.buildNorm(tok_embd, layer.nextn.enorm, null, .rms, il);
     b.cb(e_norm, "mtp_enorm", il);
 
-    const concat: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_concat(ctx, e_norm, h_norm, 0);
+    const concat: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_concat(ctx, e_norm, h_norm, 0);
     b.cb(concat, "mtp_concat", il);
 
     var cur = b.buildLoraMm(layer.nextn.eh_proj.?, concat, layer.nextn.eh_proj_s);
@@ -331,15 +331,15 @@ fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder)
     const qkv = b.buildLoraMm(layer.wqkv.?, cur, layer.wqkv_s);
     b.cb(qkv, "mtp_wqkv", il);
 
-    const row_k = llama.impl.c.ggml_row_size(qkv.type, b.n_embd_head_k);
-    const row_v = llama.impl.c.ggml_row_size(qkv.type, b.n_embd_head_v);
+    const row_k = llama.impl.llama_c.ggml_row_size(qkv.type, b.n_embd_head_k);
+    const row_v = llama.impl.llama_c.ggml_row_size(qkv.type, b.n_embd_head_v);
     const row_full = qkv.nb[1];
     const k_off = row_k * @as(usize, @intCast(n_head_l));
     const v_off = k_off + row_k * @as(usize, @intCast(n_head_kv_l));
 
-    var Qcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, qkv, b.n_embd_head_k, n_head_l, b.n_tokens, row_k, row_full, 0);
-    var Kcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, qkv, b.n_embd_head_k, n_head_kv_l, b.n_tokens, row_k, row_full, k_off);
-    const Vcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, qkv, b.n_embd_head_v, n_head_kv_l, b.n_tokens, row_v, row_full, v_off);
+    var Qcur: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, qkv, b.n_embd_head_k, n_head_l, b.n_tokens, row_k, row_full, 0);
+    var Kcur: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, qkv, b.n_embd_head_k, n_head_kv_l, b.n_tokens, row_k, row_full, k_off);
+    const Vcur: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, qkv, b.n_embd_head_v, n_head_kv_l, b.n_tokens, row_v, row_full, v_off);
 
     Qcur = b.buildRope(Qcur, inp_pos, il);
     Kcur = b.buildRope(Kcur, inp_pos, il);
@@ -352,11 +352,11 @@ fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder)
     b.cb(cur, "mtp_attn_out", il);
 
     if (v_scale != 0.0) {
-        cur = llama.impl.c.ggml_scale(ctx, cur, v_scale);
+        cur = llama.impl.llama_c.ggml_scale(ctx, cur, v_scale);
         b.cb(cur, "mtp_attn_out_scaled", il);
     }
 
-    const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+    const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
     b.cb(ffn_inp, "mtp_ffn_inp", il);
 
     cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -366,10 +366,10 @@ fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder)
     cur = b.buildFfn(cur, layer.ffn_up, layer.ffn_up_b, null, layer.ffn_gate, layer.ffn_gate_b, null, layer.ffn_down, layer.ffn_down_b, null, null, .silu, .par, il);
     b.cb(cur, "mtp_ffn_out", il);
 
-    cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+    cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
     b.cb(cur, "mtp_post_ffn", il);
 
-    cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+    cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
 
     b.cb(cur, "h_nextn", -1);
     b.res.t_h_nextn = cur;

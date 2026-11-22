@@ -11,16 +11,16 @@
 //! tables are not emitted: the host getters reach them only for an AMD
 //! compute capability.
 
-const MmaConfig = @import("fattn_mma.zig").Config;
+const mod = @import("module.zig");
 
 /// One `GGML_CUDA_FATTN_MMA_CONFIG_CASE`.
-pub const MmaCase = struct { DKQ: c_int, DV: c_int, ncols: c_int, config: MmaConfig };
+pub const MmaCase = struct { DKQ: c_int, DV: c_int, ncols: c_int, config: mod.fattn_mma.Config };
 
 pub const MmaTable = struct {
     cases: []const MmaCase,
     /// The config returned when no case matches; null when the family
     /// falls through to `fallthrough`.
-    default: ?MmaConfig,
+    default: ?mod.fattn_mma.Config,
     fallthrough: ?*const MmaTable,
 };
 

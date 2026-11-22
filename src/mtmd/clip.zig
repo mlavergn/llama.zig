@@ -29,6 +29,7 @@
 //! message in `what_buf` and returns `error.Runtime`.
 
 const std = @import("std");
+const llama = @import("llama");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 
@@ -70,13 +71,13 @@ pub const EncState = struct {
     slot_pos: std.ArrayList(i32) = .empty, // absolute position held by each slot, -1 if empty
     stem_tail: std.ArrayList(f32) = .empty, // last conv stem output frame, empty on a cold start
 
-    ctx_data: ?*mod.impl.c.ggml_context = null,
-    buf: mod.impl.c.ggml_backend_buffer_t = null,
-    k: std.ArrayList(*mod.impl.c.ggml_tensor) = .empty, // per layer [n_embd_kv, n_ctx]
-    v: std.ArrayList(*mod.impl.c.ggml_tensor) = .empty,
+    ctx_data: ?*llama.impl.llama_c.ggml_context = null,
+    buf: llama.impl.llama_c.ggml_backend_buffer_t = null,
+    k: std.ArrayList(*llama.impl.llama_c.ggml_tensor) = .empty, // per layer [n_embd_kv, n_ctx]
+    v: std.ArrayList(*llama.impl.llama_c.ggml_tensor) = .empty,
 
     // lfm3a: same order as list_lfm3a_state_slots(), F32 [ne0, ne1], updated in place
-    slots: std.ArrayList(*mod.impl.c.ggml_tensor) = .empty,
+    slots: std.ArrayList(*llama.impl.llama_c.ggml_tensor) = .empty,
 
     // nemotron transcribe: the window's normalized log-mel, cache and FIFO rows in; its speaker rows and predictions out
     mel_norm: std.ArrayList(f32) = .empty,
@@ -93,8 +94,8 @@ pub const EncState = struct {
         self.slots.deinit(std.heap.c_allocator);
         self.v.deinit(std.heap.c_allocator);
         self.k.deinit(std.heap.c_allocator);
-        if (self.buf != null) mod.impl.c.ggml_backend_buffer_free(self.buf);
-        if (self.ctx_data != null) mod.impl.c.ggml_free(self.ctx_data);
+        if (self.buf != null) llama.impl.llama_c.ggml_backend_buffer_free(self.buf);
+        if (self.ctx_data != null) llama.impl.llama_c.ggml_free(self.ctx_data);
         self.stem_tail.deinit(std.heap.c_allocator);
         self.slot_pos.deinit(std.heap.c_allocator);
         std.heap.c_allocator.destroy(self);
@@ -107,21 +108,21 @@ pub const EncState = struct {
 pub const GenState = struct {
     rng: stdlib.libcxx.Mt19937 = undefined,
 
-    ctx_data: ?*mod.impl.c.ggml_context = null,
-    buf: mod.impl.c.ggml_backend_buffer_t = null,
-    slots: std.ArrayList(*mod.impl.c.ggml_tensor) = .empty, // same order as list_gen_state_slots(), F32 [ne0, ne1]
+    ctx_data: ?*llama.impl.llama_c.ggml_context = null,
+    buf: llama.impl.llama_c.ggml_backend_buffer_t = null,
+    slots: std.ArrayList(*llama.impl.llama_c.ggml_tensor) = .empty, // same order as list_gen_state_slots(), F32 [ne0, ne1]
 
     /// Ports `reset` (mtmd-subcontext.h:106 @b1b770d90), a member of
     /// `mtmd_subctx_gen_state`: clears the slots and keeps the RNG stream.
     pub fn reset(self: *GenState) void {
-        if (self.buf != null) mod.impl.c.ggml_backend_buffer_clear(self.buf, 0);
+        if (self.buf != null) llama.impl.llama_c.ggml_backend_buffer_clear(self.buf, 0);
     }
 
     /// The C++'s destructor (`delete`), members in reverse order.
     pub fn destroy(self: *GenState) void {
         self.slots.deinit(std.heap.c_allocator);
-        if (self.buf != null) mod.impl.c.ggml_backend_buffer_free(self.buf);
-        if (self.ctx_data != null) mod.impl.c.ggml_free(self.ctx_data);
+        if (self.buf != null) llama.impl.llama_c.ggml_backend_buffer_free(self.buf);
+        if (self.ctx_data != null) llama.impl.llama_c.ggml_free(self.ctx_data);
         std.heap.c_allocator.destroy(self);
     }
 };
@@ -178,13 +179,13 @@ pub const SubctxParams = struct {
 /// Ports `mtmd_backend_cpu_set_n_threads` (mtmd-subcontext.cpp:24
 /// @b1b770d90): `ggml_backend_cpu_set_n_threads(backend_cpu, n_threads)`
 /// through the registry.
-pub fn backendCpuSetNThreads(backend_cpu: mod.impl.c.ggml_backend_t, n_threads: c_int) void {
-    const dev = mod.impl.c.ggml_backend_get_device(backend_cpu);
-    const reg = if (dev != null) mod.impl.c.ggml_backend_dev_backend_reg(dev) else null;
+pub fn backendCpuSetNThreads(backend_cpu: llama.impl.llama_c.ggml_backend_t, n_threads: c_int) void {
+    const dev = llama.impl.llama_c.ggml_backend_get_device(backend_cpu);
+    const reg = if (dev != null) llama.impl.llama_c.ggml_backend_dev_backend_reg(dev) else null;
     if (reg != null) {
-        const fn_ptr = mod.impl.c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_set_n_threads");
+        const fn_ptr = llama.impl.llama_c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_set_n_threads");
         if (fn_ptr != null) {
-            const set_n_threads: mod.impl.c.ggml_backend_set_n_threads_t = @ptrCast(@alignCast(fn_ptr));
+            const set_n_threads: llama.impl.llama_c.ggml_backend_set_n_threads_t = @ptrCast(@alignCast(fn_ptr));
             set_n_threads.?(backend_cpu, n_threads);
         }
     }
@@ -194,16 +195,16 @@ pub fn backendCpuSetNThreads(backend_cpu: mod.impl.c.ggml_backend_t, n_threads: 
 /// threadpool for two threads or more, through the registry; null if the
 /// CPU backend has none to give. The `shared_ptr`'s deleter is `free_fn`,
 /// kept beside the pool.
-fn threadpoolInit(n_threads: c_int, free_out: *?*const fn (mod.impl.c.ggml_threadpool_t) callconv(.c) void) Error!mod.impl.c.ggml_threadpool_t {
-    const dev = mod.impl.c.ggml_backend_dev_by_type(mod.impl.c.GGML_BACKEND_DEVICE_TYPE_CPU);
-    const reg = if (dev != null) mod.impl.c.ggml_backend_dev_backend_reg(dev) else null;
+fn threadpoolInit(n_threads: c_int, free_out: *?*const fn (llama.impl.llama_c.ggml_threadpool_t) callconv(.c) void) Error!llama.impl.llama_c.ggml_threadpool_t {
+    const dev = llama.impl.llama_c.ggml_backend_dev_by_type(llama.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_CPU);
+    const reg = if (dev != null) llama.impl.llama_c.ggml_backend_dev_backend_reg(dev) else null;
     if (reg == null or n_threads < 2) return null;
-    const new_ptr = mod.impl.c.ggml_backend_reg_get_proc_address(reg, "ggml_threadpool_new");
-    const free_ptr = mod.impl.c.ggml_backend_reg_get_proc_address(reg, "ggml_threadpool_free");
+    const new_ptr = llama.impl.llama_c.ggml_backend_reg_get_proc_address(reg, "ggml_threadpool_new");
+    const free_ptr = llama.impl.llama_c.ggml_backend_reg_get_proc_address(reg, "ggml_threadpool_free");
     if (new_ptr == null or free_ptr == null) return null;
-    const new_fn: *const fn ([*c]mod.impl.c.ggml_threadpool_params) callconv(.c) mod.impl.c.ggml_threadpool_t = @ptrCast(@alignCast(new_ptr));
-    const free_fn: *const fn (mod.impl.c.ggml_threadpool_t) callconv(.c) void = @ptrCast(@alignCast(free_ptr));
-    var tpp = mod.impl.c.ggml_threadpool_params_default(n_threads);
+    const new_fn: *const fn ([*c]llama.impl.llama_c.ggml_threadpool_params) callconv(.c) llama.impl.llama_c.ggml_threadpool_t = @ptrCast(@alignCast(new_ptr));
+    const free_fn: *const fn (llama.impl.llama_c.ggml_threadpool_t) callconv(.c) void = @ptrCast(@alignCast(free_ptr));
+    var tpp = llama.impl.llama_c.ggml_threadpool_params_default(n_threads);
     tpp.poll = 0; // the pool is idle most of the time, don't take CPU away from the text model
     const threadpool = new_fn(&tpp);
     if (threadpool == null) return throwErr("failed to create threadpool", .{});
@@ -213,33 +214,33 @@ fn threadpoolInit(n_threads: c_int, free_out: *?*const fn (mod.impl.c.ggml_threa
 
 /// Ports `mtmd_select_device` (mtmd-subcontext.cpp:55 @b1b770d90): the
 /// device the weights and the graphs are placed on, null for the CPU.
-pub fn selectDevice(use_gpu: bool, device: mod.impl.c.ggml_backend_dev_t) mod.impl.c.ggml_backend_dev_t {
+pub fn selectDevice(use_gpu: bool, device: llama.impl.llama_c.ggml_backend_dev_t) llama.impl.llama_c.ggml_backend_dev_t {
     if (!use_gpu) return null;
     if (device != null) return device;
-    const dev = mod.impl.c.ggml_backend_dev_by_type(mod.impl.c.GGML_BACKEND_DEVICE_TYPE_GPU);
-    return if (dev != null) dev else mod.impl.c.ggml_backend_dev_by_type(mod.impl.c.GGML_BACKEND_DEVICE_TYPE_IGPU);
+    const dev = llama.impl.llama_c.ggml_backend_dev_by_type(llama.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_GPU);
+    return if (dev != null) dev else llama.impl.llama_c.ggml_backend_dev_by_type(llama.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_IGPU);
 }
 
 /// Ports `mtmd_backends` (mtmd-subcontext.h:36 @b1b770d90): the backends and
 /// the scheduler every subcontext of one `mtmd_context` shares (a591cbe17), so its compute buffers fit the largest graph any of them
 /// reserved. Not thread-safe.
 pub const Backends = struct {
-    backend: mod.impl.c.ggml_backend_t = null, // backend_cpu if no accelerator
-    backend_cpu: mod.impl.c.ggml_backend_t = null,
+    backend: llama.impl.llama_c.ggml_backend_t = null, // backend_cpu if no accelerator
+    backend_cpu: llama.impl.llama_c.ggml_backend_t = null,
 
     // for ggml_backend_sched_new(), backend_cpu last
-    ptrs: std.ArrayList(mod.impl.c.ggml_backend_t) = .empty,
-    bufts: std.ArrayList(mod.impl.c.ggml_backend_buffer_type_t) = .empty,
+    ptrs: std.ArrayList(llama.impl.llama_c.ggml_backend_t) = .empty,
+    bufts: std.ArrayList(llama.impl.llama_c.ggml_backend_buffer_type_t) = .empty,
 
-    threadpool: mod.impl.c.ggml_threadpool_t = null, // can be null
-    threadpool_free: ?*const fn (mod.impl.c.ggml_threadpool_t) callconv(.c) void = null,
+    threadpool: llama.impl.llama_c.ggml_threadpool_t = null, // can be null
+    threadpool_free: ?*const fn (llama.impl.llama_c.ggml_threadpool_t) callconv(.c) void = null,
 
     // its buffers fit the largest graph reserved by the subcontexts
-    sched: mod.impl.c.ggml_backend_sched_t = null,
+    sched: llama.impl.llama_c.ggml_backend_sched_t = null,
 
     /// Ports `mtmd_backends` (mtmd-subcontext.cpp:66 @b1b770d90), its
     /// constructor; `device` null means the CPU.
-    pub fn create(device: mod.impl.c.ggml_backend_dev_t, n_threads: c_int, max_nodes: c_int, cb_eval: mod.impl.c.ggml_backend_sched_eval_callback, cb_eval_user_data: ?*anyopaque) Error!*Backends {
+    pub fn create(device: llama.impl.llama_c.ggml_backend_dev_t, n_threads: c_int, max_nodes: c_int, cb_eval: llama.impl.llama_c.ggml_backend_sched_eval_callback, cb_eval_user_data: ?*anyopaque) Error!*Backends {
         const func = "mtmd_backends";
         const self = try std.heap.c_allocator.create(Backends);
         self.* = .{};
@@ -247,44 +248,44 @@ pub const Backends = struct {
         errdefer self.destroyMembers();
         self.threadpool = try threadpoolInit(n_threads, &self.threadpool_free);
 
-        self.backend_cpu = mod.impl.c.ggml_backend_init_by_type(mod.impl.c.GGML_BACKEND_DEVICE_TYPE_CPU, null);
+        self.backend_cpu = llama.impl.llama_c.ggml_backend_init_by_type(llama.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_CPU, null);
         if (self.backend_cpu == null) return throwErr("failed to initialize CPU backend", .{});
         if (self.threadpool != null) {
-            const reg = mod.impl.c.ggml_backend_dev_backend_reg(mod.impl.c.ggml_backend_get_device(self.backend_cpu));
-            const p = mod.impl.c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_cpu_set_threadpool");
+            const reg = llama.impl.llama_c.ggml_backend_dev_backend_reg(llama.impl.llama_c.ggml_backend_get_device(self.backend_cpu));
+            const p = llama.impl.llama_c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_cpu_set_threadpool");
             if (p != null) {
-                const set_threadpool_fn: *const fn (mod.impl.c.ggml_backend_t, mod.impl.c.ggml_threadpool_t) callconv(.c) void = @ptrCast(@alignCast(p));
+                const set_threadpool_fn: *const fn (llama.impl.llama_c.ggml_backend_t, llama.impl.llama_c.ggml_threadpool_t) callconv(.c) void = @ptrCast(@alignCast(p));
                 set_threadpool_fn(self.backend_cpu, self.threadpool);
             }
         }
         if (device != null) {
-            self.backend = mod.impl.c.ggml_backend_dev_init(device, null);
+            self.backend = llama.impl.llama_c.ggml_backend_dev_init(device, null);
             if (self.backend == null) {
-                mod.impl.c.ggml_backend_free(self.backend_cpu);
+                llama.impl.llama_c.ggml_backend_free(self.backend_cpu);
                 self.backend_cpu = null;
-                return throwErr("%s: failed to initialize \"%s\" backend\n", .{ func, mod.impl.c.ggml_backend_dev_name(device) });
+                return throwErr("%s: failed to initialize \"%s\" backend\n", .{ func, llama.impl.llama_c.ggml_backend_dev_name(device) });
             }
         }
 
         if (self.backend != null) {
-            mod.impl.logInf("%s: using %s backend\n", .{ func, mod.impl.c.ggml_backend_name(self.backend) });
+            mod.impl.logInf("%s: using %s backend\n", .{ func, llama.impl.llama_c.ggml_backend_name(self.backend) });
             try self.ptrs.append(std.heap.c_allocator, self.backend);
-            try self.bufts.append(std.heap.c_allocator, mod.impl.c.ggml_backend_get_default_buffer_type(self.backend));
+            try self.bufts.append(std.heap.c_allocator, llama.impl.llama_c.ggml_backend_get_default_buffer_type(self.backend));
         } else {
             self.backend = self.backend_cpu;
             mod.impl.logInf("%s: using CPU backend\n", .{func});
         }
 
         try self.ptrs.append(std.heap.c_allocator, self.backend_cpu);
-        try self.bufts.append(std.heap.c_allocator, mod.impl.c.ggml_backend_get_default_buffer_type(self.backend_cpu));
+        try self.bufts.append(std.heap.c_allocator, llama.impl.llama_c.ggml_backend_get_default_buffer_type(self.backend_cpu));
 
-        self.sched = mod.impl.c.ggml_backend_sched_new(self.ptrs.items.ptr, self.bufts.items.ptr, @intCast(self.ptrs.items.len), @intCast(max_nodes), false, true);
-        if (cb_eval != null) mod.impl.c.ggml_backend_sched_set_eval_callback(self.sched, cb_eval, cb_eval_user_data);
+        self.sched = llama.impl.llama_c.ggml_backend_sched_new(self.ptrs.items.ptr, self.bufts.items.ptr, @intCast(self.ptrs.items.len), @intCast(max_nodes), false, true);
+        if (cb_eval != null) llama.impl.llama_c.ggml_backend_sched_set_eval_callback(self.sched, cb_eval, cb_eval_user_data);
         return self;
     }
 
     fn destroyMembers(self: *Backends) void {
-        if (self.sched != null) mod.impl.c.ggml_backend_sched_free(self.sched);
+        if (self.sched != null) llama.impl.llama_c.ggml_backend_sched_free(self.sched);
         if (self.threadpool != null) self.threadpool_free.?(self.threadpool);
         self.bufts.deinit(std.heap.c_allocator);
         self.ptrs.deinit(std.heap.c_allocator);
@@ -296,10 +297,10 @@ pub const Backends = struct {
     /// order (the threadpool after the CPU backend that ran on it).
     pub fn destroy(self: *Backends) void {
         // before the backends it uses
-        if (self.sched != null) mod.impl.c.ggml_backend_sched_free(self.sched);
+        if (self.sched != null) llama.impl.llama_c.ggml_backend_sched_free(self.sched);
         self.sched = null;
-        mod.impl.c.ggml_backend_free(self.backend);
-        if (self.backend != self.backend_cpu) mod.impl.c.ggml_backend_free(self.backend_cpu);
+        llama.impl.llama_c.ggml_backend_free(self.backend);
+        if (self.backend != self.backend_cpu) llama.impl.llama_c.ggml_backend_free(self.backend_cpu);
         self.destroyMembers();
     }
 
@@ -308,7 +309,7 @@ pub const Backends = struct {
     pub fn getMemCompute(self: *const Backends) Error!mod.model.DevSizeMap {
         var res: mod.model.DevSizeMap = .{};
         errdefer res.deinit();
-        for (self.ptrs.items) |b| try res.add(mod.impl.c.ggml_backend_get_device(b), mod.impl.c.ggml_backend_sched_get_buffer_size(self.sched, b));
+        for (self.ptrs.items) |b| try res.add(llama.impl.llama_c.ggml_backend_get_device(b), llama.impl.llama_c.ggml_backend_sched_get_buffer_size(self.sched, b));
         return res;
     }
 };
@@ -344,14 +345,14 @@ pub const Ctx = struct {
 
         self.debug_output_embeddings = stdlib.env.getenv("MTMD_DEBUG_EMBEDDINGS") != null;
 
-        try self.buf_compute_meta.resize(std.heap.c_allocator, @as(usize, @intCast(self.max_nodes)) * mod.impl.c.ggml_tensor_overhead() + mod.impl.c.ggml_graph_overhead_custom(@intCast(self.max_nodes), false));
+        try self.buf_compute_meta.resize(std.heap.c_allocator, @as(usize, @intCast(self.max_nodes)) * llama.impl.llama_c.ggml_tensor_overhead() + llama.impl.llama_c.ggml_graph_overhead_custom(@intCast(self.max_nodes), false));
 
         var batch = try self.getDummyBatch();
         defer batch.deinit();
         if (model.modality != .gen_audio) {
             // check batching support: the C++ constructs a builder for the
             // dummy batch and asks it, without building
-            self.support_batch = mod.models.supportBatch(self.projType()) orelse mod.impl.abort("mtmd-graph.cpp", 1056, "missing cgraph builder");
+            self.support_batch = mod.models.dispatch.supportBatch(self.projType()) orelse mod.impl.abort("mtmd-graph.cpp", 1056, "missing cgraph builder");
         }
         if (params.warmup) {
             try self.warmup(&batch);
@@ -446,7 +447,7 @@ pub const Ctx = struct {
             if (!info.fattn and info.fattn_op != null) {
                 const op = info.fattn_op;
                 mod.impl.logWrn("%s: *****************************************************************\n", .{func});
-                mod.impl.logWrn("%s: WARNING: flash attention not supported by %s, memory usage will increase\n", .{ func, mod.impl.c.ggml_backend_name(backends.backend) });
+                mod.impl.logWrn("%s: WARNING: flash attention not supported by %s, memory usage will increase\n", .{ func, llama.impl.llama_c.ggml_backend_name(backends.backend) });
                 mod.impl.logWrn("%s: op params: \n", .{func});
                 printShape(func, " dst", op);
                 printShape(func, "src0", op.?.src[0]);
@@ -481,12 +482,12 @@ pub const Ctx = struct {
                 mod.impl.logWrn("%s: *****************************************************************\n", .{func});
                 mod.impl.logWrn("%s: WARNING: the mmproj graph uses unsupported operators by the backend\n", .{func});
                 mod.impl.logWrn("%s:          the performance will be suboptimal                      \n", .{func});
-                mod.impl.logWrn("%s:          list of unsupported ops (backend=%s):\n", .{ func, mod.impl.c.ggml_backend_name(backends.backend) });
+                mod.impl.logWrn("%s:          list of unsupported ops (backend=%s):\n", .{ func, llama.impl.llama_c.ggml_backend_name(backends.backend) });
                 for (unsupported_ops.items) |op| {
                     const t = op.op.?;
                     mod.impl.logWrn("%s: %16s: type = %s, ne = [%d %d %d %d]\n", .{
-                        func,                           mod.impl.c.ggml_op_name(t.op),  mod.impl.c.ggml_type_name(t.type),
-                        @as(c_int, @truncate(t.ne[0])), @as(c_int, @truncate(t.ne[1])), @as(c_int, @truncate(t.ne[2])),
+                        func,                           llama.impl.llama_c.ggml_op_name(t.op), llama.impl.llama_c.ggml_type_name(t.type),
+                        @as(c_int, @truncate(t.ne[0])), @as(c_int, @truncate(t.ne[1])),        @as(c_int, @truncate(t.ne[2])),
                         @as(c_int, @truncate(t.ne[3])),
                     });
                 }
@@ -504,7 +505,7 @@ pub const Ctx = struct {
     fn printShape(func: [*:0]const u8, name: [*:0]const u8, t: mod.graph.T) void {
         const x = t.?;
         mod.impl.logWrn("%s:   %s: type = %s, ne = [%d %d %d %d], nb = [%d %d %d %d]\n", .{
-            func,                                               name,                                               mod.impl.c.ggml_type_name(x.type),
+            func,                                               name,                                               llama.impl.llama_c.ggml_type_name(x.type),
             @as(c_int, @truncate(x.ne[0])),                     @as(c_int, @truncate(x.ne[1])),                     @as(c_int, @truncate(x.ne[2])),
             @as(c_int, @truncate(x.ne[3])),                     @as(c_int, @truncate(@as(i64, @bitCast(x.nb[0])))), @as(c_int, @truncate(@as(i64, @bitCast(x.nb[1])))),
             @as(c_int, @truncate(@as(i64, @bitCast(x.nb[2])))), @as(c_int, @truncate(@as(i64, @bitCast(x.nb[3])))),
@@ -518,13 +519,13 @@ pub const Ctx = struct {
     fn reserveComputeMeta(self: *Ctx, batch: *const mod.impl.ImageF32Batch) Error!SupportInfoGraph {
         const func = "reserve_compute_meta";
         const sched = self.backends.sched;
-        var built = try mod.models.buildGraph(self, batch, null);
+        var built = try mod.models.dispatch.buildGraph(self, batch, null);
         defer built.deinit();
         const gf = built.gf;
-        _ = mod.impl.c.ggml_backend_sched_reserve(sched, gf);
+        _ = llama.impl.llama_c.ggml_backend_sched_reserve(sched, gf);
 
-        const n_splits = mod.impl.c.ggml_backend_sched_get_n_splits(sched);
-        const n_nodes = mod.impl.c.ggml_graph_n_nodes(gf);
+        const n_splits = llama.impl.llama_c.ggml_backend_sched_get_n_splits(sched);
+        const n_nodes = llama.impl.llama_c.ggml_graph_n_nodes(gf);
 
         mod.impl.logInf("%s: graph splits = %d, nodes = %d\n", .{ func, n_splits, n_nodes });
 
@@ -533,12 +534,12 @@ pub const Ctx = struct {
 
         // check op support
         var i: c_int = 0;
-        while (i < mod.impl.c.ggml_graph_n_nodes(gf)) : (i += 1) {
-            const node = mod.impl.c.ggml_graph_node(gf, i);
+        while (i < llama.impl.llama_c.ggml_graph_n_nodes(gf)) : (i += 1) {
+            const node = llama.impl.llama_c.ggml_graph_node(gf, i);
             try res.ops.append(std.heap.c_allocator, .{ .op = node, .is_accel = true });
-            if (!mod.impl.c.ggml_backend_supports_op(self.backends.backend, node)) {
+            if (!llama.impl.llama_c.ggml_backend_supports_op(self.backends.backend, node)) {
                 res.ops.items[res.ops.items.len - 1].is_accel = false;
-                if (node.*.op == mod.impl.c.GGML_OP_FLASH_ATTN_EXT) {
+                if (node.*.op == llama.impl.llama_c.GGML_OP_FLASH_ATTN_EXT) {
                     res.fattn = false;
                     res.fattn_op = node;
                 }
@@ -572,8 +573,8 @@ pub const Ctx = struct {
 
 /// Ports `mtmd_model_loader` (mtmd-model.cpp:32 @b1b770d90).
 pub const Loader = struct {
-    ctx_meta: ?*mod.impl.c.ggml_context = null,
-    ctx_gguf: ?*mod.impl.c.gguf_context = null,
+    ctx_meta: ?*llama.impl.llama_c.ggml_context = null,
+    ctx_gguf: ?*llama.impl.llama_c.gguf_context = null,
 
     fname: [:0]const u8,
 
@@ -590,15 +591,15 @@ pub const Loader = struct {
     pub fn init(fname: [:0]const u8, skip_tensors: bool, progress_cb: ?*const fn (f32, ?*anyopaque) callconv(.c) bool, progress_user_data: ?*anyopaque) Error!Loader {
         const func = "mtmd_model_loader";
         var self: Loader = .{ .fname = fname, .progress_callback = progress_cb, .progress_callback_user_data = progress_user_data };
-        var meta: ?*mod.impl.c.ggml_context = null;
-        const params: mod.impl.c.gguf_init_params = .{ .no_alloc = true, .ctx = &meta };
+        var meta: ?*llama.impl.llama_c.ggml_context = null;
+        const params: llama.impl.llama_c.gguf_init_params = .{ .no_alloc = true, .ctx = &meta };
 
-        self.ctx_gguf = mod.impl.c.gguf_init_from_file(fname.ptr, params);
+        self.ctx_gguf = llama.impl.llama_c.gguf_init_from_file(fname.ptr, params);
         if (self.ctx_gguf == null) return throwErr("%s: failed to load mmproj model from %s. Does this file exist?\n", .{ func, fname.ptr });
 
         self.ctx_meta = meta;
 
-        const n_tensors: c_int = @intCast(mod.impl.c.gguf_get_n_tensors(self.ctx_gguf));
+        const n_tensors: c_int = @intCast(llama.impl.llama_c.gguf_get_n_tensors(self.ctx_gguf));
 
         // print gguf info
         {
@@ -608,10 +609,10 @@ pub const Loader = struct {
             try self.getStringPtr(mod.names.KEY_DESCRIPTION, &desc_buf, false);
             mod.impl.logInf("%s: model name:   %s\n", .{ func, name_buf.? });
             mod.impl.logInf("%s: description:  %s\n", .{ func, desc_buf.? });
-            mod.impl.logInf("%s: GGUF version: %d\n", .{ func, @as(c_int, @intCast(mod.impl.c.gguf_get_version(self.ctx_gguf))) });
-            mod.impl.logInf("%s: alignment:    %zu\n", .{ func, mod.impl.c.gguf_get_alignment(self.ctx_gguf) });
+            mod.impl.logInf("%s: GGUF version: %d\n", .{ func, @as(c_int, @intCast(llama.impl.llama_c.gguf_get_version(self.ctx_gguf))) });
+            mod.impl.logInf("%s: alignment:    %zu\n", .{ func, llama.impl.llama_c.gguf_get_alignment(self.ctx_gguf) });
             mod.impl.logInf("%s: n_tensors:    %d\n", .{ func, n_tensors });
-            mod.impl.logInf("%s: n_kv:         %d\n", .{ func, @as(c_int, @intCast(mod.impl.c.gguf_get_n_kv(self.ctx_gguf))) });
+            mod.impl.logInf("%s: n_kv:         %d\n", .{ func, @as(c_int, @intCast(llama.impl.llama_c.gguf_get_n_kv(self.ctx_gguf))) });
             mod.impl.logInf("\n", .{});
         }
 
@@ -630,16 +631,16 @@ pub const Loader = struct {
         if (!skip_tensors) {
             var i: c_int = 0;
             while (i < n_tensors) : (i += 1) {
-                const tname = mod.impl.c.gguf_get_tensor_name(self.ctx_gguf, i);
-                const offset = mod.impl.c.gguf_get_tensor_offset(self.ctx_gguf, i);
-                const ttype = mod.impl.c.gguf_get_tensor_type(self.ctx_gguf, i);
-                const cur = mod.impl.c.ggml_get_tensor(meta, tname);
-                const tensor_size = mod.impl.c.ggml_nbytes(cur);
+                const tname = llama.impl.llama_c.gguf_get_tensor_name(self.ctx_gguf, i);
+                const offset = llama.impl.llama_c.gguf_get_tensor_offset(self.ctx_gguf, i);
+                const ttype = llama.impl.llama_c.gguf_get_tensor_type(self.ctx_gguf, i);
+                const cur = llama.impl.llama_c.ggml_get_tensor(meta, tname);
+                const tensor_size = llama.impl.llama_c.ggml_nbytes(cur);
                 self.model_size += tensor_size;
                 mod.impl.logDbg("%s: tensor[%d]: n_dims = %d, name = %s, tensor_size=%zu, offset=%zu, shape:[%llu, %llu, %llu, %llu], type = %s\n", .{
-                    func,                                    i,                                       mod.impl.c.ggml_n_dims(cur),             @as([*:0]const u8, @ptrCast(&cur.*.name)),
-                    tensor_size,                             offset,                                  @as(c_ulonglong, @bitCast(cur.*.ne[0])), @as(c_ulonglong, @bitCast(cur.*.ne[1])),
-                    @as(c_ulonglong, @bitCast(cur.*.ne[2])), @as(c_ulonglong, @bitCast(cur.*.ne[3])), mod.impl.c.ggml_type_name(ttype),
+                    func,                                    i,                                       llama.impl.llama_c.ggml_n_dims(cur),      @as([*:0]const u8, @ptrCast(&cur.*.name)),
+                    tensor_size,                             offset,                                  @as(c_ulonglong, @bitCast(cur.*.ne[0])),  @as(c_ulonglong, @bitCast(cur.*.ne[1])),
+                    @as(c_ulonglong, @bitCast(cur.*.ne[2])), @as(c_ulonglong, @bitCast(cur.*.ne[3])), llama.impl.llama_c.ggml_type_name(ttype),
                 });
             }
         }
@@ -648,12 +649,12 @@ pub const Loader = struct {
 
     /// The smart pointers' destructors.
     pub fn deinit(self: *Loader) void {
-        if (self.ctx_gguf != null) mod.impl.c.gguf_free(self.ctx_gguf);
-        if (self.ctx_meta != null) mod.impl.c.ggml_free(self.ctx_meta);
+        if (self.ctx_gguf != null) llama.impl.llama_c.gguf_free(self.ctx_gguf);
+        if (self.ctx_meta != null) llama.impl.llama_c.ggml_free(self.ctx_meta);
     }
 
     fn findKey(self: *const Loader, key: [*:0]const u8) i64 {
-        return mod.impl.c.gguf_find_key(self.ctx_gguf, key);
+        return llama.impl.llama_c.gguf_find_key(self.ctx_gguf, key);
     }
 
     /// Ports `get_bool` (mtmd-model.cpp:3572 @b1b770d90), a member of `mtmd_model_loader`.
@@ -663,7 +664,7 @@ pub const Loader = struct {
             if (required) return keyNotFound(key);
             return;
         }
-        output.* = mod.impl.c.gguf_get_val_bool(self.ctx_gguf, i);
+        output.* = llama.impl.llama_c.gguf_get_val_bool(self.ctx_gguf, i);
     }
 
     /// Ports `get_i32` (mtmd-model.cpp:3583 @b1b770d90), a member of `mtmd_model_loader`.
@@ -673,7 +674,7 @@ pub const Loader = struct {
             if (required) return keyNotFound(key);
             return;
         }
-        output.* = mod.impl.c.gguf_get_val_i32(self.ctx_gguf, i);
+        output.* = llama.impl.llama_c.gguf_get_val_i32(self.ctx_gguf, i);
     }
 
     /// Ports `get_u32` (mtmd-model.cpp:3594 @b1b770d90), a member of `mtmd_model_loader`.
@@ -683,7 +684,7 @@ pub const Loader = struct {
             if (required) return keyNotFound(key);
             return;
         }
-        const val = mod.impl.c.gguf_get_val_u32(self.ctx_gguf, i);
+        const val = llama.impl.llama_c.gguf_get_val_u32(self.ctx_gguf, i);
         // sanity check
         if (val > @as(u32, std.math.maxInt(i32))) {
             return throwErr("%s: value %u for key '%s' exceeds INT32_MAX\n", .{ "get_u32", val, key });
@@ -698,7 +699,7 @@ pub const Loader = struct {
             if (required) return keyNotFound(key);
             return;
         }
-        output.* = mod.impl.c.gguf_get_val_f32(self.ctx_gguf, i);
+        output.* = llama.impl.llama_c.gguf_get_val_f32(self.ctx_gguf, i);
     }
 
     /// Ports `get_arr_f32` (mtmd-model.cpp:3622 @b1b770d90), a member of `mtmd_model_loader`.
@@ -709,13 +710,13 @@ pub const Loader = struct {
             if (required) return keyNotFound(key);
             return;
         }
-        if (mod.impl.c.gguf_get_kv_type(self.ctx_gguf, i) != mod.impl.c.GGUF_TYPE_ARRAY) return throwErr("%s: key '%s' is not an array\n", .{ func, key });
-        const t = mod.impl.c.gguf_get_arr_type(self.ctx_gguf, i);
-        if (t != mod.impl.c.GGUF_TYPE_FLOAT32) return throwErr("%s: array '%s' has type %d, expected %d (GGUF_TYPE_FLOAT32)\n", .{ func, key, @as(c_int, @intCast(t)), @as(c_int, mod.impl.c.GGUF_TYPE_FLOAT32) });
-        const n = mod.impl.c.gguf_get_arr_n(self.ctx_gguf, i);
+        if (llama.impl.llama_c.gguf_get_kv_type(self.ctx_gguf, i) != llama.impl.llama_c.GGUF_TYPE_ARRAY) return throwErr("%s: key '%s' is not an array\n", .{ func, key });
+        const t = llama.impl.llama_c.gguf_get_arr_type(self.ctx_gguf, i);
+        if (t != llama.impl.llama_c.GGUF_TYPE_FLOAT32) return throwErr("%s: array '%s' has type %d, expected %d (GGUF_TYPE_FLOAT32)\n", .{ func, key, @as(c_int, @intCast(t)), @as(c_int, llama.impl.llama_c.GGUF_TYPE_FLOAT32) });
+        const n = llama.impl.llama_c.gguf_get_arr_n(self.ctx_gguf, i);
         if (n > @as(usize, std.math.maxInt(c_int))) return throwErr("%s: array '%s' is too large (%zu elements)\n", .{ func, key, n });
         try output.resize(std.heap.c_allocator, n);
-        const values: [*]align(1) const f32 = @ptrCast(mod.impl.c.gguf_get_arr_data(self.ctx_gguf, i));
+        const values: [*]align(1) const f32 = @ptrCast(llama.impl.llama_c.gguf_get_arr_data(self.ctx_gguf, i));
         for (0..n) |j| output.items[j] = values[j];
     }
 
@@ -727,7 +728,7 @@ pub const Loader = struct {
             if (required) return keyNotFound(key);
             return;
         }
-        output.* = mod.impl.c.gguf_get_val_str(self.ctx_gguf, i);
+        output.* = llama.impl.llama_c.gguf_get_val_str(self.ctx_gguf, i);
     }
 
     /// `get_string` into an owned copy, the C++'s `std::string` output.
@@ -746,13 +747,13 @@ pub const Loader = struct {
             if (required) return keyNotFound(key);
             return;
         }
-        if (mod.impl.c.gguf_get_kv_type(self.ctx_gguf, i) != mod.impl.c.GGUF_TYPE_ARRAY) return throwErr("%s: key '%s' is not an array\n", .{ func, key });
-        const t = mod.impl.c.gguf_get_arr_type(self.ctx_gguf, i);
-        if (t != mod.impl.c.GGUF_TYPE_INT32) return throwErr("%s: array '%s' has type %d, expected %d (GGUF_TYPE_INT32)\n", .{ func, key, @as(c_int, @intCast(t)), @as(c_int, mod.impl.c.GGUF_TYPE_INT32) });
-        const n = mod.impl.c.gguf_get_arr_n(self.ctx_gguf, i);
+        if (llama.impl.llama_c.gguf_get_kv_type(self.ctx_gguf, i) != llama.impl.llama_c.GGUF_TYPE_ARRAY) return throwErr("%s: key '%s' is not an array\n", .{ func, key });
+        const t = llama.impl.llama_c.gguf_get_arr_type(self.ctx_gguf, i);
+        if (t != llama.impl.llama_c.GGUF_TYPE_INT32) return throwErr("%s: array '%s' has type %d, expected %d (GGUF_TYPE_INT32)\n", .{ func, key, @as(c_int, @intCast(t)), @as(c_int, llama.impl.llama_c.GGUF_TYPE_INT32) });
+        const n = llama.impl.llama_c.gguf_get_arr_n(self.ctx_gguf, i);
         if (n > @as(usize, std.math.maxInt(c_int))) return throwErr("%s: array '%s' is too large (%zu elements)\n", .{ func, key, n });
         try output.resize(std.heap.c_allocator, n);
-        const values: [*]align(1) const i32 = @ptrCast(mod.impl.c.gguf_get_arr_data(self.ctx_gguf, i));
+        const values: [*]align(1) const i32 = @ptrCast(llama.impl.llama_c.gguf_get_arr_data(self.ctx_gguf, i));
         for (0..n) |j| output.items[j] = values[j];
     }
 
@@ -1034,13 +1035,13 @@ pub const Loader = struct {
             }
             mod.impl.logInf("\n", .{});
             mod.impl.logInf("%s: model size:         %.2f MiB\n", .{ func, @as(f64, @floatFromInt(self.model_size)) / 1024.0 / 1024.0 });
-            mod.impl.logInf("%s: metadata size:      %.2f MiB\n", .{ func, @as(f64, @floatFromInt(mod.impl.c.ggml_get_mem_size(self.ctx_meta))) / 1024.0 / 1024.0 });
+            mod.impl.logInf("%s: metadata size:      %.2f MiB\n", .{ func, @as(f64, @floatFromInt(llama.impl.llama_c.ggml_get_mem_size(self.ctx_meta))) / 1024.0 / 1024.0 });
         }
     }
 
     /// Ports `load_tensors` (mtmd-model.cpp:1321 @b1b770d90), a member of `mtmd_model_loader`;
     /// the model-specific switch is `arms_tensors.load`.
-    pub fn loadTensors(self: *Loader, model: *mod.model.Model, buft: mod.impl.c.ggml_backend_buffer_type_t, no_alloc: bool) Error!void {
+    pub fn loadTensors(self: *Loader, model: *mod.model.Model, buft: llama.impl.llama_c.ggml_backend_buffer_type_t, no_alloc: bool) Error!void {
         const func = "load_tensors";
         const hparams = &model.hparams;
 
@@ -1056,19 +1057,19 @@ pub const Loader = struct {
         // get offsets
         {
             var i: i64 = 0;
-            while (i < mod.impl.c.gguf_get_n_tensors(self.ctx_gguf)) : (i += 1) {
-                const tname = std.mem.span(mod.impl.c.gguf_get_tensor_name(self.ctx_gguf, i));
-                try tl.tensor_offset.put(std.heap.c_allocator, tname, mod.impl.c.gguf_get_data_offset(self.ctx_gguf) + mod.impl.c.gguf_get_tensor_offset(self.ctx_gguf, i));
+            while (i < llama.impl.llama_c.gguf_get_n_tensors(self.ctx_gguf)) : (i += 1) {
+                const tname = std.mem.span(llama.impl.llama_c.gguf_get_tensor_name(self.ctx_gguf, i));
+                try tl.tensor_offset.put(std.heap.c_allocator, tname, llama.impl.llama_c.gguf_get_data_offset(self.ctx_gguf) + llama.impl.llama_c.gguf_get_tensor_offset(self.ctx_gguf, i));
             }
         }
 
         // create data context
-        const params: mod.impl.c.ggml_init_params = .{
-            .mem_size = @as(usize, @intCast(mod.impl.c.gguf_get_n_tensors(self.ctx_gguf) + 1)) * mod.impl.c.ggml_tensor_overhead(),
+        const params: llama.impl.llama_c.ggml_init_params = .{
+            .mem_size = @as(usize, @intCast(llama.impl.llama_c.gguf_get_n_tensors(self.ctx_gguf) + 1)) * llama.impl.llama_c.ggml_tensor_overhead(),
             .mem_buffer = null,
             .no_alloc = true,
         };
-        model.ctx_data = mod.impl.c.ggml_init(params);
+        model.ctx_data = llama.impl.llama_c.ggml_init(params);
         if (model.ctx_data == null) return throwErr("%s: failed to init ggml context\n", .{func});
 
         var nb: [256]u8 = undefined;
@@ -1194,32 +1195,32 @@ pub const Loader = struct {
 
             // compute total tensor data size for progress reporting
             var total_data_size: usize = 0;
-            for (tl.tensors_to_load.items) |t| total_data_size += mod.impl.c.ggml_nbytes(t);
+            for (tl.tensors_to_load.items) |t| total_data_size += llama.impl.llama_c.ggml_nbytes(t);
 
             // alloc memory and offload data
-            model.buf = mod.impl.c.ggml_backend_alloc_ctx_tensors_from_buft(model.ctx_data, buft);
-            mod.impl.c.ggml_backend_buffer_set_usage(model.buf, mod.impl.c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
+            model.buf = llama.impl.llama_c.ggml_backend_alloc_ctx_tensors_from_buft(model.ctx_data, buft);
+            llama.impl.llama_c.ggml_backend_buffer_set_usage(model.buf, llama.impl.llama_c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
             // read the weight from file
             if (!no_alloc) {
                 var data_loaded: usize = 0;
                 for (tl.tensors_to_load.items) |t| {
                     const tname: [*:0]const u8 = @ptrCast(&t.?.name);
-                    const cur = mod.impl.c.ggml_get_tensor(model.ctx_data, tname);
+                    const cur = llama.impl.llama_c.ggml_get_tensor(model.ctx_data, tname);
                     mod.impl.ggmlAssert(cur != null, "mtmd-model.cpp", 3537, "cur && \"tensor not found in ctx_data\"");
                     const off = tl.tensor_offset.get(std.mem.span(tname));
                     mod.impl.ggmlAssert(off != null, "mtmd-model.cpp", 3539, "it_off != tensor_offset.end() && \"no offset for tensor\"");
                     if (stdlib.libc.fseeko(tl.fin, @intCast(off.?), 0) != 0) {
                         return throwErr("%s: failed to seek for tensor %s\n", .{ func, tname });
                     }
-                    const num_bytes = mod.impl.c.ggml_nbytes(cur);
-                    if (mod.impl.c.ggml_backend_buft_is_host(buft)) {
+                    const num_bytes = llama.impl.llama_c.ggml_nbytes(cur);
+                    if (llama.impl.llama_c.ggml_backend_buft_is_host(buft)) {
                         // for the CPU and Metal backend, we can read directly into the tensor
                         _ = std.c.fread(@ptrCast(cur.*.data), 1, num_bytes, tl.fin.?);
                     } else {
                         // read into a temporary buffer first, then copy to device memory
                         try read_buf.resize(std.heap.c_allocator, num_bytes);
                         _ = std.c.fread(read_buf.items.ptr, 1, num_bytes, tl.fin.?);
-                        mod.impl.c.ggml_backend_tensor_set(cur, read_buf.items.ptr, 0, num_bytes);
+                        llama.impl.llama_c.ggml_backend_tensor_set(cur, read_buf.items.ptr, 0, num_bytes);
                     }
                     data_loaded += num_bytes;
                     if (self.progress_callback) |cb| {
@@ -1243,7 +1244,7 @@ pub const Loader = struct {
 pub const TensorLoader = struct {
     loader: *Loader,
     model: *mod.model.Model,
-    buft: mod.impl.c.ggml_backend_buffer_type_t,
+    buft: llama.impl.llama_c.ggml_backend_buffer_type_t,
     prefix: [*:0]const u8 = "v",
     fin: ?*std.c.FILE = null,
     tensor_offset: std.StringHashMapUnmanaged(usize) = .empty,
@@ -1266,16 +1267,16 @@ pub const TensorLoader = struct {
         const key = std.mem.span(name);
         // Each tensor should only be loaded once; duplicates indicate a bug
         if (self.loaded_tensor_names.contains(key)) return throwErr("%s: tensor already loaded: %s\n", .{ func, name });
-        var cur: mod.graph.T = mod.impl.c.ggml_get_tensor(self.loader.ctx_meta, name);
+        var cur: mod.graph.T = llama.impl.llama_c.ggml_get_tensor(self.loader.ctx_meta, name);
         if (cur == null and required) return throwErr("%s: unable to find tensor %s\n", .{ func, name });
         if (cur != null) {
             try self.tensors_to_load.append(std.heap.c_allocator, cur);
-            const data_tensor = mod.impl.c.ggml_dup_tensor(self.model.ctx_data, cur);
-            _ = mod.impl.c.ggml_set_name(data_tensor, @ptrCast(&cur.?.name));
+            const data_tensor = llama.impl.llama_c.ggml_dup_tensor(self.model.ctx_data, cur);
+            _ = llama.impl.llama_c.ggml_set_name(data_tensor, @ptrCast(&cur.?.name));
             try self.loaded_tensor_names.put(std.heap.c_allocator, try std.heap.c_allocator.dupe(u8, key), {});
             cur = data_tensor;
             // add to weight memory counter
-            try self.model.mem_weights.add(mod.impl.c.ggml_backend_buft_get_device(self.buft), mod.impl.c.ggml_nbytes(cur));
+            try self.model.mem_weights.add(llama.impl.llama_c.ggml_backend_buft_get_device(self.buft), llama.impl.llama_c.ggml_nbytes(cur));
         }
         return cur;
     }
@@ -1287,13 +1288,13 @@ pub const TensorLoader = struct {
         var result: std.ArrayList(f32) = .empty;
         const off = self.tensor_offset.get(std.mem.span(name)) orelse return result;
 
-        const idx = mod.impl.c.gguf_find_tensor(self.loader.ctx_gguf, name);
+        const idx = llama.impl.llama_c.gguf_find_tensor(self.loader.ctx_gguf, name);
         if (idx < 0) return throwErr("%s: failed to find tensor %s\n", .{ func, name });
 
-        const t = mod.impl.c.gguf_get_tensor_type(self.loader.ctx_gguf, idx);
-        if (t != mod.impl.c.GGML_TYPE_F32) return throwErr("%s: %s must be %s, was %s\n", .{ func, name, mod.impl.c.ggml_type_name(mod.impl.c.GGML_TYPE_F32), mod.impl.c.ggml_type_name(t) });
+        const t = llama.impl.llama_c.gguf_get_tensor_type(self.loader.ctx_gguf, idx);
+        if (t != llama.impl.llama_c.GGML_TYPE_F32) return throwErr("%s: %s must be %s, was %s\n", .{ func, name, llama.impl.llama_c.ggml_type_name(llama.impl.llama_c.GGML_TYPE_F32), llama.impl.llama_c.ggml_type_name(t) });
 
-        const n_bytes = mod.impl.c.gguf_get_tensor_size(self.loader.ctx_gguf, idx);
+        const n_bytes = llama.impl.llama_c.gguf_get_tensor_size(self.loader.ctx_gguf, idx);
         if (n_bytes == 0) return throwErr("%s: tensor %s is empty\n", .{ func, name });
 
         const n_elems = n_bytes / @sizeOf(f32);
@@ -1426,7 +1427,7 @@ pub fn destroyModel(m: *mod.model.Model) void {
 
 /// Ports `mtmd_model_load` (mtmd-model.cpp:3726 @b1b770d90): every modality
 /// of `fname`, the weights allocated in `buft`. Throws on error.
-pub fn modelLoad(fname: [:0]const u8, params: *const ModelParams, buft: mod.impl.c.ggml_backend_buffer_type_t) Error!Models {
+pub fn modelLoad(fname: [:0]const u8, params: *const ModelParams, buft: llama.impl.llama_c.ggml_backend_buffer_type_t) Error!Models {
     var loader = try Loader.init(fname, false, params.progress_callback, params.progress_callback_user_data);
     defer loader.deinit();
 
@@ -1451,7 +1452,7 @@ pub fn modelLoad(fname: [:0]const u8, params: *const ModelParams, buft: mod.impl
 }
 
 /// Ports the `load` lambda (mtmd-model.cpp:3732 @b1b770d90) of `mtmd_model_load`.
-fn loadModality(loader: *Loader, params: *const ModelParams, buft: mod.impl.c.ggml_backend_buffer_type_t, modality: mod.impl.Modality) Error!*mod.model.Model {
+fn loadModality(loader: *Loader, params: *const ModelParams, buft: llama.impl.llama_c.ggml_backend_buffer_type_t, modality: mod.impl.Modality) Error!*mod.model.Model {
     const model = try std.heap.c_allocator.create(mod.model.Model);
     model.* = .{};
     errdefer destroyModel(model);
@@ -1526,16 +1527,16 @@ pub fn nOutputTokens(model: *const mod.model.Model, img: *const mod.impl.ImageF3
 /// element count (0 if not found); `out` may be null to query the size.
 pub fn cbxReadTensor(model: *const mod.model.Model, name: []const u8, out: ?[*]f32, n_max: usize) usize {
     const t = (model.cbx_tensors.get(name) orelse return 0) orelse return 0;
-    const n: usize = @intCast(mod.impl.c.ggml_nelements(t));
+    const n: usize = @intCast(llama.impl.llama_c.ggml_nelements(t));
     const o = out orelse return n;
     if (n_max < n) return 0;
-    if (t.type == mod.impl.c.GGML_TYPE_F32) {
-        mod.impl.c.ggml_backend_tensor_get(t, o, 0, n * @sizeOf(f32));
-    } else if (t.type == mod.impl.c.GGML_TYPE_F16) {
-        const tmp = std.heap.c_allocator.alloc(mod.impl.c.ggml_fp16_t, n) catch mod.impl.abortUncaught("std::bad_alloc", "std::bad_alloc");
+    if (t.type == llama.impl.llama_c.GGML_TYPE_F32) {
+        llama.impl.llama_c.ggml_backend_tensor_get(t, o, 0, n * @sizeOf(f32));
+    } else if (t.type == llama.impl.llama_c.GGML_TYPE_F16) {
+        const tmp = std.heap.c_allocator.alloc(llama.impl.llama_c.ggml_fp16_t, n) catch mod.impl.abortUncaught("std::bad_alloc", "std::bad_alloc");
         defer std.heap.c_allocator.free(tmp);
-        mod.impl.c.ggml_backend_tensor_get(t, tmp.ptr, 0, n * @sizeOf(mod.impl.c.ggml_fp16_t));
-        for (0..n) |i| o[i] = mod.impl.c.ggml_fp16_to_fp32(tmp[i]);
+        llama.impl.llama_c.ggml_backend_tensor_get(t, tmp.ptr, 0, n * @sizeOf(llama.impl.llama_c.ggml_fp16_t));
+        for (0..n) |i| o[i] = llama.impl.llama_c.ggml_fp16_to_fp32(tmp[i]);
     } else {
         return 0;
     }
@@ -1564,7 +1565,7 @@ pub const EncodeState = struct {
     ctx: *Ctx,
     params: *EncodeParams,
     imgs: *const mod.impl.ImageF32Batch,
-    gf: ?*mod.impl.c.ggml_cgraph,
+    gf: ?*llama.impl.llama_c.ggml_cgraph,
 
     image_size_width: c_int,
     image_size_height: c_int,
@@ -1576,18 +1577,18 @@ pub const EncodeState = struct {
 
     /// The `get_inp_tensor` lambda (mtmd-subcontext.cpp:578 @b1b770d90).
     pub fn getInpTensor(self: *const EncodeState, name: [*:0]const u8) mod.graph.T {
-        const inp = mod.impl.c.ggml_graph_get_tensor(self.gf, name);
-        if (inp == null) _ = mod.impl.c.ggml_abort("mtmd-subcontext.cpp", 581, "Failed to get tensor %s", name);
-        if (inp.*.flags & mod.impl.c.GGML_TENSOR_FLAG_INPUT == 0) _ = mod.impl.c.ggml_abort("mtmd-subcontext.cpp", 584, "Tensor %s is not an input tensor", name);
+        const inp = llama.impl.llama_c.ggml_graph_get_tensor(self.gf, name);
+        if (inp == null) _ = llama.impl.llama_c.ggml_abort("mtmd-subcontext.cpp", 581, "Failed to get tensor %s", name);
+        if (inp.*.flags & llama.impl.llama_c.GGML_TENSOR_FLAG_INPUT == 0) _ = llama.impl.llama_c.ggml_abort("mtmd-subcontext.cpp", 584, "Tensor %s is not an input tensor", name);
         return inp;
     }
 
     /// The `set_input_f32` lambda (mtmd-subcontext.cpp:589 @b1b770d90).
     pub fn setInputF32(self: *const EncodeState, name: [*:0]const u8, values: []const f32) void {
         const cur = self.getInpTensor(name);
-        mod.impl.ggmlAssert(cur.?.type == mod.impl.c.GGML_TYPE_F32, "mtmd-subcontext.cpp", 591, "cur->type == GGML_TYPE_F32");
-        mod.impl.ggmlAssert(mod.impl.c.ggml_nelements(cur) == @as(i64, @intCast(values.len)), "mtmd-subcontext.cpp", 592, "ggml_nelements(cur) == (int64_t)values.size()");
-        mod.impl.c.ggml_backend_tensor_set(cur, values.ptr, 0, mod.impl.c.ggml_nbytes(cur));
+        mod.impl.ggmlAssert(cur.?.type == llama.impl.llama_c.GGML_TYPE_F32, "mtmd-subcontext.cpp", 591, "cur->type == GGML_TYPE_F32");
+        mod.impl.ggmlAssert(llama.impl.llama_c.ggml_nelements(cur) == @as(i64, @intCast(values.len)), "mtmd-subcontext.cpp", 592, "ggml_nelements(cur) == (int64_t)values.size()");
+        llama.impl.llama_c.ggml_backend_tensor_set(cur, values.ptr, 0, llama.impl.llama_c.ggml_nbytes(cur));
     }
 
     /// The `set_input_attn_mask` lambda (mtmd-subcontext.cpp:597 @b1b770d90): a
@@ -1595,24 +1596,24 @@ pub const EncodeState = struct {
     pub fn setInputAttnMask(self: *const EncodeState, values: []const f32, idx: c_int) Error!void {
         var buf: [32]u8 = undefined;
         const cur = self.getInpTensor(mod.graph.attnMaskName(&buf, idx));
-        mod.impl.ggmlAssert(mod.impl.c.ggml_nelements(cur) == @as(i64, @intCast(values.len)), "mtmd-subcontext.cpp", 599, "ggml_nelements(cur) == (int64_t)values.size()");
-        if (cur.?.type == mod.impl.c.GGML_TYPE_F16) {
-            const values_f16 = try std.heap.c_allocator.alloc(mod.impl.c.ggml_fp16_t, values.len);
+        mod.impl.ggmlAssert(llama.impl.llama_c.ggml_nelements(cur) == @as(i64, @intCast(values.len)), "mtmd-subcontext.cpp", 599, "ggml_nelements(cur) == (int64_t)values.size()");
+        if (cur.?.type == llama.impl.llama_c.GGML_TYPE_F16) {
+            const values_f16 = try std.heap.c_allocator.alloc(llama.impl.llama_c.ggml_fp16_t, values.len);
             defer std.heap.c_allocator.free(values_f16);
-            mod.impl.c.ggml_fp32_to_fp16_row(values.ptr, values_f16.ptr, @intCast(values.len));
-            mod.impl.c.ggml_backend_tensor_set(cur, values_f16.ptr, 0, mod.impl.c.ggml_nbytes(cur));
+            llama.impl.llama_c.ggml_fp32_to_fp16_row(values.ptr, values_f16.ptr, @intCast(values.len));
+            llama.impl.llama_c.ggml_backend_tensor_set(cur, values_f16.ptr, 0, llama.impl.llama_c.ggml_nbytes(cur));
         } else {
-            mod.impl.ggmlAssert(cur.?.type == mod.impl.c.GGML_TYPE_F32, "mtmd-subcontext.cpp", 605, "cur->type == GGML_TYPE_F32");
-            mod.impl.c.ggml_backend_tensor_set(cur, values.ptr, 0, mod.impl.c.ggml_nbytes(cur));
+            mod.impl.ggmlAssert(cur.?.type == llama.impl.llama_c.GGML_TYPE_F32, "mtmd-subcontext.cpp", 605, "cur->type == GGML_TYPE_F32");
+            llama.impl.llama_c.ggml_backend_tensor_set(cur, values.ptr, 0, llama.impl.llama_c.ggml_nbytes(cur));
         }
     }
 
     /// The `set_input_i32` lambda (mtmd-subcontext.cpp:610 @b1b770d90).
     pub fn setInputI32(self: *const EncodeState, name: [*:0]const u8, values: []const i32) void {
         const cur = self.getInpTensor(name);
-        mod.impl.ggmlAssert(cur.?.type == mod.impl.c.GGML_TYPE_I32, "mtmd-subcontext.cpp", 612, "cur->type == GGML_TYPE_I32");
-        mod.impl.ggmlAssert(mod.impl.c.ggml_nelements(cur) == @as(i64, @intCast(values.len)), "mtmd-subcontext.cpp", 613, "ggml_nelements(cur) == (int64_t)values.size()");
-        mod.impl.c.ggml_backend_tensor_set(cur, values.ptr, 0, mod.impl.c.ggml_nbytes(cur));
+        mod.impl.ggmlAssert(cur.?.type == llama.impl.llama_c.GGML_TYPE_I32, "mtmd-subcontext.cpp", 612, "cur->type == GGML_TYPE_I32");
+        mod.impl.ggmlAssert(llama.impl.llama_c.ggml_nelements(cur) == @as(i64, @intCast(values.len)), "mtmd-subcontext.cpp", 613, "ggml_nelements(cur) == (int64_t)values.size()");
+        llama.impl.llama_c.ggml_backend_tensor_set(cur, values.ptr, 0, llama.impl.llama_c.ggml_nbytes(cur));
     }
 
     /// The `set_gen_state_in` lambda (mtmd-subcontext.cpp:618 @b1b770d90): the
@@ -1620,8 +1621,8 @@ pub const EncodeState = struct {
     /// the graph's to read.
     pub fn setGenStateIn(self: *const EncodeState) Error!void {
         const state_slots = self.params.gen_state.?.slots.items;
-        const slots = try mod.models.genStateSlots(&self.ctx.model.hparams, self.ctx.model);
-        defer mod.models.freeSlots(slots);
+        const slots = try mod.models.dispatch.genStateSlots(&self.ctx.model.hparams, self.ctx.model);
+        defer mod.models.dispatch.freeSlots(slots);
         var i: usize = 0;
         for (slots) |slot| {
             mod.impl.ggmlAssert(i < state_slots.len, "mtmd-subcontext.cpp", 622, "i < slots.size()");
@@ -1631,7 +1632,7 @@ pub const EncodeState = struct {
             }
             var nb: [256]u8 = undefined;
             _ = stdlib.libc.snprintf(&nb, nb.len, "state_in_%s", slot.name.ptr);
-            mod.impl.c.ggml_backend_tensor_copy(state_slots[i], self.getInpTensor(@ptrCast(&nb)));
+            llama.impl.llama_c.ggml_backend_tensor_copy(state_slots[i], self.getInpTensor(@ptrCast(&nb)));
             i += 1;
         }
     }
@@ -1640,25 +1641,25 @@ pub const EncodeState = struct {
     /// the streaming encoder's state in, and its "pos" slot returned; without
     /// a stream the state is zero.
     pub fn setEncStateIn(self: *const EncodeState) Error!c_int {
-        const state_slots = try mod.models.encStateSlots(&self.ctx.model.hparams, self.ctx.model);
-        defer mod.models.freeSlots(state_slots);
+        const state_slots = try mod.models.dispatch.encStateSlots(&self.ctx.model.hparams, self.ctx.model);
+        defer mod.models.dispatch.freeSlots(state_slots);
         mod.impl.ggmlAssert(state_slots.len != 0 and std.mem.eql(u8, state_slots[0].name, "pos"), "mtmd-subcontext.cpp", 634, "!state_slots.empty() && state_slots[0].name == \"pos\"");
         var nb: [256]u8 = undefined;
         if (self.params.enc_state == null) {
             for (state_slots) |slot| {
                 _ = stdlib.libc.snprintf(&nb, nb.len, "state_in_%s", slot.name.ptr);
                 const t = self.getInpTensor(@ptrCast(&nb));
-                mod.impl.c.ggml_backend_tensor_memset(t, 0, 0, mod.impl.c.ggml_nbytes(t));
+                llama.impl.llama_c.ggml_backend_tensor_memset(t, 0, 0, llama.impl.llama_c.ggml_nbytes(t));
             }
             return 0;
         }
         const slots = self.params.enc_state.?.slots.items;
         mod.impl.ggmlAssert(slots.len == state_slots.len, "mtmd-subcontext.cpp", 643, "slots.size() == state_slots.size()");
         var base_f: f32 = 0.0;
-        mod.impl.c.ggml_backend_tensor_get(slots[0], &base_f, 0, @sizeOf(f32));
+        llama.impl.llama_c.ggml_backend_tensor_get(slots[0], &base_f, 0, @sizeOf(f32));
         for (state_slots, 0..) |slot, i| {
             _ = stdlib.libc.snprintf(&nb, nb.len, "state_in_%s", slot.name.ptr);
-            mod.impl.c.ggml_backend_tensor_copy(slots[i], self.getInpTensor(@ptrCast(&nb)));
+            llama.impl.llama_c.ggml_backend_tensor_copy(slots[i], self.getInpTensor(@ptrCast(&nb)));
         }
         return @intFromFloat(base_f);
     }
@@ -1691,7 +1692,7 @@ pub const EncodeState = struct {
     /// positions and the causal sliding-window mask of the mimi transformers.
     pub fn setPocketttsTfmInputs(self: *const EncodeState) Error!void {
         const hparams = &self.ctx.model.hparams;
-        const n_pos = mod.impl.c.ggml_nelements(self.getInpTensor("inp_pos"));
+        const n_pos = llama.impl.llama_c.ggml_nelements(self.getInpTensor("inp_pos"));
         mod.impl.ggmlAssert(n_pos > 0, "mtmd-subcontext.cpp", 679, "n_pos > 0");
         const positions = try std.heap.c_allocator.alloc(i32, @intCast(n_pos));
         defer std.heap.c_allocator.free(positions);
@@ -1720,38 +1721,38 @@ pub const EncodeState = struct {
 
 /// Ports `copy_gen_state_out` (mtmd-subcontext.cpp:409 @b1b770d90): state_out can have another
 /// shape than its slot, only the byte size must match.
-fn copyGenStateOut(src: *mod.impl.c.ggml_tensor, dst: *mod.impl.c.ggml_tensor) Error!void {
-    mod.impl.ggmlAssert(mod.impl.c.ggml_nbytes(src) == mod.impl.c.ggml_nbytes(dst), "mtmd-subcontext.cpp", 410, "ggml_nbytes(src) == ggml_nbytes(dst)");
-    if (src.type == dst.type and mod.impl.c.ggml_are_same_shape(src, dst) and mod.impl.c.ggml_is_contiguous(src)) {
-        mod.impl.c.ggml_backend_tensor_copy(src, dst);
+fn copyGenStateOut(src: *llama.impl.llama_c.ggml_tensor, dst: *llama.impl.llama_c.ggml_tensor) Error!void {
+    mod.impl.ggmlAssert(llama.impl.llama_c.ggml_nbytes(src) == llama.impl.llama_c.ggml_nbytes(dst), "mtmd-subcontext.cpp", 410, "ggml_nbytes(src) == ggml_nbytes(dst)");
+    if (src.type == dst.type and llama.impl.llama_c.ggml_are_same_shape(src, dst) and llama.impl.llama_c.ggml_is_contiguous(src)) {
+        llama.impl.llama_c.ggml_backend_tensor_copy(src, dst);
         return;
     }
-    const tmp = try std.heap.c_allocator.alloc(u8, mod.impl.c.ggml_nbytes(src));
+    const tmp = try std.heap.c_allocator.alloc(u8, llama.impl.llama_c.ggml_nbytes(src));
     defer std.heap.c_allocator.free(tmp);
-    mod.impl.c.ggml_backend_tensor_get(src, tmp.ptr, 0, tmp.len);
-    mod.impl.c.ggml_backend_tensor_set(dst, tmp.ptr, 0, tmp.len);
+    llama.impl.llama_c.ggml_backend_tensor_get(src, tmp.ptr, 0, tmp.len);
+    llama.impl.llama_c.ggml_backend_tensor_set(dst, tmp.ptr, 0, tmp.len);
 }
 
 /// Allocates one F32 tensor per slot on the shared backend, named by `fmt`
 /// over the slot, and clears them: the tail `gen_state_init` and
 /// `enc_state_init`'s lfm3a and gemma4a arm share (a zero state is the cold
 /// start).
-fn allocStateSlots(ctx: *Ctx, slots: []const mod.models.StateSlot, comptime fmt: [*:0]const u8, ctx_data: *?*mod.impl.c.ggml_context, buf: *mod.impl.c.ggml_backend_buffer_t, out: *std.ArrayList(*mod.impl.c.ggml_tensor)) Error!bool {
-    const params: mod.impl.c.ggml_init_params = .{
-        .mem_size = mod.impl.c.ggml_tensor_overhead() * slots.len,
+fn allocStateSlots(ctx: *Ctx, slots: []const mod.models.dispatch.StateSlot, comptime fmt: [*:0]const u8, ctx_data: *?*llama.impl.llama_c.ggml_context, buf: *llama.impl.llama_c.ggml_backend_buffer_t, out: *std.ArrayList(*llama.impl.llama_c.ggml_tensor)) Error!bool {
+    const params: llama.impl.llama_c.ggml_init_params = .{
+        .mem_size = llama.impl.llama_c.ggml_tensor_overhead() * slots.len,
         .mem_buffer = null,
         .no_alloc = true,
     };
-    ctx_data.* = mod.impl.c.ggml_init(params);
+    ctx_data.* = llama.impl.llama_c.ggml_init(params);
     for (slots) |slot| {
-        const t = mod.impl.c.ggml_new_tensor_2d(ctx_data.*, mod.impl.c.GGML_TYPE_F32, slot.ne0, slot.ne1);
-        _ = mod.impl.c.ggml_format_name(t, fmt, slot.name.ptr);
+        const t = llama.impl.llama_c.ggml_new_tensor_2d(ctx_data.*, llama.impl.llama_c.GGML_TYPE_F32, slot.ne0, slot.ne1);
+        _ = llama.impl.llama_c.ggml_format_name(t, fmt, slot.name.ptr);
         try out.append(std.heap.c_allocator, t.?);
     }
-    buf.* = mod.impl.c.ggml_backend_alloc_ctx_tensors(ctx_data.*, ctx.backends.backend);
+    buf.* = llama.impl.llama_c.ggml_backend_alloc_ctx_tensors(ctx_data.*, ctx.backends.backend);
     if (buf.* == null) return false;
     // a zero state is the cold start
-    mod.impl.c.ggml_backend_buffer_clear(buf.*, 0);
+    llama.impl.llama_c.ggml_backend_buffer_clear(buf.*, 0);
     return true;
 }
 
@@ -1764,8 +1765,8 @@ pub fn genStateInit(ctx: *Ctx, seed: u32) Error!?*GenState {
     errdefer st.destroy();
     st.rng = stdlib.libcxx.Mt19937.init(if (seed == std.math.maxInt(u32)) stdlib.libcxx.randomDevice() else seed);
 
-    const slots = try mod.models.genStateSlots(&ctx.model.hparams, ctx.model);
-    defer mod.models.freeSlots(slots);
+    const slots = try mod.models.dispatch.genStateSlots(&ctx.model.hparams, ctx.model);
+    defer mod.models.dispatch.freeSlots(slots);
     if (slots.len == 0) return st;
 
     if (!try allocStateSlots(ctx, slots, "gen_state_%s", &st.ctx_data, &st.buf, &st.slots)) {
@@ -1785,8 +1786,8 @@ pub fn encStateInit(ctx: *Ctx, n_frames_max: i32) Error!?*EncState {
     const hparams = &ctx.model.hparams;
     if (ctx.projType() == .lfm3a or ctx.projType() == .gemma4a) {
         // see list_enc_state_slots()
-        const slots = try mod.models.encStateSlots(hparams, ctx.model);
-        defer mod.models.freeSlots(slots);
+        const slots = try mod.models.dispatch.encStateSlots(hparams, ctx.model);
+        defer mod.models.dispatch.freeSlots(slots);
         const st = try std.heap.c_allocator.create(EncState);
         st.* = .{};
         errdefer st.destroy();
@@ -1816,31 +1817,31 @@ pub fn encStateInit(ctx: *Ctx, n_frames_max: i32) Error!?*EncState {
     st.n_ctx = hparams.attn_window_size + n_frames_max;
     try st.slot_pos.appendNTimes(std.heap.c_allocator, -1, @intCast(st.n_ctx));
 
-    const params: mod.impl.c.ggml_init_params = .{
-        .mem_size = mod.impl.c.ggml_tensor_overhead() * 2 * @as(usize, @intCast(n_layer)),
+    const params: llama.impl.llama_c.ggml_init_params = .{
+        .mem_size = llama.impl.llama_c.ggml_tensor_overhead() * 2 * @as(usize, @intCast(n_layer)),
         .mem_buffer = null,
         .no_alloc = true,
     };
-    st.ctx_data = mod.impl.c.ggml_init(params);
+    st.ctx_data = llama.impl.llama_c.ggml_init(params);
     var il: c_int = 0;
     while (il < n_layer) : (il += 1) {
-        const k = mod.impl.c.ggml_new_tensor_2d(st.ctx_data, mod.impl.c.GGML_TYPE_F16, n_embd_kv, st.n_ctx);
-        const v = mod.impl.c.ggml_new_tensor_2d(st.ctx_data, mod.impl.c.GGML_TYPE_F16, n_embd_kv, st.n_ctx);
-        _ = mod.impl.c.ggml_format_name(k, "enc_state_k_%d", il);
-        _ = mod.impl.c.ggml_format_name(v, "enc_state_v_%d", il);
+        const k = llama.impl.llama_c.ggml_new_tensor_2d(st.ctx_data, llama.impl.llama_c.GGML_TYPE_F16, n_embd_kv, st.n_ctx);
+        const v = llama.impl.llama_c.ggml_new_tensor_2d(st.ctx_data, llama.impl.llama_c.GGML_TYPE_F16, n_embd_kv, st.n_ctx);
+        _ = llama.impl.llama_c.ggml_format_name(k, "enc_state_k_%d", il);
+        _ = llama.impl.llama_c.ggml_format_name(v, "enc_state_v_%d", il);
         try st.k.append(std.heap.c_allocator, k.?);
         try st.v.append(std.heap.c_allocator, v.?);
     }
-    st.buf = mod.impl.c.ggml_backend_alloc_ctx_tensors(st.ctx_data, ctx.backends.backend);
+    st.buf = llama.impl.llama_c.ggml_backend_alloc_ctx_tensors(st.ctx_data, ctx.backends.backend);
     if (st.buf == null) {
         mod.impl.logErr("%s: failed to allocate the encoder state\n", .{func});
         st.destroy();
         return null;
     }
     // empty slots are masked out, but they must not hold NaN
-    mod.impl.c.ggml_backend_buffer_clear(st.buf, 0);
+    llama.impl.llama_c.ggml_backend_buffer_clear(st.buf, 0);
 
-    mod.impl.logInf("%s: encoder state: %d slots, %.2f MiB\n", .{ func, @as(c_int, st.n_ctx), @as(f64, @floatFromInt(mod.impl.c.ggml_backend_buffer_get_size(st.buf))) / 1024.0 / 1024.0 });
+    mod.impl.logInf("%s: encoder state: %d slots, %.2f MiB\n", .{ func, @as(c_int, st.n_ctx), @as(f64, @floatFromInt(llama.impl.llama_c.ggml_backend_buffer_get_size(st.buf))) / 1024.0 / 1024.0 });
 
     return st;
 }
@@ -1871,7 +1872,7 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
     }
     if (ctx.projType() == .drama3_gen and params.gen_process == .gen_code) {
         var pos: f32 = 0.0;
-        mod.impl.c.ggml_backend_tensor_get(params.gen_state.?.slots.items[0], &pos, 0, @sizeOf(f32));
+        llama.impl.llama_c.ggml_backend_tensor_get(params.gen_state.?.slots.items[0], &pos, 0, @sizeOf(f32));
         if (@as(c_int, @intFromFloat(pos)) >= mod.models.drama3_gen.n_pos_max) {
             mod.impl.logErr("%s: the codebook tower holds at most %d rows\n", .{ func, @as(c_int, mod.models.drama3_gen.n_pos_max) });
             return false;
@@ -1879,16 +1880,16 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
     }
 
     // build the inference graph
-    mod.impl.c.ggml_backend_sched_reset(ctx.backends.sched);
-    var built = try mod.models.buildGraph(ctx, imgs, params);
+    llama.impl.llama_c.ggml_backend_sched_reset(ctx.backends.sched);
+    var built = try mod.models.dispatch.buildGraph(ctx, imgs, params);
     defer built.deinit();
     const gf = built.gf;
 
     // the last node is the embedding tensor, code2wav has no out_embd
     // read it before scheduling: backends may reorder the nodes of graphs with several outputs (Metal)
-    const embeddings: mod.graph.T = if (params.out_embd != null) mod.impl.c.ggml_graph_node(gf, -1) else null;
+    const embeddings: mod.graph.T = if (params.out_embd != null) llama.impl.llama_c.ggml_graph_node(gf, -1) else null;
 
-    if (!mod.impl.c.ggml_backend_sched_alloc_graph(ctx.backends.sched, gf)) {
+    if (!llama.impl.llama_c.ggml_backend_sched_alloc_graph(ctx.backends.sched, gf)) {
         mod.impl.logErr("%s: failed to allocate compute graph\n", .{func});
         return false;
     }
@@ -1950,7 +1951,7 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
     } else if (params.gen_process != .gen_wav and
         params.gen_process != .tts and
         params.gen_process != .tts_vocode and
-        mod.impl.c.ggml_graph_get_tensor(gf, "inp_raw") != null)
+        llama.impl.llama_c.ggml_graph_get_tensor(gf, "inp_raw") != null)
     {
         // audio input. GEN_WAV and the chatterbox TTS stages are not here: they take codes or feats, set in the switch below.
         // a GEN_CODE graph may have no hidden-state input (lfm3a_gen feedback embedding)
@@ -1971,8 +1972,8 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
 
     backendCpuSetNThreads(ctx.backends.backend_cpu, params.n_threads);
 
-    const status = mod.impl.c.ggml_backend_sched_graph_compute(ctx.backends.sched, gf);
-    if (status != mod.impl.c.GGML_STATUS_SUCCESS) {
+    const status = llama.impl.llama_c.ggml_backend_sched_graph_compute(ctx.backends.sched, gf);
+    if (status != llama.impl.llama_c.GGML_STATUS_SUCCESS) {
         mod.impl.logErr("%s: ggml_backend_sched_graph_compute failed with error %d\n", .{ func, @as(c_int, @intCast(status)) });
         return false;
     }
@@ -1983,7 +1984,7 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
         const expected_n_tokens_out = nOutputTokens(model, &imgs.entries.items[0]);
         if (n_tokens_out != expected_n_tokens_out) {
             mod.impl.logErr("%s: expected output %d tokens, got %d\n", .{ func, expected_n_tokens_out, n_tokens_out });
-            _ = mod.impl.c.ggml_abort("mtmd-subcontext.cpp", 2288, "Invalid number of output tokens");
+            _ = llama.impl.llama_c.ggml_abort("mtmd-subcontext.cpp", 2288, "Invalid number of output tokens");
         }
 
         mod.impl.logDbg("%s: output embedding shape [%d, %d, %d]\n", .{ func, @as(c_int, @intCast(embeddings.?.ne[0])), @as(c_int, @intCast(embeddings.?.ne[1])), @as(c_int, @intCast(embeddings.?.ne[2])) });
@@ -1992,11 +1993,11 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
         // if output is empty, skip the copy
         const out_batch_embd = params.out_embd.?;
         if (out_batch_embd.items.len != 0) {
-            if (out_batch_embd.items.len != @as(usize, @intCast(mod.impl.c.ggml_nelements(embeddings)))) {
-                mod.impl.logErr("%s: output buffer has %zu elements but expected %zu\n", .{ func, out_batch_embd.items.len, @as(usize, @intCast(mod.impl.c.ggml_nelements(embeddings))) });
-                _ = mod.impl.c.ggml_abort("mtmd-subcontext.cpp", 2300, "Output buffer size mismatch");
+            if (out_batch_embd.items.len != @as(usize, @intCast(llama.impl.llama_c.ggml_nelements(embeddings)))) {
+                mod.impl.logErr("%s: output buffer has %zu elements but expected %zu\n", .{ func, out_batch_embd.items.len, @as(usize, @intCast(llama.impl.llama_c.ggml_nelements(embeddings))) });
+                _ = llama.impl.llama_c.ggml_abort("mtmd-subcontext.cpp", 2300, "Output buffer size mismatch");
             }
-            mod.impl.c.ggml_backend_tensor_get(embeddings, out_batch_embd.items.ptr, 0, mod.impl.c.ggml_nbytes(embeddings));
+            llama.impl.llama_c.ggml_backend_tensor_get(embeddings, out_batch_embd.items.ptr, 0, llama.impl.llama_c.ggml_nbytes(embeddings));
         } else {
             mod.impl.logWrn("%s: output buffer is empty, skipping copy\n", .{func});
         }
@@ -2015,33 +2016,33 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
 
     // optional outputs: a pipeline yields codes or feats, and not all have an eos head
     if (params.out_codes) |out_codes| {
-        const codes = mod.impl.c.ggml_graph_get_tensor(gf, "out_codes");
+        const codes = llama.impl.llama_c.ggml_graph_get_tensor(gf, "out_codes");
         if (codes != null) {
-            try out_codes.resize(std.heap.c_allocator, @intCast(mod.impl.c.ggml_nelements(codes)));
-            mod.impl.c.ggml_backend_tensor_get(codes, out_codes.items.ptr, 0, mod.impl.c.ggml_nbytes(codes));
+            try out_codes.resize(std.heap.c_allocator, @intCast(llama.impl.llama_c.ggml_nelements(codes)));
+            llama.impl.llama_c.ggml_backend_tensor_get(codes, out_codes.items.ptr, 0, llama.impl.llama_c.ggml_nbytes(codes));
         }
     }
     if (params.out_feats) |out_feats| {
-        const feats = mod.impl.c.ggml_graph_get_tensor(gf, "out_feats");
+        const feats = llama.impl.llama_c.ggml_graph_get_tensor(gf, "out_feats");
         if (feats != null) {
-            try out_feats.resize(std.heap.c_allocator, @intCast(mod.impl.c.ggml_nelements(feats)));
-            mod.impl.c.ggml_backend_tensor_get(feats, out_feats.items.ptr, 0, mod.impl.c.ggml_nbytes(feats));
+            try out_feats.resize(std.heap.c_allocator, @intCast(llama.impl.llama_c.ggml_nelements(feats)));
+            llama.impl.llama_c.ggml_backend_tensor_get(feats, out_feats.items.ptr, 0, llama.impl.llama_c.ggml_nbytes(feats));
         }
     }
     if (params.out_is_eos) |out_is_eos| {
-        const eos = mod.impl.c.ggml_graph_get_tensor(gf, "out_eos_score");
+        const eos = llama.impl.llama_c.ggml_graph_get_tensor(gf, "out_eos_score");
         if (eos != null) {
-            mod.impl.ggmlAssert(mod.impl.c.ggml_nelements(eos) == 1, "mtmd-subcontext.cpp", 2536, "ggml_nelements(eos) == 1");
+            mod.impl.ggmlAssert(llama.impl.llama_c.ggml_nelements(eos) == 1, "mtmd-subcontext.cpp", 2536, "ggml_nelements(eos) == 1");
             var score: f32 = 0.0;
-            mod.impl.c.ggml_backend_tensor_get(eos, &score, 0, @sizeOf(f32));
+            llama.impl.llama_c.ggml_backend_tensor_get(eos, &score, 0, @sizeOf(f32));
             out_is_eos.* = score > hparams.gen_eos_threshold;
         }
     }
     if (params.out_audio) |out_audio| {
-        const audio = mod.impl.c.ggml_graph_get_tensor(gf, "out_audio");
-        if (audio == null) _ = mod.impl.c.ggml_abort("mtmd-subcontext.cpp", 2545, "out_audio requested but graph has no \"out_audio\" tensor");
-        try out_audio.resize(std.heap.c_allocator, @intCast(mod.impl.c.ggml_nelements(audio)));
-        mod.impl.c.ggml_backend_tensor_get(audio, out_audio.items.ptr, 0, mod.impl.c.ggml_nbytes(audio));
+        const audio = llama.impl.llama_c.ggml_graph_get_tensor(gf, "out_audio");
+        if (audio == null) _ = llama.impl.llama_c.ggml_abort("mtmd-subcontext.cpp", 2545, "out_audio requested but graph has no \"out_audio\" tensor");
+        try out_audio.resize(std.heap.c_allocator, @intCast(llama.impl.llama_c.ggml_nelements(audio)));
+        llama.impl.llama_c.ggml_backend_tensor_get(audio, out_audio.items.ptr, 0, llama.impl.llama_c.ggml_nbytes(audio));
 
         if (model.proj_type == .soprano) {
             const spectrum = try std.heap.c_allocator.dupe(f32, out_audio.items);
@@ -2062,29 +2063,29 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
     }
     if (params.enc_state != null and (model.proj_type == .lfm3a or model.proj_type == .gemma4a)) {
         const state_slots = params.enc_state.?.slots.items;
-        const slots = try mod.models.encStateSlots(hparams, model);
-        defer mod.models.freeSlots(slots);
+        const slots = try mod.models.dispatch.encStateSlots(hparams, model);
+        defer mod.models.dispatch.freeSlots(slots);
         for (slots, 0..) |slot, i| {
             var nb: [256]u8 = undefined;
             _ = stdlib.libc.snprintf(&nb, nb.len, "state_out_%s", slot.name.ptr);
-            const t = mod.impl.c.ggml_graph_get_tensor(gf, @ptrCast(&nb));
+            const t = llama.impl.llama_c.ggml_graph_get_tensor(gf, @ptrCast(&nb));
             mod.impl.ggmlAssert(t != null, "mtmd-subcontext.cpp", 2572, "t != nullptr");
             try copyGenStateOut(t, state_slots[i]);
         }
     } else if (params.enc_state != null and model.proj_type == .nemotron_transcribe) {
         const es = params.enc_state.?;
-        const chunk = mod.impl.c.ggml_graph_get_tensor(gf, "spk_chunk");
-        const preds = mod.impl.c.ggml_graph_get_tensor(gf, "spk_preds");
+        const chunk = llama.impl.llama_c.ggml_graph_get_tensor(gf, "spk_chunk");
+        const preds = llama.impl.llama_c.ggml_graph_get_tensor(gf, "spk_preds");
         mod.impl.ggmlAssert(chunk != null and preds != null, "mtmd-subcontext.cpp", 2579, "chunk != nullptr && preds != nullptr");
-        try es.spk_chunk.resize(std.heap.c_allocator, @intCast(mod.impl.c.ggml_nelements(chunk)));
-        try es.spk_preds.resize(std.heap.c_allocator, @intCast(mod.impl.c.ggml_nelements(preds)));
-        mod.impl.c.ggml_backend_tensor_get(chunk, es.spk_chunk.items.ptr, 0, mod.impl.c.ggml_nbytes(chunk));
-        mod.impl.c.ggml_backend_tensor_get(preds, es.spk_preds.items.ptr, 0, mod.impl.c.ggml_nbytes(preds));
+        try es.spk_chunk.resize(std.heap.c_allocator, @intCast(llama.impl.llama_c.ggml_nelements(chunk)));
+        try es.spk_preds.resize(std.heap.c_allocator, @intCast(llama.impl.llama_c.ggml_nelements(preds)));
+        llama.impl.llama_c.ggml_backend_tensor_get(chunk, es.spk_chunk.items.ptr, 0, llama.impl.llama_c.ggml_nbytes(chunk));
+        llama.impl.llama_c.ggml_backend_tensor_get(preds, es.spk_preds.items.ptr, 0, llama.impl.llama_c.ggml_nbytes(preds));
     } else if (params.enc_state) |es| {
-        const tail = mod.impl.c.ggml_graph_get_tensor(gf, "out_stem_tail");
+        const tail = llama.impl.llama_c.ggml_graph_get_tensor(gf, "out_stem_tail");
         mod.impl.ggmlAssert(tail != null, "mtmd-subcontext.cpp", 2587, "tail != nullptr");
-        try es.stem_tail.resize(std.heap.c_allocator, @intCast(mod.impl.c.ggml_nelements(tail)));
-        mod.impl.c.ggml_backend_tensor_get(tail, es.stem_tail.items.ptr, 0, mod.impl.c.ggml_nbytes(tail));
+        try es.stem_tail.resize(std.heap.c_allocator, @intCast(llama.impl.llama_c.ggml_nelements(tail)));
+        llama.impl.llama_c.ggml_backend_tensor_get(tail, es.stem_tail.items.ptr, 0, llama.impl.llama_c.ggml_nbytes(tail));
 
         const n_new = @divTrunc(imgs.entries.items[0].nx() - 2, 2);
         var i: i32 = 0;
@@ -2094,8 +2095,8 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
 
     if (params.gen_process == .gen_wav) {
         const state_slots = params.gen_state.?.slots.items;
-        const slots = try mod.models.genStateSlots(hparams, model);
-        defer mod.models.freeSlots(slots);
+        const slots = try mod.models.dispatch.genStateSlots(hparams, model);
+        defer mod.models.dispatch.freeSlots(slots);
         var i: usize = 0;
         for (slots) |slot| {
             if (slot.in_place) {
@@ -2104,8 +2105,8 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
             }
             var nb: [256]u8 = undefined;
             _ = stdlib.libc.snprintf(&nb, nb.len, "state_out_%s", slot.name.ptr);
-            const t = mod.impl.c.ggml_graph_get_tensor(gf, @ptrCast(&nb));
-            if (t == null) _ = mod.impl.c.ggml_abort("mtmd-subcontext.cpp", 2608, "graph has no \"state_out_%s\" tensor", slot.name.ptr);
+            const t = llama.impl.llama_c.ggml_graph_get_tensor(gf, @ptrCast(&nb));
+            if (t == null) _ = llama.impl.llama_c.ggml_abort("mtmd-subcontext.cpp", 2608, "graph has no \"state_out_%s\" tensor", slot.name.ptr);
             mod.impl.ggmlAssert(i < state_slots.len, "mtmd-subcontext.cpp", 2610, "i < slots.size()");
             try copyGenStateOut(t, state_slots[i]);
             i += 1;
@@ -2119,9 +2120,9 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
     if (ctx.debug_output_embeddings and embeddings != null) {
         const n_embd = embeddings.?.ne[0];
         const n_tokens = embeddings.?.ne[1];
-        const emb_data = try std.heap.c_allocator.alloc(f32, @intCast(mod.impl.c.ggml_nelements(embeddings)));
+        const emb_data = try std.heap.c_allocator.alloc(f32, @intCast(llama.impl.llama_c.ggml_nelements(embeddings)));
         defer std.heap.c_allocator.free(emb_data);
-        mod.impl.c.ggml_backend_tensor_get(embeddings, emb_data.ptr, 0, mod.impl.c.ggml_nbytes(embeddings));
+        llama.impl.llama_c.ggml_backend_tensor_get(embeddings, emb_data.ptr, 0, llama.impl.llama_c.ggml_nbytes(embeddings));
 
         mod.impl.logInf("\n=== MTMD_DEBUG_EMBEDDINGS ===\n", .{});
         mod.impl.logInf("Shape: [%lld, %lld]\n", .{ @as(c_longlong, n_embd), @as(c_longlong, n_tokens) });

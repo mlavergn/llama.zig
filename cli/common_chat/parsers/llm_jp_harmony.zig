@@ -15,10 +15,8 @@ const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
 
-const Allocator = std.mem.Allocator;
-
 const Build = struct {
-    a: Allocator,
+    a: std.mem.Allocator,
     inputs: *const common_chat.template.GenerationParams,
     has_tools: bool,
     has_response_format: bool,
@@ -124,7 +122,7 @@ const Build = struct {
 /// The messages with each one's `reasoning_content` also as `thinking`, as
 /// the template reads it, and the content of a message with tool calls
 /// dropped. Part of `common_chat_params_init_llm_jp_harmony`.
-fn adjustMessages(a: Allocator, messages: *const json.Value) common_chat.exception.Error!json.Value {
+fn adjustMessages(a: std.mem.Allocator, messages: *const json.Value) common_chat.exception.Error!json.Value {
     var adjusted = json.Value.emptyArray();
     var it = @constCast(messages).items();
     while (it.next()) |item| {
@@ -153,7 +151,7 @@ fn adjustMessages(a: Allocator, messages: *const json.Value) common_chat.excepti
 /// Ports `common_chat_params_init_llm_jp_harmony` (parsers/llm-jp-harmony.cpp:6 @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
-pub fn init(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
+pub fn init(a: std.mem.Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
     var data: common_chat.params.ChatParams = .{};
 
     // Copy reasoning to the "thinking" field as expected by the template

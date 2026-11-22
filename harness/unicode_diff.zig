@@ -52,8 +52,6 @@ extern fn ref_uni_cpt_to_byte(cpt: u32) c_int;
 extern fn ref_uni_regex_split(text: [*]const u8, text_len: usize, exprs: [*]const [*]const u8, expr_lens: [*]const usize, n_exprs: usize, byte_encode: c_int, out: *?[*]u8, out_len: *usize) c_long;
 extern fn ref_uni_free(p: ?[*]u8) void;
 
-const gpa = std.heap.c_allocator;
-
 var checks: usize = 0;
 var failures: usize = 0;
 
@@ -68,8 +66,8 @@ fn fail(comptime fmt: []const u8, args: anytype) void {
 fn sweepCodepoints() void {
     const extra = [_]u32{ 0x110000, 0x110001, 0x1FFFFF, 0x200000, 0xFFFFFFFF };
     const n: usize = 0x110000 + extra.len;
-    const all = gpa.alloc(u32, n) catch unreachable;
-    defer gpa.free(all);
+    const all = std.heap.c_allocator.alloc(u32, n) catch unreachable;
+    defer std.heap.c_allocator.free(all);
     for (0..0x110000) |c| all[c] = @intCast(c);
     @memcpy(all[0x110000..], &extra);
 
@@ -95,11 +93,11 @@ fn sweepCodepoints() void {
     }
 
     // NFD, the whole range as one vector.
-    const rn = gpa.alloc(u32, n) catch unreachable;
-    defer gpa.free(rn);
+    const rn = std.heap.c_allocator.alloc(u32, n) catch unreachable;
+    defer std.heap.c_allocator.free(rn);
     ref_uni_nfd(all.ptr, n, rn.ptr);
     const zn = unicode.cptsNormalizeNfd(all);
-    defer gpa.free(zn);
+    defer std.heap.c_allocator.free(zn);
     for (all, rn, zn) |c, r, z| {
         checks += 1;
         if (r != z) fail("nfd U+{X:0>4}: ref U+{X:0>4} zig U+{X:0>4}", .{ c, r, z });
@@ -121,11 +119,11 @@ fn sweepCodepoints() void {
 fn compareNfc(in: []const u32) void {
     checks += 1;
     const cap = in.len * 4 + 4;
-    const rbuf = gpa.alloc(u32, cap) catch unreachable;
-    defer gpa.free(rbuf);
+    const rbuf = std.heap.c_allocator.alloc(u32, cap) catch unreachable;
+    defer std.heap.c_allocator.free(rbuf);
     const rn = ref_uni_nfc(in.ptr, in.len, rbuf.ptr, cap);
     const z = unicode.cptsNormalizeNfc(in);
-    defer gpa.free(z);
+    defer std.heap.c_allocator.free(z);
     if (rn > cap or !std.mem.eql(u32, rbuf[0..rn], z)) {
         fail("nfc {any}: ref {any} zig {any}", .{ in[0..@min(in.len, 8)], rbuf[0..@min(rn, 8, cap)], z[0..@min(z.len, 8)] });
     }
@@ -199,7 +197,7 @@ fn compareDecode(s: []const u8) void {
     var rbuf: [64]u32 = undefined;
     const rn = ref_uni_cpts_from_utf8(s.ptr, s.len, &rbuf);
     const z = unicode.cptsFromUtf8(s);
-    defer gpa.free(z);
+    defer std.heap.c_allocator.free(z);
     if (!std.mem.eql(u32, rbuf[0..rn], z)) fail("cpts_from_utf8 {x}: ref {any} zig {any}", .{ s, rbuf[0..rn], z });
 }
 
@@ -294,16 +292,16 @@ fn parseSets(text: []const u8) []Set {
     var lines = std.mem.splitScalar(u8, text, '\n');
     while (lines.next()) |line| {
         if (std.mem.eql(u8, line, "SET")) {
-            if (cur.items.len != 0) sets.append(gpa, cur.toOwnedSlice(gpa) catch unreachable) catch unreachable;
+            if (cur.items.len != 0) sets.append(std.heap.c_allocator, cur.toOwnedSlice(std.heap.c_allocator) catch unreachable) catch unreachable;
             continue;
         }
         if (line.len == 0) continue;
-        const bytes = gpa.alloc(u8, line.len / 2) catch unreachable;
+        const bytes = std.heap.c_allocator.alloc(u8, line.len / 2) catch unreachable;
         _ = std.fmt.hexToBytes(bytes, line) catch @panic("bad hex in sets file");
-        cur.append(gpa, bytes) catch unreachable;
+        cur.append(std.heap.c_allocator, bytes) catch unreachable;
     }
-    if (cur.items.len != 0) sets.append(gpa, cur.toOwnedSlice(gpa) catch unreachable) catch unreachable;
-    return sets.toOwnedSlice(gpa) catch unreachable;
+    if (cur.items.len != 0) sets.append(std.heap.c_allocator, cur.toOwnedSlice(std.heap.c_allocator) catch unreachable) catch unreachable;
+    return sets.toOwnedSlice(std.heap.c_allocator) catch unreachable;
 }
 
 /// Patterns no vocabulary uses, for the paths the real sets do not reach:
@@ -379,7 +377,7 @@ fn randomText(r: std.Random, buf: *std.ArrayList(u8)) []const u8 {
     const n = r.uintLessThan(usize, 40);
     for (0..n) |_| {
         const piece = if (r.uintLessThan(u16, 400) == 0) pool_rare[r.uintLessThan(usize, pool_rare.len)] else pool[r.uintLessThan(usize, pool.len)];
-        buf.appendSlice(gpa, piece) catch unreachable;
+        buf.appendSlice(std.heap.c_allocator, piece) catch unreachable;
     }
     return buf.items;
 }
@@ -443,18 +441,18 @@ pub fn main() !void {
     var seen: std.StringHashMapUnmanaged(void) = .empty;
     // The empty text, which returns before any pattern is
     // compiled -- the malformed synthetic ones included.
-    try corpus.append(gpa, "");
-    try seen.put(gpa, "", {});
+    try corpus.append(std.heap.c_allocator, "");
+    try seen.put(std.heap.c_allocator, "", {});
     for (inputs.corpus) |text| {
         var it = std.mem.splitSequence(u8, text, "\n__ggml_vocab_test__\n");
         while (it.next()) |s| {
-            if ((try seen.getOrPut(gpa, s)).found_existing) continue;
-            try corpus.append(gpa, s);
+            if ((try seen.getOrPut(std.heap.c_allocator, s)).found_existing) continue;
+            try corpus.append(std.heap.c_allocator, s);
         }
     }
     const n_upstream = corpus.items.len;
     var rbuf: std.ArrayList(u8) = .empty;
-    for (0..1500) |_| try corpus.append(gpa, try gpa.dupe(u8, randomText(r, &rbuf)));
+    for (0..1500) |_| try corpus.append(std.heap.c_allocator, try std.heap.c_allocator.dupe(u8, randomText(r, &rbuf)));
 
     for (sets) |set| {
         for (corpus.items) |text| {

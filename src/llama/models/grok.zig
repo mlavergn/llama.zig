@@ -152,13 +152,13 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0, il);
         }
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
         cur = b.buildNorm(cur, layer.attn_out_norm, null, .rms, il);
         b.cb(cur, "attn_out_norm", il);
 
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The feed-forward network.
@@ -186,7 +186,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 
             // `std::sqrt(2) / 2`, a double, narrowed to the float argument.
             const inv_sqrt2: f32 = @floatCast(@sqrt(@as(f64, 2.0)) / 2.0);
-            cur = llama.impl.c.ggml_scale(ctx, llama.impl.c.ggml_add(ctx, ffn_out, moe_out), inv_sqrt2);
+            cur = llama.impl.llama_c.ggml_scale(ctx, llama.impl.llama_c.ggml_add(ctx, ffn_out, moe_out), inv_sqrt2);
             b.cb(cur, "ffn_out", il);
         } else {
             cur = moe_out;
@@ -194,7 +194,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         cur = b.buildNorm(cur, layer.ffn_post_norm, null, .rms, il);
         b.cb(cur, "ffn_post_norm", il);
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
         b.cb(cur, "ffn_out", il);
 
         cur = b.buildCvec(cur, il);
@@ -213,13 +213,13 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     // The LM head.
     cur = b.buildLoraMm(model.output.?, cur, model.output_s);
 
-    cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_logit_scale);
+    cur = llama.impl.llama_c.ggml_scale(ctx, cur, hp.f_logit_scale);
 
     // Final logit soft-capping.
     if (hp.f_final_logit_softcapping != 0.0) {
-        cur = llama.impl.c.ggml_scale(ctx, cur, 1.0 / hp.f_final_logit_softcapping);
-        cur = llama.impl.c.ggml_tanh(ctx, cur);
-        cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_final_logit_softcapping);
+        cur = llama.impl.llama_c.ggml_scale(ctx, cur, 1.0 / hp.f_final_logit_softcapping);
+        cur = llama.impl.llama_c.ggml_tanh(ctx, cur);
+        cur = llama.impl.llama_c.ggml_scale(ctx, cur, hp.f_final_logit_softcapping);
     }
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;

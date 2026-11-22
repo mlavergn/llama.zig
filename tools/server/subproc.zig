@@ -23,12 +23,10 @@
 
 const std = @import("std");
 const stdlib = @import("stdlib");
-const tools = @import("tools_common");
-
-const fd_t = std.posix.fd_t;
+const tools_common = @import("tools_common");
 
 /// A pipe end as std reads it.
-fn pipeFile(fd: fd_t) std.Io.File {
+fn pipeFile(fd: std.posix.fd_t) std.Io.File {
     return .{ .handle = fd, .flags = .{ .nonblocking = false } };
 }
 
@@ -36,7 +34,7 @@ fn pipeFile(fd: fd_t) std.Io.File {
 ///
 /// Return: the bytes read; null when nothing is available (EAGAIN); 0 at
 /// end of file or on an error.
-fn readNonBlocking(fd: fd_t, buf: []u8) ?usize {
+fn readNonBlocking(fd: std.posix.fd_t, buf: []u8) ?usize {
     return pipeFile(fd).readStreaming(stdlib.file.defaultIo(), &.{buf}) catch |err| switch (err) {
         error.WouldBlock => null,
         else => 0,
@@ -64,10 +62,10 @@ pub const n_streams = 2;
 pub fn reserveStdout() std.Io.File {
     stdlib.stdio.stdout().flush();
     // `fileno(stdout)` and `fileno(stderr)`
-    const stdout_fd: fd_t = 1;
-    const stderr_fd: fd_t = 2;
+    const stdout_fd: std.posix.fd_t = 1;
+    const stderr_fd: std.posix.fd_t = 2;
     const fd = std.posix.system.fcntl(stdout_fd, std.posix.F.DUPFD_CLOEXEC, @as(c_int, 0));
-    tools.ggml.ggmlAssert(std.posix.errno(fd) == .SUCCESS, "server-common.cpp", 2132, "fd >= 0");
+    tools_common.ggml.ggmlAssert(std.posix.errno(fd) == .SUCCESS, "server-common.cpp", 2132, "fd >= 0");
     _ = std.posix.system.dup2(stderr_fd, stdout_fd);
     return pipeFile(@intCast(fd));
 }
@@ -148,13 +146,13 @@ pub fn Subproc(comptime P: type) type {
 /// Ports `server_subproc`'s `waiter` (server-common.h:725 @b1b770d90): a
 /// self-pipe to wake a `poll` on the children's output.
 pub const Waiter = struct {
-    wake_fd: [2]fd_t = .{ -1, -1 }, // POSIX self-pipe
+    wake_fd: [2]std.posix.fd_t = .{ -1, -1 }, // POSIX self-pipe
 
     /// Ports the constructor of `server_subproc`'s `waiter` (server-common.cpp:2214 @b1b770d90).
     pub fn init() Waiter {
         // pipe(), not close-on-exec: the C's children inherit it too
-        const fds = std.Io.Threaded.pipe2(.{}) catch [2]fd_t{ -1, -1 };
-        tools.ggml.ggmlAssert(fds[0] >= 0, "server-common.cpp", 2217, "pipe(fds) == 0");
+        const fds = std.Io.Threaded.pipe2(.{}) catch [2]std.posix.fd_t{ -1, -1 };
+        tools_common.ggml.ggmlAssert(fds[0] >= 0, "server-common.cpp", 2217, "pipe(fds) == 0");
         for (fds) |fd| {
             stdlib.subproc.setNonBlocking(fd);
         }
@@ -196,7 +194,7 @@ pub const Waiter = struct {
         // the C library's poll on Darwin, the system call on Linux
         const e = std.posix.errno(std.posix.system.poll(pfds.items.ptr, @intCast(pfds.items.len), @intCast(timeout)));
         if (e != .SUCCESS and e != .INTR) {
-            tools.log.err("%s: poll() failed: %s\n", .{ "wait", stdlib.errno.strerror(@backingInt(e)) });
+            tools_common.log.err("%s: poll() failed: %s\n", .{ "wait", stdlib.errno.strerror(@backingInt(e)) });
         }
         if (pfds.items[0].revents != 0) {
             var buf: [64]u8 = undefined;

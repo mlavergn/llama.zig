@@ -38,21 +38,21 @@ const stdlib = @import("stdlib");
 /// `ggml-opt.h`; and `gguf.h`, which the vocabulary and the model loader
 /// read metadata through. Translated from `c_import.h` by
 /// `build/llamacpp.zig` (Zig 0.17 has no `@cImport`).
-pub const c = @import("llama_c");
+pub const llama_c = @import("llama_c");
 
 /// C's `stdout`: `__stdoutp` on Darwin, `stdout` on glibc, `__acrt_iob_func(1)`
 /// in MinGW's UCRT. The macro expands to a different variable or call on each,
 /// so it is read by name.
 ///
 /// Return: the stream.
-pub fn cStdout() *c.FILE {
+pub fn cStdout() *llama_c.FILE {
     return @ptrCast(@alignCast(stdlib.stdio.cStream(.stdout)));
 }
 
 /// C's `stderr`; see `cStdout`.
 ///
 /// Return: the stream.
-pub fn cStderr() *c.FILE {
+pub fn cStderr() *llama_c.FILE {
     return @ptrCast(@alignCast(stdlib.stdio.cStream(.stderr)));
 }
 
@@ -88,26 +88,25 @@ pub fn writeStderr(parts: []const []const u8) void {
 /// - `n_rows`: how many.
 ///
 /// Return: nothing.
-pub fn prefetchRows(tensor: ?*const c.ggml_tensor, rows: [*c]const i32, n_rows: usize) void {
+pub fn prefetchRows(tensor: ?*const llama_c.ggml_tensor, rows: [*c]const i32, n_rows: usize) void {
     const t = tensor orelse return;
-    if (t.data == null or t.buffer == null or !c.ggml_backend_buffer_is_host(t.buffer) or n_rows == 0) {
+    if (t.data == null or t.buffer == null or !llama_c.ggml_backend_buffer_is_host(t.buffer) or n_rows == 0) {
         return;
     }
 
-    assert(c.ggml_is_matrix(t), "llama-impl.cpp", 27, "ggml_is_matrix(tensor)");
+    assert(llama_c.ggml_is_matrix(t), "llama-impl.cpp", 27, "ggml_is_matrix(tensor)");
 
-    const row_bytes = c.ggml_row_size(t.type, t.ne[0]);
+    const row_bytes = llama_c.ggml_row_size(t.type, t.ne[0]);
     const base: [*]const u8 = @ptrCast(t.data.?);
 
-    const mmap = @import("mmap.zig");
-    const mr = std.heap.c_allocator.alloc(mmap.MemoryRange, n_rows) catch abort("llama-impl.cpp", 32, "out of memory");
+    const mr = std.heap.c_allocator.alloc(mod.mmap.MemoryRange, n_rows) catch abort("llama-impl.cpp", 32, "out of memory");
     defer std.heap.c_allocator.free(mr);
     for (0..n_rows) |i| {
         assert(rows[i] >= 0 and rows[i] < t.ne[1], "llama-impl.cpp", 35, "rows[i] >= 0 && rows[i] < tensor->ne[1]");
         mr[i] = .{ .addr = base + @as(usize, @intCast(rows[i])) * t.nb[1], .size = row_bytes };
     }
 
-    mmap.prefetchRanges(mr);
+    mod.mmap.prefetchRanges(mr);
 }
 
 /// Ports `llama_clear_tensor_data` (llama-impl.cpp:91 @b1b770d90): zero
@@ -115,13 +114,13 @@ pub fn prefetchRows(tensor: ?*const c.ggml_tensor, rows: [*c]const i32, n_rows: 
 /// since not every backend buffer implements `ggml_backend_tensor_memset`.
 ///
 /// Return: nothing.
-pub fn clearTensorData(t: *c.ggml_tensor, offset: usize, size: usize) void {
+pub fn clearTensorData(t: *llama_c.ggml_tensor, offset: usize, size: usize) void {
     const zeros = struct {
         var buf: [1024 * 1024]u8 = @splat(0);
     };
     var ofs: usize = 0;
     while (ofs < size) : (ofs += zeros.buf.len) {
-        c.ggml_backend_tensor_set(t, &zeros.buf, offset + ofs, @min(size - ofs, zeros.buf.len));
+        llama_c.ggml_backend_tensor_set(t, &zeros.buf, offset + ofs, @min(size - ofs, zeros.buf.len));
     }
 }
 
@@ -133,7 +132,7 @@ pub fn clearTensorData(t: *c.ggml_tensor, offset: usize, size: usize) void {
 ///
 /// Return: nothing.
 pub fn logWarn(comptime format: [:0]const u8, args: anytype) void {
-    mod.log.logInternal(c.GGML_LOG_LEVEL_WARN, format, args);
+    mod.log.logInternal(llama_c.GGML_LOG_LEVEL_WARN, format, args);
 }
 
 /// Ports `LLAMA_LOG_ERROR` (llama-impl.h:30 @b1b770d90).
@@ -144,7 +143,7 @@ pub fn logWarn(comptime format: [:0]const u8, args: anytype) void {
 ///
 /// Return: nothing.
 pub fn logError(comptime format: [:0]const u8, args: anytype) void {
-    mod.log.logInternal(c.GGML_LOG_LEVEL_ERROR, format, args);
+    mod.log.logInternal(llama_c.GGML_LOG_LEVEL_ERROR, format, args);
 }
 
 /// Ports `LLAMA_LOG_INFO` (llama-impl.h:28 @b1b770d90).
@@ -155,7 +154,7 @@ pub fn logError(comptime format: [:0]const u8, args: anytype) void {
 ///
 /// Return: nothing.
 pub fn logInfo(comptime format: [:0]const u8, args: anytype) void {
-    mod.log.logInternal(c.GGML_LOG_LEVEL_INFO, format, args);
+    mod.log.logInternal(llama_c.GGML_LOG_LEVEL_INFO, format, args);
 }
 
 /// Ports `LLAMA_LOG_DEBUG` (llama-impl.h:31 @b1b770d90).
@@ -166,7 +165,7 @@ pub fn logInfo(comptime format: [:0]const u8, args: anytype) void {
 ///
 /// Return: nothing.
 pub fn logDebug(comptime format: [:0]const u8, args: anytype) void {
-    mod.log.logInternal(c.GGML_LOG_LEVEL_DEBUG, format, args);
+    mod.log.logInternal(llama_c.GGML_LOG_LEVEL_DEBUG, format, args);
 }
 
 /// Ports `LLAMA_LOG_CONT` (llama-impl.h:32 @b1b770d90): continues the
@@ -178,7 +177,7 @@ pub fn logDebug(comptime format: [:0]const u8, args: anytype) void {
 ///
 /// Return: nothing.
 pub fn logCont(comptime format: [:0]const u8, args: anytype) void {
-    mod.log.logInternal(c.GGML_LOG_LEVEL_CONT, format, args);
+    mod.log.logInternal(llama_c.GGML_LOG_LEVEL_CONT, format, args);
 }
 
 // -----------------------------------------------------------------------------
@@ -217,7 +216,7 @@ pub fn replaceAll(s: *std.ArrayList(u8), search: []const u8, replace: []const u8
 ///
 /// Return: never.
 pub fn abort(comptime file: [:0]const u8, comptime line: c_int, comptime msg: [:0]const u8) noreturn {
-    c.ggml_abort(file.ptr, line, "%s", msg.ptr);
+    llama_c.ggml_abort(file.ptr, line, "%s", msg.ptr);
 }
 
 /// Mirrors `GGML_ASSERT` (ggml.h:115 @b1b770d90).
@@ -230,7 +229,7 @@ pub fn abort(comptime file: [:0]const u8, comptime line: c_int, comptime msg: [:
 ///
 /// Return: nothing when `ok`; never otherwise.
 pub inline fn assert(ok: bool, comptime file: [:0]const u8, comptime line: c_int, comptime expr: [:0]const u8) void {
-    if (!ok) c.ggml_abort(file.ptr, line, "GGML_ASSERT(%s) failed", expr.ptr);
+    if (!ok) llama_c.ggml_abort(file.ptr, line, "GGML_ASSERT(%s) failed", expr.ptr);
 }
 
 /// Stands in for a C++ exception that escapes through the C ABI.
@@ -251,7 +250,7 @@ pub fn throwRuntime(comptime file: [:0]const u8, comptime line: c_int, msg: []co
     const n = @min(msg.len, buf.len - 1);
     @memcpy(buf[0..n], msg[0..n]);
     buf[n] = 0;
-    c.ggml_abort(file.ptr, line, "terminating due to uncaught exception of type std::runtime_error: %s", &buf);
+    llama_c.ggml_abort(file.ptr, line, "terminating due to uncaught exception of type std::runtime_error: %s", &buf);
 }
 
 /// The one error a function standing in for a throwing C++ function returns.
@@ -328,7 +327,7 @@ pub const Exception = struct {
     /// Return: never.
     pub fn terminate(self: *Exception, comptime file: [:0]const u8, comptime line: c_int) noreturn {
         self.buf[self.len] = 0;
-        c.ggml_abort(file.ptr, line, "terminating due to uncaught exception of type %s: %s", self.kind.name().ptr, &self.buf);
+        llama_c.ggml_abort(file.ptr, line, "terminating due to uncaught exception of type %s: %s", self.kind.name().ptr, &self.buf);
     }
 };
 
@@ -351,7 +350,7 @@ pub const TimeMeas = struct {
     ///
     /// Return: the running measurement.
     pub fn init(t_acc: *i64, disable: bool) TimeMeas {
-        return .{ .t_start_us = if (disable) -1 else c.ggml_time_us(), .t_acc = t_acc };
+        return .{ .t_start_us = if (disable) -1 else llama_c.ggml_time_us(), .t_acc = t_acc };
     }
 
     /// Ports the destructor of `time_meas` (llama-impl.cpp:44 @b1b770d90).
@@ -359,7 +358,7 @@ pub const TimeMeas = struct {
     /// Return: nothing.
     pub fn deinit(self: TimeMeas) void {
         if (self.t_start_us >= 0) {
-            self.t_acc.* += c.ggml_time_us() - self.t_start_us;
+            self.t_acc.* += llama_c.ggml_time_us() - self.t_start_us;
         }
     }
 };

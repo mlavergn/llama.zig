@@ -6,10 +6,11 @@
 //! Ports `llama.cpp/tools/mtmd/models/nemotron-v2-vl.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
+const llama = @import("llama");
 const mtmd = @import("../module.zig");
 
 /// Ports `build` (nemotron-v2-vl.cpp:3 @b1b770d90), a member of `mtmd_graph_nemotron_v2_vl`.
-pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*llama.impl.llama_c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
     const model = g.model;
@@ -22,14 +23,14 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     var inp = g.buildInp();
 
     // add position embeddings (pre-downsampled during GGUF conversion for fixed 512x512 input)
-    inp = mtmd.impl.c.ggml_add(ctx0, inp, model.position_embeddings);
+    inp = llama.impl.llama_c.ggml_add(ctx0, inp, model.position_embeddings);
     g.cb(inp, "inp_pos", -1);
 
-    inp = mtmd.impl.c.ggml_concat(ctx0, model.class_embedding, inp, 1);
+    inp = llama.impl.llama_c.ggml_concat(ctx0, model.class_embedding, inp, 1);
 
     var cur = g.buildVit(inp, n_pos, .normal, g.hparams.ffn_op, null, null, .{});
 
-    cur = mtmd.impl.c.ggml_view_2d(ctx0, cur, g.n_embd, g.n_patches, mtmd.impl.c.ggml_row_size(cur.?.type, g.n_embd), @as(usize, @intCast(n_registers)) * mtmd.impl.c.ggml_row_size(cur.?.type, g.n_embd));
+    cur = llama.impl.llama_c.ggml_view_2d(ctx0, cur, g.n_embd, g.n_patches, llama.impl.llama_c.ggml_row_size(cur.?.type, g.n_embd), @as(usize, @intCast(n_registers)) * llama.impl.llama_c.ggml_row_size(cur.?.type, g.n_embd));
 
     cur = g.buildPatchMergePermute(cur, g.hparams.n_merge);
 
@@ -38,7 +39,7 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
         cur = g.buildFfn(cur, model.mm_1_w, null, null, null, model.mm_3_w, null, .relu_sqr, -1);
     }
 
-    mtmd.impl.c.ggml_build_forward_expand(g.gf, cur);
+    llama.impl.llama_c.ggml_build_forward_expand(g.gf, cur);
     return g.gf;
 }
 

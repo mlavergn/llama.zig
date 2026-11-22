@@ -73,9 +73,9 @@ pub inline fn barrier(params: *const ggml.cpu.defs.ComputeParams) void {
 pub inline fn toF32(comptime T: type, v: T) f32 {
     return switch (T) {
         f32 => v,
-        ggml.impl.c.ggml_fp16_t => ggml.impl.fp16ToFp32(v),
-        ggml.impl.c.ggml_bf16_t => ggml.impl.bf16ToFp32(v.bits),
-        ggml.impl.c.ggml_fp8_e4m3_t => ggml.impl.f8E4m3ToFp32(v.bits),
+        ggml.impl.ggml_c.ggml_fp16_t => ggml.impl.fp16ToFp32(v),
+        ggml.impl.ggml_c.ggml_bf16_t => ggml.impl.bf16ToFp32(v.bits),
+        ggml.impl.ggml_c.ggml_fp8_e4m3_t => ggml.impl.f8E4m3ToFp32(v.bits),
         i32 => @floatFromInt(v),
         else => @compileError("no conversion for " ++ @typeName(T)),
     };
@@ -93,9 +93,9 @@ pub inline fn toF32(comptime T: type, v: T) f32 {
 pub inline fn fromF32(comptime T: type, v: f32) T {
     return switch (T) {
         f32 => v,
-        ggml.impl.c.ggml_fp16_t => ggml.cpu.convert.cpuFp32ToFp16(v),
-        ggml.impl.c.ggml_bf16_t => .{ .bits = ggml.impl.fp32ToBf16(v) },
-        ggml.impl.c.ggml_fp8_e4m3_t => .{ .bits = ggml.impl.fp32ToF8E4m3(v) },
+        ggml.impl.ggml_c.ggml_fp16_t => ggml.cpu.convert.cpuFp32ToFp16(v),
+        ggml.impl.ggml_c.ggml_bf16_t => .{ .bits = ggml.impl.fp32ToBf16(v) },
+        ggml.impl.ggml_c.ggml_fp8_e4m3_t => .{ .bits = ggml.impl.fp32ToF8E4m3(v) },
         // `f32_to_i32` is a C cast, which truncates toward zero and is
         // undefined out of range or on a NaN; `truncTo` gives what aarch64's
         // `fcvtzs` gives (saturated, NaN to 0) where `@intFromFloat` traps
@@ -111,10 +111,10 @@ pub inline fn fromF32(comptime T: type, v: f32) T {
 /// - `src0`: the tensor whose rows are being split.
 ///
 /// Return: the half-open row range `[ir0, ir1)` this thread owns.
-pub fn getThreadRange(params: *const ggml.cpu.defs.ComputeParams, src0: *const ggml.impl.c.ggml_tensor) struct { i64, i64 } {
+pub fn getThreadRange(params: *const ggml.cpu.defs.ComputeParams, src0: *const ggml.impl.ggml_c.ggml_tensor) struct { i64, i64 } {
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
-    const nr: i64 = @intCast(ggml.impl.c.ggml_nrows(src0));
+    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src0));
     const dr = @divTrunc(nr + nth - 1, nth);
     const ir0 = dr * ith;
     return .{ ir0, @min(ir0 + dr, nr) };

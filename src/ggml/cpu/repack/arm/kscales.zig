@@ -18,7 +18,6 @@
 //! the two lines are order-dependent in the C only because they read the
 //! *original* `sm[0]`. Writing to `sm` in between would break it.
 
-const std = @import("std");
 const ggml = @import("../../../module.zig");
 
 const kmask1: u32 = 0x3f3f3f3f;
@@ -47,9 +46,4 @@ pub inline fn decodeQKx86BitScales(scales_in: [*]const u8, out_mins: *ggml.cpu.q
     scales_u32[0] = sm[0] & kmask1;
     scales_u32[1] = (sm[2] & kmask2) | (((sm[0] >> 6) & kmask3) << 4);
     @memcpy(@as([*]u8, @ptrCast(out_scales))[0..8], @as([*]const u8, @ptrCast(&scales_u32))[0..8]);
-}
-
-comptime {
-    _ = std;
-    _ = ggml.impl;
 }

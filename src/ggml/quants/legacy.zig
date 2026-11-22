@@ -42,8 +42,8 @@ const ggml = @import("../module.zig");
 /// The scale is the block's *mean* absolute value, not its maximum: with a
 /// single bit per weight there is no magnitude information to preserve, so the
 /// average minimises expected error where the max would not.
-pub export fn quantize_row_q1_0_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.Q1_0, k: i64) void {
-    const qk = ggml.impl.c.QK1_0;
+pub fn quantize_row_q1_0_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.Q1_0, k: i64) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK1_0;
     std.debug.assert(@rem(k, qk) == 0);
     const nb: usize = @intCast(@divExact(k, qk));
 
@@ -66,8 +66,8 @@ pub export fn quantize_row_q1_0_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.
 }
 
 /// Ports `dequantize_row_q1_0` (ggml-quants.c:422 @b1b770d90).
-pub export fn dequantize_row_q1_0(x: [*c]const ggml.quants.blocks.Q1_0, y: [*c]f32, k: i64) void {
-    const qk = ggml.impl.c.QK1_0;
+pub fn dequantize_row_q1_0(x: [*c]const ggml.quants.blocks.Q1_0, y: [*c]f32, k: i64) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK1_0;
     std.debug.assert(@rem(k, qk) == 0);
     const nb: usize = @intCast(@divExact(k, qk));
 
@@ -90,8 +90,8 @@ pub export fn dequantize_row_q1_0(x: [*c]const ggml.quants.blocks.Q1_0, y: [*c]f
 /// The two-bit code is deliberately lopsided: `00 = -1`, `01 = 0`, `10 = +1`,
 /// `11 = +2`. Three of the four values are the usual signed set, and the
 /// fourth extends upward rather than downward.
-pub export fn quantize_row_q2_0_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.Q2_0, k: i64) void {
-    const qk = ggml.impl.c.QK2_0;
+pub fn quantize_row_q2_0_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.Q2_0, k: i64) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK2_0;
     std.debug.assert(@rem(k, qk) == 0);
     const nb: usize = @intCast(@divExact(k, qk));
 
@@ -119,8 +119,8 @@ pub export fn quantize_row_q2_0_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.
 }
 
 /// Ports `dequantize_row_q2_0` (ggml-quants.c:442 @b1b770d90).
-pub export fn dequantize_row_q2_0(x: [*c]const ggml.quants.blocks.Q2_0, y: [*c]f32, k: i64) void {
-    const qk = ggml.impl.c.QK2_0;
+pub fn dequantize_row_q2_0(x: [*c]const ggml.quants.blocks.Q2_0, y: [*c]f32, k: i64) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK2_0;
     std.debug.assert(@rem(k, qk) == 0);
     const nb: usize = @intCast(@divExact(k, qk));
 
@@ -143,8 +143,8 @@ pub export fn dequantize_row_q2_0(x: [*c]const ggml.quants.blocks.Q2_0, y: [*c]f
 /// included. Dividing by *negative* eight is not a typo: it puts the extreme
 /// value at code 0 and zero at code 8, so the unsigned nibble covers
 /// `[-8, 7] * d` after the bias is subtracted on the way out.
-pub export fn quantize_row_q4_0_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.Q4_0, k: i64) void {
-    const qk = ggml.impl.c.QK4_0;
+pub fn quantize_row_q4_0_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.Q4_0, k: i64) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK4_0;
     std.debug.assert(@rem(k, qk) == 0);
     const nb: usize = @intCast(@divExact(k, qk));
 
@@ -179,8 +179,8 @@ pub export fn quantize_row_q4_0_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.
 }
 
 /// Ports `dequantize_row_q4_0` (ggml-quants.c:462 @b1b770d90).
-pub export fn dequantize_row_q4_0(x: [*c]const ggml.quants.blocks.Q4_0, y: [*c]f32, k: i64) void {
-    const qk = ggml.impl.c.QK4_0;
+pub fn dequantize_row_q4_0(x: [*c]const ggml.quants.blocks.Q4_0, y: [*c]f32, k: i64) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK4_0;
     std.debug.assert(@rem(k, qk) == 0);
     const nb: usize = @intCast(@divExact(k, qk));
 
@@ -197,8 +197,8 @@ pub export fn dequantize_row_q4_0(x: [*c]const ggml.quants.blocks.Q4_0, y: [*c]f
 }
 
 /// Ports `quantize_row_q4_1_ref` (ggml-quants.c:147 @b1b770d90).
-pub export fn quantize_row_q4_1_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.Q4_1, k: i64) void {
-    const qk = ggml.impl.c.QK4_1;
+pub fn quantize_row_q4_1_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.Q4_1, k: i64) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK4_1;
     std.debug.assert(@rem(k, qk) == 0);
     const nb: usize = @intCast(@divExact(k, qk));
 
@@ -232,8 +232,8 @@ pub export fn quantize_row_q4_1_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.
 }
 
 /// Ports `dequantize_row_q4_1` (ggml-quants.c:482 @b1b770d90).
-pub export fn dequantize_row_q4_1(x: [*c]const ggml.quants.blocks.Q4_1, y: [*c]f32, k: i64) void {
-    const qk = ggml.impl.c.QK4_1;
+pub fn dequantize_row_q4_1(x: [*c]const ggml.quants.blocks.Q4_1, y: [*c]f32, k: i64) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK4_1;
     std.debug.assert(@rem(k, qk) == 0);
     const nb: usize = @intCast(@divExact(k, qk));
 
@@ -259,8 +259,8 @@ pub export fn dequantize_row_q4_1(x: [*c]const ggml.quants.blocks.Q4_1, y: [*c]f
 // first half and bit `j + qk/2` for the second.
 
 /// Ports `quantize_row_q5_0_ref` (ggml-quants.c:184 @b1b770d90).
-pub export fn quantize_row_q5_0_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.Q5_0, k: i64) void {
-    const qk = ggml.impl.c.QK5_0;
+pub fn quantize_row_q5_0_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.Q5_0, k: i64) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK5_0;
     std.debug.assert(@rem(k, qk) == 0);
     const nb: usize = @intCast(@divExact(k, qk));
 
@@ -302,8 +302,8 @@ pub export fn quantize_row_q5_0_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.
 }
 
 /// Ports `dequantize_row_q5_0` (ggml-quants.c:503 @b1b770d90).
-pub export fn dequantize_row_q5_0(x: [*c]const ggml.quants.blocks.Q5_0, y: [*c]f32, k: i64) void {
-    const qk = ggml.impl.c.QK5_0;
+pub fn dequantize_row_q5_0(x: [*c]const ggml.quants.blocks.Q5_0, y: [*c]f32, k: i64) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK5_0;
     std.debug.assert(@rem(k, qk) == 0);
     const nb: usize = @intCast(@divExact(k, qk));
 
@@ -329,8 +329,8 @@ pub export fn dequantize_row_q5_0(x: [*c]const ggml.quants.blocks.Q5_0, y: [*c]f
 }
 
 /// Ports `quantize_row_q5_1_ref` (ggml-quants.c:228 @b1b770d90).
-pub export fn quantize_row_q5_1_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.Q5_1, k: i64) void {
-    const qk = ggml.impl.c.QK5_1;
+pub fn quantize_row_q5_1_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.Q5_1, k: i64) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK5_1;
     std.debug.assert(@rem(k, qk) == 0);
     const nb: usize = @intCast(@divExact(k, qk));
 
@@ -372,8 +372,8 @@ pub export fn quantize_row_q5_1_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.
 }
 
 /// Ports `dequantize_row_q5_1` (ggml-quants.c:529 @b1b770d90).
-pub export fn dequantize_row_q5_1(x: [*c]const ggml.quants.blocks.Q5_1, y: [*c]f32, k: i64) void {
-    const qk = ggml.impl.c.QK5_1;
+pub fn dequantize_row_q5_1(x: [*c]const ggml.quants.blocks.Q5_1, y: [*c]f32, k: i64) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK5_1;
     std.debug.assert(@rem(k, qk) == 0);
     const nb: usize = @intCast(@divExact(k, qk));
 
@@ -401,8 +401,8 @@ pub export fn dequantize_row_q5_1(x: [*c]const ggml.quants.blocks.Q5_1, y: [*c]f
 // q8_0 / q8_1 -- eight bits per weight
 
 /// Ports `quantize_row_q8_0_ref` (ggml-quants.c:273 @b1b770d90).
-pub export fn quantize_row_q8_0_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.Q8_0, k: i64) void {
-    const qk = ggml.impl.c.QK8_0;
+pub fn quantize_row_q8_0_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.Q8_0, k: i64) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK8_0;
     std.debug.assert(@rem(k, qk) == 0);
     const nb: usize = @intCast(@divExact(k, qk));
 
@@ -423,8 +423,8 @@ pub export fn quantize_row_q8_0_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.
 }
 
 /// Ports `dequantize_row_q8_0` (ggml-quants.c:556 @b1b770d90).
-pub export fn dequantize_row_q8_0(x: [*c]const ggml.quants.blocks.Q8_0, y: [*c]f32, k: i64) void {
-    const qk = ggml.impl.c.QK8_0;
+pub fn dequantize_row_q8_0(x: [*c]const ggml.quants.blocks.Q8_0, y: [*c]f32, k: i64) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK8_0;
     std.debug.assert(@rem(k, qk) == 0);
     const nb: usize = @intCast(@divExact(k, qk));
 
@@ -443,8 +443,8 @@ pub export fn dequantize_row_q8_0(x: [*c]const ggml.quants.blocks.Q8_0, y: [*c]f
 /// the `m * sum(q)` term without a second pass. There is no
 /// `dequantize_row_q8_1`: this format is an intermediate the dot-product
 /// kernels produce, never a stored weight.
-pub export fn quantize_row_q8_1_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.Q8_1, k: i64) void {
-    const qk = ggml.impl.c.QK8_1;
+pub fn quantize_row_q8_1_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.Q8_1, k: i64) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK8_1;
     comptime std.debug.assert(qk == 32);
     std.debug.assert(@rem(k, qk) == 0);
     const nb: usize = @intCast(@divExact(k, qk));
@@ -492,9 +492,9 @@ pub export fn quantize_row_q8_1_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.
 /// so does this.
 fn bestIndexMxfp4(x: f32, e: f32) u8 {
     var best_index: u8 = 0;
-    var best_err = @abs(@as(f32, @floatFromInt(ggml.impl.c.kvalues_mxfp4[0])) * e - x);
+    var best_err = @abs(@as(f32, @floatFromInt(ggml.impl.ggml_c.kvalues_mxfp4[0])) * e - x);
     for (1..16) |i| {
-        const err = @abs(@as(f32, @floatFromInt(ggml.impl.c.kvalues_mxfp4[i])) * e - x);
+        const err = @abs(@as(f32, @floatFromInt(ggml.impl.ggml_c.kvalues_mxfp4[i])) * e - x);
         if (err < best_err) {
             best_index = @intCast(i);
             best_err = err;
@@ -504,8 +504,8 @@ fn bestIndexMxfp4(x: f32, e: f32) u8 {
 }
 
 /// Ports `quantize_row_mxfp4_ref` (ggml-quants.c:347 @b1b770d90).
-pub export fn quantize_row_mxfp4_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.MXFP4, k: i64) void {
-    const qk = ggml.impl.c.QK_MXFP4;
+pub fn quantize_row_mxfp4_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.MXFP4, k: i64) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK_MXFP4;
     std.debug.assert(@rem(k, qk) == 0);
     const nb: usize = @intCast(@divExact(k, qk));
 
@@ -538,8 +538,8 @@ pub export fn quantize_row_mxfp4_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks
 }
 
 /// Ports `dequantize_row_mxfp4` (ggml-quants.c:572 @b1b770d90).
-pub export fn dequantize_row_mxfp4(x: [*c]const ggml.quants.blocks.MXFP4, y: [*c]f32, k: i64) void {
-    const qk = ggml.impl.c.QK_MXFP4;
+pub fn dequantize_row_mxfp4(x: [*c]const ggml.quants.blocks.MXFP4, y: [*c]f32, k: i64) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK_MXFP4;
     std.debug.assert(@rem(k, qk) == 0);
     const nb: usize = @intCast(@divExact(k, qk));
 
@@ -547,8 +547,8 @@ pub export fn dequantize_row_mxfp4(x: [*c]const ggml.quants.blocks.MXFP4, y: [*c
         const d = ggml.impl.e8m0ToFp32Half(x[i].e);
 
         for (0..qk / 2) |j| {
-            const x0 = ggml.impl.c.kvalues_mxfp4[x[i].qs[j] & 0x0F];
-            const x1 = ggml.impl.c.kvalues_mxfp4[x[i].qs[j] >> 4];
+            const x0 = ggml.impl.ggml_c.kvalues_mxfp4[x[i].qs[j] & 0x0F];
+            const x1 = ggml.impl.ggml_c.kvalues_mxfp4[x[i].qs[j] >> 4];
 
             y[i * qk + j + 0] = @as(f32, @floatFromInt(x0)) * d;
             y[i * qk + j + qk / 2] = @as(f32, @floatFromInt(x1)) * d;
@@ -561,9 +561,9 @@ pub export fn dequantize_row_mxfp4(x: [*c]const ggml.quants.blocks.MXFP4, y: [*c
 /// Same codebook as `mxfp4`, but the 64-element block is split into four
 /// 16-element sub-blocks each with its own UE4M3 scale, so a block with one
 /// large outlier does not flatten the rest.
-pub export fn quantize_row_nvfp4_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.NVFP4, k: i64) void {
-    const qk = ggml.impl.c.QK_NVFP4;
-    const qk_sub = ggml.impl.c.QK_NVFP4_SUB;
+pub fn quantize_row_nvfp4_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.NVFP4, k: i64) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK_NVFP4;
+    const qk_sub = ggml.impl.ggml_c.QK_NVFP4_SUB;
     const n_sub = qk / qk_sub;
 
     std.debug.assert(@rem(k, qk) == 0);
@@ -594,9 +594,9 @@ pub export fn quantize_row_nvfp4_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks
 }
 
 /// Ports `dequantize_row_nvfp4` (ggml-quants.c:592 @b1b770d90).
-pub export fn dequantize_row_nvfp4(x: [*c]const ggml.quants.blocks.NVFP4, y: [*c]f32, k: i64) void {
-    const qk = ggml.impl.c.QK_NVFP4;
-    const qk_sub = ggml.impl.c.QK_NVFP4_SUB;
+pub fn dequantize_row_nvfp4(x: [*c]const ggml.quants.blocks.NVFP4, y: [*c]f32, k: i64) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK_NVFP4;
+    const qk_sub = ggml.impl.ggml_c.QK_NVFP4_SUB;
     const n_sub = qk / qk_sub;
 
     std.debug.assert(@rem(k, qk) == 0);
@@ -608,8 +608,8 @@ pub export fn dequantize_row_nvfp4(x: [*c]const ggml.quants.blocks.NVFP4, y: [*c
             const yb = y + i * qk + s * qk_sub;
 
             for (0..qk_sub / 2) |j| {
-                const v0 = ggml.impl.c.kvalues_mxfp4[x[i].qs[s * (qk_sub / 2) + j] & 0x0F];
-                const v1 = ggml.impl.c.kvalues_mxfp4[x[i].qs[s * (qk_sub / 2) + j] >> 4];
+                const v0 = ggml.impl.ggml_c.kvalues_mxfp4[x[i].qs[s * (qk_sub / 2) + j] & 0x0F];
+                const v1 = ggml.impl.ggml_c.kvalues_mxfp4[x[i].qs[s * (qk_sub / 2) + j] >> 4];
 
                 yb[j + 0] = @as(f32, @floatFromInt(v0)) * d;
                 yb[j + qk_sub / 2] = @as(f32, @floatFromInt(v1)) * d;
@@ -621,7 +621,7 @@ pub export fn dequantize_row_nvfp4(x: [*c]const ggml.quants.blocks.NVFP4, y: [*c
 /// Ports `quantize_row_f8_e4m3_ref` (ggml-quants.c:416 @b1b770d90).
 ///
 /// Not a block format: one byte per element, each `fp32ToF8E4m3`.
-pub export fn quantize_row_f8_e4m3_ref(x: [*c]const f32, y: [*c]ggml.impl.c.ggml_fp8_e4m3_t, k: i64) void {
+pub fn quantize_row_f8_e4m3_ref(x: [*c]const f32, y: [*c]ggml.impl.ggml_c.ggml_fp8_e4m3_t, k: i64) callconv(.c) void {
     var i: i64 = 0;
     while (i < k) : (i += 1) {
         const u: usize = @intCast(i);
@@ -630,7 +630,7 @@ pub export fn quantize_row_f8_e4m3_ref(x: [*c]const f32, y: [*c]ggml.impl.c.ggml
 }
 
 /// Ports `dequantize_row_f8_e4m3` (ggml-quants.c:617 @b1b770d90).
-pub export fn dequantize_row_f8_e4m3(x: [*c]const ggml.impl.c.ggml_fp8_e4m3_t, y: [*c]f32, k: i64) void {
+pub fn dequantize_row_f8_e4m3(x: [*c]const ggml.impl.ggml_c.ggml_fp8_e4m3_t, y: [*c]f32, k: i64) callconv(.c) void {
     var i: i64 = 0;
     while (i < k) : (i += 1) {
         const u: usize = @intCast(i);
@@ -754,18 +754,18 @@ test "the four-bit formats pack halves of the block, not adjacent elements" {
     // A direct check of the packing rule, independent of the checksums, because
     // getting it wrong is the single easiest way to produce a file that looks
     // right and decodes to scrambled weights.
-    var src: [ggml.impl.c.QK4_0]f32 = @splat(0.0);
+    var src: [ggml.impl.ggml_c.QK4_0]f32 = @splat(0.0);
     // Element 0 large positive, element qk/2 large negative: after packing they
     // must land in the low and high nibble of the *same* byte.
     src[0] = 1.0;
-    src[ggml.impl.c.QK4_0 / 2] = -1.0;
+    src[ggml.impl.ggml_c.QK4_0 / 2] = -1.0;
 
     var block: ggml.quants.blocks.Q4_0 = undefined;
-    quantize_row_q4_0_ref(&src, @ptrCast(&block), ggml.impl.c.QK4_0);
+    quantize_row_q4_0_ref(&src, @ptrCast(&block), ggml.impl.ggml_c.QK4_0);
 
-    var out: [ggml.impl.c.QK4_0]f32 = undefined;
-    dequantize_row_q4_0(@ptrCast(&block), &out, ggml.impl.c.QK4_0);
+    var out: [ggml.impl.ggml_c.QK4_0]f32 = undefined;
+    dequantize_row_q4_0(@ptrCast(&block), &out, ggml.impl.ggml_c.QK4_0);
 
     try std.testing.expect(out[0] > 0.0);
-    try std.testing.expect(out[ggml.impl.c.QK4_0 / 2] < 0.0);
+    try std.testing.expect(out[ggml.impl.ggml_c.QK4_0 / 2] < 0.0);
 }

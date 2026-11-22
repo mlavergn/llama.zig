@@ -8,8 +8,6 @@
 //! (v1.0.0, `b1b770d90`). Each tool binds them to its own upstream file
 //! name, the `__FILE__` the C's message carries.
 
-const c = @import("tools_h");
-
 /// Ports `GGML_ASSERT` (ggml.h:115 @b1b770d90): `ggml_abort` with the
 /// failed condition, in every build mode.
 ///
@@ -17,7 +15,7 @@ const c = @import("tools_h");
 /// - `file`, `line`: where upstream's assertion is, for its message.
 /// - `expr`: the condition's text.
 pub fn ggmlAssert(ok: bool, comptime file: [*:0]const u8, comptime line: c_int, comptime expr: [*:0]const u8) void {
-    if (!ok) _ = c.ggml_abort(file, line, "GGML_ASSERT(%s) failed", expr);
+    if (!ok) _ = llama.impl.llama_c.ggml_abort(file, line, "GGML_ASSERT(%s) failed", expr);
 }
 
 /// An allocation failed where upstream's would throw `std::bad_alloc` and
@@ -26,7 +24,7 @@ pub fn ggmlAssert(ok: bool, comptime file: [*:0]const u8, comptime line: c_int, 
 /// Parameters:
 /// - `file`: the upstream file the allocation is in.
 pub fn oom(comptime file: [*:0]const u8) noreturn {
-    _ = c.ggml_abort(file, 0, "out of memory");
+    _ = llama.impl.llama_c.ggml_abort(file, 0, "out of memory");
     unreachable;
 }
 
@@ -34,6 +32,7 @@ pub fn oom(comptime file: [*:0]const u8) noreturn {
 // Unit Tests
 
 const std = @import("std");
+const llama = @import("llama");
 
 test {
     std.testing.refAllDecls(@This());

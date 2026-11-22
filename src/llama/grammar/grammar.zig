@@ -60,7 +60,7 @@ const Candidate = struct {
     index: usize,
     code_points: [*]const u32,
     partial_utf8: PartialUtf8,
-    id: llama.impl.c.llama_token,
+    id: llama.impl.llama_c.llama_token,
 };
 
 fn oom() noreturn {
@@ -142,14 +142,14 @@ pub const TriggerPattern = struct {
 
 /// Ports `llama_grammar`'s `token_pos` (llama-grammar.h:130 @b1b770d90).
 const TokenPos = struct {
-    token: llama.impl.c.llama_token,
+    token: llama.impl.llama_c.llama_token,
     start: usize,
     end: usize,
 };
 
 /// Ports `llama_grammar` (llama-grammar.h:128 @b1b770d90).
 pub const Grammar = struct {
-    vocab: ?*const llama.impl.c.struct_llama_vocab,
+    vocab: ?*const llama.impl.llama_c.struct_llama_vocab,
 
     /// Owned; never resized, so the stacks' pointers into it stay valid.
     rules: [][]llama.grammar.parser.Element,
@@ -162,7 +162,7 @@ pub const Grammar = struct {
     awaiting_trigger: bool = false,
     trigger_buffer: std.ArrayList(u8) = .empty,
     trigger_buffer_positions: std.ArrayList(TokenPos) = .empty,
-    trigger_tokens: std.ArrayList(llama.impl.c.llama_token) = .empty,
+    trigger_tokens: std.ArrayList(llama.impl.llama_c.llama_token) = .empty,
     trigger_patterns: std.ArrayList(TriggerPattern) = .empty,
 };
 
@@ -319,7 +319,7 @@ fn matchPartialChar(pos_in: ElemPtr, partial_utf8: PartialUtf8) bool {
 }
 
 /// Ports `llama_grammar_match_token` (llama-grammar.cpp:852 @b1b770d90).
-fn matchToken(pos: ElemPtr, token: llama.impl.c.llama_token) bool {
+fn matchToken(pos: ElemPtr, token: llama.impl.llama_c.llama_token) bool {
     llama.impl.assert(pos[0].type == .token or pos[0].type == .token_not, src, 855, "pos->type == LLAMA_GRETYPE_TOKEN || pos->type == LLAMA_GRETYPE_TOKEN_NOT");
     if (pos[0].type == .token) return pos[0].value == @as(u32, @bitCast(token));
     if (pos[0].type == .token_not) return pos[0].value != @as(u32, @bitCast(token));
@@ -659,12 +659,12 @@ fn rejectCandidates(rules: []const []llama.grammar.parser.Element, stacks: []con
 ///
 /// Return: the grammar, or null after logging why it could not be built.
 pub fn initImpl(
-    vocab: ?*const llama.impl.c.struct_llama_vocab,
+    vocab: ?*const llama.impl.llama_c.struct_llama_vocab,
     grammar_str: [*:0]const u8,
     grammar_root: [*:0]const u8,
     lazy: bool,
     trigger_patterns: []const [*:0]const u8,
-    trigger_tokens: []const llama.impl.c.llama_token,
+    trigger_tokens: []const llama.impl.llama_c.llama_token,
 ) ?*Grammar {
     var p = llama.grammar.parser.Parser.init(vocab);
     defer p.deinit();
@@ -824,7 +824,7 @@ pub fn cloneImpl(grammar: *const Grammar) *Grammar {
 
 /// `vocab->token_to_piece(id)`: the cached piece, which the C API returns
 /// with `lstrip = 0, special = true`.
-fn tokenToPiece(vocab: ?*const llama.impl.c.struct_llama_vocab, token: llama.impl.c.llama_token, buf: *std.ArrayList(u8)) []const u8 {
+fn tokenToPiece(vocab: ?*const llama.impl.llama_c.struct_llama_vocab, token: llama.impl.llama_c.llama_token, buf: *std.ArrayList(u8)) []const u8 {
     if (buf.items.len < 64) buf.resize(std.heap.c_allocator, 64) catch oom();
     var n = llama.api.vocab.llama_token_to_piece(vocab, token, buf.items.ptr, @intCast(buf.items.len), 0, true);
     if (n < 0) {
@@ -844,7 +844,7 @@ fn tokenToPiece(vocab: ?*const llama.impl.c.struct_llama_vocab, token: llama.imp
 /// - `cur_p`: the candidates.
 ///
 /// Return: nothing.
-pub fn applyImpl(grammar: *const Grammar, cur_p: *llama.impl.c.llama_token_data_array) void {
+pub fn applyImpl(grammar: *const Grammar, cur_p: *llama.impl.llama_c.llama_token_data_array) void {
     llama.impl.assert(grammar.vocab != null, src, 1432, "grammar.vocab != nullptr");
 
     if (grammar.awaiting_trigger) return;
@@ -912,7 +912,7 @@ pub fn applyImpl(grammar: *const Grammar, cur_p: *llama.impl.c.llama_token_data_
 /// - `token`: the token chosen.
 ///
 /// Return: nothing.
-pub fn acceptImpl(grammar: *Grammar, token: llama.impl.c.llama_token) void {
+pub fn acceptImpl(grammar: *Grammar, token: llama.impl.llama_c.llama_token) void {
     llama.impl.assert(grammar.vocab != null, src, 1475, "grammar.vocab != nullptr");
 
     var piece_buf: std.ArrayList(u8) = .empty;
@@ -920,7 +920,7 @@ pub fn acceptImpl(grammar: *Grammar, token: llama.impl.c.llama_token) void {
     const piece = tokenToPiece(grammar.vocab, token, &piece_buf);
 
     if (grammar.awaiting_trigger) {
-        if (std.mem.findScalar(llama.impl.c.llama_token, grammar.trigger_tokens.items, token) != null) {
+        if (std.mem.findScalar(llama.impl.llama_c.llama_token, grammar.trigger_tokens.items, token) != null) {
             grammar.awaiting_trigger = false;
             grammar.trigger_buffer.clearRetainingCapacity();
             acceptToken(grammar, token, piece);
@@ -984,7 +984,7 @@ pub fn acceptImpl(grammar: *Grammar, token: llama.impl.c.llama_token) void {
 /// - `piece`: its text, possibly a suffix of it when replaying a trigger.
 ///
 /// Return: nothing; terminates if no stack survives.
-pub fn acceptToken(grammar: *Grammar, token: llama.impl.c.llama_token, piece: []const u8) void {
+pub fn acceptToken(grammar: *Grammar, token: llama.impl.llama_c.llama_token, piece: []const u8) void {
     var code_points: std.ArrayList(u32) = .empty;
     defer code_points.deinit(std.heap.c_allocator);
     const partial = decodeUtf8(piece, grammar.partial_utf8, &code_points);

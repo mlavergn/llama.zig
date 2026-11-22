@@ -114,9 +114,9 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
             cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
         }
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
-            ffn_inp = llama.impl.c.ggml_get_rows(ctx, ffn_inp, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpL = llama.impl.llama_c.ggml_get_rows(ctx, inpL, inp_out_ids);
+            ffn_inp = llama.impl.llama_c.ggml_get_rows(ctx, ffn_inp, inp_out_ids);
         }
         const attn_out = cur;
 
@@ -126,8 +126,8 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
             b.cb(cur, "ffn_out", il);
         }
         // The residual, the feed-forward and the attention, added together.
-        cur = llama.impl.c.ggml_add(ctx, cur, inpL);
-        cur = llama.impl.c.ggml_add(ctx, cur, attn_out);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, inpL);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, attn_out);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
@@ -146,7 +146,7 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
     cur = b.buildLoraMm(model.output.?, cur, model.output_s);
 
     if (f_logit_scale != 0.0) {
-        cur = llama.impl.c.ggml_scale(ctx, cur, f_logit_scale);
+        cur = llama.impl.llama_c.ggml_scale(ctx, cur, f_logit_scale);
     }
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;

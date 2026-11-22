@@ -81,7 +81,7 @@ fn gemv(
     var sum_minf: [ncols_interleaved]f32 = undefined;
     var utmp: [32]u32 = undefined;
 
-    const a_ptr: [*]const ggml.impl.c.block_q8_K = @ptrCast(@alignCast(vy));
+    const a_ptr: [*]const ggml.impl.ggml_c.block_q8_K = @ptrCast(@alignCast(vy));
     var x: i32 = 0;
     while (x < @divTrunc(nc, ncols_interleaved)) : (x += 1) {
         const b_ptr: [*]const ggml.cpu.repack.blocks.block_q5_Kx8 =
@@ -248,19 +248,15 @@ fn gemm(
     }
 }
 
-pub export fn ggml_gemv_q5_K_8x4_q8_K_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemv_q5_K_8x4_q8_K_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     gemv(4, 8, n, s, bs, vx, vy, nr, nc);
 }
-pub export fn ggml_gemv_q5_K_8x8_q8_K_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemv_q5_K_8x8_q8_K_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     gemv(8, 8, n, s, bs, vx, vy, nr, nc);
 }
-pub export fn ggml_gemm_q5_K_8x4_q8_K_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemm_q5_K_8x4_q8_K_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     gemm(4, 8, n, s, bs, vx, vy, nr, nc);
 }
-pub export fn ggml_gemm_q5_K_8x8_q8_K_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemm_q5_K_8x8_q8_K_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     gemm(8, 8, n, s, bs, vx, vy, nr, nc);
-}
-
-comptime {
-    _ = ggml.cpu.repack.q4_k;
 }

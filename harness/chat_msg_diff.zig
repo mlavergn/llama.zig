@@ -9,10 +9,7 @@
 
 const std = @import("std");
 const json = @import("json");
-const chat = @import("common_chat");
-
-const Msg = chat.Msg;
-const Value = json.Value;
+const common_chat = @import("common_chat");
 
 var gpa_state: std.heap.DebugAllocator(.{}) = .init;
 const gpa = gpa_state.allocator();
@@ -30,20 +27,20 @@ fn line(comptime fmt: []const u8, args: anytype) !void {
 /// The C++ driver's `guarded`: a throw is printed as its class and text.
 fn guarded(r: anyerror!void) !void {
     r catch |e| switch (e) {
-        error.JsonError => try str("json_error", chat.what(e)),
-        error.InvalidArgument => try str("invalid_argument", chat.what(e)),
-        error.RuntimeError => try str("runtime_error", chat.what(e)),
+        error.JsonError => try str("json_error", common_chat.what(e)),
+        error.InvalidArgument => try str("invalid_argument", common_chat.what(e)),
+        error.RuntimeError => try str("runtime_error", common_chat.what(e)),
         else => return e,
     };
 }
 
-fn dumpOwned(v: Value, indent: i32) ![]u8 {
+fn dumpOwned(v: json.Value, indent: i32) ![]u8 {
     var x = v;
     defer x.deinit(gpa);
     return json.dump(gpa, &x, indent);
 }
 
-fn showMsg(m: *const Msg) !void {
+fn showMsg(m: *const common_chat.Msg) !void {
     try str("role", m.role);
     try str("content", m.content);
     for (m.content_parts.items) |p| {
@@ -67,35 +64,35 @@ fn showMsg(m: *const Msg) !void {
     try guarded(render(m, "|", "render_bar"));
 }
 
-fn oai(m: *const Msg, concat: bool, label: []const u8) !void {
+fn oai(m: *const common_chat.Msg, concat: bool, label: []const u8) !void {
     const s = try dumpOwned(try m.toJsonOaicompat(gpa, concat), -1);
     defer gpa.free(s);
     try str(label, s);
 }
 
-fn render(m: *const Msg, delim: []const u8, label: []const u8) !void {
+fn render(m: *const common_chat.Msg, delim: []const u8, label: []const u8) !void {
     const s = try m.renderContent(gpa, delim);
     defer gpa.free(s);
     try str(label, s);
 }
 
-fn freeMsgs(msgs: *std.ArrayList(Msg)) void {
+fn freeMsgs(msgs: *std.ArrayList(common_chat.Msg)) void {
     for (msgs.items) |*m| m.deinit(gpa);
     msgs.deinit(gpa);
 }
 
-fn oneMsg(j: *const Value) !Msg {
-    var arr = Value.emptyArray();
+fn oneMsg(j: *const json.Value) !common_chat.Msg {
+    var arr = json.Value.emptyArray();
     defer arr.deinit(gpa);
     try arr.pushBack(gpa, try j.clone(gpa));
-    var msgs = try chat.msg.msgsParseOaicompat(gpa, &arr);
+    var msgs = try common_chat.msg.msgsParseOaicompat(gpa, &arr);
     defer freeMsgs(&msgs);
     if (msgs.items.len == 0) return error.Unreachable;
     return msgs.items[0].clone(gpa);
 }
 
-fn opM(j: *Value) !void {
-    var msgs = try chat.msg.msgsParseOaicompat(gpa, j);
+fn opM(j: *json.Value) !void {
+    var msgs = try common_chat.msg.msgsParseOaicompat(gpa, j);
     defer freeMsgs(&msgs);
     try line("n {d}", .{msgs.items.len});
     for (msgs.items) |*m| try showMsg(m);
@@ -104,14 +101,14 @@ fn opM(j: *Value) !void {
     for (msgs.items) |*x| for (msgs.items) |*y| try line("eq {d}", .{@intFromBool(x.eql(y))});
 }
 
-fn all(msgs: []const Msg, concat: bool) !void {
-    const s = try dumpOwned(try chat.msg.msgsToJsonOaicompat(gpa, msgs, concat), if (concat) 2 else -1);
+fn all(msgs: []const common_chat.Msg, concat: bool) !void {
+    const s = try dumpOwned(try common_chat.msg.msgsToJsonOaicompat(gpa, msgs, concat), if (concat) 2 else -1);
     defer gpa.free(s);
     try str(if (concat) "all_concat" else "all", s);
 }
 
-fn opT(j: *Value) !void {
-    var tools = try chat.msg.toolsParseOaicompat(gpa, j);
+fn opT(j: *json.Value) !void {
+    var tools = try common_chat.msg.toolsParseOaicompat(gpa, j);
     defer {
         for (tools.items) |*t| t.deinit(gpa);
         tools.deinit(gpa);
@@ -126,22 +123,22 @@ fn opT(j: *Value) !void {
     try guarded(toolsBack(tools.items));
 }
 
-fn toolsBack(tools: []const chat.Tool) !void {
-    const s = try dumpOwned(try chat.msg.toolsToJsonOaicompat(gpa, tools), -1);
+fn toolsBack(tools: []const common_chat.Tool) !void {
+    const s = try dumpOwned(try common_chat.msg.toolsToJsonOaicompat(gpa, tools), -1);
     defer gpa.free(s);
     try str("back", s);
 }
 
-fn opC(j: *Value) !void {
-    const choice = try chat.msg.toolChoiceParseOaicompat(try j.get([]const u8));
+fn opC(j: *json.Value) !void {
+    const choice = try common_chat.msg.toolChoiceParseOaicompat(try j.get([]const u8));
     try line("choice {d}", .{@backingInt(choice)});
 }
 
-fn opK(j: *Value) !void {
-    try line("continuation {d}", .{@backingInt(try chat.msg.continuationParse(j))});
+fn opK(j: *json.Value) !void {
+    try line("continuation {d}", .{@backingInt(try common_chat.msg.continuationParse(j))});
 }
 
-fn ints(gpa_: std.mem.Allocator, v: *Value) !std.ArrayList(i32) {
+fn ints(gpa_: std.mem.Allocator, v: *json.Value) !std.ArrayList(i32) {
     var r: std.ArrayList(i32) = .empty;
     const xs = try v.getSlice(gpa_, i32);
     defer gpa_.free(xs);
@@ -149,13 +146,13 @@ fn ints(gpa_: std.mem.Allocator, v: *Value) !std.ArrayList(i32) {
     return r;
 }
 
-fn opS(j: *Value) !void {
-    var d: chat.MsgDelimiters = .{};
+fn opS(j: *json.Value) !void {
+    var d: common_chat.MsgDelimiters = .{};
     defer d.deinit(gpa);
     var it = (try j.at("delims")).items();
     while (it.next()) |item| {
         const e = item.value;
-        const role = chat.Role.fromString(try (try e.at("role")).get([]const u8));
+        const role = common_chat.Role.fromString(try (try e.at("role")).get([]const u8));
         try d.add(gpa, role, try (try e.at("delimiter")).get([]const u8));
         d.delimiters.items[d.delimiters.items.len - 1].tokens = try ints(gpa, try e.at("tokens"));
     }
@@ -189,12 +186,12 @@ fn opS(j: *Value) !void {
     try line("last_user {d}", .{spans.lastUserMessagePos()});
 }
 
-fn opF(j: *Value) !void {
+fn opF(j: *json.Value) !void {
     var prv = try oneMsg(try j.atIndex(0));
     defer prv.deinit(gpa);
     var cur = try oneMsg(try j.atIndex(1));
     defer cur.deinit(gpa);
-    var diffs = try chat.msg.computeDiffs(gpa, &prv, &cur);
+    var diffs = try common_chat.msg.computeDiffs(gpa, &prv, &cur);
     defer diffs.deinit(gpa);
     try line("n {d}", .{diffs.items.len});
     for (diffs.items) |d| {
@@ -208,13 +205,13 @@ fn opF(j: *Value) !void {
     for (diffs.items) |x| for (diffs.items) |y| try line("eq {d}", .{@intFromBool(x.eql(y))});
 }
 
-fn opR(j: *Value) !void {
-    const f = try chat.ReasoningFormat.fromName(try j.get([]const u8));
+fn opR(j: *json.Value) !void {
+    const f = try common_chat.ReasoningFormat.fromName(try j.get([]const u8));
     try line("format {d} {s}", .{ @backingInt(f), f.name() });
 }
 
-fn opP(j: *Value) !void {
-    const s = try dumpOwned(try chat.msg.toolParameters(gpa, j), -1);
+fn opP(j: *json.Value) !void {
+    const s = try dumpOwned(try common_chat.msg.toolParameters(gpa, j), -1);
     defer gpa.free(s);
     try str("params", s);
 }
@@ -254,9 +251,9 @@ pub fn main(init: std.process.Init) !void {
         n += 1;
         try run(rec[0], rec[2..]);
     }
-    for (std.enums.values(chat.Format)) |f| try line("format_name {s}", .{f.name()});
+    for (std.enums.values(common_chat.Format)) |f| try line("format_name {s}", .{f.name()});
     for ([_][]const u8{ "system", "assistant", "user", "tool", "", "User", "developer" }) |r| {
-        const role = chat.Role.fromString(r);
+        const role = common_chat.Role.fromString(r);
         try line("role {s} {d} {s}", .{ r, @backingInt(role), role.toString() });
     }
     try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = args[2], .data = out.items });

@@ -20,6 +20,7 @@
 //! index would bucket differently, and no real model has one.
 
 const std = @import("std");
+const llama = @import("llama");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 
@@ -143,7 +144,7 @@ pub fn load(ld: *mod.clip.Loader, model: *mod.model.Model, info: Info) mod.clip.
             if (hparams.subsampling_factor != 8) {
                 return mod.clip.throwErr("%s: unsupported subsampling factor %d\n", .{ func, hparams.subsampling_factor });
             }
-            if (hparams.spk_n_layer <= 0 or hparams.spk_n_layer > @as(c_int, @truncate(mod.impl.c.gguf_get_n_tensors(ld.ctx_gguf)))) {
+            if (hparams.spk_n_layer <= 0 or hparams.spk_n_layer > @as(c_int, @truncate(llama.impl.llama_c.gguf_get_n_tensors(ld.ctx_gguf)))) {
                 return mod.clip.throwErr("%s: invalid speaker block count %d\n", .{ func, hparams.spk_n_layer });
             }
             hparams.audio_chunk_len = 0;
@@ -152,8 +153,7 @@ pub fn load(ld: *mod.clip.Loader, model: *mod.model.Model, info: Info) mod.clip.
             hparams.audio_window_len = 400;
             hparams.audio_hop_len = 160;
             // one full window
-            const nt = @import("models/nemotron_transcribe.zig");
-            hparams.warmup_audio_size = (nt.window_left + nt.window_core + nt.window_right) * hparams.subsampling_factor;
+            hparams.warmup_audio_size = (mod.models.nemotron_transcribe.window_left + mod.models.nemotron_transcribe.window_core + mod.models.nemotron_transcribe.window_right) * hparams.subsampling_factor;
         },
         // PROJECTOR_TYPE_IDEFICS3
         .idefics3 => {

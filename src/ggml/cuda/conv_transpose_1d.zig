@@ -57,27 +57,27 @@ fn convTranspose1dF32F32Cuda(
 }
 
 /// Ports `ggml_cuda_op_conv_transpose_1d` (conv-transpose-1d.cu:59 @b1b770d90).
-pub fn opConvTranspose1d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn opConvTranspose1d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
     const src0_d: ?*const anyopaque = src0.data;
 
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
     const src1_d: ?*const anyopaque = src1.data;
 
     const dst_d: ?*anyopaque = dst.data;
     const stream = ctx.stream();
 
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F32");
 
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(src1), "ggml_is_contiguous(src1)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src1), "ggml_is_contiguous(src1)");
 
     const s0 = ggml.impl.getOpParamsI32(dst, 0);
     const p0: c_int = 0; //opts[3];
     const d0: c_int = 1; //opts[4];
 
-    const output_size = ggml.impl.c.ggml_nelements(dst);
+    const output_size = ggml.impl.ggml_c.ggml_nelements(dst);
 
     convTranspose1dF32F32Cuda(s0, p0, d0, int(output_size), int(src0.ne[0]), int(src0.ne[1]), int(src0.ne[2]), int(src0.ne[3]), int(src1.ne[0]), int(src1.ne[1]), int(src1.ne[2]), int(src1.ne[3]), int(dst.ne[0]), int(dst.ne[1]), int(dst.ne[2]), int(dst.ne[3]), src0_d, src1_d, dst_d, stream);
 }

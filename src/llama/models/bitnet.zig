@@ -77,7 +77,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 
     llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/bitnet.cpp", 54, "n_embd_head == hparams.n_embd_head_k()");
 
-    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.llama_c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
 
     // The positions.
     const inp_pos = b.buildInpPos();
@@ -115,17 +115,17 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 
             cur = b.buildLoraMm(layer.wo.?, cur, layer.wo_s);
             if (layer.wo_b) |wo_b| {
-                cur = llama.impl.c.ggml_add(ctx, cur, wo_b);
+                cur = llama.impl.llama_c.ggml_add(ctx, cur, wo_b);
             }
             b.cb(cur, "attn_out", il);
         }
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The feed-forward network.
@@ -141,7 +141,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         cur = b.buildLoraMm(layer.ffn_down.?, cur, layer.ffn_down_s);
         b.cb(cur, "ffn_down", il);
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
         b.cb(cur, "l_out", il);
 
         cur = b.buildCvec(cur, il);

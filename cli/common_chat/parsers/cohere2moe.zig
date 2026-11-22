@@ -13,8 +13,6 @@ const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
 
-const Allocator = std.mem.Allocator;
-
 const TURN_START = "<|START_OF_TURN_TOKEN|>";
 const TURN_END = "<|END_OF_TURN_TOKEN|>";
 const CHATBOT = "<|CHATBOT_TOKEN|>";
@@ -92,7 +90,7 @@ const Build = struct {
 /// Ports `common_chat_params_init_cohere2moe` (parsers/cohere2moe.cpp:19 @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
-pub fn init(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
+pub fn init(a: std.mem.Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
     var data: common_chat.params.ChatParams = .{};
 
     data.prompt = try common_chat.template.directApplyImpl(a, tmpl, inputs, null, null, null);

@@ -20,10 +20,8 @@ const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 const json = @import("json");
 
-const Allocator = std.mem.Allocator;
-
 /// Ports `gbnf_escape_char_class` (peg-parser.cpp:1402 @b1b770d90).
-fn escapeCharClass(out: *std.ArrayList(u8), a: Allocator, c: u32) mod.errors.Error!void {
+fn escapeCharClass(out: *std.ArrayList(u8), a: std.mem.Allocator, c: u32) mod.errors.Error!void {
     if (c == '-' or c == ']' or c == '[' or c == '\\') return out.appendSlice(a, &.{ '\\', @intCast(c) });
     if (c == '\n') return out.appendSlice(a, "\\n");
     if (c == '\t') return out.appendSlice(a, "\\t");
@@ -35,7 +33,7 @@ fn escapeCharClass(out: *std.ArrayList(u8), a: Allocator, c: u32) mod.errors.Err
 }
 
 /// Ports `gbnf_char_class` (peg-parser.cpp:1452 @b1b770d90).
-fn charClass(a: Allocator, chars: []const u32, negate: bool) mod.errors.Error![]u8 {
+fn charClass(a: std.mem.Allocator, chars: []const u32, negate: bool) mod.errors.Error![]u8 {
     var out: std.ArrayList(u8) = .empty;
     try out.appendSlice(a, if (negate) "[^" else "[");
     for (chars) |ch| try escapeCharClass(&out, a, ch);
@@ -55,12 +53,12 @@ const Mode = enum { excluding, including };
 /// `strings`.
 ///
 /// Return: the start state's rule name, allocated with `a`.
-fn acGrammar(a: Allocator, builder: *json.schema_to_grammar.GrammarBuilder, prefix: []const u8, strings: []const []const u8, mode: Mode) mod.errors.Error![]const u8 {
+fn acGrammar(a: std.mem.Allocator, builder: *json.schema_to_grammar.GrammarBuilder, prefix: []const u8, strings: []const []const u8, mode: Mode) mod.errors.Error![]const u8 {
     var ac = try json.trie.AhoCorasick.init(a, strings);
     defer ac.deinit();
 
     const S = struct {
-        fn name(al: Allocator, pfx: []const u8, s: usize) mod.errors.Error![]const u8 {
+        fn name(al: std.mem.Allocator, pfx: []const u8, s: usize) mod.errors.Error![]const u8 {
             if (s == 0) return pfx;
             if (s < 10) return std.fmt.allocPrint(al, "{s}-0{d}", .{ pfx, s });
             return std.fmt.allocPrint(al, "{s}-{d}", .{ pfx, s });
@@ -117,12 +115,12 @@ fn acGrammar(a: Allocator, builder: *json.schema_to_grammar.GrammarBuilder, pref
 
 /// Ports `collect_reachable_rules` (peg-parser.cpp:1558 @b1b770d90): the
 /// names of every rule reachable from `rule`, references followed.
-fn collectReachableRules(a: Allocator, arena: *const mod.arena.Arena, rule: mod.arena.ParserId, reachable: *std.StringHashMapUnmanaged(void)) mod.errors.Error!void {
+fn collectReachableRules(a: std.mem.Allocator, arena: *const mod.arena.Arena, rule: mod.arena.ParserId, reachable: *std.StringHashMapUnmanaged(void)) mod.errors.Error!void {
     var visited: std.StringHashMapUnmanaged(void) = .empty;
     try collectVisit(a, arena, rule, reachable, &visited);
 }
 
-fn collectVisit(a: Allocator, arena: *const mod.arena.Arena, id: mod.arena.ParserId, reachable: *std.StringHashMapUnmanaged(void), visited: *std.StringHashMapUnmanaged(void)) mod.errors.Error!void {
+fn collectVisit(a: std.mem.Allocator, arena: *const mod.arena.Arena, id: mod.arena.ParserId, reachable: *std.StringHashMapUnmanaged(void), visited: *std.StringHashMapUnmanaged(void)) mod.errors.Error!void {
     const parser = try arena.get(id);
     switch (parser.*) {
         .epsilon, .start, .end, .until, .literal, .chars, .space, .any, .string => {},
@@ -142,7 +140,7 @@ fn collectVisit(a: Allocator, arena: *const mod.arena.Arena, id: mod.arena.Parse
 /// Builds `common_peg_arena::build_grammar`'s `to_gbnf` and its two
 /// lambdas over one arena and builder.
 const Generator = struct {
-    a: Allocator,
+    a: std.mem.Allocator,
     arena: *const mod.arena.Arena,
     builder: *json.schema_to_grammar.GrammarBuilder,
 
@@ -313,7 +311,7 @@ pub fn buildGrammar(arena: *const mod.arena.Arena, builder: *json.schema_to_gram
 /// - `options`: the converter's, `dotall` for patterns.
 ///
 /// Return: the grammar, owned by the caller.
-pub fn grammar(gpa: Allocator, arena: *const mod.arena.Arena, lazy: bool, options: json.schema_to_grammar.Options) mod.errors.Error![]u8 {
+pub fn grammar(gpa: std.mem.Allocator, arena: *const mod.arena.Arena, lazy: bool, options: json.schema_to_grammar.Options) mod.errors.Error![]u8 {
     const Ctx = struct {
         arena: *const mod.arena.Arena,
         lazy: bool,
@@ -343,10 +341,9 @@ test {
 }
 
 test "an until parser is the complement of its delimiters' automaton" {
-    const builder = @import("builder.zig");
     const a = std.testing.allocator;
-    var arena = try builder.buildPegParser(a, {}, struct {
-        fn f(_: void, b: *builder.Builder) mod.errors.Error!mod.arena.ParserId {
+    var arena = try mod.builder.buildPegParser(a, {}, struct {
+        fn f(_: void, b: *mod.builder.Builder) mod.errors.Error!mod.arena.ParserId {
             return b.plus(try b.until("ab"), try b.literal("ab"));
         }
     }.f);

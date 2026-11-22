@@ -56,9 +56,9 @@ inline fn softplus(input: f32) f32 {
 /// Fusing every step was 1 ULP out on 61 of 160 outputs under `make
 /// ops-diff`. The C says why it does not call `ggml_vec_dot_f32`: that one
 /// sums in `double`.
-fn ssmConvF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]); // conv_x
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]); // conv1d.weight
+fn ssmConvF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]); // conv_x
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]); // conv1d.weight
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
@@ -109,9 +109,9 @@ fn ssmConvF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml
 }
 
 /// Ports `ggml_compute_forward_ssm_conv` (ops.cpp:9864 @b1b770d90).
-pub export fn ggml_compute_forward_ssm_conv(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    switch (ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]).type) {
-        ggml.impl.c.GGML_TYPE_F32 => ssmConvF32(params, dst),
+pub fn ggml_compute_forward_ssm_conv(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    switch (ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]).type) {
+        ggml.impl.ggml_c.GGML_TYPE_F32 => ssmConvF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -122,14 +122,14 @@ pub export fn ggml_compute_forward_ssm_conv(params: *const ggml.cpu.defs.Compute
 /// Ports `ggml_compute_forward_ssm_scan_f32` (ops.cpp:9881 @b1b770d90). The
 /// Mamba-2 arm is the `GGML_SIMD` NEON one; the Mamba-1 arm is the
 /// non-SVE scalar loop.
-fn ssmScanF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]); // s  {d_state, dim, n_head, n_seqs+}
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]); // x  {dim, n_head, n_seq_tokens, n_seqs}
-    const src2 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]); // dt {n_head, n_seq_tokens, n_seqs}
-    const src3 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[3]); // A  {d_state, n_head} or {1, n_head}
-    const src4 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[4]); // B  {d_state, n_group, n_seq_tokens, n_seqs}
-    const src5 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[5]); // C  {d_state, n_group, n_seq_tokens, n_seqs}
-    const src6 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[6]); // ids {n_seqs}
+fn ssmScanF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]); // s  {d_state, dim, n_head, n_seqs+}
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]); // x  {dim, n_head, n_seq_tokens, n_seqs}
+    const src2 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]); // dt {n_head, n_seq_tokens, n_seqs}
+    const src3 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[3]); // A  {d_state, n_head} or {1, n_head}
+    const src4 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[4]); // B  {d_state, n_group, n_seq_tokens, n_seqs}
+    const src5 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[5]); // C  {d_state, n_group, n_seq_tokens, n_seqs}
+    const src6 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[6]); // ids {n_seqs}
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
@@ -143,10 +143,10 @@ fn ssmScanF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml
     const K: i64 = ggml.impl.getOpParamsI32(dst, 0);
 
     // can't use ggml_nbytes because src1 is not necessarily contiguous
-    const s_off: usize = @as(usize, @intCast(ggml.impl.c.ggml_nelements(src1))) * ggml.impl.c.ggml_element_size(src1);
+    const s_off: usize = @as(usize, @intCast(ggml.impl.ggml_c.ggml_nelements(src1))) * ggml.impl.ggml_c.ggml_element_size(src1);
 
     ggml.impl.assert(K >= 1, "K >= 1");
-    ggml.impl.assert(ggml.impl.c.ggml_nelements(src1) + K * nc * nr * nh * ns == ggml.impl.c.ggml_nelements(dst), "ggml_nelements(src1) + K*nc*nr*nh*ns == ggml_nelements(dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_nelements(src1) + K * nc * nr * nh * ns == ggml.impl.ggml_c.ggml_nelements(dst), "ggml_nelements(src1) + K*nc*nr*nh*ns == ggml_nelements(dst)");
     ggml.impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
     ggml.impl.assert(src1.nb[0] == @sizeOf(f32), "src1->nb[0] == sizeof(float)");
     ggml.impl.assert(src2.nb[0] == @sizeOf(f32), "src2->nb[0] == sizeof(float)");
@@ -336,9 +336,9 @@ fn ssmScanF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml
 }
 
 /// Ports `ggml_compute_forward_ssm_scan` (ops.cpp:10104 @b1b770d90).
-pub export fn ggml_compute_forward_ssm_scan(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    switch (ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]).type) {
-        ggml.impl.c.GGML_TYPE_F32 => ssmScanF32(params, dst),
+pub fn ggml_compute_forward_ssm_scan(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    switch (ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]).type) {
+        ggml.impl.ggml_c.GGML_TYPE_F32 => ssmScanF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }

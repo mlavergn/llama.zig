@@ -13,8 +13,6 @@ const std = @import("std");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 const builtin = @import("builtin");
-const c = @import("tools_h");
-const Params = @import("params.zig").Params;
 const llama = @import("llama");
 
 extern fn SetConsoleOutputCP(cp: c_uint) callconv(.winapi) c_int;
@@ -22,20 +20,20 @@ extern fn SetConsoleCP(cp: c_uint) callconv(.winapi) c_int;
 
 /// Ports `common_log_get_verbosity` (common/log.cpp:548 @b1b770d90), which
 /// `log.h` exports: the `common_log` verbosity a ggml log level maps to.
-pub fn logGetVerbosity(level: c.ggml_log_level) c_int {
+pub fn logGetVerbosity(level: llama.impl.llama_c.ggml_log_level) c_int {
     return switch (level) {
-        c.GGML_LOG_LEVEL_DEBUG => mod.log.level_debug,
-        c.GGML_LOG_LEVEL_INFO => mod.log.level_trace,
-        c.GGML_LOG_LEVEL_WARN => mod.log.level_warn,
-        c.GGML_LOG_LEVEL_ERROR => mod.log.level_error,
-        c.GGML_LOG_LEVEL_CONT => mod.log.level_trace,
+        llama.impl.llama_c.GGML_LOG_LEVEL_DEBUG => mod.log.level_debug,
+        llama.impl.llama_c.GGML_LOG_LEVEL_INFO => mod.log.level_trace,
+        llama.impl.llama_c.GGML_LOG_LEVEL_WARN => mod.log.level_warn,
+        llama.impl.llama_c.GGML_LOG_LEVEL_ERROR => mod.log.level_error,
+        llama.impl.llama_c.GGML_LOG_LEVEL_CONT => mod.log.level_trace,
         else => mod.log.level_output,
     };
 }
 
 /// Ports `common_log_default_callback` (common/log.cpp:561 @b1b770d90): libllama's
 /// messages through `common_log`, at `common_log_get_verbosity`'s level.
-pub fn defaultLogCallback(level: c.ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
+pub fn defaultLogCallback(level: llama.impl.llama_c.ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
     if (logGetVerbosity(level) <= mod.log.verbosity_thold) mod.log.add(@fromBackingInt(@intCast(level)), "%s", .{text});
 }
 
@@ -49,23 +47,23 @@ pub fn init() void {
     mod.log.setPrefix(true);
     mod.log.setTimestamps(true);
 
-    c.llama_log_set(defaultLogCallback, null);
+    llama.api.impl.llama_log_set(defaultLogCallback, null);
 }
 
 /// Ports `common_tokenize` (common/common.cpp:1866 @b1b770d90).
 ///
 /// Return: the tokens, the allocator's.
-pub fn tokenize(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, text: []const u8, add_special: bool, parse_special: bool) ![]c.llama_token {
+pub fn tokenize(a: std.mem.Allocator, vocab: ?*const llama.impl.llama_c.llama_vocab, text: []const u8, add_special: bool, parse_special: bool) ![]llama.impl.llama_c.llama_token {
     // upper limit for the number of tokens
     var n_tokens: c_int = @intCast(text.len + 2 * @as(usize, @intFromBool(add_special)));
-    var result = try a.alloc(c.llama_token, @intCast(n_tokens));
-    n_tokens = c.llama_tokenize(vocab, text.ptr, @intCast(text.len), result.ptr, @intCast(result.len), add_special, parse_special);
+    var result = try a.alloc(llama.impl.llama_c.llama_token, @intCast(n_tokens));
+    n_tokens = llama.api.vocab.llama_tokenize(vocab, text.ptr, @intCast(text.len), result.ptr, @intCast(result.len), add_special, parse_special);
     if (n_tokens == std.math.minInt(i32)) {
         return mod.arg.throwStr("Tokenization failed: input text too large, tokenization result exceeds int32_t limit");
     }
     if (n_tokens < 0) {
         result = try a.realloc(result, @intCast(-n_tokens));
-        const check = c.llama_tokenize(vocab, text.ptr, @intCast(text.len), result.ptr, @intCast(result.len), add_special, parse_special);
+        const check = llama.api.vocab.llama_tokenize(vocab, text.ptr, @intCast(text.len), result.ptr, @intCast(result.len), add_special, parse_special);
         std.debug.assert(check == -n_tokens);
         return result;
     }
@@ -74,12 +72,12 @@ pub fn tokenize(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, text: []cons
 
 /// Ports `common_token_to_piece` (common/common.cpp:1894 @b1b770d90): the first
 /// try fits libc++'s short-string buffer, 22 bytes.
-pub fn tokenToPiece(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, token: c.llama_token, special: bool) ![:0]u8 {
+pub fn tokenToPiece(a: std.mem.Allocator, vocab: ?*const llama.impl.llama_c.llama_vocab, token: llama.impl.llama_c.llama_token, special: bool) ![:0]u8 {
     var piece = try a.alloc(u8, 22 + 1);
-    const n_chars = c.llama_token_to_piece(vocab, token, piece.ptr, 22, 0, special);
+    const n_chars = llama.api.vocab.llama_token_to_piece(vocab, token, piece.ptr, 22, 0, special);
     if (n_chars < 0) {
         piece = try a.realloc(piece, @intCast(-n_chars + 1));
-        const check = c.llama_token_to_piece(vocab, token, piece.ptr, -n_chars, 0, special);
+        const check = llama.api.vocab.llama_token_to_piece(vocab, token, piece.ptr, -n_chars, 0, special);
         std.debug.assert(check == -n_chars);
         piece[@intCast(-n_chars)] = 0;
         return piece[0..@intCast(-n_chars) :0];
@@ -92,21 +90,21 @@ pub fn tokenToPiece(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, token: c
 /// fits libc++'s short-string buffer, 22 bytes, or the token count.
 ///
 /// Return: the text, the allocator's.
-pub fn detokenize(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, tokens: []const c.llama_token, special: bool) ![]u8 {
+pub fn detokenize(a: std.mem.Allocator, vocab: ?*const llama.impl.llama_c.llama_vocab, tokens: []const llama.impl.llama_c.llama_token, special: bool) ![]u8 {
     var text = try a.alloc(u8, @max(22, tokens.len));
-    var n_chars = c.llama_detokenize(vocab, tokens.ptr, @intCast(tokens.len), text.ptr, @intCast(text.len), false, special);
+    var n_chars = llama.api.vocab.llama_detokenize(vocab, tokens.ptr, @intCast(tokens.len), text.ptr, @intCast(text.len), false, special);
     if (n_chars < 0) {
         text = try a.realloc(text, @intCast(-n_chars));
-        n_chars = c.llama_detokenize(vocab, tokens.ptr, @intCast(tokens.len), text.ptr, @intCast(text.len), false, special);
+        n_chars = llama.api.vocab.llama_detokenize(vocab, tokens.ptr, @intCast(tokens.len), text.ptr, @intCast(text.len), false, special);
         // whitespace trimming is performed after per-token detokenization
-        if (n_chars > @as(i32, @intCast(text.len))) _ = c.ggml_abort("common.cpp", 1923, "GGML_ASSERT(%s) failed", "n_chars <= (int32_t)text.size()");
+        if (n_chars > @as(i32, @intCast(text.len))) _ = llama.impl.llama_c.ggml_abort("common.cpp", 1923, "GGML_ASSERT(%s) failed", "n_chars <= (int32_t)text.size()");
     }
     return text[0..@intCast(n_chars)];
 }
 
 /// Ports `common_model_params_to_llama` (common/common.cpp:1686 @b1b770d90).
-pub fn modelParamsToLlama(p: *Params) c.llama_model_params {
-    var mparams = c.llama_model_default_params();
+pub fn modelParamsToLlama(p: *mod.params.Params) llama.impl.llama_c.llama_model_params {
+    var mparams = llama.api.model.llama_model_default_params();
 
     if (p.devices.items.len != 0) mparams.devices = p.devices.items.ptr;
 
@@ -148,7 +146,7 @@ pub fn modelParamsToLlama(p: *Params) c.llama_model_params {
 /// NUL-terminated for the C API.
 ///
 /// Return: owned by `a`.
-pub fn modelPaths(a: std.mem.Allocator, model: *const @import("params.zig").Model) ![]const [*:0]const u8 {
+pub fn modelPaths(a: std.mem.Allocator, model: *const mod.params.Model) ![]const [*:0]const u8 {
     const paths = try model.getPaths(a);
     const out = try a.alloc([*:0]const u8, paths.len);
     for (paths, 0..) |path, i| out[i] = (try a.dupeSentinel(u8, path, 0)).ptr;
@@ -158,14 +156,14 @@ pub fn modelPaths(a: std.mem.Allocator, model: *const @import("params.zig").Mode
 /// Ports `common_model_load` (common/common.cpp:1725 @b1b770d90): one file
 /// through `llama_model_load_from_file`, several through
 /// `llama_model_load_from_splits`.
-pub fn modelLoad(paths: []const [*:0]const u8, mparams: c.llama_model_params) ?*c.llama_model {
-    if (paths.len == 1) return c.llama_model_load_from_file(paths[0], mparams);
-    return c.llama_model_load_from_splits(@ptrCast(@constCast(paths.ptr)), paths.len, mparams);
+pub fn modelLoad(paths: []const [*:0]const u8, mparams: llama.impl.llama_c.llama_model_params) ?*llama.impl.llama_c.llama_model {
+    if (paths.len == 1) return llama.api.llama.llama_model_load_from_file(paths[0], mparams);
+    return llama.api.llama.llama_model_load_from_splits(@ptrCast(@constCast(paths.ptr)), paths.len, mparams);
 }
 
 /// Ports `common_context_params_to_llama` (common/common.cpp:1738 @b1b770d90).
-pub fn contextParamsToLlama(p: *const Params) c.llama_context_params {
-    var cparams = c.llama_context_default_params();
+pub fn contextParamsToLlama(p: *const mod.params.Params) llama.impl.llama_c.llama_context_params {
+    var cparams = llama.api.context.llama_context_default_params();
 
     cparams.n_ctx = @bitCast(p.n_ctx);
     cparams.n_seq_max = @bitCast(p.n_parallel);
@@ -212,13 +210,13 @@ pub const Batch = struct {
     /// Ports `token` (common/common.h:1103 @b1b770d90), a member of
     /// `common_batch`.
     pub const Token = struct {
-        id: c.llama_token,
-        pos: [c.GGML_MROPE_SECTIONS]c.llama_pos, // only pos[0] is used for text tokens
-        seq_id: c.llama_seq_id, // the first sequence id, see addSeq()
+        id: llama.impl.llama_c.llama_token,
+        pos: [llama.impl.llama_c.GGML_MROPE_SECTIONS]llama.impl.llama_c.llama_pos, // only pos[0] is used for text tokens
+        seq_id: llama.impl.llama_c.llama_seq_id, // the first sequence id, see addSeq()
         output: bool,
-        embd: c.llama_embd, // non-owning view of the data passed to addEmbd()/setEmbd(), data == null if none
-        state: c.llama_embd = .{ .data = null, .n_rows = 0, .n_embd = 0 }, // non-owning view of the data passed to setEmbdState(), data == null if none
-        seq_ids_extra: std.ArrayList(c.llama_seq_id) = .empty, // see addSeq()
+        embd: llama.impl.llama_c.llama_embd, // non-owning view of the data passed to addEmbd()/setEmbd(), data == null if none
+        state: llama.impl.llama_c.llama_embd = .{ .data = null, .n_rows = 0, .n_embd = 0 }, // non-owning view of the data passed to setEmbdState(), data == null if none
+        seq_ids_extra: std.ArrayList(llama.impl.llama_c.llama_seq_id) = .empty, // see addSeq()
         decision_order: i32 = 0, // see llama_batch_ext_set_decision_order()
         embd_row: i32 = -1, // see addEmbdRow(), -1 if none
         state_row: i32 = -1, // see setEmbdStateRow(), -1 if none
@@ -226,7 +224,7 @@ pub const Batch = struct {
 
     a: std.mem.Allocator,
     tokens: std.ArrayList(Token) = .empty, // mirror of the entries, tokens[i] describes batch index i
-    batch: ?*c.llama_batch_ext = null,
+    batch: ?*llama.impl.llama_c.llama_batch_ext = null,
 
     n_pos: i32 = 1, // positions per embedding entry, GGML_MROPE_SECTIONS for MROPE/IMROPE
 
@@ -238,12 +236,12 @@ pub const Batch = struct {
 
     /// Ports `common_batch` (common/common.cpp:2202 @b1b770d90), the
     /// constructor over a context.
-    pub fn init(a: std.mem.Allocator, ctx: ?*c.llama_context) Batch {
-        const rope_type = c.llama_model_rope_type(c.llama_get_model(ctx));
+    pub fn init(a: std.mem.Allocator, ctx: ?*llama.impl.llama_c.llama_context) Batch {
+        const rope_type = llama.api.model.llama_model_rope_type(llama.api.context.llama_get_model(ctx));
         return .{
             .a = a,
-            .batch = c.llama_batch_ext_init(ctx),
-            .n_pos = if (rope_type == c.LLAMA_ROPE_TYPE_MROPE or rope_type == c.LLAMA_ROPE_TYPE_IMROPE) c.GGML_MROPE_SECTIONS else 1,
+            .batch = llama.api.batch.llama_batch_ext_init(ctx),
+            .n_pos = if (rope_type == llama.impl.llama_c.LLAMA_ROPE_TYPE_MROPE or rope_type == llama.impl.llama_c.LLAMA_ROPE_TYPE_IMROPE) llama.impl.llama_c.GGML_MROPE_SECTIONS else 1,
         };
     }
 
@@ -251,17 +249,17 @@ pub const Batch = struct {
     pub fn deinit(self: *Batch) void {
         self.clear();
         self.tokens.deinit(self.a);
-        if (self.batch) |b| c.llama_batch_ext_free(b);
+        if (self.batch) |b| llama.api.batch.llama_batch_ext_free(b);
         self.batch = null;
     }
 
-    pub fn get(self: *Batch) ?*c.llama_batch_ext {
+    pub fn get(self: *Batch) ?*llama.impl.llama_c.llama_batch_ext {
         return self.getSubBatch(0, self.size());
     }
 
     /// content type of the batch, all entries carry the same combination
     pub fn hasToken(self: *const Batch) bool {
-        return self.tokens.items.len != 0 and self.tokens.items[0].id != c.LLAMA_TOKEN_NULL;
+        return self.tokens.items.len != 0 and self.tokens.items[0].id != llama.impl.llama_c.LLAMA_TOKEN_NULL;
     }
     pub fn hasEmbd(self: *const Batch) bool {
         return self.tokens.items.len != 0 and self.tokens.items[0].embd.data != null;
@@ -278,15 +276,15 @@ pub const Batch = struct {
     }
 
     /// Ports `add` (common/common.cpp:2211 @b1b770d90): the batch index.
-    pub fn add(self: *Batch, id: c.llama_token, pos: c.llama_pos, seq_id: c.llama_seq_id, output: bool) i32 {
+    pub fn add(self: *Batch, id: llama.impl.llama_c.llama_token, pos: llama.impl.llama_c.llama_pos, seq_id: llama.impl.llama_c.llama_seq_id, output: bool) i32 {
         self.tokens.append(self.a, .{ .id = id, .pos = .{ pos, 0, 0, 0 }, .seq_id = seq_id, .output = output, .embd = .{ .data = null, .n_rows = 0, .n_embd = 0 }, .state = .{ .data = null, .n_rows = 0, .n_embd = 0 } }) catch oom();
         return self.size() - 1;
     }
 
     /// Ports `add` (common/common.cpp:2216 @b1b770d90), the overload with
     /// the entry shared by all of `seq_ids`, which must not be empty.
-    pub fn addSeqs(self: *Batch, id: c.llama_token, pos: c.llama_pos, seq_ids: []const c.llama_seq_id, output: bool) i32 {
-        if (seq_ids.len == 0) _ = c.ggml_abort("common.cpp", 2217, "GGML_ASSERT(%s) failed", "!seq_ids.empty()");
+    pub fn addSeqs(self: *Batch, id: llama.impl.llama_c.llama_token, pos: llama.impl.llama_c.llama_pos, seq_ids: []const llama.impl.llama_c.llama_seq_id, output: bool) i32 {
+        if (seq_ids.len == 0) _ = llama.impl.llama_c.ggml_abort("common.cpp", 2217, "GGML_ASSERT(%s) failed", "!seq_ids.empty()");
 
         const idx = self.add(id, pos, seq_ids[0], output);
         for (seq_ids[1..]) |s| _ = self.addSeq(idx, s);
@@ -295,7 +293,7 @@ pub const Batch = struct {
 
     /// Ports `add_seq` (common/common.cpp:2226 @b1b770d90): the entry at
     /// `idx` in another sequence too; `tokens[idx].seq_id` keeps the first.
-    pub fn addSeq(self: *Batch, idx: i32, seq_id: c.llama_seq_id) bool {
+    pub fn addSeq(self: *Batch, idx: i32, seq_id: llama.impl.llama_c.llama_seq_id) bool {
         if (idx < 0 or idx >= self.size()) return false;
         self.tokens.items[@intCast(idx)].seq_ids_extra.append(self.a, seq_id) catch oom();
         return true;
@@ -310,7 +308,7 @@ pub const Batch = struct {
 
     /// Ports `set_embd` (common/common.cpp:2242 @b1b770d90): a token
     /// embedding for the entry at `idx`, once.
-    pub fn setEmbd(self: *Batch, idx: i32, embd: c.llama_embd) bool {
+    pub fn setEmbd(self: *Batch, idx: i32, embd: llama.impl.llama_c.llama_embd) bool {
         if (idx < 0 or idx >= self.size() or self.tokens.items[@intCast(idx)].embd.data != null) return false;
         self.tokens.items[@intCast(idx)].embd = embd;
         return true;
@@ -319,7 +317,7 @@ pub const Batch = struct {
     /// Ports `set_embd_state` (common/common.cpp:2250 @b1b770d90): a state
     /// embedding (the target's hidden state for MTP, say) for the entry at
     /// `idx`, once.
-    pub fn setEmbdState(self: *Batch, idx: i32, state: c.llama_embd) bool {
+    pub fn setEmbdState(self: *Batch, idx: i32, state: llama.impl.llama_c.llama_embd) bool {
         if (idx < 0 or idx >= self.size() or self.tokens.items[@intCast(idx)].state.data != null) return false;
         self.tokens.items[@intCast(idx)].state = state;
         return true;
@@ -338,8 +336,8 @@ pub const Batch = struct {
 
     /// Ports `add_embd` (common/common.cpp:2266 @b1b770d90): an
     /// embedding-only entry; `pos` points to `n_pos` positions.
-    pub fn addEmbd(self: *Batch, embd: c.llama_embd, pos: [*]const c.llama_pos, seq_id: c.llama_seq_id, output: bool) i32 {
-        var t: Token = .{ .id = c.LLAMA_TOKEN_NULL, .pos = .{ 0, 0, 0, 0 }, .seq_id = seq_id, .output = output, .embd = embd, .state = .{ .data = null, .n_rows = 0, .n_embd = 0 } };
+    pub fn addEmbd(self: *Batch, embd: llama.impl.llama_c.llama_embd, pos: [*]const llama.impl.llama_c.llama_pos, seq_id: llama.impl.llama_c.llama_seq_id, output: bool) i32 {
+        var t: Token = .{ .id = llama.impl.llama_c.LLAMA_TOKEN_NULL, .pos = .{ 0, 0, 0, 0 }, .seq_id = seq_id, .output = output, .embd = embd, .state = .{ .data = null, .n_rows = 0, .n_embd = 0 } };
         for (0..@intCast(self.n_pos)) |j| t.pos[j] = pos[j];
         self.tokens.append(self.a, t) catch oom();
         return self.size() - 1;
@@ -348,8 +346,8 @@ pub const Batch = struct {
     /// Ports `add_embd_row` (common/common.cpp:2275 @b1b770d90): an entry
     /// whose embedding is row `row` of the layer input device buffer of the
     /// context's `ctx_other`; `pos` points to `n_pos` positions.
-    pub fn addEmbdRow(self: *Batch, row: i32, pos: [*]const c.llama_pos, seq_id: c.llama_seq_id, output: bool) i32 {
-        var t: Token = .{ .id = c.LLAMA_TOKEN_NULL, .pos = .{ 0, 0, 0, 0 }, .seq_id = seq_id, .output = output, .embd = .{ .data = null, .n_rows = 0, .n_embd = 0 }, .state = .{ .data = null, .n_rows = 0, .n_embd = 0 } };
+    pub fn addEmbdRow(self: *Batch, row: i32, pos: [*]const llama.impl.llama_c.llama_pos, seq_id: llama.impl.llama_c.llama_seq_id, output: bool) i32 {
+        var t: Token = .{ .id = llama.impl.llama_c.LLAMA_TOKEN_NULL, .pos = .{ 0, 0, 0, 0 }, .seq_id = seq_id, .output = output, .embd = .{ .data = null, .n_rows = 0, .n_embd = 0 }, .state = .{ .data = null, .n_rows = 0, .n_embd = 0 } };
         t.embd_row = row;
         for (0..@intCast(self.n_pos)) |j| t.pos[j] = pos[j];
         self.tokens.append(self.a, t) catch oom();
@@ -359,14 +357,14 @@ pub const Batch = struct {
     /// Ports `get_sub_batch` (common/common.cpp:2285 @b1b770d90): entries
     /// `[off, off + n)` rendered into the `llama_batch_ext`, which the next
     /// call overwrites.
-    pub fn getSubBatch(self: *Batch, off: i32, n: i32) ?*c.llama_batch_ext {
+    pub fn getSubBatch(self: *Batch, off: i32, n: i32) ?*llama.impl.llama_c.llama_batch_ext {
         const res = self.batch orelse {
-            _ = c.ggml_abort("common.cpp", 2286, "GGML_ASSERT(%s) failed", "batch && \"common_batch was not initialized with a context\"");
+            _ = llama.impl.llama_c.ggml_abort("common.cpp", 2286, "GGML_ASSERT(%s) failed", "batch && \"common_batch was not initialized with a context\"");
             unreachable;
         };
-        if (!(off >= 0 and n >= 0 and off + n <= self.size())) _ = c.ggml_abort("common.cpp", 2287, "GGML_ASSERT(%s) failed", "off >= 0 && n >= 0 && off + n <= size()");
+        if (!(off >= 0 and n >= 0 and off + n <= self.size())) _ = llama.impl.llama_c.ggml_abort("common.cpp", 2287, "GGML_ASSERT(%s) failed", "off >= 0 && n >= 0 && off + n <= size()");
 
-        c.llama_batch_ext_clear(res);
+        llama.api.batch.llama_batch_ext_clear(res);
 
         const func = "get_sub_batch";
         var i = off;
@@ -374,43 +372,43 @@ pub const Batch = struct {
             const t = &self.tokens.items[@intCast(i)];
 
             var idx: i32 = undefined;
-            if (t.id != c.LLAMA_TOKEN_NULL) {
-                idx = c.llama_batch_ext_add_token(res, t.seq_id, t.id);
+            if (t.id != llama.impl.llama_c.LLAMA_TOKEN_NULL) {
+                idx = llama.api.batch.llama_batch_ext_add_token(res, t.seq_id, t.id);
                 if (idx < 0) {
-                    _ = c.ggml_abort("common.cpp", 2299, "%s: failed to add token %d at index %d (error %d, n = %d)\n", func, t.id, i, idx, n);
+                    _ = llama.impl.llama_c.ggml_abort("common.cpp", 2299, "%s: failed to add token %d at index %d (error %d, n = %d)\n", func, t.id, i, idx, n);
                 }
-                _ = c.llama_batch_ext_set_pos(res, idx, &t.pos);
-                if (t.embd.data != null and !c.llama_batch_ext_set_embd_token(res, idx, t.embd)) {
-                    _ = c.ggml_abort("common.cpp", 2303, "%s: failed to set the embedding of token %d at index %d\n", func, t.id, i);
+                _ = llama.api.batch.llama_batch_ext_set_pos(res, idx, &t.pos);
+                if (t.embd.data != null and !llama.api.batch.llama_batch_ext_set_embd_token(res, idx, t.embd)) {
+                    _ = llama.impl.llama_c.ggml_abort("common.cpp", 2303, "%s: failed to set the embedding of token %d at index %d\n", func, t.id, i);
                 }
             } else if (t.embd_row >= 0) {
                 idx = llama.api.batch.llama_batch_ext_add_embd_row(@ptrCast(res), t.seq_id, t.embd_row); // llama-ext.h: C++ linkage, reached through the port's api
                 if (idx < 0) {
-                    _ = c.ggml_abort("common.cpp", 2308, "%s: failed to add embd row %d at index %d (error %d, n = %d)\n", func, t.embd_row, i, idx, n);
+                    _ = llama.impl.llama_c.ggml_abort("common.cpp", 2308, "%s: failed to add embd row %d at index %d (error %d, n = %d)\n", func, t.embd_row, i, idx, n);
                 }
-                _ = c.llama_batch_ext_set_pos(res, idx, &t.pos);
+                _ = llama.api.batch.llama_batch_ext_set_pos(res, idx, &t.pos);
             } else {
-                idx = c.llama_batch_ext_add_embd(res, t.seq_id, t.embd);
+                idx = llama.api.batch.llama_batch_ext_add_embd(res, t.seq_id, t.embd);
                 if (idx < 0) {
-                    _ = c.ggml_abort("common.cpp", 2314, "%s: failed to add embedding at index %d (error %d, n = %d)\n", func, i, idx, n);
+                    _ = llama.impl.llama_c.ggml_abort("common.cpp", 2314, "%s: failed to add embedding at index %d (error %d, n = %d)\n", func, i, idx, n);
                 }
-                _ = c.llama_batch_ext_set_pos(res, idx, &t.pos);
+                _ = llama.api.batch.llama_batch_ext_set_pos(res, idx, &t.pos);
             }
-            if (idx != i - off) _ = c.ggml_abort("common.cpp", 2318, "GGML_ASSERT(%s) failed", "idx == i - off");
+            if (idx != i - off) _ = llama.impl.llama_c.ggml_abort("common.cpp", 2318, "GGML_ASSERT(%s) failed", "idx == i - off");
 
             for (t.seq_ids_extra.items) |seq_id| {
-                if (!c.llama_batch_ext_add_seq(res, idx, seq_id)) {
-                    _ = c.ggml_abort("common.cpp", 2322, "%s: failed to add seq %d to the entry at index %d\n", func, seq_id, i);
+                if (!llama.api.batch.llama_batch_ext_add_seq(res, idx, seq_id)) {
+                    _ = llama.impl.llama_c.ggml_abort("common.cpp", 2322, "%s: failed to add seq %d to the entry at index %d\n", func, seq_id, i);
                 }
             }
             if (t.output) {
-                _ = c.llama_batch_ext_set_output_logits(res, idx, true);
+                _ = llama.api.batch.llama_batch_ext_set_output_logits(res, idx, true);
             }
             if (t.state.data != null) {
-                _ = c.llama_batch_ext_set_embd_state(res, idx, t.state); // contexts without a state input ignore it
+                _ = llama.api.batch.llama_batch_ext_set_embd_state(res, idx, t.state); // contexts without a state input ignore it
             }
-            if (t.state_row >= 0 and !c.llama_batch_ext_set_embd_state_row(res, idx, t.state_row)) {
-                _ = c.ggml_abort("common.cpp", 2332, "%s: failed to set the state row of the entry at index %d\n", func, i);
+            if (t.state_row >= 0 and !llama.api.batch.llama_batch_ext_set_embd_state_row(res, idx, t.state_row)) {
+                _ = llama.impl.llama_c.ggml_abort("common.cpp", 2332, "%s: failed to set the state row of the entry at index %d\n", func, i);
             }
             if (t.decision_order != 0) {
                 _ = llama.api.batch.llama_batch_ext_set_decision_order(@ptrCast(res), idx, @fromBackingInt(@intCast(@as(c_uint, @bitCast(t.decision_order)))));
@@ -424,11 +422,11 @@ pub const Batch = struct {
 /// Ports `common_batch_get_one` (common/common.cpp:2342 @b1b770d90): a
 /// single-sequence batch of `tokens`, positions continuing from the memory,
 /// output on the last.
-pub fn batchGetOne(a: std.mem.Allocator, ctx: ?*c.llama_context, tokens: []const c.llama_token) Batch {
+pub fn batchGetOne(a: std.mem.Allocator, ctx: ?*llama.impl.llama_c.llama_context, tokens: []const llama.impl.llama_c.llama_token) Batch {
     var batch = Batch.init(a, ctx);
 
-    const mem = c.llama_get_memory(ctx);
-    var pos: c.llama_pos = c.llama_memory_seq_pos_max(mem, 0) + 1; // -1 + 1 == 0 when the memory is empty
+    const mem = llama.api.context.llama_get_memory(ctx);
+    var pos: llama.impl.llama_c.llama_pos = llama.api.context.llama_memory_seq_pos_max(mem, 0) + 1; // -1 + 1 == 0 when the memory is empty
 
     for (tokens, 0..) |t, i| {
         const output = i == tokens.len - 1;
@@ -440,12 +438,12 @@ pub fn batchGetOne(a: std.mem.Allocator, ctx: ?*c.llama_context, tokens: []const
 }
 
 /// Ports `common_replay_last_token` (common/common.cpp:2191 @b1b770d90).
-pub fn replayLastToken(a: std.mem.Allocator, ctx: ?*c.llama_context, last_token: c.llama_token, pos: i32) bool {
+pub fn replayLastToken(a: std.mem.Allocator, ctx: ?*llama.impl.llama_c.llama_context, last_token: llama.impl.llama_c.llama_token, pos: i32) bool {
     var batch = Batch.init(a, ctx);
     defer batch.deinit();
     _ = batch.add(last_token, pos, 0, true);
 
-    if (c.llama_process(ctx, c.LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) {
+    if (llama.api.context.llama_process(ctx, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) {
         mod.log.err("%s: failed to replay last token\n", .{@as([*:0]const u8, "common_replay_last_token")});
         return false;
     }
@@ -514,15 +512,15 @@ fn decisionTypeFromString(str: []const u8) DecisionType {
 
 /// Ports `common_get_decision_type` (common/common.cpp:1185 @b1b770d90),
 /// the overload over a loaded model.
-pub fn getDecisionType(model: ?*const c.llama_model) DecisionType {
+pub fn getDecisionType(model: ?*const llama.impl.llama_c.llama_model) DecisionType {
     var buf: [64]u8 = undefined;
-    if (c.llama_model_meta_val_str(model, "general.architecture", &buf, buf.len) < 0) {
+    if (llama.api.model.llama_model_meta_val_str(model, "general.architecture", &buf, buf.len) < 0) {
         return .none;
     }
     var key_buf: [80]u8 = undefined;
     const arch = std.mem.sliceTo(&buf, 0);
     const key = std.fmt.bufPrintSentinel(&key_buf, "{s}.decision.type", .{arch}, 0) catch return .none;
-    if (c.llama_model_meta_val_str(model, key.ptr, &buf, buf.len) < 0) {
+    if (llama.api.model.llama_model_meta_val_str(model, key.ptr, &buf, buf.len) < 0) {
         return .none;
     }
     return decisionTypeFromString(std.mem.sliceTo(&buf, 0));
@@ -543,42 +541,42 @@ pub const GgufInfo = struct {
 pub fn getGgufInfo(fname: []const u8) GgufInfo {
     var info: GgufInfo = .{};
 
-    const gguf_params: c.gguf_init_params = .{ .no_alloc = true, .ctx = null };
+    const gguf_params: llama.impl.llama_c.gguf_init_params = .{ .no_alloc = true, .ctx = null };
 
     const fname_z = std.heap.c_allocator.dupeSentinel(u8, fname, 0) catch oom();
     defer std.heap.c_allocator.free(fname_z);
-    const gguf_ctx = c.gguf_init_from_file(fname_z.ptr, gguf_params) orelse
+    const gguf_ctx = llama.impl.llama_c.gguf_init_from_file(fname_z.ptr, gguf_params) orelse
         return info; // missing or unreadable file
-    defer c.gguf_free(gguf_ctx);
+    defer llama.impl.llama_c.gguf_free(gguf_ctx);
 
-    const arch_id = c.gguf_find_key(gguf_ctx, "general.architecture");
-    if (arch_id < 0 or c.gguf_get_kv_type(gguf_ctx, arch_id) != c.GGUF_TYPE_STRING) {
+    const arch_id = llama.impl.llama_c.gguf_find_key(gguf_ctx, "general.architecture");
+    if (arch_id < 0 or llama.impl.llama_c.gguf_get_kv_type(gguf_ctx, arch_id) != llama.impl.llama_c.GGUF_TYPE_STRING) {
         return info; // no architecture in the metadata
     }
-    const arch = std.mem.span(c.gguf_get_val_str(gguf_ctx, arch_id));
+    const arch = std.mem.span(llama.impl.llama_c.gguf_get_val_str(gguf_ctx, arch_id));
     if (arch.len == 0) {
         return info;
     }
 
     const type_key = std.fmt.allocPrintSentinel(std.heap.c_allocator, "{s}.decision.type", .{arch}, 0) catch oom();
     defer std.heap.c_allocator.free(type_key);
-    const type_id = c.gguf_find_key(gguf_ctx, type_key.ptr);
+    const type_id = llama.impl.llama_c.gguf_find_key(gguf_ctx, type_key.ptr);
     if (type_id < 0) {
         info.decision_type = .none;
-    } else if (c.gguf_get_kv_type(gguf_ctx, type_id) == c.GGUF_TYPE_STRING) {
-        info.decision_type = decisionTypeFromString(std.mem.span(c.gguf_get_val_str(gguf_ctx, type_id)));
+    } else if (llama.impl.llama_c.gguf_get_kv_type(gguf_ctx, type_id) == llama.impl.llama_c.GGUF_TYPE_STRING) {
+        info.decision_type = decisionTypeFromString(std.mem.span(llama.impl.llama_c.gguf_get_val_str(gguf_ctx, type_id)));
     }
 
     // same key and type as the model loader
     const ctx_key = std.fmt.allocPrintSentinel(std.heap.c_allocator, "{s}.context_length", .{arch}, 0) catch oom();
     defer std.heap.c_allocator.free(ctx_key);
-    const ctx_id = c.gguf_find_key(gguf_ctx, ctx_key.ptr);
-    if (ctx_id >= 0 and c.gguf_get_kv_type(gguf_ctx, ctx_id) == c.GGUF_TYPE_UINT32) {
-        info.n_ctx_train = c.gguf_get_val_u32(gguf_ctx, ctx_id);
+    const ctx_id = llama.impl.llama_c.gguf_find_key(gguf_ctx, ctx_key.ptr);
+    if (ctx_id >= 0 and llama.impl.llama_c.gguf_get_kv_type(gguf_ctx, ctx_id) == llama.impl.llama_c.GGUF_TYPE_UINT32) {
+        info.n_ctx_train = llama.impl.llama_c.gguf_get_val_u32(gguf_ctx, ctx_id);
     }
 
     // same key as llama_model_chat_template(model, nullptr)
-    info.has_chat_tmpl = c.gguf_find_key(gguf_ctx, "tokenizer.chat_template") >= 0;
+    info.has_chat_tmpl = llama.impl.llama_c.gguf_find_key(gguf_ctx, "tokenizer.chat_template") >= 0;
 
     return info;
 }
@@ -617,25 +615,24 @@ fn comLog(comptime level: enum { trc, inf, err }, comptime func: [*:0]const u8, 
 /// Ports `common_params_get_system_info` (common/common.cpp:442 @b1b770d90).
 ///
 /// Return: owned by `a`.
-pub fn paramsGetSystemInfo(a: std.mem.Allocator, params: *const Params) ![:0]u8 {
+pub fn paramsGetSystemInfo(a: std.mem.Allocator, params: *const mod.params.Params) ![:0]u8 {
     var os: std.ArrayList(u8) = .empty;
     try os.print(a, "system_info: n_threads = {d}", .{params.cpuparams.n_threads});
     if (params.cpuparams_batch.n_threads != -1) {
         try os.print(a, " (n_threads_batch = {d})", .{params.cpuparams_batch.n_threads});
     }
-    try os.print(a, " / {d} | {s}", .{ stdlib.thread.hardwareConcurrency(), c.llama_print_system_info() });
+    try os.print(a, " / {d} | {s}", .{ stdlib.thread.hardwareConcurrency(), llama.api.llama.llama_print_system_info() });
     return a.dupeSentinel(u8, os.items, 0);
 }
 
 /// Ports `common_params_print_info` (common/common.cpp:418 @b1b770d90): the
 /// build, the verbosity, the devices and the system, at the trace level but
 /// for the verbosity line.
-pub fn paramsPrintInfo(a: std.mem.Allocator, params: *const Params, print_devices: bool) !void {
+pub fn paramsPrintInfo(a: std.mem.Allocator, params: *const mod.params.Params, print_devices: bool) !void {
     const func = "common_params_print_info";
-    const bi = @import("build_info.zig");
     // `NDEBUG`, which `zig c++` defines in ReleaseFast and ReleaseSmall only
     const build_type: [*:0]const u8 = if (std.debug.runtime_safety) " (debug)" else "";
-    comLog(.trc, func, "%s: build %d (%s) with %s for %s%s\n", .{ func, bi.build_number, bi.commit.ptr, bi.compiler.ptr, bi.build_target.ptr, build_type });
+    comLog(.trc, func, "%s: build %d (%s) with %s for %s%s\n", .{ func, mod.build_info.build_number, mod.build_info.commit.ptr, mod.build_info.compiler.ptr, mod.build_info.build_target.ptr, build_type });
 
     const verbosity = mod.log.verbosity_thold;
     comLog(.inf, func, "%s: verbosity = %d (adjust with the `-lv N` CLI arg)\n", .{ func, verbosity });
@@ -644,12 +641,12 @@ pub fn paramsPrintInfo(a: std.mem.Allocator, params: *const Params, print_device
     if (print_devices and verbosity >= mod.log.level_trace) {
         comLog(.trc, func, "%s", .{@as([*:0]const u8, "device_info:\n")});
         var i: usize = 0;
-        while (i < c.ggml_backend_dev_count()) : (i += 1) {
-            const dev = c.ggml_backend_dev_get(i);
+        while (i < llama.impl.llama_c.ggml_backend_dev_count()) : (i += 1) {
+            const dev = llama.impl.llama_c.ggml_backend_dev_get(i);
             var free: usize = 0;
             var total: usize = 0;
-            c.ggml_backend_dev_memory(dev, &free, &total);
-            comLog(.trc, func, "  - %-8s: %s (%zu MiB, %zu MiB free)\n", .{ c.ggml_backend_dev_name(dev), c.ggml_backend_dev_description(dev), total / 1024 / 1024, free / 1024 / 1024 });
+            llama.impl.llama_c.ggml_backend_dev_memory(dev, &free, &total);
+            comLog(.trc, func, "  - %-8s: %s (%zu MiB, %zu MiB free)\n", .{ llama.impl.llama_c.ggml_backend_dev_name(dev), llama.impl.llama_c.ggml_backend_dev_description(dev), total / 1024 / 1024, free / 1024 / 1024 });
         }
     }
     if (verbosity >= mod.log.level_trace) {
@@ -669,8 +666,8 @@ pub const SeqRmType = enum(c_int) {
 /// zeros for every entry's state embedding, the dummy input of warmup and
 /// probe decodes. `zeros`, allocated with `a`, is resized; it must outlive
 /// the batch's use.
-pub fn batchSetZeroState(a: std.mem.Allocator, batch: *Batch, model: ?*const c.llama_model, zeros: *std.ArrayList(f32)) void {
-    const n: usize = @intCast(c.llama_model_n_embd_out(model));
+pub fn batchSetZeroState(a: std.mem.Allocator, batch: *Batch, model: ?*const llama.impl.llama_c.llama_model, zeros: *std.ArrayList(f32)) void {
+    const n: usize = @intCast(llama.api.model.llama_model_n_embd_out(model));
     zeros.clearRetainingCapacity();
     zeros.appendNTimes(a, 0.0, n) catch oom();
     var i: i32 = 0;
@@ -682,21 +679,21 @@ pub fn batchSetZeroState(a: std.mem.Allocator, batch: *Batch, model: ?*const c.l
 /// Ports `common_context_can_seq_rm` (common/common.cpp:1584 @b1b770d90):
 /// whether the context can remove part of a sequence, found by trying.
 /// Clears the context's memory.
-pub fn contextCanSeqRm(ctx: ?*c.llama_context) SeqRmType {
+pub fn contextCanSeqRm(ctx: ?*llama.impl.llama_c.llama_context) SeqRmType {
     const func = "common_context_can_seq_rm";
-    const mem = c.llama_get_memory(ctx) orelse return .no;
+    const mem = llama.api.context.llama_get_memory(ctx) orelse return .no;
 
-    if (c.llama_n_rs_seq(ctx) > 0) {
+    if (llama.api.context.llama_n_rs_seq(ctx) > 0) {
         comLog(.trc, func, "%s", .{@as([*:0]const u8, "the context supports bounded partial sequence removal\n")});
         return .rs;
     }
 
     var res: SeqRmType = .part;
 
-    c.llama_memory_clear(mem, true);
+    llama.api.context.llama_memory_clear(mem, true);
 
     // eval 2 tokens to check if the context is compatible
-    var tmp = [_]c.llama_token{ 0, 0 };
+    var tmp = [_]llama.impl.llama_c.llama_token{ 0, 0 };
 
     done: {
         const ret = blk: {
@@ -704,8 +701,8 @@ pub fn contextCanSeqRm(ctx: ?*c.llama_context) SeqRmType {
             defer batch.deinit();
             var zeros: std.ArrayList(f32) = .empty;
             defer zeros.deinit(std.heap.c_allocator);
-            batchSetZeroState(std.heap.c_allocator, &batch, c.llama_get_model(ctx), &zeros);
-            break :blk c.llama_process(ctx, c.LLAMA_PROCESS_TYPE_DECODE, batch.get());
+            batchSetZeroState(std.heap.c_allocator, &batch, llama.api.context.llama_get_model(ctx), &zeros);
+            break :blk llama.api.context.llama_process(ctx, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, batch.get());
         };
         if (ret != 0) {
             comLog(.err, func, "llama_process() failed: %d\n", .{ret});
@@ -714,64 +711,64 @@ pub fn contextCanSeqRm(ctx: ?*c.llama_context) SeqRmType {
         }
 
         // try to remove the last tokens
-        if (!c.llama_memory_seq_rm(mem, 0, 1, -1)) {
+        if (!llama.api.context.llama_memory_seq_rm(mem, 0, 1, -1)) {
             comLog(.trc, func, "%s", .{@as([*:0]const u8, "the context does not support partial sequence removal\n")});
             res = .full;
             break :done;
         }
     }
 
-    c.llama_memory_clear(mem, true);
-    c.llama_synchronize(ctx);
+    llama.api.context.llama_memory_clear(mem, true);
+    llama.api.context.llama_synchronize(ctx);
 
     return res;
 }
 
 /// Ports `common_context_seq_rm` (common/common.cpp:1631 @b1b770d90): aborts
 /// when the memory refuses.
-fn contextSeqRm(ctx: ?*c.llama_context, seq_id: c.llama_seq_id, p0: c.llama_pos, p1: c.llama_pos) void {
-    const mem = c.llama_get_memory(ctx);
-    if (!c.llama_memory_seq_rm(mem, seq_id, p0, p1)) {
-        _ = c.ggml_abort("common.cpp", 1634, "failed to remove sequence %d with p0=%d, p1=%d\n", seq_id, p0, p1);
+fn contextSeqRm(ctx: ?*llama.impl.llama_c.llama_context, seq_id: llama.impl.llama_c.llama_seq_id, p0: llama.impl.llama_c.llama_pos, p1: llama.impl.llama_c.llama_pos) void {
+    const mem = llama.api.context.llama_get_memory(ctx);
+    if (!llama.api.context.llama_memory_seq_rm(mem, seq_id, p0, p1)) {
+        _ = llama.impl.llama_c.ggml_abort("common.cpp", 1634, "failed to remove sequence %d with p0=%d, p1=%d\n", seq_id, p0, p1);
     }
 }
 
 /// Ports `common_memory` (common/common.h:1084 @b1b770d90): the target's
 /// and the draft's memory, edited together.
 pub const Memory = struct {
-    ctx_tgt: ?*c.llama_context = null,
-    ctx_dft: ?*c.llama_context = null,
+    ctx_tgt: ?*llama.impl.llama_c.llama_context = null,
+    ctx_dft: ?*llama.impl.llama_c.llama_context = null,
 
     /// Ports `common_memory`'s `init` (common/common.cpp:1648 @b1b770d90).
-    pub fn init(self: *Memory, ctx_tgt: ?*c.llama_context, ctx_dft: ?*c.llama_context) void {
+    pub fn init(self: *Memory, ctx_tgt: ?*llama.impl.llama_c.llama_context, ctx_dft: ?*llama.impl.llama_c.llama_context) void {
         self.ctx_tgt = ctx_tgt;
         self.ctx_dft = ctx_dft;
     }
 
     /// Ports `common_memory`'s `seq_rm` (common/common.cpp:1653 @b1b770d90):
     /// aborts on failure.
-    pub fn seqRm(self: *const Memory, seq_id: c.llama_seq_id, p0: c.llama_pos, p1: c.llama_pos) void {
+    pub fn seqRm(self: *const Memory, seq_id: llama.impl.llama_c.llama_seq_id, p0: llama.impl.llama_c.llama_pos, p1: llama.impl.llama_c.llama_pos) void {
         contextSeqRm(self.ctx_tgt, seq_id, p0, p1);
         if (self.ctx_dft) |d| contextSeqRm(d, seq_id, p0, p1);
     }
 
     /// Ports `common_memory`'s `seq_cp` (common/common.cpp:1660 @b1b770d90).
-    pub fn seqCp(self: *const Memory, seq_id_src: c.llama_seq_id, seq_id_dst: c.llama_seq_id, p0: c.llama_pos, p1: c.llama_pos) void {
-        c.llama_memory_seq_cp(c.llama_get_memory(self.ctx_tgt), seq_id_src, seq_id_dst, p0, p1);
-        if (self.ctx_dft) |d| c.llama_memory_seq_cp(c.llama_get_memory(d), seq_id_src, seq_id_dst, p0, p1);
+    pub fn seqCp(self: *const Memory, seq_id_src: llama.impl.llama_c.llama_seq_id, seq_id_dst: llama.impl.llama_c.llama_seq_id, p0: llama.impl.llama_c.llama_pos, p1: llama.impl.llama_c.llama_pos) void {
+        llama.api.context.llama_memory_seq_cp(llama.api.context.llama_get_memory(self.ctx_tgt), seq_id_src, seq_id_dst, p0, p1);
+        if (self.ctx_dft) |d| llama.api.context.llama_memory_seq_cp(llama.api.context.llama_get_memory(d), seq_id_src, seq_id_dst, p0, p1);
     }
 
     /// Ports `common_memory`'s `seq_add` (common/common.cpp:1667 @b1b770d90).
-    pub fn seqAdd(self: *const Memory, seq_id: c.llama_seq_id, p0: c.llama_pos, p1: c.llama_pos, delta: c.llama_pos) void {
-        c.llama_memory_seq_add(c.llama_get_memory(self.ctx_tgt), seq_id, p0, p1, delta);
-        if (self.ctx_dft) |d| c.llama_memory_seq_add(c.llama_get_memory(d), seq_id, p0, p1, delta);
+    pub fn seqAdd(self: *const Memory, seq_id: llama.impl.llama_c.llama_seq_id, p0: llama.impl.llama_c.llama_pos, p1: llama.impl.llama_c.llama_pos, delta: llama.impl.llama_c.llama_pos) void {
+        llama.api.context.llama_memory_seq_add(llama.api.context.llama_get_memory(self.ctx_tgt), seq_id, p0, p1, delta);
+        if (self.ctx_dft) |d| llama.api.context.llama_memory_seq_add(llama.api.context.llama_get_memory(d), seq_id, p0, p1, delta);
     }
 };
 
 /// Ports `common_set_adapter_lora` (common/common.cpp:1674 @b1b770d90): the
 /// adapters and their scales onto the context.
-pub fn setAdapterLora(a: std.mem.Allocator, ctx: ?*c.llama_context, lora: []const @import("params.zig").LoraInfo) !void {
-    const loras = try a.alloc(?*c.llama_adapter_lora, lora.len);
+pub fn setAdapterLora(a: std.mem.Allocator, ctx: ?*llama.impl.llama_c.llama_context, lora: []const mod.params.LoraInfo) !void {
+    const loras = try a.alloc(?*llama.impl.llama_c.llama_adapter_lora, lora.len);
     defer a.free(loras);
     const scales = try a.alloc(f32, lora.len);
     defer a.free(scales);
@@ -780,7 +777,7 @@ pub fn setAdapterLora(a: std.mem.Allocator, ctx: ?*c.llama_context, lora: []cons
         scales[i] = la.scale;
     }
     // an empty `std::vector`'s `data()` is null, and libllama logs it
-    _ = c.llama_set_adapters_lora(ctx, if (lora.len == 0) null else loras.ptr, lora.len, if (lora.len == 0) null else scales.ptr);
+    _ = llama.api.adapter.llama_set_adapters_lora(ctx, if (lora.len == 0) null else loras.ptr, lora.len, if (lora.len == 0) null else scales.ptr);
 }
 
 /// Ports `common_embd_normalize` (common/common.cpp:1936 @b1b770d90).

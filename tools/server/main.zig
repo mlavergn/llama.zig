@@ -10,13 +10,6 @@ const std = @import("std");
 const stdlib = @import("stdlib");
 const server = @import("server.zig");
 
-comptime {
-    // libllama and libmtmd, compiled in (see `build/tools.zig`): their C APIs
-    // are what `c.llama_*` and `c.mtmd_*` link against.
-    _ = @import("llama").lib;
-    _ = @import("mtmd").lib;
-}
-
 /// Ports `main` (tools/server/main.cpp:3 @b1b770d90).
 pub fn main(init: std.process.Init) !u8 {
     stdlib.stdio.bufferAsC();

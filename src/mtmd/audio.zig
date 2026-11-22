@@ -33,6 +33,7 @@
 //! computed it on the CPU are gone.
 
 const std = @import("std");
+const llama = @import("llama");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 
@@ -351,24 +352,24 @@ pub const MelConfig = struct {
     /// log-mel's, and `preprocess` defers the graph to `compute`.
     has_cache: bool = false,
     /// must be set before the first `compute`, see `mtmd_context::init_audio()`
-    sched: mod.impl.c.ggml_backend_sched_t = null,
+    sched: llama.impl.llama_c.ggml_backend_sched_t = null,
 };
 
 /// Ports `mtmd_backend_cpu_set_n_threads` (mtmd-subcontext.cpp:24 @b1b770d90).
-pub fn backendCpuSetNThreads(backend_cpu: mod.impl.c.ggml_backend_t, n_threads: c_int) void {
-    const dev = mod.impl.c.ggml_backend_get_device(backend_cpu);
-    const reg: mod.impl.c.ggml_backend_reg_t = if (dev != null) mod.impl.c.ggml_backend_dev_backend_reg(dev) else null;
+pub fn backendCpuSetNThreads(backend_cpu: llama.impl.llama_c.ggml_backend_t, n_threads: c_int) void {
+    const dev = llama.impl.llama_c.ggml_backend_get_device(backend_cpu);
+    const reg: llama.impl.llama_c.ggml_backend_reg_t = if (dev != null) llama.impl.llama_c.ggml_backend_dev_backend_reg(dev) else null;
     if (reg != null) {
-        const p = mod.impl.c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_set_n_threads");
+        const p = llama.impl.llama_c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_set_n_threads");
         if (p != null) {
-            const set_n_threads: mod.impl.c.ggml_backend_set_n_threads_t = @ptrCast(@alignCast(p));
+            const set_n_threads: llama.impl.llama_c.ggml_backend_set_n_threads_t = @ptrCast(@alignCast(p));
             set_n_threads.?(backend_cpu, n_threads);
         }
     }
 }
 
 /// `t->nb[1]` of a tensor known not to be null.
-fn tensorNb1(t: ?*mod.impl.c.ggml_tensor) usize {
+fn tensorNb1(t: ?*llama.impl.llama_c.ggml_tensor) usize {
     return t.?.nb[1];
 }
 
@@ -381,7 +382,7 @@ fn tensorNb1(t: ?*mod.impl.c.ggml_tensor) usize {
 /// Return: false, logged, when the graph cannot be allocated or computed.
 pub fn logMel(config: *const MelConfig, cache: *const Cache, samples: [*]const f32, window: [*]const f32, n_frames: i64, out: [*]f32) !bool {
     const sched = config.sched;
-    const backend_cpu = mod.impl.c.ggml_backend_sched_get_backend(sched, mod.impl.c.ggml_backend_sched_get_n_backends(sched) - 1);
+    const backend_cpu = llama.impl.llama_c.ggml_backend_sched_get_backend(sched, llama.impl.llama_c.ggml_backend_sched_get_n_backends(sched) - 1);
     backendCpuSetNThreads(backend_cpu, @max(1, config.n_threads));
 
     const filters = cache.filters.data.items;
@@ -411,61 +412,61 @@ pub fn logMel(config: *const MelConfig, cache: *const Cache, samples: [*]const f
     while (off < n_frames) : (off += n_frames_max) {
         const n_cur = @min(n_frames_max, n_frames - off);
 
-        const params: mod.impl.c.ggml_init_params = .{
-            .mem_size = mod.impl.c.ggml_tensor_overhead() * 32 + mod.impl.c.ggml_graph_overhead(),
+        const params: llama.impl.llama_c.ggml_init_params = .{
+            .mem_size = llama.impl.llama_c.ggml_tensor_overhead() * 32 + llama.impl.llama_c.ggml_graph_overhead(),
             .mem_buffer = null,
             .no_alloc = true,
         };
-        const ctx0 = mod.impl.c.ggml_init(params);
-        defer mod.impl.c.ggml_free(ctx0);
+        const ctx0 = llama.impl.llama_c.ggml_init(params);
+        defer llama.impl.llama_c.ggml_free(ctx0);
 
-        const inp_samples = mod.impl.c.ggml_new_tensor_1d(ctx0, mod.impl.c.GGML_TYPE_F32, (n_cur - 1) * config.hop_length + frame_size);
-        const inp_dft = mod.impl.c.ggml_new_tensor_2d(ctx0, mod.impl.c.GGML_TYPE_F32, frame_size, 2 * n_fft_bins);
-        const inp_filters = mod.impl.c.ggml_new_tensor_2d(ctx0, mod.impl.c.GGML_TYPE_F32, n_fft_bins, n_mel);
-        mod.impl.c.ggml_set_input(inp_samples);
-        mod.impl.c.ggml_set_input(inp_dft);
-        mod.impl.c.ggml_set_input(inp_filters);
+        const inp_samples = llama.impl.llama_c.ggml_new_tensor_1d(ctx0, llama.impl.llama_c.GGML_TYPE_F32, (n_cur - 1) * config.hop_length + frame_size);
+        const inp_dft = llama.impl.llama_c.ggml_new_tensor_2d(ctx0, llama.impl.llama_c.GGML_TYPE_F32, frame_size, 2 * n_fft_bins);
+        const inp_filters = llama.impl.llama_c.ggml_new_tensor_2d(ctx0, llama.impl.llama_c.GGML_TYPE_F32, n_fft_bins, n_mel);
+        llama.impl.llama_c.ggml_set_input(inp_samples);
+        llama.impl.llama_c.ggml_set_input(inp_dft);
+        llama.impl.llama_c.ggml_set_input(inp_filters);
 
-        var cur = mod.impl.c.ggml_cont(ctx0, mod.impl.c.ggml_view_2d(ctx0, inp_samples, frame_size, n_cur, @as(usize, @intCast(config.hop_length)) * mod.impl.c.ggml_element_size(inp_samples), 0));
-        cur = mod.impl.c.ggml_mul_mat(ctx0, inp_dft, cur); // [2 * n_fft_bins, n_cur]
-        _ = mod.impl.c.ggml_prec_set_src(cur, mod.impl.c.GGML_PREC_F32, 1);
+        var cur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_view_2d(ctx0, inp_samples, frame_size, n_cur, @as(usize, @intCast(config.hop_length)) * llama.impl.llama_c.ggml_element_size(inp_samples), 0));
+        cur = llama.impl.llama_c.ggml_mul_mat(ctx0, inp_dft, cur); // [2 * n_fft_bins, n_cur]
+        _ = llama.impl.llama_c.ggml_prec_set_src(cur, llama.impl.llama_c.GGML_PREC_F32, 1);
 
-        cur = mod.impl.c.ggml_sqr(ctx0, cur);
+        cur = llama.impl.llama_c.ggml_sqr(ctx0, cur);
         const nb1 = tensorNb1(cur);
-        cur = mod.impl.c.ggml_add(ctx0, mod.impl.c.ggml_view_2d(ctx0, cur, n_fft_bins, n_cur, nb1, 0), mod.impl.c.ggml_view_2d(ctx0, cur, n_fft_bins, n_cur, nb1, nb * mod.impl.c.ggml_element_size(cur)));
+        cur = llama.impl.llama_c.ggml_add(ctx0, llama.impl.llama_c.ggml_view_2d(ctx0, cur, n_fft_bins, n_cur, nb1, 0), llama.impl.llama_c.ggml_view_2d(ctx0, cur, n_fft_bins, n_cur, nb1, nb * llama.impl.llama_c.ggml_element_size(cur)));
         if (config.use_magnitude) {
-            cur = mod.impl.c.ggml_sqrt(ctx0, cur);
+            cur = llama.impl.llama_c.ggml_sqrt(ctx0, cur);
         }
 
-        cur = mod.impl.c.ggml_mul_mat(ctx0, cur, inp_filters); // [n_cur, n_mel]
-        _ = mod.impl.c.ggml_prec_set_src(cur, mod.impl.c.GGML_PREC_F32, 1);
+        cur = llama.impl.llama_c.ggml_mul_mat(ctx0, cur, inp_filters); // [n_cur, n_mel]
+        _ = llama.impl.llama_c.ggml_prec_set_src(cur, llama.impl.llama_c.GGML_PREC_F32, 1);
         cur = if (config.mel_floor_add)
-            mod.impl.c.ggml_scale_bias(ctx0, cur, 1.0, config.mel_floor)
+            llama.impl.llama_c.ggml_scale_bias(ctx0, cur, 1.0, config.mel_floor)
         else
-            mod.impl.c.ggml_clamp(ctx0, cur, config.mel_floor, std.math.floatMax(f32));
-        cur = mod.impl.c.ggml_log(ctx0, cur);
+            llama.impl.llama_c.ggml_clamp(ctx0, cur, config.mel_floor, std.math.floatMax(f32));
+        cur = llama.impl.llama_c.ggml_log(ctx0, cur);
         if (!config.use_natural_log) {
             // clang folds `1.0f / logf(10.0f)` at compile time, and LLVM
             // folds `logf` of a constant through the host's `double` `log`
-            cur = mod.impl.c.ggml_scale(ctx0, cur, 1.0 / @as(f32, @floatCast(stdlib.libm.log(10.0))));
+            cur = llama.impl.llama_c.ggml_scale(ctx0, cur, 1.0 / @as(f32, @floatCast(stdlib.libm.log(10.0))));
         }
-        mod.impl.c.ggml_set_output(cur);
+        llama.impl.llama_c.ggml_set_output(cur);
 
-        const gf = mod.impl.c.ggml_new_graph(ctx0);
-        mod.impl.c.ggml_build_forward_expand(gf, cur);
+        const gf = llama.impl.llama_c.ggml_new_graph(ctx0);
+        llama.impl.llama_c.ggml_build_forward_expand(gf, cur);
 
-        mod.impl.c.ggml_backend_sched_reset(sched);
-        if (!mod.impl.c.ggml_backend_sched_alloc_graph(sched, gf)) {
+        llama.impl.llama_c.ggml_backend_sched_reset(sched);
+        if (!llama.impl.llama_c.ggml_backend_sched_alloc_graph(sched, gf)) {
             mod.impl.logErr("%s: failed to allocate compute graph\n", .{"mtmd_audio_log_mel"});
             return false;
         }
 
-        mod.impl.c.ggml_backend_tensor_set(inp_samples, samples + @as(usize, @intCast(off * config.hop_length)), 0, mod.impl.c.ggml_nbytes(inp_samples));
-        mod.impl.c.ggml_backend_tensor_set(inp_dft, dft.ptr, 0, mod.impl.c.ggml_nbytes(inp_dft));
-        mod.impl.c.ggml_backend_tensor_set(inp_filters, filters.ptr, 0, mod.impl.c.ggml_nbytes(inp_filters));
+        llama.impl.llama_c.ggml_backend_tensor_set(inp_samples, samples + @as(usize, @intCast(off * config.hop_length)), 0, llama.impl.llama_c.ggml_nbytes(inp_samples));
+        llama.impl.llama_c.ggml_backend_tensor_set(inp_dft, dft.ptr, 0, llama.impl.llama_c.ggml_nbytes(inp_dft));
+        llama.impl.llama_c.ggml_backend_tensor_set(inp_filters, filters.ptr, 0, llama.impl.llama_c.ggml_nbytes(inp_filters));
 
-        const status = mod.impl.c.ggml_backend_sched_graph_compute(sched, gf);
-        if (status != mod.impl.c.GGML_STATUS_SUCCESS) {
+        const status = llama.impl.llama_c.ggml_backend_sched_graph_compute(sched, gf);
+        if (status != llama.impl.llama_c.GGML_STATUS_SUCCESS) {
             mod.impl.logErr("%s: ggml_backend_sched_graph_compute failed with error %d\n", .{ "mtmd_audio_log_mel", @as(c_int, status) });
             return false;
         }
@@ -473,7 +474,7 @@ pub fn logMel(config: *const MelConfig, cache: *const Cache, samples: [*]const f
         const cur_nb1 = tensorNb1(cur);
         var j: i64 = 0;
         while (j < n_mel) : (j += 1) {
-            mod.impl.c.ggml_backend_tensor_get(cur, out + @as(usize, @intCast(j * n_frames + off)), @as(usize, @intCast(j)) * cur_nb1, @as(usize, @intCast(n_cur)) * mod.impl.c.ggml_element_size(cur));
+            llama.impl.llama_c.ggml_backend_tensor_get(cur, out + @as(usize, @intCast(j * n_frames + off)), @as(usize, @intCast(j)) * cur_nb1, @as(usize, @intCast(n_cur)) * llama.impl.llama_c.ggml_element_size(cur));
         }
     }
 

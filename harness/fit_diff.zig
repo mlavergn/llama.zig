@@ -37,42 +37,38 @@ const std = @import("std");
 const harness_root = @import("harness_root");
 const fit = @import("fit");
 
-const c = harness_root.impl.c;
-const api = harness_root.api;
-
-const gpa = std.heap.c_allocator;
 const MiB: usize = 1024 * 1024;
 
 extern fn fit_ref_log_setup(path: [*:0]const u8, verbosity: c_int) void;
 extern fn fit_ref_log_flush() void;
 extern fn fit_ref_params(
     path_model: [*:0]const u8,
-    mparams: *c.llama_model_params,
-    cparams: *c.llama_context_params,
+    mparams: *harness_root.impl.c.llama_model_params,
+    cparams: *harness_root.impl.c.llama_context_params,
     tensor_split: ?[*]f32,
-    tensor_buft_overrides: ?[*]c.llama_model_tensor_buft_override,
+    tensor_buft_overrides: ?[*]harness_root.impl.c.llama_model_tensor_buft_override,
     margins: [*]usize,
     n_ctx_min: u32,
     extra_path: ?[*:0]const u8,
-    extra_mparams: ?*c.llama_model_params,
-    extra_cparams: ?*c.llama_context_params,
+    extra_mparams: ?*harness_root.impl.c.llama_model_params,
+    extra_cparams: ?*harness_root.impl.c.llama_context_params,
     extra_shares_model: bool,
     log_level: c_int,
 ) c_int;
 extern fn fit_ref_device_memory(
     path_model: [*:0]const u8,
-    mparams: *const c.llama_model_params,
-    cparams: *const c.llama_context_params,
+    mparams: *const harness_root.impl.c.llama_model_params,
+    cparams: *const harness_root.impl.c.llama_context_params,
     out: [*]i64,
     cap: c_int,
-    devs: [*]c.ggml_backend_dev_t,
+    devs: [*]harness_root.impl.c.ggml_backend_dev_t,
     n_devs: *c_int,
     hp: *[4]u32,
     log_level: c_int,
 ) c_int;
-extern fn fit_ref_measure(path_model: [*:0]const u8, mparams: *const c.llama_model_params, cparams: *const c.llama_context_params, out: [*]u8, cap: usize, log_level: c_int) c_int;
-extern fn fit_ref_print(path_model: [*:0]const u8, mparams: *c.llama_model_params, cparams: *c.llama_context_params, path: [*:0]const u8) c_int;
-extern fn fit_dev_set(i: c_int, free: usize, total: usize, typ: c_int) c.ggml_backend_dev_t;
+extern fn fit_ref_measure(path_model: [*:0]const u8, mparams: *const harness_root.impl.c.llama_model_params, cparams: *const harness_root.impl.c.llama_context_params, out: [*]u8, cap: usize, log_level: c_int) c_int;
+extern fn fit_ref_print(path_model: [*:0]const u8, mparams: *harness_root.impl.c.llama_model_params, cparams: *harness_root.impl.c.llama_context_params, path: [*:0]const u8) c_int;
+extern fn fit_dev_set(i: c_int, free: usize, total: usize, typ: c_int) harness_root.impl.c.ggml_backend_dev_t;
 
 // -----------------------------------------------------------------------------
 // Transcripts
@@ -80,8 +76,8 @@ extern fn fit_dev_set(i: c_int, free: usize, total: usize, typ: c_int) c.ggml_ba
 /// libllama's messages for the side running, as `level|text`.
 var llama_log: std.ArrayList(u8) = .empty;
 
-fn logCb(level: c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
-    llama_log.print(gpa, "{d}|{s}", .{ level, std.mem.span(@as([*:0]const u8, @ptrCast(text))) }) catch unreachable;
+fn logCb(level: harness_root.impl.c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
+    llama_log.print(std.heap.c_allocator, "{d}|{s}", .{ level, std.mem.span(@as([*:0]const u8, @ptrCast(text))) }) catch unreachable;
 }
 
 /// `text` with every clock reading -- "took 1.20 ms", "took 0.03 seconds"
@@ -93,12 +89,12 @@ fn maskTiming(text: []const u8) ![]u8 {
     while (std.mem.indexOfPos(u8, text, k, "took ")) |at| {
         var e = at + "took ".len;
         while (e < text.len and (std.ascii.isDigit(text[e]) or text[e] == '.')) e += 1;
-        try out.appendSlice(gpa, text[k .. at + "took ".len]);
-        if (e > at + "took ".len) try out.appendSlice(gpa, "<t>");
+        try out.appendSlice(std.heap.c_allocator, text[k .. at + "took ".len]);
+        if (e > at + "took ".len) try out.appendSlice(std.heap.c_allocator, "<t>");
         k = e;
     }
-    try out.appendSlice(gpa, text[k..]);
-    return out.toOwnedSlice(gpa);
+    try out.appendSlice(std.heap.c_allocator, text[k..]);
+    return out.toOwnedSlice(std.heap.c_allocator);
 }
 
 var ref_log_path: [:0]const u8 = undefined;
@@ -110,14 +106,14 @@ fn refLogSince() ![]u8 {
     const f = std.c.fopen(ref_log_path.ptr, "rb") orelse return error.NoLog;
     defer _ = std.c.fclose(f);
     var all: std.ArrayList(u8) = .empty;
-    defer all.deinit(gpa);
+    defer all.deinit(std.heap.c_allocator);
     var buf: [65536]u8 = undefined;
     while (true) {
         const n = std.c.fread(&buf, 1, buf.len, f);
         if (n == 0) break;
-        try all.appendSlice(gpa, buf[0..n]);
+        try all.appendSlice(std.heap.c_allocator, buf[0..n]);
     }
-    const out = try gpa.dupe(u8, all.items[@min(ref_log_offset, all.items.len)..]);
+    const out = try std.heap.c_allocator.dupe(u8, all.items[@min(ref_log_offset, all.items.len)..]);
     ref_log_offset = all.items.len;
     return out;
 }
@@ -170,7 +166,7 @@ const Case = struct {
     n_seq_max: u32 = 1,
     kv_unified: bool = false,
     n_gpu_layers: i32 = -1,
-    split_mode: c.enum_llama_split_mode = c.LLAMA_SPLIT_MODE_LAYER,
+    split_mode: harness_root.impl.c.enum_llama_split_mode = harness_root.impl.c.LLAMA_SPLIT_MODE_LAYER,
     user_split: bool = false,
     user_tbo: bool = false,
     null_split_buf: bool = false,
@@ -178,7 +174,7 @@ const Case = struct {
     load_mtp: bool = false,
     extra: ?Extra = null,
     extra_missing: bool = false,
-    log_level: c_int = c.GGML_LOG_LEVEL_ERROR,
+    log_level: c_int = harness_root.impl.c.GGML_LOG_LEVEL_ERROR,
     /// Also compare `common_get_device_memory_data` and `common_fit_print`.
     memory_data: bool = false,
 };
@@ -207,7 +203,7 @@ const cases = [_]Case{
     .{ .name = "cpu-qwen3-min-above-train", .model = .qwen3, .cpu_only = true, .margin = .{ .host_frac = 0.5 }, .n_ctx_min = 65536 },
     .{ .name = "cpu-qwen3-min-small", .model = .qwen3, .cpu_only = true, .margin = .{ .host_frac = 0.2 }, .n_ctx_min = 512 },
     .{ .name = "cpu-qwen35-mtp", .model = .qwen35, .cpu_only = true, .margin = .{ .host_frac = 0.3 }, .load_mtp = true },
-    .{ .name = "cpu-qwen35-debug-level", .model = .qwen35, .cpu_only = true, .margin = .{ .host_frac = 0.3 }, .log_level = c.GGML_LOG_LEVEL_DEBUG },
+    .{ .name = "cpu-qwen35-debug-level", .model = .qwen35, .cpu_only = true, .margin = .{ .host_frac = 0.3 }, .log_level = harness_root.impl.c.GGML_LOG_LEVEL_DEBUG },
 
     // One fake GPU.
     .{ .name = "gpu1-qwen3-fits", .model = .qwen3, .devs = &.{d(1.5)}, .memory_data = true },
@@ -253,11 +249,11 @@ const cases = [_]Case{
 
     // What the fit refuses to change. Each refusal comes after the context
     // reduction, so the device is too small even for the least context.
-    .{ .name = "refuse-tensor-split-mode", .model = .qwen3, .devs = &.{d(0.5)}, .split_mode = c.LLAMA_SPLIT_MODE_TENSOR },
+    .{ .name = "refuse-tensor-split-mode", .model = .qwen3, .devs = &.{d(0.5)}, .split_mode = harness_root.impl.c.LLAMA_SPLIT_MODE_TENSOR },
     .{ .name = "refuse-ngl-set", .model = .qwen3, .devs = &.{d(0.05)}, .n_gpu_layers = 99 },
     .{ .name = "refuse-ngl-set-fits", .model = .qwen3, .devs = &.{d(1.5)}, .n_gpu_layers = 99 },
     .{ .name = "refuse-user-split", .model = .qwen3, .devs = &.{ d(0.4), d(0.4) }, .user_split = true },
-    .{ .name = "refuse-row-split", .model = .qwen3, .devs = &.{ d(0.4), d(0.4) }, .split_mode = c.LLAMA_SPLIT_MODE_ROW },
+    .{ .name = "refuse-row-split", .model = .qwen3, .devs = &.{ d(0.4), d(0.4) }, .split_mode = harness_root.impl.c.LLAMA_SPLIT_MODE_ROW },
     .{ .name = "refuse-null-split-buf", .model = .qwen3, .devs = &.{ d(0.4), d(0.4) }, .null_split_buf = true },
     .{ .name = "refuse-null-tbo-buf", .model = .qwen3, .devs = &.{d(0.05)}, .null_tbo_buf = true },
     .{ .name = "refuse-user-tbo", .model = .qwen3, .devs = &.{d(0.05)}, .user_tbo = true },
@@ -326,25 +322,25 @@ const Measured = struct { one_dev: usize, host_min: usize, host_full: usize, hos
 var measured: std.EnumArray(ModelKey, Measured) = undefined;
 
 const Inputs = struct {
-    devs: [8]c.ggml_backend_dev_t = @splat(null),
-    mp: c.llama_model_params,
-    cp: c.llama_context_params,
-    emp: c.llama_model_params,
-    ecp: c.llama_context_params,
+    devs: [8]harness_root.impl.c.ggml_backend_dev_t = @splat(null),
+    mp: harness_root.impl.c.llama_model_params,
+    cp: harness_root.impl.c.llama_context_params,
+    emp: harness_root.impl.c.llama_model_params,
+    ecp: harness_root.impl.c.llama_context_params,
     split_buf: [128]f32 = @splat(0),
     user_split: [128]f32 = @splat(0),
-    tbo_buf: []c.llama_model_tensor_buft_override,
-    user_tbo: [2]c.llama_model_tensor_buft_override,
+    tbo_buf: []harness_root.impl.c.llama_model_tensor_buft_override,
+    user_tbo: [2]harness_root.impl.c.llama_model_tensor_buft_override,
     margins: [16]usize = @splat(1024 * MiB),
 
     fn init(cs: Case) !Inputs {
         var in: Inputs = .{
-            .mp = api.model.llama_model_default_params(),
-            .cp = api.context.llama_context_default_params(),
-            .emp = api.model.llama_model_default_params(),
-            .ecp = api.context.llama_context_default_params(),
-            .tbo_buf = try gpa.alloc(c.llama_model_tensor_buft_override, api.llama.llama_max_tensor_buft_overrides()),
-            .user_tbo = .{ .{ .pattern = "blk\\.0\\..*", .buft = c.ggml_backend_cpu_buffer_type() }, .{ .pattern = null, .buft = null } },
+            .mp = harness_root.api.model.llama_model_default_params(),
+            .cp = harness_root.api.context.llama_context_default_params(),
+            .emp = harness_root.api.model.llama_model_default_params(),
+            .ecp = harness_root.api.context.llama_context_default_params(),
+            .tbo_buf = try std.heap.c_allocator.alloc(harness_root.impl.c.llama_model_tensor_buft_override, harness_root.api.llama.llama_max_tensor_buft_overrides()),
+            .user_tbo = .{ .{ .pattern = "blk\\.0\\..*", .buft = harness_root.impl.c.ggml_backend_cpu_buffer_type() }, .{ .pattern = null, .buft = null } },
         };
         @memset(in.tbo_buf, .{ .pattern = null, .buft = null });
         const m = measured.get(cs.model);
@@ -420,29 +416,29 @@ fn record(w: *std.Io.Writer, in: *const Inputs, status: c_int) !void {
     for (in.tbo_buf, 0..) |o, i| {
         if (o.pattern == null and o.buft == null) continue;
         const pat: []const u8 = if (o.pattern != null) std.mem.span(@as([*:0]const u8, @ptrCast(o.pattern))) else "(null)";
-        const buft: []const u8 = if (o.buft != null) std.mem.span(c.ggml_backend_buft_name(o.buft)) else "(null)";
+        const buft: []const u8 = if (o.buft != null) std.mem.span(harness_root.impl.c.ggml_backend_buft_name(o.buft)) else "(null)";
         try w.print("  tbo[{d}] = {s} -> {s}\n", .{ i, pat, buft });
     }
 }
 
 fn runRef(cs: Case, in: *Inputs) !c_int {
-    c.llama_log_set(logCb, null);
+    harness_root.impl.c.llama_log_set(logCb, null);
     const extra_path: ?[*:0]const u8 = if (cs.extra) |e| pathOf(e.model).ptr else null;
     return fit_ref_params(pathOf(cs.model).ptr, &in.mp, &in.cp, if (cs.null_split_buf) null else &in.split_buf, if (cs.null_tbo_buf) null else in.tbo_buf.ptr, &in.margins, cs.n_ctx_min, extra_path, if (cs.extra != null) &in.emp else null, if (cs.extra != null) &in.ecp else null, if (cs.extra) |e| e.shares_model else false, cs.log_level);
 }
 
 fn runPort(cs: Case, in: *Inputs, log: fit.Log) !c_int {
-    api.impl.llama_log_set(logCb, null);
-    var patterns: fit.Patterns = try .init(gpa);
+    harness_root.api.impl.llama_log_set(logCb, null);
+    var patterns: fit.Patterns = try .init(std.heap.c_allocator);
     // The patterns the overrides point at are compared before this frees them.
     defer patterns.deinit();
     var extra: fit.ExtraModel = undefined;
     if (cs.extra) |e| extra = .{ .paths_model = &.{pathOf(e.model).ptr}, .mparams = &in.emp, .cparams = &in.ecp, .shares_model = e.shares_model };
-    const status = try fit.fitParams(gpa, &patterns, log, &.{pathOf(cs.model).ptr}, &in.mp, &in.cp, if (cs.null_split_buf) null else &in.split_buf, if (cs.null_tbo_buf) null else in.tbo_buf.ptr, &in.margins, cs.n_ctx_min, if (cs.extra != null) &extra else null, @intCast(cs.log_level));
-    var w: std.Io.Writer.Allocating = .init(gpa);
+    const status = try fit.fitParams(std.heap.c_allocator, &patterns, log, &.{pathOf(cs.model).ptr}, &in.mp, &in.cp, if (cs.null_split_buf) null else &in.split_buf, if (cs.null_tbo_buf) null else in.tbo_buf.ptr, &in.margins, cs.n_ctx_min, if (cs.extra != null) &extra else null, @intCast(cs.log_level));
+    var w: std.Io.Writer.Allocating = .init(std.heap.c_allocator);
     defer w.deinit();
     try record(&w.writer, in, @backingInt(status));
-    port_record = try gpa.dupe(u8, w.written());
+    port_record = try std.heap.c_allocator.dupe(u8, w.written());
     return @backingInt(status);
 }
 
@@ -458,15 +454,15 @@ var port_record: []u8 = &.{};
 fn sortGraphInputs(text: []const u8) ![]u8 {
     const marker = "llama_graph_n_input_tensors: input tensor ";
     var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(gpa);
+    errdefer out.deinit(std.heap.c_allocator);
     var run: std.ArrayList([]const u8) = .empty;
-    defer run.deinit(gpa);
+    defer run.deinit(std.heap.c_allocator);
     var it = std.mem.splitScalar(u8, text, '\n');
     var first = true;
     while (true) {
         const line = it.next();
         if (line) |l| if (std.mem.indexOf(u8, l, marker) != null) {
-            try run.append(gpa, l);
+            try run.append(std.heap.c_allocator, l);
             continue;
         };
         std.mem.sort([]const u8, run.items, {}, struct {
@@ -475,28 +471,28 @@ fn sortGraphInputs(text: []const u8) ![]u8 {
             }
         }.lt);
         for (run.items) |r| {
-            if (!first) try out.append(gpa, '\n');
+            if (!first) try out.append(std.heap.c_allocator, '\n');
             first = false;
-            try out.appendSlice(gpa, r);
+            try out.appendSlice(std.heap.c_allocator, r);
         }
         run.clearRetainingCapacity();
         const l = line orelse break;
-        if (!first) try out.append(gpa, '\n');
+        if (!first) try out.append(std.heap.c_allocator, '\n');
         first = false;
-        try out.appendSlice(gpa, l);
+        try out.appendSlice(std.heap.c_allocator, l);
     }
-    return out.toOwnedSlice(gpa);
+    return out.toOwnedSlice(std.heap.c_allocator);
 }
 
 fn transcript(cs: Case, side: enum { ref, port }) ![]u8 {
     var in = try Inputs.init(cs);
-    defer gpa.free(in.tbo_buf);
+    defer std.heap.c_allocator.free(in.tbo_buf);
     in.settle(cs);
     llama_log.clearRetainingCapacity();
 
-    var w: std.Io.Writer.Allocating = .init(gpa);
+    var w: std.Io.Writer.Allocating = .init(std.heap.c_allocator);
     defer w.deinit();
-    var fit_log_w: std.Io.Writer.Allocating = .init(gpa);
+    var fit_log_w: std.Io.Writer.Allocating = .init(std.heap.c_allocator);
     defer fit_log_w.deinit();
 
     switch (side) {
@@ -505,13 +501,13 @@ fn transcript(cs: Case, side: enum { ref, port }) ![]u8 {
             const status = try runRef(cs, &in);
             try record(&w.writer, &in, status);
             const text = try refLogSince();
-            defer gpa.free(text);
+            defer std.heap.c_allocator.free(text);
             try fit_log_w.writer.writeAll(text);
         },
         .port => {
             const log: fit.Log = .{ .verbosity = fit.Log.level_trace, .out = &fit_log_w.writer, .prefix = true };
             _ = try runPort(cs, &in, log);
-            defer gpa.free(port_record);
+            defer std.heap.c_allocator.free(port_record);
             try w.writer.writeAll(port_record);
         },
     }
@@ -520,18 +516,18 @@ fn transcript(cs: Case, side: enum { ref, port }) ![]u8 {
         // On fresh inputs: the port's override patterns are freed with its
         // cache once the fit is recorded.
         var fresh = try Inputs.init(cs);
-        defer gpa.free(fresh.tbo_buf);
+        defer std.heap.c_allocator.free(fresh.tbo_buf);
         fresh.settle(cs);
         try memoryData(&w.writer, cs, &fresh, side == .ref, &fit_log_w.writer);
     }
 
     try w.writer.writeAll("--- fit log\n");
     const masked = try maskTiming(fit_log_w.written());
-    defer gpa.free(masked);
+    defer std.heap.c_allocator.free(masked);
     try w.writer.writeAll(masked);
     try w.writer.writeAll("\n--- llama log\n");
     const masked_llama = try maskTiming(llama_log.items);
-    defer gpa.free(masked_llama);
+    defer std.heap.c_allocator.free(masked_llama);
     try w.writer.writeAll(masked_llama);
     return sortGraphInputs(w.written());
 }
@@ -542,15 +538,15 @@ fn memoryData(w: *std.Io.Writer, cs: Case, in: *Inputs, ref: bool, fit_log: *std
     var tmp_path_buf: [512]u8 = undefined;
     if (ref) {
         var out: [5 * 16]i64 = undefined;
-        var devs: [16]c.ggml_backend_dev_t = undefined;
+        var devs: [16]harness_root.impl.c.ggml_backend_dev_t = undefined;
         var n_devs: c_int = 0;
         var hp: [4]u32 = .{ 0, 0, 0, 0 };
         const n = fit_ref_device_memory(pathOf(cs.model).ptr, &in.mp, &in.cp, &out, 16, &devs, &n_devs, &hp, cs.log_level);
         try w.print("memory_data {d} devs {d} hp {d} {d} {d} {d}\n", .{ n, if (n < 0) 0 else n_devs, hp[0], hp[1], hp[2], hp[3] });
         if (n > 0) for (0..@intCast(n)) |i| try w.print("  {d} {d} {d} {d} {d}\n", .{ out[5 * i], out[5 * i + 1], out[5 * i + 2], out[5 * i + 3], out[5 * i + 4] });
-        if (n > 0) for (devs[0..@intCast(n_devs)]) |dv| try w.print("  dev {s}\n", .{std.mem.span(c.ggml_backend_dev_name(dv))});
+        if (n > 0) for (devs[0..@intCast(n_devs)]) |dv| try w.print("  dev {s}\n", .{std.mem.span(harness_root.impl.c.ggml_backend_dev_name(dv))});
         const text = try refLogSince();
-        defer gpa.free(text);
+        defer std.heap.c_allocator.free(text);
         try fit_log.writeAll(text);
 
         const p = try std.fmt.bufPrintSentinel(&tmp_path_buf, "{s}.print", .{ref_log_path}, 0);
@@ -562,7 +558,7 @@ fn memoryData(w: *std.Io.Writer, cs: Case, in: *Inputs, ref: bool, fit_log: *std
         const got = std.c.fread(&buf, 1, buf.len, f);
         if (rc == 0) try w.writeAll(buf[0..got]);
         const text2 = try refLogSince();
-        defer gpa.free(text2);
+        defer std.heap.c_allocator.free(text2);
         try fit_log.writeAll(text2);
 
         var rows: [4096]u8 = undefined;
@@ -572,26 +568,26 @@ fn memoryData(w: *std.Io.Writer, cs: Case, in: *Inputs, ref: bool, fit_log: *std
         _ = fit_ref_measure(pathOf(cs.model).ptr, &in.mp, &cp, &rows, rows.len, cs.log_level);
         try w.writeAll(std.mem.sliceTo(&rows, 0));
         const text3 = try refLogSince();
-        defer gpa.free(text3);
+        defer std.heap.c_allocator.free(text3);
         try fit_log.writeAll(text3);
     } else {
         const log: fit.Log = .{ .verbosity = fit.Log.level_trace, .out = fit_log, .prefix = true };
-        var devs: std.ArrayList(c.ggml_backend_dev_t) = .empty;
-        defer devs.deinit(gpa);
+        var devs: std.ArrayList(harness_root.impl.c.ggml_backend_dev_t) = .empty;
+        defer devs.deinit(std.heap.c_allocator);
         var hp: [4]u32 = .{ 0, 0, 0, 0 };
-        if (fit.getDeviceMemoryData(gpa, log, &.{pathOf(cs.model).ptr}, &in.mp, &in.cp, &devs, &hp[0], &hp[3], &hp[1], &hp[2], @intCast(cs.log_level))) |v| {
-            defer gpa.free(v);
+        if (fit.getDeviceMemoryData(std.heap.c_allocator, log, &.{pathOf(cs.model).ptr}, &in.mp, &in.cp, &devs, &hp[0], &hp[3], &hp[1], &hp[2], @intCast(cs.log_level))) |v| {
+            defer std.heap.c_allocator.free(v);
             try w.print("memory_data {d} devs {d} hp {d} {d} {d} {d}\n", .{ v.len, devs.items.len, hp[0], hp[1], hp[2], hp[3] });
             for (v) |e| try w.print("  {d} {d} {d} {d} {d}\n", .{ e.total, e.free, @as(i64, @bitCast(e.model)), @as(i64, @bitCast(e.context)), @as(i64, @bitCast(e.compute)) });
-            for (devs.items) |dv| try w.print("  dev {s}\n", .{std.mem.span(c.ggml_backend_dev_name(dv))});
+            for (devs.items) |dv| try w.print("  dev {s}\n", .{std.mem.span(harness_root.impl.c.ggml_backend_dev_name(dv))});
         } else |e| switch (e) {
             error.Runtime => try w.print("memory_data -1 devs 0 hp {d} {d} {d} {d}\n", .{ hp[0], hp[1], hp[2], hp[3] }),
             else => return e,
         }
 
-        var pw: std.Io.Writer.Allocating = .init(gpa);
+        var pw: std.Io.Writer.Allocating = .init(std.heap.c_allocator);
         defer pw.deinit();
-        if (fit.fitPrint(gpa, log, &pw.writer, &.{pathOf(cs.model).ptr}, &in.mp, &in.cp)) {
+        if (fit.fitPrint(std.heap.c_allocator, log, &pw.writer, &.{pathOf(cs.model).ptr}, &in.mp, &in.cp)) {
             try w.print("fit_print 0\n", .{});
             try w.writeAll(pw.written());
         } else |e| switch (e) {
@@ -599,7 +595,7 @@ fn memoryData(w: *std.Io.Writer, cs: Case, in: *Inputs, ref: bool, fit_log: *std
             else => return e,
         }
 
-        var arena_state = std.heap.ArenaAllocator.init(gpa);
+        var arena_state = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer arena_state.deinit();
         var n_ctx_train: u32 = 0;
         var n_ctx: u32 = 0;
@@ -622,16 +618,16 @@ fn memoryData(w: *std.Io.Writer, cs: Case, in: *Inputs, ref: bool, fit_log: *std
 /// dense model on one device needs no override.
 fn layersUse(k: ModelKey, layers: u32, n_ctx: u32) !usize {
     var hp: [4]u32 = undefined;
-    var devs: std.ArrayList(c.ggml_backend_dev_t) = .empty;
-    defer devs.deinit(gpa);
-    var dev_list: [2]c.ggml_backend_dev_t = .{ fit_dev_set(0, 1 << 40, 1 << 41, 0), null };
-    var mp = api.model.llama_model_default_params();
-    var cp = api.context.llama_context_default_params();
+    var devs: std.ArrayList(harness_root.impl.c.ggml_backend_dev_t) = .empty;
+    defer devs.deinit(std.heap.c_allocator);
+    var dev_list: [2]harness_root.impl.c.ggml_backend_dev_t = .{ fit_dev_set(0, 1 << 40, 1 << 41, 0), null };
+    var mp = harness_root.api.model.llama_model_default_params();
+    var cp = harness_root.api.context.llama_context_default_params();
     cp.n_ctx = n_ctx;
     mp.devices = &dev_list;
     mp.n_gpu_layers = @intCast(layers);
-    const v = try fit.getDeviceMemoryData(gpa, .{}, &.{pathOf(k).ptr}, &mp, &cp, &devs, &hp[0], &hp[3], &hp[1], &hp[2], c.GGML_LOG_LEVEL_ERROR);
-    defer gpa.free(v);
+    const v = try fit.getDeviceMemoryData(std.heap.c_allocator, .{}, &.{pathOf(k).ptr}, &mp, &cp, &devs, &hp[0], &hp[3], &hp[1], &hp[2], harness_root.impl.c.GGML_LOG_LEVEL_ERROR);
+    defer std.heap.c_allocator.free(v);
     return v[0].model + v[0].context + v[0].compute;
 }
 
@@ -644,28 +640,28 @@ fn measure(k: ModelKey) !void {
     }
     const log: fit.Log = .{};
     var hp: [4]u32 = undefined;
-    var devs: std.ArrayList(c.ggml_backend_dev_t) = .empty;
-    defer devs.deinit(gpa);
+    var devs: std.ArrayList(harness_root.impl.c.ggml_backend_dev_t) = .empty;
+    defer devs.deinit(std.heap.c_allocator);
 
-    var dev_list: [2]c.ggml_backend_dev_t = .{ fit_dev_set(0, 1 << 40, 1 << 41, 0), null };
-    var mp = api.model.llama_model_default_params();
-    var cp = api.context.llama_context_default_params();
+    var dev_list: [2]harness_root.impl.c.ggml_backend_dev_t = .{ fit_dev_set(0, 1 << 40, 1 << 41, 0), null };
+    var mp = harness_root.api.model.llama_model_default_params();
+    var cp = harness_root.api.context.llama_context_default_params();
     // The cases' own context, the trained one: their fractions mean what
     // they say only against it.
     cp.n_ctx = 0;
     mp.devices = &dev_list;
-    const one = try fit.getDeviceMemoryData(gpa, log, &.{pathOf(k).ptr}, &mp, &cp, &devs, &hp[0], &hp[3], &hp[1], &hp[2], c.GGML_LOG_LEVEL_ERROR);
-    defer gpa.free(one);
+    const one = try fit.getDeviceMemoryData(std.heap.c_allocator, log, &.{pathOf(k).ptr}, &mp, &cp, &devs, &hp[0], &hp[3], &hp[1], &hp[2], harness_root.impl.c.GGML_LOG_LEVEL_ERROR);
+    defer std.heap.c_allocator.free(one);
     const one_dev: usize = @as(usize, @bitCast(one[0].model)) + @as(usize, @bitCast(one[0].context)) + @as(usize, @bitCast(one[0].compute));
 
-    var none: [1]c.ggml_backend_dev_t = .{null};
+    var none: [1]harness_root.impl.c.ggml_backend_dev_t = .{null};
     mp.devices = &none;
     cp.n_ctx = 4096;
-    const lo = try fit.getDeviceMemoryData(gpa, log, &.{pathOf(k).ptr}, &mp, &cp, &devs, &hp[0], &hp[3], &hp[1], &hp[2], c.GGML_LOG_LEVEL_ERROR);
-    defer gpa.free(lo);
+    const lo = try fit.getDeviceMemoryData(std.heap.c_allocator, log, &.{pathOf(k).ptr}, &mp, &cp, &devs, &hp[0], &hp[3], &hp[1], &hp[2], harness_root.impl.c.GGML_LOG_LEVEL_ERROR);
+    defer std.heap.c_allocator.free(lo);
     cp.n_ctx = 0;
-    const hi = try fit.getDeviceMemoryData(gpa, log, &.{pathOf(k).ptr}, &mp, &cp, &devs, &hp[0], &hp[3], &hp[1], &hp[2], c.GGML_LOG_LEVEL_ERROR);
-    defer gpa.free(hi);
+    const hi = try fit.getDeviceMemoryData(std.heap.c_allocator, log, &.{pathOf(k).ptr}, &mp, &cp, &devs, &hp[0], &hp[3], &hp[1], &hp[2], harness_root.impl.c.GGML_LOG_LEVEL_ERROR);
+    defer std.heap.c_allocator.free(hi);
     const host = struct {
         fn total(e: fit.DeviceMemoryData) usize {
             return e.model + e.context + e.compute;
@@ -705,10 +701,10 @@ pub fn main(init: std.process.Init) !void {
         std.debug.print("usage: fit_diff <qwen35.gguf> <qwen3.gguf> <moe.gguf> <dense.gguf> [--case <substring>]\n", .{});
         std.process.exit(2);
     }
-    model_paths.set(.qwen35, try gpa.dupeSentinel(u8, args[1], 0));
-    model_paths.set(.qwen3, try gpa.dupeSentinel(u8, args[2], 0));
-    model_paths.set(.moe, try gpa.dupeSentinel(u8, args[3], 0));
-    model_paths.set(.dense, try gpa.dupeSentinel(u8, args[4], 0));
+    model_paths.set(.qwen35, try std.heap.c_allocator.dupeSentinel(u8, args[1], 0));
+    model_paths.set(.qwen3, try std.heap.c_allocator.dupeSentinel(u8, args[2], 0));
+    model_paths.set(.moe, try std.heap.c_allocator.dupeSentinel(u8, args[3], 0));
+    model_paths.set(.dense, try std.heap.c_allocator.dupeSentinel(u8, args[4], 0));
     model_paths.set(.missing, "/nonexistent/fit-diff-missing.gguf");
     var only: ?[]const u8 = null;
     var i: usize = 5;
@@ -720,11 +716,11 @@ pub fn main(init: std.process.Init) !void {
     }
     const out_dir: ?[]const u8 = if (std.c.getenv("FIT_DIFF_OUT")) |o| std.mem.span(o) else null;
     const tmp_dir: []const u8 = if (std.c.getenv("FIT_DIFF_TMP")) |t| std.mem.span(t) else "/tmp";
-    ref_log_path = try std.fmt.allocPrintSentinel(gpa, "{s}/fit-ref.log", .{tmp_dir}, 0);
+    ref_log_path = try std.fmt.allocPrintSentinel(std.heap.c_allocator, "{s}/fit-ref.log", .{tmp_dir}, 0);
 
-    c.llama_log_set(logCb, null);
-    api.impl.llama_log_set(logCb, null);
-    c.llama_backend_init();
+    harness_root.impl.c.llama_log_set(logCb, null);
+    harness_root.api.impl.llama_log_set(logCb, null);
+    harness_root.impl.c.llama_backend_init();
     fit_ref_log_setup(ref_log_path.ptr, fit.Log.level_trace);
 
     for (std.enums.values(ModelKey)) |k| try measure(k);
@@ -733,8 +729,8 @@ pub fn main(init: std.process.Init) !void {
     // not; one throwaway fit on each side puts both past it.
     {
         const warm: Case = .{ .name = "warm-up", .model = .qwen3 };
-        gpa.free(try transcript(warm, .ref));
-        gpa.free(try transcript(warm, .port));
+        std.heap.c_allocator.free(try transcript(warm, .ref));
+        std.heap.c_allocator.free(try transcript(warm, .port));
     }
 
     var seen: [required.len]bool = @splat(false);
@@ -746,14 +742,14 @@ pub fn main(init: std.process.Init) !void {
         // FIT_DIFF_SIDE=ref|port runs one side alone, for a case that crashes.
         if (std.c.getenv("FIT_DIFF_SIDE")) |one| {
             const t = try transcript(cs, if (std.mem.eql(u8, std.mem.span(one), "port")) .port else .ref);
-            defer gpa.free(t);
+            defer std.heap.c_allocator.free(t);
             std.debug.print("{s}\n", .{t});
             continue;
         }
         const a = try transcript(cs, .ref);
-        defer gpa.free(a);
+        defer std.heap.c_allocator.free(a);
         const b = try transcript(cs, .port);
-        defer gpa.free(b);
+        defer std.heap.c_allocator.free(b);
         for (required, 0..) |phrase, k| {
             if (std.mem.indexOf(u8, a, phrase) != null) seen[k] = true;
         }

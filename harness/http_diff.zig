@@ -12,17 +12,10 @@
 //! Usage: http_port <config> <port-file>
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
+const cli_fit = @import("cli_fit");
+const stdlib = @import("stdlib");
 const http = @import("http");
 const tools_common = @import("tools_common");
-const json = @import("cli_fit").json;
-
-const log = tools_common.log;
-const Req = http.Req;
-const Res = http.Res;
-const Handler = http.Handler;
-
-const gpa = std.heap.c_allocator;
 
 var g_quit: std.atomic.Value(bool) = .init(false);
 var g_wait_complete: std.atomic.Value(bool) = .init(false);
@@ -35,9 +28,9 @@ fn sleepMs(ms: u32) void {
 // ex_wrapper
 
 const ExWrapper = struct {
-    inner: Handler,
+    inner: http.Handler,
 
-    fn call(ctx: ?*anyopaque, req: *const Req) anyerror!*Res {
+    fn call(ctx: ?*anyopaque, req: *const http.Req) anyerror!*http.Res {
         const self: *ExWrapper = @ptrCast(@alignCast(ctx.?));
         return self.inner.call(req) catch |err| {
             var ty: http.ErrorType = .server;
@@ -48,32 +41,32 @@ const ExWrapper = struct {
             } else if (http.what(err)) |w| {
                 message = w;
             }
-            const message_copy = try gpa.dupe(u8, message);
-            defer gpa.free(message_copy);
-            const res = try Res.create(gpa);
+            const message_copy = try std.heap.c_allocator.dupe(u8, message);
+            defer std.heap.c_allocator.free(message_copy);
+            const res = try http.Res.create(std.heap.c_allocator);
             const a = res.allocator();
             res.status = 500;
             var error_data = try http.formatErrorResponse(a, message_copy, ty);
             res.status = @intCast(try (try error_data.at("code")).get(i64));
-            var outer = json.Value.emptyObject();
+            var outer = cli_fit.json.Value.emptyObject();
             try outer.set(a, "error", error_data);
             try res.setData(try http.safeJsonToStr(a, &outer));
             const z = try a.dupeSentinel(u8, res.data.items, 0);
-            log.wrn("srv  %12.*s: got exception: %s\n", .{ @as(c_int, 12), @as([*:0]const u8, "operator()"), z.ptr });
+            tools_common.log.wrn("srv  %12.*s: got exception: %s\n", .{ @as(c_int, 12), @as([*:0]const u8, "operator()"), z.ptr });
             return res;
         };
     }
 };
 
-fn exWrapper(inner: Handler) Handler {
-    const w = gpa.create(ExWrapper) catch @panic("OOM");
+fn exWrapper(inner: http.Handler) http.Handler {
+    const w = std.heap.c_allocator.create(ExWrapper) catch @panic("OOM");
     w.* = .{ .inner = inner };
     return .{ .ctx = w, .func = ExWrapper.call };
 }
 
-fn handler(comptime f: fn (req: *const Req) anyerror!*Res) Handler {
+fn handler(comptime f: fn (req: *const http.Req) anyerror!*http.Res) http.Handler {
     return .{ .ctx = null, .func = struct {
-        fn call(_: ?*anyopaque, req: *const Req) anyerror!*Res {
+        fn call(_: ?*anyopaque, req: *const http.Req) anyerror!*http.Res {
             return f(req);
         }
     }.call };
@@ -82,35 +75,35 @@ fn handler(comptime f: fn (req: *const Req) anyerror!*Res) Handler {
 // -----------------------------------------------------------------------------
 // Routes
 
-fn jsonRes(v: *json.Value, va: std.mem.Allocator) !*Res {
+fn jsonRes(v: *cli_fit.json.Value, va: std.mem.Allocator) !*http.Res {
     defer v.deinit(va);
-    const res = try Res.create(gpa);
+    const res = try http.Res.create(std.heap.c_allocator);
     try res.setData(try http.safeJsonToStr(res.allocator(), v));
     return res;
 }
 
-fn str(a: std.mem.Allocator, s: []const u8) !json.Value {
-    return json.Value.initString(a, s);
+fn str(a: std.mem.Allocator, s: []const u8) !cli_fit.json.Value {
+    return cli_fit.json.Value.initString(a, s);
 }
 
-fn echoJson(a: std.mem.Allocator, tag: []const u8, req: *const Req) !json.Value {
-    var j = json.Value.emptyObject();
+fn echoJson(a: std.mem.Allocator, tag: []const u8, req: *const http.Req) !cli_fit.json.Value {
+    var j = cli_fit.json.Value.emptyObject();
     try j.set(a, "tag", try str(a, tag));
     try j.set(a, "path", try str(a, req.path));
     try j.set(a, "query_string", try str(a, req.query_string));
-    var p = json.Value.emptyObject();
+    var p = cli_fit.json.Value.emptyObject();
     for (req.params.entries.items) |e| try p.set(a, e.key, try str(a, e.value));
     try j.set(a, "params", p);
-    var h = json.Value.emptyObject();
+    var h = cli_fit.json.Value.emptyObject();
     for (req.headers.entries.items) |e| try h.set(a, e.key, try str(a, e.value));
     try j.set(a, "headers", h);
     try j.set(a, "body", try str(a, req.body));
-    var f = json.Value.emptyObject();
+    var f = cli_fit.json.Value.emptyObject();
     for (req.files.entries.items) |e| {
-        var o = json.Value.emptyObject();
+        var o = cli_fit.json.Value.emptyObject();
         try o.set(a, "filename", try str(a, e.value.filename));
         try o.set(a, "content_type", try str(a, e.value.content_type));
-        try o.set(a, "size", try json.Value.from(a, @as(i64, @intCast(e.value.data.len))));
+        try o.set(a, "size", try cli_fit.json.Value.from(a, @as(i64, @intCast(e.value.data.len))));
         try o.set(a, "data", try str(a, e.value.data));
         try f.set(a, e.key, o);
     }
@@ -118,39 +111,39 @@ fn echoJson(a: std.mem.Allocator, tag: []const u8, req: *const Req) !json.Value 
     return j;
 }
 
-fn echo(comptime tag: []const u8) Handler {
+fn echo(comptime tag: []const u8) http.Handler {
     return handler(struct {
-        fn f(req: *const Req) anyerror!*Res {
-            var j = try echoJson(gpa, tag, req);
-            return jsonRes(&j, gpa);
+        fn f(req: *const http.Req) anyerror!*http.Res {
+            var j = try echoJson(std.heap.c_allocator, tag, req);
+            return jsonRes(&j, std.heap.c_allocator);
         }
     }.f);
 }
 
 /// The websocket route of `harness/http_ref.cpp`: the same greeting, the
 /// same echo and the same log lines.
-fn wsRoute(_: ?*anyopaque, req: *const Req, conn: *http.WsConn) void {
+fn wsRoute(_: ?*anyopaque, req: *const http.Req, conn: *http.WsConn) void {
     wsRouteImpl(req, conn) catch {};
 }
 
-fn wsRouteImpl(req: *const Req, conn: *http.WsConn) !void {
+fn wsRouteImpl(req: *const http.Req, conn: *http.WsConn) !void {
     {
-        var j = try echoJson(gpa, "ws", req);
-        defer j.deinit(gpa);
-        try j.set(gpa, "stop", try json.Value.from(gpa, req.should_stop.call()));
-        const s = try http.safeJsonToStr(gpa, &j);
-        defer gpa.free(s);
+        var j = try echoJson(std.heap.c_allocator, "ws", req);
+        defer j.deinit(std.heap.c_allocator);
+        try j.set(std.heap.c_allocator, "stop", try cli_fit.json.Value.from(std.heap.c_allocator, req.should_stop.call()));
+        const s = try http.safeJsonToStr(std.heap.c_allocator, &j);
+        defer std.heap.c_allocator.free(s);
         _ = conn.send(s);
     }
     var msg: std.ArrayList(u8) = .empty;
-    defer msg.deinit(gpa);
+    defer msg.deinit(std.heap.c_allocator);
     while (true) {
-        const ty = try conn.read(gpa, &msg);
+        const ty = try conn.read(std.heap.c_allocator, &msg);
         if (ty == 0) {
-            log.inf("harness: ws closed, open=%d stop=%d\n", .{ @as(c_int, @intFromBool(conn.isOpen())), @as(c_int, @intFromBool(req.should_stop.call())) });
+            tools_common.log.inf("harness: ws closed, open=%d stop=%d\n", .{ @as(c_int, @intFromBool(conn.isOpen())), @as(c_int, @intFromBool(req.should_stop.call())) });
             return;
         }
-        log.inf("harness: ws read type=%d len=%zu\n", .{ ty, msg.items.len });
+        tools_common.log.inf("harness: ws read type=%d len=%zu\n", .{ ty, msg.items.len });
         if (std.mem.eql(u8, msg.items, "close")) {
             conn.close();
             continue;
@@ -171,20 +164,20 @@ fn wsRouteImpl(req: *const Req, conn: *http.WsConn) !void {
     }
 }
 
-fn health(_: *const Req) anyerror!*Res {
-    var j = json.Value.emptyObject();
-    try j.set(gpa, "status", try str(gpa, "ok"));
-    return jsonRes(&j, gpa);
+fn health(_: *const http.Req) anyerror!*http.Res {
+    var j = cli_fit.json.Value.emptyObject();
+    try j.set(std.heap.c_allocator, "status", try str(std.heap.c_allocator, "ok"));
+    return jsonRes(&j, std.heap.c_allocator);
 }
 
-fn empty(_: *const Req) anyerror!*Res {
-    return Res.create(gpa);
+fn empty(_: *const http.Req) anyerror!*http.Res {
+    return http.Res.create(std.heap.c_allocator);
 }
 
 /// `std::stoi`, its two exceptions told apart as `ex_wrapper` tells them.
 fn stoi(s: []const u8) !c_int {
-    const z = try gpa.dupeSentinel(u8, s, 0);
-    defer gpa.free(z);
+    const z = try std.heap.c_allocator.dupeSentinel(u8, s, 0);
+    defer std.heap.c_allocator.free(z);
     return tools_common.arg.stoi(z) catch {
         const msg = tools_common.arg.what();
         if (std.mem.eql(u8, msg, "stoi: no conversion")) return http.throwInvalidArgument(msg);
@@ -192,9 +185,9 @@ fn stoi(s: []const u8) !c_int {
     };
 }
 
-fn status(req: *const Req) anyerror!*Res {
+fn status(req: *const http.Req) anyerror!*http.Res {
     const code = try stoi(req.getParam("code", "200"));
-    const res = try Res.create(gpa);
+    const res = try http.Res.create(std.heap.c_allocator);
     errdefer res.destroy();
     res.status = code;
     try res.setData(req.getParam("body", ""));
@@ -210,8 +203,8 @@ const StreamState = struct {
     stop: http.ShouldStop,
 };
 
-fn stream(req: *const Req) anyerror!*Res {
-    const res = try Res.create(gpa);
+fn stream(req: *const http.Req) anyerror!*http.Res {
+    const res = try http.Res.create(std.heap.c_allocator);
     res.content_type = "text/event-stream";
     try res.setHeader("Cache-Control", "no-cache");
     const st = try res.allocator().create(StreamState);
@@ -242,15 +235,15 @@ fn stream(req: *const Req) anyerror!*Res {
     return res;
 }
 
-const wait_vtable: Res.VTable = .{ .on_complete = waitComplete, .destroy = Res.destroyBase };
+const wait_vtable: http.Res.VTable = .{ .on_complete = waitComplete, .destroy = http.Res.destroyBase };
 
-fn waitComplete(_: *Res) void {
-    log.inf("harness: stream-wait complete\n", .{});
+fn waitComplete(_: *http.Res) void {
+    tools_common.log.inf("harness: stream-wait complete\n", .{});
     g_wait_complete.store(true, .seq_cst);
 }
 
-fn streamWait(req: *const Req) anyerror!*Res {
-    const res = try Res.create(gpa);
+fn streamWait(req: *const http.Req) anyerror!*http.Res {
+    const res = try http.Res.create(std.heap.c_allocator);
     res.vtable = &wait_vtable;
     res.content_type = "text/plain";
     const st = try res.allocator().create(StreamState);
@@ -266,12 +259,12 @@ fn streamWait(req: *const Req) anyerror!*Res {
             }
             for (0..300) |_| {
                 if (s.stop.call()) {
-                    log.inf("harness: should_stop fired\n", .{});
+                    tools_common.log.inf("harness: should_stop fired\n", .{});
                     return false;
                 }
                 sleepMs(10);
             }
-            log.inf("harness: should_stop timed out\n", .{});
+            tools_common.log.inf("harness: should_stop timed out\n", .{});
             try out.appendSlice(a, "late\n");
             return false;
         }
@@ -279,42 +272,42 @@ fn streamWait(req: *const Req) anyerror!*Res {
     return res;
 }
 
-fn waitCompleteRoute(_: *const Req) anyerror!*Res {
+fn waitCompleteRoute(_: *const http.Req) anyerror!*http.Res {
     var complete = false;
     var i: usize = 0;
     while (i < 300 and !complete) : (i += 1) {
         complete = g_wait_complete.swap(false, .seq_cst);
         if (!complete) sleepMs(10);
     }
-    var j = json.Value.emptyObject();
-    try j.set(gpa, "complete", try json.Value.from(gpa, complete));
-    return jsonRes(&j, gpa);
+    var j = cli_fit.json.Value.emptyObject();
+    try j.set(std.heap.c_allocator, "complete", try cli_fit.json.Value.from(std.heap.c_allocator, complete));
+    return jsonRes(&j, std.heap.c_allocator);
 }
 
-fn throwInvalid(req: *const Req) anyerror!*Res {
-    const msg = try std.mem.concat(gpa, u8, &.{ "bad input: ", req.body });
-    defer gpa.free(msg);
+fn throwInvalid(req: *const http.Req) anyerror!*http.Res {
+    const msg = try std.mem.concat(std.heap.c_allocator, u8, &.{ "bad input: ", req.body });
+    defer std.heap.c_allocator.free(msg);
     return http.throwInvalidArgument(msg);
 }
 
-fn throwRuntime(_: *const Req) anyerror!*Res {
+fn throwRuntime(_: *const http.Req) anyerror!*http.Res {
     return http.throwRuntimeError("boom");
 }
 
-fn throwUnknown(_: *const Req) anyerror!*Res {
+fn throwUnknown(_: *const http.Req) anyerror!*http.Res {
     // `throw 42`: not a std::exception
     return error.NotAStdException;
 }
 
-fn throwRaw(_: *const Req) anyerror!*Res {
+fn throwRaw(_: *const http.Req) anyerror!*http.Res {
     return http.throwRuntimeError("raw boom");
 }
 
-fn quit(_: *const Req) anyerror!*Res {
+fn quit(_: *const http.Req) anyerror!*http.Res {
     g_quit.store(true, .seq_cst);
-    var j = json.Value.emptyObject();
-    try j.set(gpa, "bye", try json.Value.from(gpa, true));
-    return jsonRes(&j, gpa);
+    var j = cli_fit.json.Value.emptyObject();
+    try j.set(std.heap.c_allocator, "bye", try cli_fit.json.Value.from(std.heap.c_allocator, true));
+    return jsonRes(&j, std.heap.c_allocator);
 }
 
 // -----------------------------------------------------------------------------
@@ -347,7 +340,7 @@ fn configure(name: []const u8, params: *http.Params, ready: *bool) void {
     } else if (std.mem.eql(u8, name, "notready")) {
         ready.* = false;
     } else if (std.mem.eql(u8, name, "unix")) {
-        params.hostnames = gpa.dupe([]const u8, &.{sockPath()}) catch unreachable;
+        params.hostnames = std.heap.c_allocator.dupe([]const u8, &.{sockPath()}) catch unreachable;
     } else if (std.mem.eql(u8, name, "ssl")) {
         params.ssl_file_key = "key.pem";
         params.ssl_file_cert = "cert.pem";
@@ -359,7 +352,7 @@ fn configure(name: []const u8, params: *http.Params, ready: *bool) void {
     } else if (std.mem.eql(u8, name, "multi")) {
         // A listener per address, a Unix socket first and one TCP
         // address, so port 0 is allowed
-        params.hostnames = gpa.dupe([]const u8, &.{ sockPath(), "127.0.0.1" }) catch unreachable;
+        params.hostnames = std.heap.c_allocator.dupe([]const u8, &.{ sockPath(), "127.0.0.1" }) catch unreachable;
         params.api_keys = &.{"abc"};
     } else if (std.mem.eql(u8, name, "multitcp")) {
         // two TCP addresses on one fixed port, each IPv6-only where it can be
@@ -406,15 +399,15 @@ pub fn main(init: std.process.Init) !u8 {
         return 2;
     }
     const config = args[1];
-    log.verbosity_thold = log.level_debug;
+    tools_common.log.verbosity_thold = tools_common.log.level_debug;
 
     var params: http.Params = .{};
     var ready = true;
     configure(config, &params, &ready);
 
-    var ctx_http = try http.Context.init(gpa);
+    var ctx_http = try http.Context.init(std.heap.c_allocator);
     if (!try ctx_http.setup(&params)) {
-        log.inf("harness: init failed\n", .{});
+        tools_common.log.inf("harness: init failed\n", .{});
         return 1;
     }
 
@@ -441,17 +434,17 @@ pub fn main(init: std.process.Init) !u8 {
     try ctx_http.registerGcpCompat();
 
     if (!try ctx_http.start()) {
-        log.inf("harness: start failed\n", .{});
+        tools_common.log.inf("harness: start failed\n", .{});
         return 1;
     }
     if (ready) ctx_http.is_ready.store(true, .seq_cst);
     for (ctx_http.listening_addresses.items) |address| {
-        const addr = try gpa.dupeSentinel(u8, address, 0);
-        log.inf("harness: listening on %s\n", .{addr.ptr});
+        const addr = try std.heap.c_allocator.dupeSentinel(u8, address, 0);
+        tools_common.log.inf("harness: listening on %s\n", .{addr.ptr});
     }
 
     {
-        const port_str = try std.fmt.allocPrint(gpa, "{d}\n", .{ctx_http.port});
+        const port_str = try std.fmt.allocPrint(std.heap.c_allocator, "{d}\n", .{ctx_http.port});
         const f = std.c.fopen(args[2], "w") orelse return 1;
         _ = std.c.fwrite(port_str.ptr, 1, port_str.len, f);
         _ = std.c.fclose(f);
@@ -459,7 +452,7 @@ pub fn main(init: std.process.Init) !u8 {
 
     // GET /quit, or <port-file>.quit appearing: a server that is not ready
     // answers /quit with 503
-    const quit_file = try std.mem.concat(gpa, u8, &.{ args[2], ".quit\x00" });
+    const quit_file = try std.mem.concat(std.heap.c_allocator, u8, &.{ args[2], ".quit\x00" });
     while (!g_quit.load(.seq_cst)) {
         if (std.c.fopen(@ptrCast(quit_file.ptr), "r")) |q| {
             _ = std.c.fclose(q);
@@ -469,7 +462,7 @@ pub fn main(init: std.process.Init) !u8 {
     }
     ctx_http.stop();
     ctx_http.join();
-    log.inf("harness: stopped\n", .{});
-    _ = libc.fflush(null);
+    tools_common.log.inf("harness: stopped\n", .{});
+    _ = stdlib.libc.fflush(null);
     return 0;
 }

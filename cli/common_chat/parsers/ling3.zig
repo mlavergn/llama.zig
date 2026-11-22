@@ -15,8 +15,6 @@ const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
 
-const Allocator = std.mem.Allocator;
-
 const ROLE = "<role>ASSISTANT</role>";
 const THINK_START = "<think>";
 const THINK_END = "</think>";
@@ -31,7 +29,7 @@ const ARG_VAL_END = "</arg_value>";
 /// The lambda `build_chat_peg_parser` runs, and the state its
 /// `foreach_function` and `foreach_parameter` callbacks share.
 const Build = struct {
-    a: Allocator,
+    a: std.mem.Allocator,
     inputs: *const common_chat.template.GenerationParams,
     think_open: bool,
     has_tools: bool,
@@ -181,7 +179,7 @@ const Build = struct {
 /// Ports `common_chat_params_init_ling3` (parsers/ling3.cpp:11 @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
-pub fn init(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
+pub fn init(a: std.mem.Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
     var data: common_chat.params.ChatParams = .{};
 
     data.prompt = try common_chat.template.directApplyImpl(a, tmpl, inputs, null, null, null);

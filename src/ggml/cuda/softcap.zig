@@ -23,23 +23,17 @@ fn softcapF32Cuda(x: ?*const anyopaque, dst: ?*anyopaque, scale: f32, softcap: f
 
 /// Ports `ggml_cuda_op_softcap` (softcap.cu:22 @b1b770d90): `src` is the
 /// first `SCALE`, `dst` the last.
-pub fn opSoftcap(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor, src: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, src.src[0]);
+pub fn opSoftcap(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor, src: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, src.src[0]);
     const src0_d: ?*const anyopaque = src0.data;
     const dst_d: ?*anyopaque = dst.data;
     const stream = ctx.stream();
 
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F32");
 
     const scale: f32 = @bitCast(src.op_params[0]);
     const softcap: f32 = @bitCast(dst.op_params[0]);
 
-    softcapF32Cuda(src0_d, dst_d, scale, softcap, @truncate(ggml.impl.c.ggml_nelements(src0)), stream);
-}
-
-comptime {
-    // No caller until `ggml_cuda_try_fuse` is ported; referencing it keeps it
-    // compiled and type-checked.
-    _ = &opSoftcap;
+    softcapF32Cuda(src0_d, dst_d, scale, softcap, @truncate(ggml.impl.ggml_c.ggml_nelements(src0)), stream);
 }

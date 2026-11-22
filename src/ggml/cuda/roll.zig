@@ -13,13 +13,13 @@ const block_size = 256;
 /// Ports `ggml_cuda_op_roll` (roll.cu:49 @b1b770d90), which launches with
 /// `<<<>>>`. The kernel reads the source through its byte
 /// strides, so a non-contiguous view rolls as it is.
-pub fn opRoll(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+pub fn opRoll(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const s0: c_int = dst.op_params[0];
     const s1: c_int = dst.op_params[1];
     const s2: c_int = dst.op_params[2];
     const s3: c_int = dst.op_params[3];
 
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
     const src0_d: ?*const anyopaque = src0.data;
     const dst_d: ?*anyopaque = dst.data;
 
@@ -34,8 +34,8 @@ pub fn opRoll(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) voi
     const nb02: i64 = @bitCast(src0.nb[2]);
     const nb03: i64 = @bitCast(src0.nb[3]);
 
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "dst->src[0]->type == GGML_TYPE_F32");
-    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(dst->src[0], dst)");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->src[0]->type == GGML_TYPE_F32");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(dst->src[0], dst)");
 
     const stream = ctx.stream();
 

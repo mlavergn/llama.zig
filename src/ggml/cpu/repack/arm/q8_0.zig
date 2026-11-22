@@ -26,7 +26,6 @@
 //! `acc = vfmaq_f32(acc, f32(ret), ad * bd)` — fused, one rounding. The
 //! scale product `ad * bd` is a separate multiply the C does not fuse.
 
-const std = @import("std");
 const ggml = @import("../../../module.zig");
 
 // The `_generic` bodies, in `cpu/repack/`, that each export below falls to
@@ -62,7 +61,7 @@ inline fn load4d(p: [*]const i8) [4]ggml.cpu.quants.arch.neon.i8x8 {
 }
 
 /// Ports `ggml_gemv_q8_0_4x4_q8_0` (arch/arm/repack.cpp:1771 @b1b770d90).
-pub export fn ggml_gemv_q8_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemv_q8_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.q8_0.ggml_gemv_q8_0_4x4_q8_0_generic(n, s_out, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 32);
     const ncols_interleaved: c_int = 4;
@@ -72,7 +71,7 @@ pub export fn ggml_gemv_q8_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
 
     var col: c_int = 0;
     while (col < nc) : (col += ncols_interleaved) {
-        var a_ptr: [*]const ggml.impl.c.block_q8_0 = @ptrCast(@alignCast(vy));
+        var a_ptr: [*]const ggml.impl.ggml_c.block_q8_0 = @ptrCast(@alignCast(vy));
         var acc: ggml.cpu.quants.arch.neon.f32x4 = @splat(0);
         var b: c_int = 0;
         while (b < nb) : (b += 1) {
@@ -100,7 +99,7 @@ pub export fn ggml_gemv_q8_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
 /// Ports `ggml_gemv_q8_0_4x8_q8_0` (arch/arm/repack.cpp:1829 @b1b770d90).
 /// The `__ARM_FEATURE_SVE` arm is not ported: no Apple core has
 /// SVE.
-pub export fn ggml_gemv_q8_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemv_q8_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.q8_0.ggml_gemv_q8_0_4x8_q8_0_generic(n, s_out, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 32);
     const ncols_interleaved: c_int = 4;
@@ -110,7 +109,7 @@ pub export fn ggml_gemv_q8_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
 
     var col: c_int = 0;
     while (col < nc) : (col += ncols_interleaved) {
-        var a_ptr: [*]const ggml.impl.c.block_q8_0 = @ptrCast(@alignCast(vy));
+        var a_ptr: [*]const ggml.impl.ggml_c.block_q8_0 = @ptrCast(@alignCast(vy));
         var acc: ggml.cpu.quants.arch.neon.f32x4 = @splat(0);
         var b: c_int = 0;
         while (b < nb) : (b += 1) {
@@ -158,7 +157,7 @@ pub export fn ggml_gemv_q8_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
 /// 32-bit lane of the activation — so one pass over the weights serves all
 /// four rows. The per-row scale is `b_d * a_d[m]` with `a_d[m]` broadcast,
 /// and `vmlaq_f32` folds it in **fused**, like its `_n_` sibling.
-pub export fn ggml_gemm_q8_0_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemm_q8_0_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.q8_0.ggml_gemm_q8_0_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 32);
     const ncols_interleaved: c_int = 4;
@@ -204,8 +203,4 @@ pub export fn ggml_gemm_q8_0_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const
             }
         }
     }
-}
-
-comptime {
-    _ = std;
 }

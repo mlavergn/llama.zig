@@ -160,11 +160,11 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         }
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        const sa_out = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const sa_out = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(sa_out, "sa_out", il);
 
         // The mixture-of-experts branch.
@@ -194,12 +194,12 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
                 const ffn_shexp = b.buildFfn(cur, layer.ffn_up_shexp, null, null, layer.ffn_gate_shexp, null, null, layer.ffn_down_shexp, null, null, null, .silu, .par, il);
                 b.cb(ffn_shexp, "ffn_shexp", il);
 
-                cur = llama.impl.c.ggml_add(ctx, moe_out, ffn_shexp);
+                cur = llama.impl.llama_c.ggml_add(ctx, moe_out, ffn_shexp);
                 b.cb(cur, "ffn_out", il);
             }
         }
 
-        cur = llama.impl.c.ggml_add(ctx, cur, sa_out);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, sa_out);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

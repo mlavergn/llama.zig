@@ -56,7 +56,7 @@ inline fn scalesMins(b: *const ggml.cpu.repack.blocks.block_q2_Kx8, sb: usize) S
 ///
 /// As `q4_K`'s gemv, the row is stored as `permute(acc_row) - acc_min_rows`
 /// at `y * nr`.
-pub export fn ggml_gemv_q2_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemv_q2_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     // The unrolled sub-block loops evaluate the intrinsics' comptime masks
     // at every call site.
     @setEvalBranchQuota(20000);
@@ -403,7 +403,7 @@ fn rowLoops(comptime L: type, y: *usize, x_begin: usize, x_end: usize, nb: usize
 /// With `__AVX512BW__ && __AVX512DQ__` the 512-bit arm, from line 3570,
 /// runs first over the columns up to the last multiple of
 /// sixteen; the AVX2 loops then take any left, from the first row again.
-pub export fn ggml_gemm_q2_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemm_q2_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     const qk = QK_K;
     const nb: usize = @intCast(@divTrunc(n, qk));
 

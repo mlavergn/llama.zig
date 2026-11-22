@@ -8,6 +8,8 @@ pub const futex = @import("futex.zig");
 pub const Mutex = @import("mutex.zig").Mutex;
 pub const Condition = @import("condition.zig").Condition;
 
+pub const mutex = @import("mutex.zig");
+
 // ---------------------------------------------------------------------------
 // Unit Tests
 

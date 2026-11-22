@@ -18,9 +18,9 @@ const block_nt = 256;
 /// an F32 or F16 source `T`; the output is F32. Rows of 1024 to 8192 are taken
 /// too (the `!GGML_USE_MUSA` arm), one row per thread
 /// block of `GGML_CUDA_FWHT_BLOCK_NT` threads.
-fn opFwhtImpl(comptime T: type, ctx: *ggml.cuda.common.Context, src: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor) bool {
+fn opFwhtImpl(comptime T: type, ctx: *ggml.cuda.common.Context, src: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor) bool {
     const n: c_int = @truncate(src.ne[0]);
-    const rows = ggml.impl.c.ggml_nrows(src);
+    const rows = ggml.impl.ggml_c.ggml_nrows(src);
 
     const src_d: ?*const anyopaque = src.data;
     const dst_d: ?*anyopaque = dst.data;
@@ -67,14 +67,14 @@ fn opFwhtImpl(comptime T: type, ctx: *ggml.cuda.common.Context, src: *const ggml
 /// -- the hint, F32 `src0` and output, and an F32 or F16 contiguous `src1`
 /// of the output's shape. `mulmat.zig` asks it before `opFwht`, and
 /// `supports.zig` to admit an F16 `src1` against a non-F16 `src0`.
-pub fn opMulMatUseFwht(op: *const ggml.impl.c.ggml_tensor) bool {
-    const a = ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[0]);
-    const b = ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[1]);
+pub fn opMulMatUseFwht(op: *const ggml.impl.ggml_c.ggml_tensor) bool {
+    const a = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[0]);
+    const b = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[1]);
 
-    return op.op == ggml.impl.c.GGML_OP_MUL_MAT and ggml.impl.getOpParamsI32(op, 1) == ggml.impl.c.GGML_HINT_SRC0_IS_HADAMARD and
-        a.type == ggml.impl.c.GGML_TYPE_F32 and op.type == ggml.impl.c.GGML_TYPE_F32 and
-        (b.type == ggml.impl.c.GGML_TYPE_F32 or b.type == ggml.impl.c.GGML_TYPE_F16) and ggml.impl.c.ggml_is_contiguous(b) and ggml.impl.c.ggml_is_contiguous(op) and
-        ggml.impl.c.ggml_are_same_shape(b, op);
+    return op.op == ggml.impl.ggml_c.GGML_OP_MUL_MAT and ggml.impl.getOpParamsI32(op, 1) == ggml.impl.ggml_c.GGML_HINT_SRC0_IS_HADAMARD and
+        a.type == ggml.impl.ggml_c.GGML_TYPE_F32 and op.type == ggml.impl.ggml_c.GGML_TYPE_F32 and
+        (b.type == ggml.impl.ggml_c.GGML_TYPE_F32 or b.type == ggml.impl.ggml_c.GGML_TYPE_F16) and ggml.impl.ggml_c.ggml_is_contiguous(b) and ggml.impl.ggml_c.ggml_is_contiguous(op) and
+        ggml.impl.ggml_c.ggml_are_same_shape(b, op);
 }
 
 /// Ports `ggml_cuda_op_fwht` (fwht.cu:225 @b1b770d90).
@@ -83,18 +83,18 @@ pub fn opMulMatUseFwht(op: *const ggml.impl.c.ggml_tensor) bool {
 /// non-contiguous operand, a non-F32 output, a source other than F32 or
 /// F16, or a row length other than a power of two from 64 to 8192, with
 /// nothing launched.
-pub fn opFwht(ctx: *ggml.cuda.common.Context, src: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor) bool {
-    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src, dst), "ggml_are_same_shape(src, dst)");
-    if (!ggml.impl.c.ggml_is_contiguous(src) or !ggml.impl.c.ggml_is_contiguous(dst)) {
+pub fn opFwht(ctx: *ggml.cuda.common.Context, src: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor) bool {
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src, dst), "ggml_are_same_shape(src, dst)");
+    if (!ggml.impl.ggml_c.ggml_is_contiguous(src) or !ggml.impl.ggml_c.ggml_is_contiguous(dst)) {
         return false;
     }
-    if (dst.type != ggml.impl.c.GGML_TYPE_F32) {
+    if (dst.type != ggml.impl.ggml_c.GGML_TYPE_F32) {
         return false;
     }
 
     return switch (src.type) {
-        ggml.impl.c.GGML_TYPE_F32 => opFwhtImpl(f32, ctx, src, dst),
-        ggml.impl.c.GGML_TYPE_F16 => opFwhtImpl(ggml.cuda.kernels.half, ctx, src, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => opFwhtImpl(f32, ctx, src, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => opFwhtImpl(ggml.cuda.kernels.half, ctx, src, dst),
         else => false,
     };
 }

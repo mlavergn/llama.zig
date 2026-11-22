@@ -13,11 +13,11 @@ const block_size = 256;
 
 /// Ports `ggml_cuda_conv_2d_transpose_p0` (conv2d-transpose.cu:71
 /// @b1b770d90). Input is (W, H, C_in, N), kernel is (W, H, C_out, C_in).
-pub fn conv2dTransposeP0(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const kernel = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const input = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    ggml.impl.assert(kernel.type == ggml.impl.c.GGML_TYPE_F16 or kernel.type == ggml.impl.c.GGML_TYPE_F32, "kernel->type == GGML_TYPE_F16 || kernel->type == GGML_TYPE_F32");
-    ggml.impl.assert(input.type == ggml.impl.c.GGML_TYPE_F32 and dst.type == ggml.impl.c.GGML_TYPE_F32, "input->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32");
+pub fn conv2dTransposeP0(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const kernel = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const input = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    ggml.impl.assert(kernel.type == ggml.impl.ggml_c.GGML_TYPE_F16 or kernel.type == ggml.impl.ggml_c.GGML_TYPE_F32, "kernel->type == GGML_TYPE_F16 || kernel->type == GGML_TYPE_F32");
+    ggml.impl.assert(input.type == ggml.impl.ggml_c.GGML_TYPE_F32 and dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "input->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32");
 
     const input_data: ?*const anyopaque = input.data;
     const output_data: ?*anyopaque = dst.data;
@@ -39,16 +39,16 @@ pub fn conv2dTransposeP0(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_
 
     const st = ctx.stream();
 
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(input), "ggml_is_contiguous(input)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(kernel), "ggml_is_contiguous(kernel)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(input), "ggml_is_contiguous(input)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(kernel), "ggml_is_contiguous(kernel)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
 
     const total: c_int = output_w *% output_h *% channels_out *% batches;
     const blocks: c_int = @divTrunc(total +% (block_size - 1), block_size);
 
     const p: ggml.cuda.kernels.LaunchParams = .{ .grid = .{ .x = @bitCast(blocks) }, .block = .{ .x = block_size }, .shmem = 0, .stream = st };
     const args = .{ input_data, kernel_data, output_data, input_w, input_h, output_w, output_h, kernel_w, kernel_h, stride, channels_in, channels_out, batches };
-    if (kernel.type == ggml.impl.c.GGML_TYPE_F16) {
+    if (kernel.type == ggml.impl.ggml_c.GGML_TYPE_F16) {
         ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv2d-transpose", "conv2d_transpose_kernel<__half>"), p, args);
     } else {
         ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv2d-transpose", "conv2d_transpose_kernel<float>"), p, args);

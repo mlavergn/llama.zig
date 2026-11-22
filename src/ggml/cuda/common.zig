@@ -26,11 +26,7 @@ const stdlib = @import("stdlib");
 const config = @import("config");
 
 /// The translated CUDA headers; see `src/ggml/cuda/c_import.h`.
-pub const cu = @import("cuda_c");
-
-/// The C `new`s every host-side object and nothing hands it an allocator;
-/// libc's is what a C entry point can reach, as in `metal/backend.zig`.
-pub const allocator = std.heap.c_allocator;
+pub const cuda_c = @import("cuda_c");
 
 /// Ports `GGML_CUDA_NAME` (ggml-cuda.h:11 @b1b770d90).
 pub const name = "CUDA";
@@ -180,14 +176,14 @@ pub fn fp8MmaHardwareAvailable(x: c_int) bool {
 }
 
 /// Ports `ggml_cuda_is_aligned` (common.cuh:404 @b1b770d90).
-pub fn isAligned(t: *const ggml.impl.c.ggml_tensor, alignment: usize) bool {
+pub fn isAligned(t: *const ggml.impl.ggml_c.ggml_tensor, alignment: usize) bool {
     return @intFromPtr(t.data) % alignment == 0 and
         t.nb[1] % alignment == 0 and t.nb[2] % alignment == 0 and t.nb[3] % alignment == 0;
 }
 
 /// Ports `init_fastdiv_values` (common.cuh:1000 @b1b770d90): `<mp, L, d>`
 /// such that `n / d == (mulhi(n, mp) + n) >> L`.
-pub fn initFastdivValues(d_64: u64) cu.uint3 {
+pub fn initFastdivValues(d_64: u64) cuda_c.uint3 {
     ggml.impl.assert(d_64 != 0, "d_64 != 0");
     ggml.impl.assert(d_64 <= std.math.maxInt(u32), "d_64 <= std::numeric_limits<uint32_t>::max()");
     const d: u32 = @intCast(d_64);
@@ -209,32 +205,32 @@ pub fn initFastdivValues(d_64: u64) cu.uint3 {
 /// - `msg`: the library's description of the error.
 pub fn cudaError(stmt: [*:0]const u8, src: std.builtin.SourceLocation, msg: [*:0]const u8) noreturn {
     var id: c_int = -1;
-    _ = cu.cudaGetDevice(&id);
+    _ = cuda_c.cudaGetDevice(&id);
     ggml.impl.logError(name ++ " error: %s\n", .{msg});
     ggml.impl.logError("  current device: %d, in function %s at %s:%d\n", .{ id, src.fn_name.ptr, src.file.ptr, @as(c_int, @intCast(src.line)) });
     ggml.impl.logError("  %s\n", .{stmt});
     // abort with GGML_ABORT to get a stack trace. The C's `__FILE__` is the
     // absolute path nvcc was given; its basename and `__LINE__` are kept.
-    ggml.impl.c.ggml_abort("ggml-cuda.cu", 113, name ++ " error");
+    ggml.impl.ggml_c.ggml_abort("ggml-cuda.cu", 113, name ++ " error");
     unreachable;
 }
 
 /// Ports `CUDA_CHECK` (common.cuh:211 @b1b770d90).
-pub fn cudaCheck(err: cu.cudaError_t, stmt: [*:0]const u8, src: std.builtin.SourceLocation) void {
-    if (err != cu.cudaSuccess) cudaError(stmt, src, cu.cudaGetErrorString(err));
+pub fn cudaCheck(err: cuda_c.cudaError_t, stmt: [*:0]const u8, src: std.builtin.SourceLocation) void {
+    if (err != cuda_c.cudaSuccess) cudaError(stmt, src, cuda_c.cudaGetErrorString(err));
 }
 
 /// Ports `CUBLAS_CHECK` (common.cuh:235 @b1b770d90), with
 /// `cublas_get_error_str`'s CUDA 12 arm.
-pub fn cublasCheck(err: cu.cublasStatus_t, stmt: [*:0]const u8, src: std.builtin.SourceLocation) void {
-    if (err != cu.CUBLAS_STATUS_SUCCESS) cudaError(stmt, src, cu.cublasGetStatusString(err));
+pub fn cublasCheck(err: cuda_c.cublasStatus_t, stmt: [*:0]const u8, src: std.builtin.SourceLocation) void {
+    if (err != cuda_c.CUBLAS_STATUS_SUCCESS) cudaError(stmt, src, cuda_c.cublasGetStatusString(err));
 }
 
 /// Ports `CU_CHECK` (common.cuh:247 @b1b770d90), with `cu_get_error_str`.
-pub fn cuCheck(err: cu.CUresult, stmt: [*:0]const u8, src: std.builtin.SourceLocation) void {
-    if (err != cu.CUDA_SUCCESS) {
+pub fn cuCheck(err: cuda_c.CUresult, stmt: [*:0]const u8, src: std.builtin.SourceLocation) void {
+    if (err != cuda_c.CUDA_SUCCESS) {
         var str: [*c]const u8 = null;
-        _ = cu.cuGetErrorString(err, &str);
+        _ = cuda_c.cuGetErrorString(err, &str);
         cudaError(stmt, src, if (str) |s| s else "unknown error");
     }
 }
@@ -421,9 +417,9 @@ pub fn info() *const Info {
 fn init() Info {
     var inf: Info = .{};
 
-    const err = cu.cudaGetDeviceCount(&inf.physical_device_count);
-    if (err != cu.cudaSuccess) {
-        ggml.impl.logError("%s: failed to initialize " ++ name ++ ": %s\n", .{ "ggml_cuda_init", cu.cudaGetErrorString(err) });
+    const err = cuda_c.cudaGetDeviceCount(&inf.physical_device_count);
+    if (err != cuda_c.cudaSuccess) {
+        ggml.impl.logError("%s: failed to initialize " ++ name ++ ": %s\n", .{ "ggml_cuda_init", cuda_c.cudaGetErrorString(err) });
         return inf;
     }
 
@@ -462,8 +458,8 @@ fn init() Info {
 
     var total_vram: i64 = 0;
     for (0..@intCast(inf.physical_device_count)) |id| {
-        var prop: cu.cudaDeviceProp = undefined;
-        cudaCheck(cu.cudaGetDeviceProperties(&prop, @intCast(id)), "cudaGetDeviceProperties(&prop, id)", @src());
+        var prop: cuda_c.cudaDeviceProp = undefined;
+        cudaCheck(cuda_c.cudaGetDeviceProperties(&prop, @intCast(id)), "cudaGetDeviceProperties(&prop, id)", @src());
         total_vram += @intCast(prop.totalGlobalMem);
     }
     ggml.impl.logInfo("%s: found %d " ++ name ++ " devices (Total VRAM: %zu MiB):\n", .{ "ggml_cuda_init", inf.physical_device_count, @as(usize, @intCast(@divTrunc(total_vram, 1024 * 1024))) });
@@ -484,21 +480,21 @@ fn init() Info {
         const physical_id = inf.devices[id].physical_device;
 
         var device_vmm: c_int = 0;
-        var device: cu.CUdevice = 0;
-        cuCheck(cu.cuDeviceGet(&device, physical_id), "cuDeviceGet(&device, physical_id)", @src());
-        cuCheck(cu.cuDeviceGetAttribute(&device_vmm, cu.CU_DEVICE_ATTRIBUTE_VIRTUAL_MEMORY_MANAGEMENT_SUPPORTED, device), "cuDeviceGetAttribute(&device_vmm, CU_DEVICE_ATTRIBUTE_VIRTUAL_MEMORY_MANAGEMENT_SUPPORTED, device)", @src());
+        var device: cuda_c.CUdevice = 0;
+        cuCheck(cuda_c.cuDeviceGet(&device, physical_id), "cuDeviceGet(&device, physical_id)", @src());
+        cuCheck(cuda_c.cuDeviceGetAttribute(&device_vmm, cuda_c.CU_DEVICE_ATTRIBUTE_VIRTUAL_MEMORY_MANAGEMENT_SUPPORTED, device), "cuDeviceGetAttribute(&device_vmm, CU_DEVICE_ATTRIBUTE_VIRTUAL_MEMORY_MANAGEMENT_SUPPORTED, device)", @src());
 
         if (device_vmm != 0) {
-            var alloc_prop: cu.CUmemAllocationProp = std.mem.zeroes(cu.CUmemAllocationProp);
-            alloc_prop.type = cu.CU_MEM_ALLOCATION_TYPE_PINNED;
-            alloc_prop.location.type = cu.CU_MEM_LOCATION_TYPE_DEVICE;
+            var alloc_prop: cuda_c.CUmemAllocationProp = std.mem.zeroes(cuda_c.CUmemAllocationProp);
+            alloc_prop.type = cuda_c.CU_MEM_ALLOCATION_TYPE_PINNED;
+            alloc_prop.location.type = cuda_c.CU_MEM_LOCATION_TYPE_DEVICE;
             alloc_prop.location.id = physical_id;
-            cuCheck(cu.cuMemGetAllocationGranularity(&inf.devices[id].vmm_granularity, &alloc_prop, cu.CU_MEM_ALLOC_GRANULARITY_RECOMMENDED), "cuMemGetAllocationGranularity(&info.devices[id].vmm_granularity, &alloc_prop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED)", @src());
+            cuCheck(cuda_c.cuMemGetAllocationGranularity(&inf.devices[id].vmm_granularity, &alloc_prop, cuda_c.CU_MEM_ALLOC_GRANULARITY_RECOMMENDED), "cuMemGetAllocationGranularity(&info.devices[id].vmm_granularity, &alloc_prop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED)", @src());
         }
         inf.devices[id].vmm = device_vmm != 0;
 
-        var prop: cu.cudaDeviceProp = undefined;
-        cudaCheck(cu.cudaGetDeviceProperties(&prop, physical_id), "cudaGetDeviceProperties(&prop, physical_id)", @src());
+        var prop: cuda_c.cudaDeviceProp = undefined;
+        cudaCheck(cuda_c.cudaGetDeviceProperties(&prop, physical_id), "cudaGetDeviceProperties(&prop, physical_id)", @src());
 
         // a virtual device owns only a share of its physical GPU's memory
         const share = physical_share_count[@intCast(physical_id)];
@@ -519,7 +515,7 @@ fn init() Info {
         inf.devices[id].warp_size = prop.warpSize;
 
         var supports_coop_launch: c_int = 0;
-        cudaCheck(cu.cudaDeviceGetAttribute(&supports_coop_launch, cu.cudaDevAttrCooperativeLaunch, physical_id), "cudaDeviceGetAttribute(&supports_coop_launch, cudaDevAttrCooperativeLaunch, physical_id)", @src());
+        cudaCheck(cuda_c.cudaDeviceGetAttribute(&supports_coop_launch, cuda_c.cudaDevAttrCooperativeLaunch, physical_id), "cudaDeviceGetAttribute(&supports_coop_launch, cudaDevAttrCooperativeLaunch, physical_id)", @src());
         inf.devices[id].supports_cooperative_launch = supports_coop_launch != 0;
 
         inf.devices[id].smpbo = prop.sharedMemPerBlockOptin;
@@ -541,8 +537,8 @@ fn init() Info {
         // Temporary performance fix: device scheduling strategy "spinning"
         // for iGPUs with cc121, to avoid delays in cuda synchronize calls.
         if (prop.major == 12 and prop.minor == 1) {
-            cudaCheck(cu.cudaSetDevice(physical_id), "cudaSetDevice(physical_id)", @src());
-            cudaCheck(cu.cudaSetDeviceFlags(cu.cudaDeviceScheduleSpin), "cudaSetDeviceFlags(cudaDeviceScheduleSpin)", @src());
+            cudaCheck(cuda_c.cudaSetDevice(physical_id), "cudaSetDevice(physical_id)", @src());
+            cudaCheck(cuda_c.cudaSetDeviceFlags(cuda_c.cudaDeviceScheduleSpin), "cudaSetDeviceFlags(cudaDeviceScheduleSpin)", @src());
         }
     }
 
@@ -562,13 +558,13 @@ fn init() Info {
 
     if (p2pEnabled()) {
         for (0..@intCast(inf.physical_device_count)) |id| {
-            cudaCheck(cu.cudaSetDevice(@intCast(id)), "cudaSetDevice(id)", @src());
+            cudaCheck(cuda_c.cudaSetDevice(@intCast(id)), "cudaSetDevice(id)", @src());
             for (0..@intCast(inf.physical_device_count)) |id_other| {
                 if (id == id_other) continue;
                 var can_access_peer: c_int = 0;
-                cudaCheck(cu.cudaDeviceCanAccessPeer(&can_access_peer, @intCast(id), @intCast(id_other)), "cudaDeviceCanAccessPeer(&can_access_peer, id, id_other)", @src());
+                cudaCheck(cuda_c.cudaDeviceCanAccessPeer(&can_access_peer, @intCast(id), @intCast(id_other)), "cudaDeviceCanAccessPeer(&can_access_peer, id, id_other)", @src());
                 if (can_access_peer != 0) {
-                    cudaCheck(cu.cudaDeviceEnablePeerAccess(@intCast(id_other), 0), "cudaDeviceEnablePeerAccess(id_other, 0)", @src());
+                    cudaCheck(cuda_c.cudaDeviceEnablePeerAccess(@intCast(id_other), 0), "cudaDeviceEnablePeerAccess(id_other, 0)", @src());
                 }
             }
         }
@@ -588,25 +584,25 @@ pub fn physicalDevice(device: c_int) c_int {
 pub fn setDevice(device: c_int) void {
     const physical_device = physicalDevice(device);
     var current_device: c_int = 0;
-    cudaCheck(cu.cudaGetDevice(&current_device), "cudaGetDevice(&current_device)", @src());
+    cudaCheck(cuda_c.cudaGetDevice(&current_device), "cudaGetDevice(&current_device)", @src());
     if (physical_device == current_device) return;
-    cudaCheck(cu.cudaSetDevice(physical_device), "cudaSetDevice(physical_device)", @src());
+    cudaCheck(cuda_c.cudaSetDevice(physical_device), "cudaSetDevice(physical_device)", @src());
 }
 
 /// Ports `ggml_cuda_get_device` (ggml-cuda.cu:139 @b1b770d90).
 pub fn getDevice() c_int {
     var id: c_int = 0;
-    cudaCheck(cu.cudaGetDevice(&id), "cudaGetDevice(&id)", @src());
+    cudaCheck(cuda_c.cudaGetDevice(&id), "cudaGetDevice(&id)", @src());
     return id;
 }
 
 /// Ports `ggml_cuda_device_malloc` (ggml-cuda.cu:194 @b1b770d90), CUDA arm.
-pub fn deviceMalloc(ptr: *?*anyopaque, size: usize, device: c_int) cu.cudaError_t {
+pub fn deviceMalloc(ptr: *?*anyopaque, size: usize, device: c_int) cuda_c.cudaError_t {
     setDevice(device);
     if (unifiedMemoryEnabled()) {
-        return cu.cudaMallocManaged(ptr, size, cu.cudaMemAttachGlobal);
+        return cuda_c.cudaMallocManaged(ptr, size, cuda_c.cudaMemAttachGlobal);
     }
-    return cu.cudaMalloc(ptr, size);
+    return cuda_c.cudaMalloc(ptr, size);
 }
 
 // -----------------------------------------------------------------------------
@@ -660,7 +656,7 @@ pub const PoolLeg = struct {
         setDevice(self.device);
         for (&self.buffer_pool) |*b| {
             if (b.ptr != null) {
-                cudaCheck(cu.cudaFree(b.ptr), "cudaFree(b.ptr)", @src());
+                cudaCheck(cuda_c.cudaFree(b.ptr), "cudaFree(b.ptr)", @src());
                 self.pool_size -= b.size;
                 b.* = .{};
             }
@@ -678,7 +674,7 @@ pub const PoolLeg = struct {
         }
         for (self.ctx.cuda_graphs.values()) |g| {
             g.deinit();
-            allocator.destroy(g);
+            std.heap.c_allocator.destroy(g);
         }
         self.ctx.cuda_graphs.clearRetainingCapacity();
     }
@@ -714,15 +710,15 @@ pub const PoolLeg = struct {
         look_ahead_size = 256 * ((look_ahead_size + 255) / 256);
         setDevice(self.device);
         var err = deviceMalloc(&ptr, look_ahead_size, self.device);
-        if (err == cu.cudaErrorMemoryAllocation) {
-            _ = cu.cudaGetLastError();
+        if (err == cuda_c.cudaErrorMemoryAllocation) {
+            _ = cuda_c.cudaGetLastError();
             const cached_bytes = self.pool_size;
             ggml.impl.logDebug(name ++ " pool[%d]: alloc of %.2f MiB failed, flushing %.2f MiB of cached buffers and retrying\n", .{ self.device, @as(f64, @floatFromInt(look_ahead_size)) / 1024.0 / 1024.0, @as(f64, @floatFromInt(cached_bytes)) / 1024.0 / 1024.0 });
-            cudaCheck(cu.cudaDeviceSynchronize(), "cudaDeviceSynchronize()", @src());
+            cudaCheck(cuda_c.cudaDeviceSynchronize(), "cudaDeviceSynchronize()", @src());
             self.clearPool();
             self.invalidateCudaGraphs();
             err = deviceMalloc(&ptr, look_ahead_size, self.device);
-            if (err == cu.cudaSuccess) {
+            if (err == cuda_c.cudaSuccess) {
                 ggml.impl.logDebug(name ++ " pool[%d]: retry succeeded\n", .{self.device});
             }
         }
@@ -741,7 +737,7 @@ pub const PoolLeg = struct {
         }
         ggml.impl.logDebug(name ++ " buffer pool full, increase MAX_CUDA_BUFFERS\n", .{});
         setDevice(self.device);
-        cudaCheck(cu.cudaFree(ptr), "cudaFree(ptr)", @src());
+        cudaCheck(cuda_c.cudaFree(ptr), "cudaFree(ptr)", @src());
         self.pool_size -= size;
         self.invalidateCudaGraphs();
     }
@@ -759,7 +755,7 @@ pub const PoolVmm = struct {
 
     device: c_int,
     physical_device: c_int,
-    pool_addr: cu.CUdeviceptr = 0,
+    pool_addr: cuda_c.CUdeviceptr = 0,
     pool_used: usize = 0,
     pool_size: usize = 0,
     max_size: usize = vmm_max_size,
@@ -775,8 +771,8 @@ pub const PoolVmm = struct {
 
     fn deinit(self: *PoolVmm) void {
         if (self.pool_addr != 0) {
-            cuCheck(cu.cuMemUnmap(self.pool_addr, self.pool_size), "cuMemUnmap(pool_addr, pool_size)", @src());
-            cuCheck(cu.cuMemAddressFree(self.pool_addr, self.max_size), "cuMemAddressFree(pool_addr, max_size)", @src());
+            cuCheck(cuda_c.cuMemUnmap(self.pool_addr, self.pool_size), "cuMemUnmap(pool_addr, pool_size)", @src());
+            cuCheck(cuda_c.cuMemAddressFree(self.pool_addr, self.max_size), "cuMemAddressFree(pool_addr, max_size)", @src());
         }
     }
 
@@ -795,10 +791,10 @@ pub const PoolVmm = struct {
 
             // reserve virtual address space (if not already reserved)
             if (self.pool_addr == 0) {
-                var err = cu.cuMemAddressReserve(&self.pool_addr, self.max_size, 0, 0, 0);
-                while (err == cu.CUDA_ERROR_OUT_OF_MEMORY and (self.max_size >> 1) >= reserve_size and (self.max_size >> 1) >= self.granularity) {
+                var err = cuda_c.cuMemAddressReserve(&self.pool_addr, self.max_size, 0, 0, 0);
+                while (err == cuda_c.CUDA_ERROR_OUT_OF_MEMORY and (self.max_size >> 1) >= reserve_size and (self.max_size >> 1) >= self.granularity) {
                     self.max_size >>= 1;
-                    err = cu.cuMemAddressReserve(&self.pool_addr, self.max_size, 0, 0, 0);
+                    err = cuda_c.cuMemAddressReserve(&self.pool_addr, self.max_size, 0, 0, 0);
                 }
                 cuCheck(err, "err", @src());
                 if (self.max_size < vmm_max_size) {
@@ -810,26 +806,26 @@ pub const PoolVmm = struct {
             ggml.impl.assert(self.pool_size + reserve_size <= self.max_size, "pool_size + reserve_size <= max_size");
 
             // allocate more physical memory
-            var prop: cu.CUmemAllocationProp = std.mem.zeroes(cu.CUmemAllocationProp);
-            prop.type = cu.CU_MEM_ALLOCATION_TYPE_PINNED;
-            prop.location.type = cu.CU_MEM_LOCATION_TYPE_DEVICE;
+            var prop: cuda_c.CUmemAllocationProp = std.mem.zeroes(cuda_c.CUmemAllocationProp);
+            prop.type = cuda_c.CU_MEM_ALLOCATION_TYPE_PINNED;
+            prop.location.type = cuda_c.CU_MEM_LOCATION_TYPE_DEVICE;
             prop.location.id = self.physical_device;
-            var h: cu.CUmemGenericAllocationHandle = 0;
-            cuCheck(cu.cuMemCreate(&h, reserve_size, &prop, 0), "cuMemCreate(&handle, reserve_size, &prop, 0)", @src());
+            var h: cuda_c.CUmemGenericAllocationHandle = 0;
+            cuCheck(cuda_c.cuMemCreate(&h, reserve_size, &prop, 0), "cuMemCreate(&handle, reserve_size, &prop, 0)", @src());
 
             // map at the end of the pool
-            const start_ptr: cu.CUdeviceptr = self.pool_addr + self.pool_size;
-            cuCheck(cu.cuMemMap(start_ptr, reserve_size, 0, h, 0), "cuMemMap(start_ptr, reserve_size, 0, handle, 0)", @src());
+            const start_ptr: cuda_c.CUdeviceptr = self.pool_addr + self.pool_size;
+            cuCheck(cuda_c.cuMemMap(start_ptr, reserve_size, 0, h, 0), "cuMemMap(start_ptr, reserve_size, 0, handle, 0)", @src());
 
             // the memory allocation handle is no longer needed after mapping
-            cuCheck(cu.cuMemRelease(h), "cuMemRelease(handle)", @src());
+            cuCheck(cuda_c.cuMemRelease(h), "cuMemRelease(handle)", @src());
 
             const use_peer_access = p2pEnabled();
             if (use_peer_access) {
                 // VMM allocations do not become peer-accessible from
                 // cudaDeviceEnablePeerAccess, so access is granted here, on
                 // the backing physical devices, deduplicated.
-                var access_descs: [max_devices]cu.CUmemAccessDesc = undefined;
+                var access_descs: [max_devices]cuda_c.CUmemAccessDesc = undefined;
                 var n_descs: usize = 0;
                 var physical_seen: [max_devices]bool = @splat(false);
                 const device_count = info().device_count;
@@ -837,26 +833,26 @@ pub const PoolVmm = struct {
                     const id_physical = physicalDevice(@intCast(id));
                     if (id_physical != self.physical_device) {
                         var can_access_peer: c_int = 0;
-                        cudaCheck(cu.cudaDeviceCanAccessPeer(&can_access_peer, id_physical, self.physical_device), "cudaDeviceCanAccessPeer(&can_access_peer, id_physical, physical_device)", @src());
+                        cudaCheck(cuda_c.cudaDeviceCanAccessPeer(&can_access_peer, id_physical, self.physical_device), "cudaDeviceCanAccessPeer(&can_access_peer, id_physical, physical_device)", @src());
                         if (can_access_peer == 0) continue;
                     }
                     if (physical_seen[@intCast(id_physical)]) continue;
                     physical_seen[@intCast(id_physical)] = true;
-                    var access: cu.CUmemAccessDesc = std.mem.zeroes(cu.CUmemAccessDesc);
-                    access.location.type = cu.CU_MEM_LOCATION_TYPE_DEVICE;
+                    var access: cuda_c.CUmemAccessDesc = std.mem.zeroes(cuda_c.CUmemAccessDesc);
+                    access.location.type = cuda_c.CU_MEM_LOCATION_TYPE_DEVICE;
                     access.location.id = id_physical;
-                    access.flags = cu.CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+                    access.flags = cuda_c.CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
                     access_descs[n_descs] = access;
                     n_descs += 1;
                 }
-                cuCheck(cu.cuMemSetAccess(start_ptr, reserve_size, &access_descs, n_descs), "cuMemSetAccess(start_ptr, reserve_size, access_descs.data(), access_descs.size())", @src());
+                cuCheck(cuda_c.cuMemSetAccess(start_ptr, reserve_size, &access_descs, n_descs), "cuMemSetAccess(start_ptr, reserve_size, access_descs.data(), access_descs.size())", @src());
             } else {
                 // set access for non P2P
-                var access: cu.CUmemAccessDesc = std.mem.zeroes(cu.CUmemAccessDesc);
-                access.location.type = cu.CU_MEM_LOCATION_TYPE_DEVICE;
+                var access: cuda_c.CUmemAccessDesc = std.mem.zeroes(cuda_c.CUmemAccessDesc);
+                access.location.type = cuda_c.CU_MEM_LOCATION_TYPE_DEVICE;
                 access.location.id = self.physical_device;
-                access.flags = cu.CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-                cuCheck(cu.cuMemSetAccess(start_ptr, reserve_size, &access, 1), "cuMemSetAccess(start_ptr, reserve_size, &access, 1)", @src());
+                access.flags = cuda_c.CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+                cuCheck(cuda_c.cuMemSetAccess(start_ptr, reserve_size, &access, 1), "cuMemSetAccess(start_ptr, reserve_size, &access, 1)", @src());
             }
 
             // add to the pool
@@ -900,7 +896,7 @@ pub const PoolDebug = struct {
 
     fn free(self: *PoolDebug, ptr: ?*anyopaque, size: usize) void {
         setDevice(self.device);
-        cudaCheck(cu.cudaFree(ptr), "cudaFree(ptr)", @src());
+        cudaCheck(cuda_c.cudaFree(ptr), "cudaFree(ptr)", @src());
         self.pool_size -= size;
     }
 };
@@ -917,7 +913,7 @@ pub fn poolDebugEnabled() bool {
 /// Ports `ggml_backend_cuda_context`'s `new_pool_for_device`
 /// (ggml-cuda.cu:775 @b1b770d90).
 fn newPoolForDevice(ctx: *Context, device: c_int) *Pool {
-    const p = allocator.create(Pool) catch ggml.impl.abort("ggml-cuda: out of memory");
+    const p = std.heap.c_allocator.create(Pool) catch ggml.impl.abort("ggml-cuda: out of memory");
     if (poolDebugEnabled()) {
         p.* = .{ .debug = .{ .device = device } };
     } else if (info().devices[@intCast(device)].vmm) {
@@ -997,11 +993,11 @@ pub const GraphCluster = struct {
 /// an executable graph and the cluster dims it was instantiated with, since
 /// `cudaGraphExecUpdate` keeps stale ones (cuBLAS on sm90).
 pub const GraphInstance = struct {
-    handle: cu.cudaGraphExec_t = null,
+    handle: cuda_c.cudaGraphExec_t = null,
     clusters: std.ArrayList(GraphCluster) = .empty,
 
     pub fn deinit(self: *GraphInstance) void {
-        self.clusters.deinit(allocator);
+        self.clusters.deinit(std.heap.c_allocator);
     }
 
     /// The C's `clusters != other` on two vectors.
@@ -1012,10 +1008,10 @@ pub const GraphInstance = struct {
 
 /// Ports `ggml_cuda_graph`'s `node_properties` (graph.cuh:57 @b1b770d90).
 pub const NodeProperties = struct {
-    node: ggml.impl.c.ggml_tensor,
-    node_src_data_ptrs: [ggml.impl.c.GGML_MAX_SRC]?*anyopaque,
-    node_src_ne: [ggml.impl.c.GGML_MAX_SRC][ggml.impl.c.GGML_MAX_DIMS]i64,
-    node_src_nb: [ggml.impl.c.GGML_MAX_SRC][ggml.impl.c.GGML_MAX_DIMS]usize,
+    node: ggml.impl.ggml_c.ggml_tensor,
+    node_src_data_ptrs: [ggml.impl.ggml_c.GGML_MAX_SRC]?*anyopaque,
+    node_src_ne: [ggml.impl.ggml_c.GGML_MAX_SRC][ggml.impl.ggml_c.GGML_MAX_DIMS]i64,
+    node_src_nb: [ggml.impl.ggml_c.GGML_MAX_SRC][ggml.impl.ggml_c.GGML_MAX_DIMS]usize,
 };
 
 /// Ports `ggml_cuda_graph` (graph.cuh:42 @b1b770d90), with
@@ -1027,7 +1023,7 @@ pub const Graph = struct {
     /// is not kept: each chunk's is destroyed once instantiated.
     instances: std.ArrayList(GraphInstance) = .empty,
     num_nodes: usize = 0,
-    nodes: std.ArrayList(cu.cudaGraphNode_t) = .empty,
+    nodes: std.ArrayList(cuda_c.cudaGraphNode_t) = .empty,
     disable_due_to_gpu_arch: bool = false,
     warmup_complete: bool = false,
     uid: u64 = 0,
@@ -1036,12 +1032,12 @@ pub const Graph = struct {
 
     pub fn deinit(self: *Graph) void {
         for (self.instances.items) |*instance| {
-            cudaCheck(cu.cudaGraphExecDestroy(instance.handle), "cudaGraphExecDestroy(instance)", @src());
+            cudaCheck(cuda_c.cudaGraphExecDestroy(instance.handle), "cudaGraphExecDestroy(instance)", @src());
             instance.deinit();
         }
-        self.instances.deinit(allocator);
-        self.nodes.deinit(allocator);
-        self.node_props.deinit(allocator);
+        self.instances.deinit(std.heap.c_allocator);
+        self.nodes.deinit(std.heap.c_allocator);
+        self.node_props.deinit(std.heap.c_allocator);
     }
 
     /// Ports `ggml_cuda_graph`'s `is_enabled` (graph.cuh:65 @b1b770d90). The
@@ -1064,33 +1060,33 @@ pub const Graph = struct {
 
 /// Ports `ggml_cuda_concurrent_event` (graph.cuh:72 @b1b770d90).
 pub const ConcurrentEvent = struct {
-    join_events: std.ArrayList(cu.cudaEvent_t) = .empty,
-    fork_event: cu.cudaEvent_t = null,
+    join_events: std.ArrayList(cuda_c.cudaEvent_t) = .empty,
+    fork_event: cuda_c.cudaEvent_t = null,
     n_streams: c_int = 0,
-    stream_mapping: std.AutoHashMapUnmanaged(*const ggml.impl.c.ggml_tensor, c_int) = .empty,
+    stream_mapping: std.AutoHashMapUnmanaged(*const ggml.impl.ggml_c.ggml_tensor, c_int) = .empty,
     /// Original order of the nodes in this concurrent region, before
     /// interleaving; used to restore grouping for fusion within streams.
-    original_order: std.ArrayList(*const ggml.impl.c.ggml_tensor) = .empty,
-    join_node: ?*const ggml.impl.c.ggml_tensor = null,
+    original_order: std.ArrayList(*const ggml.impl.ggml_c.ggml_tensor) = .empty,
+    join_node: ?*const ggml.impl.ggml_c.ggml_tensor = null,
 
     pub fn init(n_streams: c_int) ConcurrentEvent {
         var self: ConcurrentEvent = .{ .n_streams = n_streams };
-        self.join_events.resize(allocator, @intCast(n_streams)) catch ggml.impl.abort("ggml-cuda: out of memory");
+        self.join_events.resize(std.heap.c_allocator, @intCast(n_streams)) catch ggml.impl.abort("ggml-cuda: out of memory");
         for (self.join_events.items) |*e| {
-            cudaCheck(cu.cudaEventCreateWithFlags(e, cu.cudaEventDisableTiming), "cudaEventCreateWithFlags(&join_events[i], cudaEventDisableTiming)", @src());
+            cudaCheck(cuda_c.cudaEventCreateWithFlags(e, cuda_c.cudaEventDisableTiming), "cudaEventCreateWithFlags(&join_events[i], cudaEventDisableTiming)", @src());
         }
-        cudaCheck(cu.cudaEventCreateWithFlags(&self.fork_event, cu.cudaEventDisableTiming), "cudaEventCreateWithFlags(&fork_event, cudaEventDisableTiming)", @src());
+        cudaCheck(cuda_c.cudaEventCreateWithFlags(&self.fork_event, cuda_c.cudaEventDisableTiming), "cudaEventCreateWithFlags(&fork_event, cudaEventDisableTiming)", @src());
         return self;
     }
 
     pub fn deinit(self: *ConcurrentEvent) void {
-        if (self.fork_event != null) cudaCheck(cu.cudaEventDestroy(self.fork_event), "cudaEventDestroy(fork_event)", @src());
+        if (self.fork_event != null) cudaCheck(cuda_c.cudaEventDestroy(self.fork_event), "cudaEventDestroy(fork_event)", @src());
         for (self.join_events.items) |e| {
-            if (e != null) cudaCheck(cu.cudaEventDestroy(e), "cudaEventDestroy(e)", @src());
+            if (e != null) cudaCheck(cuda_c.cudaEventDestroy(e), "cudaEventDestroy(e)", @src());
         }
-        self.join_events.deinit(allocator);
-        self.stream_mapping.deinit(allocator);
-        self.original_order.deinit(allocator);
+        self.join_events.deinit(std.heap.c_allocator);
+        self.stream_mapping.deinit(std.heap.c_allocator);
+        self.original_order.deinit(std.heap.c_allocator);
     }
 
     const Range = struct {
@@ -1101,20 +1097,20 @@ pub const ConcurrentEvent = struct {
         }
     };
 
-    fn rangeOf(tensor: *const ggml.impl.c.ggml_tensor) Range {
-        const t: *const ggml.impl.c.ggml_tensor = if (tensor.view_src) |v| v else tensor;
+    fn rangeOf(tensor: *const ggml.impl.ggml_c.ggml_tensor) Range {
+        const t: *const ggml.impl.ggml_c.ggml_tensor = if (tensor.view_src) |v| v else tensor;
         const start: i64 = @intCast(@intFromPtr(t.data));
-        return .{ .start = start, .end = start + @as(i64, @intCast(ggml.impl.c.ggml_nbytes(t))) };
+        return .{ .start = start, .end = start + @as(i64, @intCast(ggml.impl.ggml_c.ggml_nbytes(t))) };
     }
 
     /// Ports `ggml_cuda_concurrent_event`'s `is_valid` (graph.cuh:113 @b1b770d90):
     /// whether the branches write disjoint memory and read only within
     /// their own branch.
     pub fn isValid(self: *const ConcurrentEvent) bool {
-        var write_ranges = allocator.alloc(std.ArrayList(Range), @intCast(self.n_streams)) catch ggml.impl.abort("ggml-cuda: out of memory");
+        var write_ranges = std.heap.c_allocator.alloc(std.ArrayList(Range), @intCast(self.n_streams)) catch ggml.impl.abort("ggml-cuda: out of memory");
         defer {
-            for (write_ranges) |*w| w.deinit(allocator);
-            allocator.free(write_ranges);
+            for (write_ranges) |*w| w.deinit(std.heap.c_allocator);
+            std.heap.c_allocator.free(write_ranges);
         }
         for (write_ranges) |*w| w.* = .empty;
 
@@ -1127,7 +1123,7 @@ pub const ConcurrentEvent = struct {
             const r = rangeOf(kv.key_ptr.*);
             if ((r.start <= join.start and join.start < r.end) or (join.start <= r.start and r.start < join.end)) continue;
             // concurrent streams begin from 1
-            write_ranges[@intCast(kv.value_ptr.* - 1)].append(allocator, r) catch ggml.impl.abort("ggml-cuda: out of memory");
+            write_ranges[@intCast(kv.value_ptr.* - 1)].append(std.heap.c_allocator, r) catch ggml.impl.abort("ggml-cuda: out of memory");
         }
 
         for (write_ranges) |w| std.mem.sort(Range, w.items, {}, Range.lessThan);
@@ -1176,7 +1172,7 @@ pub const ConcurrentEvent = struct {
 
 /// Ports `ggml_cuda_stream_context` (graph.cuh:215 @b1b770d90).
 pub const StreamContext = struct {
-    concurrent_events: std.AutoArrayHashMapUnmanaged(*const ggml.impl.c.ggml_tensor, ConcurrentEvent) = .empty,
+    concurrent_events: std.AutoArrayHashMapUnmanaged(*const ggml.impl.ggml_c.ggml_tensor, ConcurrentEvent) = .empty,
 
     pub fn reset(self: *StreamContext) void {
         for (self.concurrent_events.values()) |*e| e.deinit();
@@ -1185,7 +1181,7 @@ pub const StreamContext = struct {
 
     pub fn deinit(self: *StreamContext) void {
         self.reset();
-        self.concurrent_events.deinit(allocator);
+        self.concurrent_events.deinit(std.heap.c_allocator);
     }
 };
 
@@ -1199,14 +1195,14 @@ pub const StreamContext = struct {
 pub const Context = struct {
     device: c_int,
     name_buf: [16:0]u8 = @splat(0),
-    copy_event: cu.cudaEvent_t = null,
+    copy_event: cuda_c.cudaEvent_t = null,
 
-    streams: [max_devices][max_streams]cu.cudaStream_t = @splat(@splat(null)),
-    cublas_handles: [max_devices][max_streams]cu.cublasHandle_t = @splat(@splat(null)),
+    streams: [max_devices][max_streams]cuda_c.cudaStream_t = @splat(@splat(null)),
+    cublas_handles: [max_devices][max_streams]cuda_c.cublasHandle_t = @splat(@splat(null)),
     cublas_workspaces: [max_devices][max_streams]?*anyopaque = @splat(@splat(null)),
     cublas_workspace_sizes: [max_devices]usize = @splat(0),
     /// For `fp8.zig`'s cuBLASLt matmul.
-    cublaslt_handles: [max_devices]cu.cublasLtHandle_t = @splat(null),
+    cublaslt_handles: [max_devices]cuda_c.cublasLtHandle_t = @splat(null),
 
     curr_stream_no: c_int = 0,
 
@@ -1223,7 +1219,7 @@ pub const Context = struct {
     /// Ports `ggml_backend_cuda_context`'s constructor (ggml-cuda.cu:789
     /// @b1b770d90): `name(GGML_CUDA_NAME + std::to_string(device))`.
     pub fn create(device: c_int) *Context {
-        const self = allocator.create(Context) catch ggml.impl.abort("ggml-cuda: out of memory");
+        const self = std.heap.c_allocator.create(Context) catch ggml.impl.abort("ggml-cuda: out of memory");
         self.* = .{ .device = device };
         _ = std.fmt.bufPrintSentinel(&self.name_buf, name ++ "{d}", .{device}, 0) catch unreachable;
         return self;
@@ -1237,14 +1233,14 @@ pub const Context = struct {
     pub fn destroy(self: *Context) void {
         lock.waitIdle();
 
-        if (self.copy_event != null) cudaCheck(cu.cudaEventDestroy(self.copy_event), "cudaEventDestroy(copy_event)", @src());
+        if (self.copy_event != null) cudaCheck(cuda_c.cudaEventDestroy(self.copy_event), "cudaEventDestroy(copy_event)", @src());
         for (0..max_devices) |i| {
             for (0..max_streams) |j| {
-                if (self.streams[i][j] != null) cudaCheck(cu.cudaStreamDestroy(self.streams[i][j]), "cudaStreamDestroy(streams[i][j])", @src());
-                if (self.cublas_handles[i][j] != null) cublasCheck(cu.cublasDestroy(self.cublas_handles[i][j]), "cublasDestroy(cublas_handles[i][j])", @src());
-                if (self.cublas_workspaces[i][j] != null) cudaCheck(cu.cudaFree(self.cublas_workspaces[i][j]), "cudaFree(cublas_workspaces[i][j])", @src());
+                if (self.streams[i][j] != null) cudaCheck(cuda_c.cudaStreamDestroy(self.streams[i][j]), "cudaStreamDestroy(streams[i][j])", @src());
+                if (self.cublas_handles[i][j] != null) cublasCheck(cuda_c.cublasDestroy(self.cublas_handles[i][j]), "cublasDestroy(cublas_handles[i][j])", @src());
+                if (self.cublas_workspaces[i][j] != null) cudaCheck(cuda_c.cudaFree(self.cublas_workspaces[i][j]), "cudaFree(cublas_workspaces[i][j])", @src());
             }
-            if (self.cublaslt_handles[i] != null) cublasCheck(cu.cublasLtDestroy(self.cublaslt_handles[i]), "cublasLtDestroy(cublaslt_handles[i])", @src());
+            if (self.cublaslt_handles[i] != null) cublasCheck(cuda_c.cublasLtDestroy(self.cublaslt_handles[i]), "cublasLtDestroy(cublaslt_handles[i])", @src());
         }
         // The members the C destroys implicitly, after the body: the
         // concurrent stream context, the pools and the CUDA graphs, in
@@ -1253,23 +1249,23 @@ pub const Context = struct {
             for (0..max_streams) |j| {
                 if (self.pools[i][j]) |p| {
                     p.deinit();
-                    allocator.destroy(p);
+                    std.heap.c_allocator.destroy(p);
                 }
             }
         }
         self.concurrent_stream_context.deinit();
         for (self.cuda_graphs.values()) |g| {
             g.deinit();
-            allocator.destroy(g);
+            std.heap.c_allocator.destroy(g);
         }
-        self.cuda_graphs.deinit(allocator);
-        allocator.destroy(self);
+        self.cuda_graphs.deinit(std.heap.c_allocator);
+        std.heap.c_allocator.destroy(self);
     }
 
     /// Ports `ggml_backend_cuda_context`'s `cuda_graph` (ggml-cuda.cu:796 @b1b770d90)
     /// with its defaulted `time_now = ggml_time_us()`.
     pub fn cudaGraph(self: *Context, first_node_ptr: ?*const anyopaque) *Graph {
-        return self.cudaGraphAt(first_node_ptr, ggml.impl.c.ggml_time_us());
+        return self.cudaGraphAt(first_node_ptr, ggml.impl.ggml_c.ggml_time_us());
     }
 
     /// Ports `ggml_backend_cuda_context`'s `cuda_graph` (ggml-cuda.cu:796 @b1b770d90)
@@ -1290,7 +1286,7 @@ pub const Context = struct {
                 const g = self.cuda_graphs.values()[i];
                 if (key != first_node_ptr and time_now - g.last_used_time >= 10_000_000) {
                     g.deinit();
-                    allocator.destroy(g);
+                    std.heap.c_allocator.destroy(g);
                     self.cuda_graphs.swapRemoveAt(i);
                 } else {
                     i += 1;
@@ -1298,9 +1294,9 @@ pub const Context = struct {
             }
         }
 
-        const gop = self.cuda_graphs.getOrPut(allocator, first_node_ptr) catch ggml.impl.abort("ggml-cuda: out of memory");
+        const gop = self.cuda_graphs.getOrPut(std.heap.c_allocator, first_node_ptr) catch ggml.impl.abort("ggml-cuda: out of memory");
         if (!gop.found_existing) {
-            gop.value_ptr.* = allocator.create(Graph) catch ggml.impl.abort("ggml-cuda: out of memory");
+            gop.value_ptr.* = std.heap.c_allocator.create(Graph) catch ggml.impl.abort("ggml-cuda: out of memory");
             gop.value_ptr.*.* = .{};
         }
         gop.value_ptr.*.last_used_time = time_now;
@@ -1320,45 +1316,45 @@ pub const Context = struct {
     }
 
     /// Ports `ggml_backend_cuda_context`'s two-argument `stream` (common.cuh:1392 @b1b770d90).
-    pub fn streamFor(self: *Context, device: c_int, stream_no: c_int) cu.cudaStream_t {
+    pub fn streamFor(self: *Context, device: c_int, stream_no: c_int) cuda_c.cudaStream_t {
         const s = &self.streams[@intCast(device)][@intCast(stream_no)];
         if (s.* == null) {
             setDevice(device);
-            cudaCheck(cu.cudaStreamCreateWithFlags(s, cu.cudaStreamNonBlocking), "cudaStreamCreateWithFlags(&streams[device][stream], cudaStreamNonBlocking)", @src());
+            cudaCheck(cuda_c.cudaStreamCreateWithFlags(s, cuda_c.cudaStreamNonBlocking), "cudaStreamCreateWithFlags(&streams[device][stream], cudaStreamNonBlocking)", @src());
         }
         return s.*;
     }
 
     /// Ports `ggml_backend_cuda_context`'s argument-free `stream` (common.cuh:1400 @b1b770d90).
-    pub fn stream(self: *Context) cu.cudaStream_t {
+    pub fn stream(self: *Context) cuda_c.cudaStream_t {
         return self.streamFor(self.device, self.curr_stream_no);
     }
 
     /// Ports `ggml_backend_cuda_context`'s `cublas_handle` (common.cuh:1404 @b1b770d90).
-    pub fn cublasHandle(self: *Context) cu.cublasHandle_t {
+    pub fn cublasHandle(self: *Context) cuda_c.cublasHandle_t {
         const d: usize = @intCast(self.device);
         const s: usize = @intCast(self.curr_stream_no);
         if (self.cublas_handles[d][s] == null) {
             setDevice(self.device);
-            cublasCheck(cu.cublasCreate_v2(&self.cublas_handles[d][s]), "cublasCreate(&cublas_handles[device][curr_stream_no])", @src());
-            cublasCheck(cu.cublasSetMathMode(self.cublas_handles[d][s], cu.CUBLAS_TF32_TENSOR_OP_MATH), "cublasSetMathMode(cublas_handles[device][curr_stream_no], CUBLAS_TF32_TENSOR_OP_MATH)", @src());
-            cublasCheck(cu.cublasSetStream_v2(self.cublas_handles[d][s], self.stream()), "cublasSetStream(cublas_handles[device][curr_stream_no], stream())", @src());
+            cublasCheck(cuda_c.cublasCreate_v2(&self.cublas_handles[d][s]), "cublasCreate(&cublas_handles[device][curr_stream_no])", @src());
+            cublasCheck(cuda_c.cublasSetMathMode(self.cublas_handles[d][s], cuda_c.CUBLAS_TF32_TENSOR_OP_MATH), "cublasSetMathMode(cublas_handles[device][curr_stream_no], CUBLAS_TF32_TENSOR_OP_MATH)", @src());
+            cublasCheck(cuda_c.cublasSetStream_v2(self.cublas_handles[d][s], self.stream()), "cublasSetStream(cublas_handles[device][curr_stream_no], stream())", @src());
             if (self.cublas_workspace_sizes[d] == 0) {
                 const x = info().devices[d].cc;
                 self.cublas_workspace_sizes[d] = if (x >= cc.hopper) 32 * 1024 * 1024 else 4 * 1024 * 1024;
             }
-            cudaCheck(cu.cudaMalloc(&self.cublas_workspaces[d][s], self.cublas_workspace_sizes[d]), "cudaMalloc(&cublas_workspaces[device][curr_stream_no], cublas_workspace_sizes[device])", @src());
-            cublasCheck(cu.cublasSetWorkspace_v2(self.cublas_handles[d][s], self.cublas_workspaces[d][s], self.cublas_workspace_sizes[d]), "cublasSetWorkspace(cublas_handles[device][curr_stream_no], cublas_workspaces[device][curr_stream_no], cublas_workspace_sizes[device])", @src());
+            cudaCheck(cuda_c.cudaMalloc(&self.cublas_workspaces[d][s], self.cublas_workspace_sizes[d]), "cudaMalloc(&cublas_workspaces[device][curr_stream_no], cublas_workspace_sizes[device])", @src());
+            cublasCheck(cuda_c.cublasSetWorkspace_v2(self.cublas_handles[d][s], self.cublas_workspaces[d][s], self.cublas_workspace_sizes[d]), "cublasSetWorkspace(cublas_handles[device][curr_stream_no], cublas_workspaces[device][curr_stream_no], cublas_workspace_sizes[device])", @src());
         }
         return self.cublas_handles[d][s];
     }
 
     /// Ports `ggml_backend_cuda_context`'s `cublaslt_handle` (common.cuh:1427 @b1b770d90).
-    pub fn cublasltHandle(self: *Context) cu.cublasLtHandle_t {
+    pub fn cublasltHandle(self: *Context) cuda_c.cublasLtHandle_t {
         const d: usize = @intCast(self.device);
         if (self.cublaslt_handles[d] == null) {
             setDevice(self.device);
-            cublasCheck(cu.cublasLtCreate(&self.cublaslt_handles[d]), "cublasLtCreate(&cublaslt_handles[device])", @src());
+            cublasCheck(cuda_c.cublasLtCreate(&self.cublaslt_handles[d]), "cublasLtCreate(&cublaslt_handles[device])", @src());
         }
         return self.cublaslt_handles[d];
     }
@@ -1419,18 +1415,18 @@ pub const lock = struct {
 /// The `shared_*` fields carry the shared expert MMVQ computes
 /// beside the routed ones (`fusion.zig`'s `matchSharedExpert`).
 pub const MmFusionArgsHost = struct {
-    x_bias: ?*const ggml.impl.c.ggml_tensor = null,
-    gate: ?*const ggml.impl.c.ggml_tensor = null,
-    gate_bias: ?*const ggml.impl.c.ggml_tensor = null,
-    x_scale: ?*const ggml.impl.c.ggml_tensor = null,
-    gate_scale: ?*const ggml.impl.c.ggml_tensor = null,
-    glu_op: ggml.impl.c.enum_ggml_glu_op = 0,
+    x_bias: ?*const ggml.impl.ggml_c.ggml_tensor = null,
+    gate: ?*const ggml.impl.ggml_c.ggml_tensor = null,
+    gate_bias: ?*const ggml.impl.ggml_c.ggml_tensor = null,
+    x_scale: ?*const ggml.impl.ggml_c.ggml_tensor = null,
+    gate_scale: ?*const ggml.impl.ggml_c.ggml_tensor = null,
+    glu_op: ggml.impl.ggml_c.enum_ggml_glu_op = 0,
     glu_limit: f32 = 0.0,
     /// The `src1` precision requested by the fused `MUL_MAT`s (MMQ).
-    prec_src1: ggml.impl.c.enum_ggml_prec = ggml.impl.c.GGML_PREC_UNDEFINED,
-    shared_up: ?*const ggml.impl.c.ggml_tensor = null,
-    shared_gate: ?*const ggml.impl.c.ggml_tensor = null,
-    shared_dst: ?*ggml.impl.c.ggml_tensor = null,
+    prec_src1: ggml.impl.ggml_c.enum_ggml_prec = ggml.impl.ggml_c.GGML_PREC_UNDEFINED,
+    shared_up: ?*const ggml.impl.ggml_c.ggml_tensor = null,
+    shared_gate: ?*const ggml.impl.ggml_c.ggml_tensor = null,
+    shared_dst: ?*ggml.impl.ggml_c.ggml_tensor = null,
 };
 
 /// Ports `ggml_cuda_mm_fusion_args_device` (common.cuh:1466 @b1b770d90).
@@ -1443,7 +1439,7 @@ pub const MmFusionArgsDevice = extern struct {
     gate_bias: ?*const anyopaque = null,
     x_scale: ?*const anyopaque = null,
     gate_scale: ?*const anyopaque = null,
-    glu_op: ggml.impl.c.enum_ggml_glu_op = 0,
+    glu_op: ggml.impl.ggml_c.enum_ggml_glu_op = 0,
     glu_limit: f32 = 0.0,
     shared_up: ?*const anyopaque = null,
     shared_gate: ?*const anyopaque = null,
@@ -1464,55 +1460,55 @@ pub const MmFusionArgsDevice = extern struct {
 /// `GGML_COMMON_DECL_C`, which leaves them out.
 pub const q = struct {
     pub const QR1_0 = 1;
-    pub const QI1_0 = ggml.impl.c.QK1_0 / 32;
+    pub const QI1_0 = ggml.impl.ggml_c.QK1_0 / 32;
     pub const QR2_0 = 1;
-    pub const QI2_0 = ggml.impl.c.QK2_0 / 32;
+    pub const QI2_0 = ggml.impl.ggml_c.QK2_0 / 32;
     pub const QR4_0 = 2;
-    pub const QI4_0 = ggml.impl.c.QK4_0 / (4 * QR4_0);
+    pub const QI4_0 = ggml.impl.ggml_c.QK4_0 / (4 * QR4_0);
     pub const QR4_1 = 2;
-    pub const QI4_1 = ggml.impl.c.QK4_1 / (4 * QR4_1);
+    pub const QI4_1 = ggml.impl.ggml_c.QK4_1 / (4 * QR4_1);
     pub const QR_MXFP4 = 2;
-    pub const QI_MXFP4 = ggml.impl.c.QK_MXFP4 / (4 * QR_MXFP4);
+    pub const QI_MXFP4 = ggml.impl.ggml_c.QK_MXFP4 / (4 * QR_MXFP4);
     pub const QR_NVFP4 = 2;
-    pub const QI_NVFP4 = ggml.impl.c.QK_NVFP4 / (4 * QR_NVFP4);
+    pub const QI_NVFP4 = ggml.impl.ggml_c.QK_NVFP4 / (4 * QR_NVFP4);
     pub const QR5_0 = 2;
-    pub const QI5_0 = ggml.impl.c.QK5_0 / (4 * QR5_0);
+    pub const QI5_0 = ggml.impl.ggml_c.QK5_0 / (4 * QR5_0);
     pub const QR5_1 = 2;
-    pub const QI5_1 = ggml.impl.c.QK5_1 / (4 * QR5_1);
+    pub const QI5_1 = ggml.impl.ggml_c.QK5_1 / (4 * QR5_1);
     pub const QR8_0 = 1;
-    pub const QI8_0 = ggml.impl.c.QK8_0 / (4 * QR8_0);
+    pub const QI8_0 = ggml.impl.ggml_c.QK8_0 / (4 * QR8_0);
     pub const QR8_1 = 1;
-    pub const QI8_1 = ggml.impl.c.QK8_1 / (4 * QR8_1);
+    pub const QI8_1 = ggml.impl.ggml_c.QK8_1 / (4 * QR8_1);
     pub const QR2_K = 4;
-    pub const QI2_K = ggml.impl.c.QK_K / (4 * QR2_K);
+    pub const QI2_K = ggml.impl.ggml_c.QK_K / (4 * QR2_K);
     pub const QR3_K = 4;
-    pub const QI3_K = ggml.impl.c.QK_K / (4 * QR3_K);
+    pub const QI3_K = ggml.impl.ggml_c.QK_K / (4 * QR3_K);
     pub const QR4_K = 2;
-    pub const QI4_K = ggml.impl.c.QK_K / (4 * QR4_K);
+    pub const QI4_K = ggml.impl.ggml_c.QK_K / (4 * QR4_K);
     pub const QR5_K = 2;
-    pub const QI5_K = ggml.impl.c.QK_K / (4 * QR5_K);
+    pub const QI5_K = ggml.impl.ggml_c.QK_K / (4 * QR5_K);
     pub const QR6_K = 2;
-    pub const QI6_K = ggml.impl.c.QK_K / (4 * QR6_K);
+    pub const QI6_K = ggml.impl.ggml_c.QK_K / (4 * QR6_K);
     pub const QR2_XXS = 4;
-    pub const QI2_XXS = ggml.impl.c.QK_K / (4 * QR2_XXS);
+    pub const QI2_XXS = ggml.impl.ggml_c.QK_K / (4 * QR2_XXS);
     pub const QR2_XS = 4;
-    pub const QI2_XS = ggml.impl.c.QK_K / (4 * QR2_XS);
+    pub const QI2_XS = ggml.impl.ggml_c.QK_K / (4 * QR2_XS);
     pub const QR2_S = 4;
-    pub const QI2_S = ggml.impl.c.QK_K / (4 * QR2_S);
+    pub const QI2_S = ggml.impl.ggml_c.QK_K / (4 * QR2_S);
     pub const QR3_XXS = 4;
-    pub const QI3_XXS = ggml.impl.c.QK_K / (4 * QR3_XXS);
+    pub const QI3_XXS = ggml.impl.ggml_c.QK_K / (4 * QR3_XXS);
     pub const QR3_XS = 4;
-    pub const QI3_XS = ggml.impl.c.QK_K / (4 * QR3_XS);
+    pub const QI3_XS = ggml.impl.ggml_c.QK_K / (4 * QR3_XS);
     pub const QR1_S = 8;
-    pub const QI1_S = ggml.impl.c.QK_K / (4 * QR1_S);
+    pub const QI1_S = ggml.impl.ggml_c.QK_K / (4 * QR1_S);
     pub const QR1_M = 8;
-    pub const QI1_M = ggml.impl.c.QK_K / (4 * QR1_M);
+    pub const QI1_M = ggml.impl.ggml_c.QK_K / (4 * QR1_M);
     pub const QR4_NL = 2;
-    pub const QI4_NL = ggml.impl.c.QK4_NL / (4 * QR4_NL);
+    pub const QI4_NL = ggml.impl.ggml_c.QK4_NL / (4 * QR4_NL);
     pub const QR4_XS = 2;
-    pub const QI4_XS = ggml.impl.c.QK_K / (4 * QR4_XS);
+    pub const QI4_XS = ggml.impl.ggml_c.QK_K / (4 * QR4_XS);
     pub const QR3_S = 4;
-    pub const QI3_S = ggml.impl.c.QK_K / (4 * QR3_S);
+    pub const QI3_S = ggml.impl.ggml_c.QK_K / (4 * QR3_S);
 };
 
 /// Ports `ggml_cuda_type_traits` (common.cuh:1057 @b1b770d90): `qk`, `qr`
@@ -1521,32 +1517,32 @@ pub const q = struct {
 /// device code reads it (`mul_mat_vec_q`'s DGX Spark prefetch).
 pub const TypeTraits = struct { qk: comptime_int, qr: comptime_int, qi: comptime_int };
 
-pub fn typeTraits(comptime t: ggml.impl.c.enum_ggml_type) TypeTraits {
+pub fn typeTraits(comptime t: ggml.impl.ggml_c.enum_ggml_type) TypeTraits {
     return switch (t) {
-        ggml.impl.c.GGML_TYPE_F16 => .{ .qk = 1, .qr = 1, .qi = 0 },
-        ggml.impl.c.GGML_TYPE_Q1_0 => .{ .qk = ggml.impl.c.QK1_0, .qr = q.QR1_0, .qi = q.QI1_0 },
-        ggml.impl.c.GGML_TYPE_Q2_0 => .{ .qk = ggml.impl.c.QK2_0, .qr = q.QR2_0, .qi = q.QI2_0 },
-        ggml.impl.c.GGML_TYPE_Q4_0 => .{ .qk = ggml.impl.c.QK4_0, .qr = q.QR4_0, .qi = q.QI4_0 },
-        ggml.impl.c.GGML_TYPE_Q4_1 => .{ .qk = ggml.impl.c.QK4_1, .qr = q.QR4_1, .qi = q.QI4_1 },
-        ggml.impl.c.GGML_TYPE_Q5_0 => .{ .qk = ggml.impl.c.QK5_0, .qr = q.QR5_0, .qi = q.QI5_0 },
-        ggml.impl.c.GGML_TYPE_Q5_1 => .{ .qk = ggml.impl.c.QK5_1, .qr = q.QR5_1, .qi = q.QI5_1 },
-        ggml.impl.c.GGML_TYPE_Q8_0 => .{ .qk = ggml.impl.c.QK8_0, .qr = q.QR8_0, .qi = q.QI8_0 },
-        ggml.impl.c.GGML_TYPE_MXFP4 => .{ .qk = ggml.impl.c.QK_MXFP4, .qr = q.QR_MXFP4, .qi = q.QI_MXFP4 },
-        ggml.impl.c.GGML_TYPE_NVFP4 => .{ .qk = ggml.impl.c.QK_NVFP4, .qr = q.QR_NVFP4, .qi = q.QI_NVFP4 },
-        ggml.impl.c.GGML_TYPE_Q2_K => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR2_K, .qi = q.QI2_K },
-        ggml.impl.c.GGML_TYPE_Q3_K => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR3_K, .qi = q.QI3_K },
-        ggml.impl.c.GGML_TYPE_Q4_K => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR4_K, .qi = q.QI4_K },
-        ggml.impl.c.GGML_TYPE_Q5_K => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR5_K, .qi = q.QI5_K },
-        ggml.impl.c.GGML_TYPE_Q6_K => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR6_K, .qi = q.QI6_K },
-        ggml.impl.c.GGML_TYPE_IQ2_XXS => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR2_XXS, .qi = q.QI2_XXS },
-        ggml.impl.c.GGML_TYPE_IQ2_XS => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR2_XS, .qi = q.QI2_XS },
-        ggml.impl.c.GGML_TYPE_IQ2_S => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR2_S, .qi = q.QI2_S },
-        ggml.impl.c.GGML_TYPE_IQ3_XXS => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR3_XXS, .qi = q.QI3_XXS },
-        ggml.impl.c.GGML_TYPE_IQ1_S => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR1_S, .qi = q.QI1_S },
-        ggml.impl.c.GGML_TYPE_IQ1_M => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR1_M, .qi = q.QI1_M },
-        ggml.impl.c.GGML_TYPE_IQ4_NL => .{ .qk = ggml.impl.c.QK4_NL, .qr = q.QR4_NL, .qi = q.QI4_NL },
-        ggml.impl.c.GGML_TYPE_IQ4_XS => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR4_XS, .qi = q.QI4_XS },
-        ggml.impl.c.GGML_TYPE_IQ3_S => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR3_S, .qi = q.QI3_S },
+        ggml.impl.ggml_c.GGML_TYPE_F16 => .{ .qk = 1, .qr = 1, .qi = 0 },
+        ggml.impl.ggml_c.GGML_TYPE_Q1_0 => .{ .qk = ggml.impl.ggml_c.QK1_0, .qr = q.QR1_0, .qi = q.QI1_0 },
+        ggml.impl.ggml_c.GGML_TYPE_Q2_0 => .{ .qk = ggml.impl.ggml_c.QK2_0, .qr = q.QR2_0, .qi = q.QI2_0 },
+        ggml.impl.ggml_c.GGML_TYPE_Q4_0 => .{ .qk = ggml.impl.ggml_c.QK4_0, .qr = q.QR4_0, .qi = q.QI4_0 },
+        ggml.impl.ggml_c.GGML_TYPE_Q4_1 => .{ .qk = ggml.impl.ggml_c.QK4_1, .qr = q.QR4_1, .qi = q.QI4_1 },
+        ggml.impl.ggml_c.GGML_TYPE_Q5_0 => .{ .qk = ggml.impl.ggml_c.QK5_0, .qr = q.QR5_0, .qi = q.QI5_0 },
+        ggml.impl.ggml_c.GGML_TYPE_Q5_1 => .{ .qk = ggml.impl.ggml_c.QK5_1, .qr = q.QR5_1, .qi = q.QI5_1 },
+        ggml.impl.ggml_c.GGML_TYPE_Q8_0 => .{ .qk = ggml.impl.ggml_c.QK8_0, .qr = q.QR8_0, .qi = q.QI8_0 },
+        ggml.impl.ggml_c.GGML_TYPE_MXFP4 => .{ .qk = ggml.impl.ggml_c.QK_MXFP4, .qr = q.QR_MXFP4, .qi = q.QI_MXFP4 },
+        ggml.impl.ggml_c.GGML_TYPE_NVFP4 => .{ .qk = ggml.impl.ggml_c.QK_NVFP4, .qr = q.QR_NVFP4, .qi = q.QI_NVFP4 },
+        ggml.impl.ggml_c.GGML_TYPE_Q2_K => .{ .qk = ggml.impl.ggml_c.QK_K, .qr = q.QR2_K, .qi = q.QI2_K },
+        ggml.impl.ggml_c.GGML_TYPE_Q3_K => .{ .qk = ggml.impl.ggml_c.QK_K, .qr = q.QR3_K, .qi = q.QI3_K },
+        ggml.impl.ggml_c.GGML_TYPE_Q4_K => .{ .qk = ggml.impl.ggml_c.QK_K, .qr = q.QR4_K, .qi = q.QI4_K },
+        ggml.impl.ggml_c.GGML_TYPE_Q5_K => .{ .qk = ggml.impl.ggml_c.QK_K, .qr = q.QR5_K, .qi = q.QI5_K },
+        ggml.impl.ggml_c.GGML_TYPE_Q6_K => .{ .qk = ggml.impl.ggml_c.QK_K, .qr = q.QR6_K, .qi = q.QI6_K },
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS => .{ .qk = ggml.impl.ggml_c.QK_K, .qr = q.QR2_XXS, .qi = q.QI2_XXS },
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XS => .{ .qk = ggml.impl.ggml_c.QK_K, .qr = q.QR2_XS, .qi = q.QI2_XS },
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_S => .{ .qk = ggml.impl.ggml_c.QK_K, .qr = q.QR2_S, .qi = q.QI2_S },
+        ggml.impl.ggml_c.GGML_TYPE_IQ3_XXS => .{ .qk = ggml.impl.ggml_c.QK_K, .qr = q.QR3_XXS, .qi = q.QI3_XXS },
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_S => .{ .qk = ggml.impl.ggml_c.QK_K, .qr = q.QR1_S, .qi = q.QI1_S },
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_M => .{ .qk = ggml.impl.ggml_c.QK_K, .qr = q.QR1_M, .qi = q.QI1_M },
+        ggml.impl.ggml_c.GGML_TYPE_IQ4_NL => .{ .qk = ggml.impl.ggml_c.QK4_NL, .qr = q.QR4_NL, .qi = q.QI4_NL },
+        ggml.impl.ggml_c.GGML_TYPE_IQ4_XS => .{ .qk = ggml.impl.ggml_c.QK_K, .qr = q.QR4_XS, .qi = q.QI4_XS },
+        ggml.impl.ggml_c.GGML_TYPE_IQ3_S => .{ .qk = ggml.impl.ggml_c.QK_K, .qr = q.QR3_S, .qi = q.QI3_S },
         else => @compileError("no ggml_cuda_type_traits specialisation"),
     };
 }

@@ -30,10 +30,10 @@ fn oom() noreturn {
 
 /// Mirrors `llama_memory_params` (llama-memory.h:18 @b1b770d90).
 pub const Params = struct {
-    type_k: mod.impl.c.enum_ggml_type,
-    type_v: mod.impl.c.enum_ggml_type,
+    type_k: mod.impl.llama_c.enum_ggml_type,
+    type_v: mod.impl.llama_c.enum_ggml_type,
     swa_full: bool,
-    ctx_type: mod.impl.c.enum_llama_context_type,
+    ctx_type: mod.impl.llama_c.enum_llama_context_type,
     /// `mem_other`: the memory this one shares cells with, or null.
     mem_other: ?Memory,
     /// Only simulate the memory allocations.
@@ -45,7 +45,7 @@ pub const Params = struct {
 /// buffers are attached instead of allocating the tensor data, so the memory
 /// use can still be measured.
 pub const Bufs = struct {
-    pub const Entry = struct { ctx: *mod.impl.c.ggml_context, buf: mod.impl.c.ggml_backend_buffer_t };
+    pub const Entry = struct { ctx: *mod.impl.llama_c.ggml_context, buf: mod.impl.llama_c.ggml_backend_buffer_t };
 
     bufs: std.ArrayList(Entry) = .empty,
     no_alloc: bool,
@@ -59,16 +59,16 @@ pub const Bufs = struct {
     /// - `exc`: receives the failure.
     ///
     /// Return: the buffer, the caller's; or `error.Thrown`.
-    pub fn allocBuf(ctx: *mod.impl.c.ggml_context, buft: mod.impl.c.ggml_backend_buffer_type_t, no_alloc: bool, name: [*:0]const u8, exc: *mod.impl.Exception) mod.impl.Thrown!mod.impl.c.ggml_backend_buffer_t {
-        var buf: mod.impl.c.ggml_backend_buffer_t = null;
+    pub fn allocBuf(ctx: *mod.impl.llama_c.ggml_context, buft: mod.impl.llama_c.ggml_backend_buffer_type_t, no_alloc: bool, name: [*:0]const u8, exc: *mod.impl.Exception) mod.impl.Thrown!mod.impl.llama_c.ggml_backend_buffer_t {
+        var buf: mod.impl.llama_c.ggml_backend_buffer_t = null;
         if (no_alloc) {
-            buf = mod.impl.c.ggml_backend_buft_alloc_buffer(buft, 0); // dummy buffer
-            var t: ?*mod.impl.c.ggml_tensor = mod.impl.c.ggml_get_first_tensor(ctx);
+            buf = mod.impl.llama_c.ggml_backend_buft_alloc_buffer(buft, 0); // dummy buffer
+            var t: ?*mod.impl.llama_c.ggml_tensor = mod.impl.llama_c.ggml_get_first_tensor(ctx);
             // a dummy buffer, so that the backend scheduler won't try to
             // allocate the tensors
-            while (t) |cur| : (t = mod.impl.c.ggml_get_next_tensor(ctx, cur)) cur.buffer = buf;
+            while (t) |cur| : (t = mod.impl.llama_c.ggml_get_next_tensor(ctx, cur)) cur.buffer = buf;
         } else {
-            buf = mod.impl.c.ggml_backend_alloc_ctx_tensors_from_buft(ctx, buft); // real buffer
+            buf = mod.impl.llama_c.ggml_backend_alloc_ctx_tensors_from_buft(ctx, buft); // real buffer
         }
         if (buf == null) return exc.throw(.runtime_error, "failed to allocate buffer for {s}", .{name});
         return buf;
@@ -80,11 +80,11 @@ pub const Bufs = struct {
     /// `error.Thrown` it stays the caller's.
     ///
     /// Return: the buffer, for logging; borrowed.
-    pub fn emplace(self: *Bufs, ctx: *mod.impl.c.ggml_context, buft: mod.impl.c.ggml_backend_buffer_type_t, name: [*:0]const u8, exc: *mod.impl.Exception) mod.impl.Thrown!mod.impl.c.ggml_backend_buffer_t {
+    pub fn emplace(self: *Bufs, ctx: *mod.impl.llama_c.ggml_context, buft: mod.impl.llama_c.ggml_backend_buffer_type_t, name: [*:0]const u8, exc: *mod.impl.Exception) mod.impl.Thrown!mod.impl.llama_c.ggml_backend_buffer_t {
         const buf = try allocBuf(ctx, buft, self.no_alloc, name, exc);
 
         // initialize the buffer to avoid NaNs in the padding
-        mod.impl.c.ggml_backend_buffer_clear(buf, 0);
+        mod.impl.llama_c.ggml_backend_buffer_clear(buf, 0);
 
         self.bufs.append(std.heap.c_allocator, .{ .ctx = ctx, .buf = buf }) catch oom();
 
@@ -96,12 +96,12 @@ pub const Bufs = struct {
     /// simulated sizes if `no_alloc` is set.
     pub fn memoryBreakdown(self: *const Bufs, out: *std.ArrayList(BuftSize)) void {
         for (self.bufs.items) |e| {
-            const buft = mod.impl.c.ggml_backend_buffer_get_type(e.buf);
+            const buft = mod.impl.llama_c.ggml_backend_buffer_get_type(e.buf);
             if (self.no_alloc) {
-                mod.impl.assert(mod.impl.c.ggml_backend_buffer_get_base(e.buf) == null, "llama-memory.cpp", 106, "ggml_backend_buffer_get_base(buf.get()) == nullptr");
-                addBuftSize(out, buft, mod.impl.c.ggml_backend_alloc_ctx_tensors_from_buft_size(e.ctx, buft));
+                mod.impl.assert(mod.impl.llama_c.ggml_backend_buffer_get_base(e.buf) == null, "llama-memory.cpp", 106, "ggml_backend_buffer_get_base(buf.get()) == nullptr");
+                addBuftSize(out, buft, mod.impl.llama_c.ggml_backend_alloc_ctx_tensors_from_buft_size(e.ctx, buft));
             } else {
-                addBuftSize(out, buft, mod.impl.c.ggml_backend_buffer_get_size(e.buf));
+                addBuftSize(out, buft, mod.impl.llama_c.ggml_backend_buffer_get_size(e.buf));
             }
         }
     }
@@ -109,8 +109,8 @@ pub const Bufs = struct {
     /// Frees every buffer and context.
     pub fn deinit(self: *Bufs) void {
         for (self.bufs.items) |e| {
-            mod.impl.c.ggml_backend_buffer_free(e.buf);
-            mod.impl.c.ggml_free(e.ctx);
+            mod.impl.llama_c.ggml_backend_buffer_free(e.buf);
+            mod.impl.llama_c.ggml_free(e.ctx);
         }
         self.bufs.deinit(std.heap.c_allocator);
     }
@@ -152,7 +152,7 @@ pub fn statusIsFail(status: Status) bool {
 /// One entry of `memory_breakdown`: bytes per buffer type, in the
 /// `std`'s `map`'s pointer order.
 pub const BuftSize = struct {
-    buft: mod.impl.c.ggml_backend_buffer_type_t,
+    buft: mod.impl.llama_c.ggml_backend_buffer_type_t,
     size: usize,
 };
 
@@ -160,7 +160,7 @@ pub const BuftSize = struct {
 /// `std::map<ggml_backend_buffer_type_t, size_t>::operator[]` does.
 ///
 /// Return: nothing.
-pub fn addBuftSize(list: *std.ArrayList(BuftSize), buft: mod.impl.c.ggml_backend_buffer_type_t, size: usize) void {
+pub fn addBuftSize(list: *std.ArrayList(BuftSize), buft: mod.impl.llama_c.ggml_backend_buffer_type_t, size: usize) void {
     var pos: usize = 0;
     while (pos < list.items.len) : (pos += 1) {
         if (list.items[pos].buft == buft) {
@@ -335,7 +335,7 @@ pub const LayerMap = struct {
 /// write visits.
 const BuffersWriter = struct {
     /// `std::set<ggml_backend_buffer_t>`: kept sorted by address.
-    buffers: std.ArrayList(mod.impl.c.ggml_backend_buffer_t) = .empty,
+    buffers: std.ArrayList(mod.impl.llama_c.ggml_backend_buffer_t) = .empty,
     size: usize = 0,
 
     fn write(ptr: *anyopaque, src: []const u8, _: *mod.impl.Exception) mod.impl.Thrown!void {
@@ -343,7 +343,7 @@ const BuffersWriter = struct {
         self.size += src.len;
     }
 
-    fn writeTensor(ptr: *anyopaque, tensor: *const mod.impl.c.ggml_tensor, _: usize, n: usize, _: *mod.impl.Exception) mod.impl.Thrown!void {
+    fn writeTensor(ptr: *anyopaque, tensor: *const mod.impl.llama_c.ggml_tensor, _: usize, n: usize, _: *mod.impl.Exception) mod.impl.Thrown!void {
         const self: *BuffersWriter = @ptrCast(@alignCast(ptr));
         const buf = tensor.buffer;
         var at: usize = 0;
@@ -373,7 +373,7 @@ const BuffersWriter = struct {
 ///
 /// Return: the buffers in address order, the caller's to free with
 /// `impl.allocator`; or `error.Thrown`.
-pub fn getBuffers(mem: Memory, exc: *mod.impl.Exception) mod.impl.Thrown![]mod.impl.c.ggml_backend_buffer_t {
+pub fn getBuffers(mem: Memory, exc: *mod.impl.Exception) mod.impl.Thrown![]mod.impl.llama_c.ggml_backend_buffer_t {
     var writer: BuffersWriter = .{};
     errdefer writer.buffers.deinit(std.heap.c_allocator);
 

@@ -135,11 +135,11 @@ pub const F16ExtraData = struct {
 ///
 /// Return: the addresses of the two copies (0 when not needed) and the end
 /// of the region.
-pub fn getF16ExtraData(dst: *const ggml.impl.c.ggml_tensor, need_f16_K: bool, need_f16_V: bool) F16ExtraData {
-    ggml.impl.assert(dst.op == ggml.impl.c.GGML_OP_FLASH_ATTN_EXT, "dst->op == GGML_OP_FLASH_ATTN_EXT");
+pub fn getF16ExtraData(dst: *const ggml.impl.ggml_c.ggml_tensor, need_f16_K: bool, need_f16_V: bool) F16ExtraData {
+    ggml.impl.assert(dst.op == ggml.impl.ggml_c.GGML_OP_FLASH_ATTN_EXT, "dst->op == GGML_OP_FLASH_ATTN_EXT");
 
-    const K_opt: ?*const ggml.impl.c.ggml_tensor = dst.src[1];
-    const V_opt: ?*const ggml.impl.c.ggml_tensor = dst.src[2];
+    const K_opt: ?*const ggml.impl.ggml_c.ggml_tensor = dst.src[1];
+    const V_opt: ?*const ggml.impl.ggml_c.ggml_tensor = dst.src[2];
 
     ggml.impl.assert(K_opt != null, "K != nullptr");
     ggml.impl.assert(V_opt != null, "V != nullptr");
@@ -149,21 +149,21 @@ pub fn getF16ExtraData(dst: *const ggml.impl.c.ggml_tensor, need_f16_K: bool, ne
     const V_is_K_view = vIsKView(K, V);
 
     var data: F16ExtraData = .{};
-    data.end = @intFromPtr(dst.data) +% ggml.impl.c.ggml_nbytes(dst);
+    data.end = @intFromPtr(dst.data) +% ggml.impl.ggml_c.ggml_nbytes(dst);
 
-    if (need_f16_K and K.type != ggml.impl.c.GGML_TYPE_F16) {
+    if (need_f16_K and K.type != ggml.impl.ggml_c.GGML_TYPE_F16) {
         data.end = stdlib.num.pad(usize, data.end, 128);
         data.K = data.end;
-        data.end +%= @as(usize, @bitCast(ggml.impl.c.ggml_nelements(K))) *% ggml.impl.c.ggml_type_size(ggml.impl.c.GGML_TYPE_F16);
+        data.end +%= @as(usize, @bitCast(ggml.impl.ggml_c.ggml_nelements(K))) *% ggml.impl.ggml_c.ggml_type_size(ggml.impl.ggml_c.GGML_TYPE_F16);
     }
 
-    if (need_f16_V and V.type != ggml.impl.c.GGML_TYPE_F16) {
+    if (need_f16_V and V.type != ggml.impl.ggml_c.GGML_TYPE_F16) {
         if (V_is_K_view) {
             data.V = data.K;
         } else {
             data.end = stdlib.num.pad(usize, data.end, 128);
             data.V = data.end;
-            data.end +%= @as(usize, @bitCast(ggml.impl.c.ggml_nelements(V))) *% ggml.impl.c.ggml_type_size(ggml.impl.c.GGML_TYPE_F16);
+            data.end +%= @as(usize, @bitCast(ggml.impl.ggml_c.ggml_nelements(V))) *% ggml.impl.ggml_c.ggml_type_size(ggml.impl.ggml_c.GGML_TYPE_F16);
         }
     }
 
@@ -173,9 +173,9 @@ pub fn getF16ExtraData(dst: *const ggml.impl.c.ggml_tensor, need_f16_K: bool, ne
 /// `V->view_src && (V->view_src == K || (V->view_src == K->view_src &&
 /// V->view_offs == K->view_offs))`, as both `get_f16_extra_data` and
 /// `launch_fattn` spell it.
-fn vIsKView(K: *const ggml.impl.c.ggml_tensor, V: *const ggml.impl.c.ggml_tensor) bool {
-    const V_src: ?*const ggml.impl.c.ggml_tensor = V.view_src;
-    const K_src: ?*const ggml.impl.c.ggml_tensor = K.view_src;
+fn vIsKView(K: *const ggml.impl.ggml_c.ggml_tensor, V: *const ggml.impl.ggml_c.ggml_tensor) bool {
+    const V_src: ?*const ggml.impl.ggml_c.ggml_tensor = V.view_src;
+    const K_src: ?*const ggml.impl.ggml_c.ggml_tensor = K.view_src;
     return V_src != null and (V_src.? == K or (V_src == K_src and V.view_offs == K.view_offs));
 }
 
@@ -250,20 +250,20 @@ pub fn launchFattn(
     comptime ncols1: comptime_int,
     comptime ncols2: comptime_int,
     ctx: *ggml.cuda.common.Context,
-    dst: *ggml.impl.c.ggml_tensor,
+    dst: *ggml.impl.ggml_c.ggml_tensor,
     a: LaunchArgs,
 ) void {
     const ncols = ncols1 * ncols2;
 
-    const Q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const K = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const V = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
+    const Q = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const K = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const V = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]);
 
     const V_is_K_view = vIsKView(K, V);
 
-    const mask: ?*const ggml.impl.c.ggml_tensor = dst.src[3];
-    const sinks: ?*const ggml.impl.c.ggml_tensor = dst.src[4];
-    const kv_rows: ?*const ggml.impl.c.ggml_tensor = dst.src[5];
+    const mask: ?*const ggml.impl.ggml_c.ggml_tensor = dst.src[3];
+    const sinks: ?*const ggml.impl.ggml_c.ggml_tensor = dst.src[4];
+    const kv_rows: ?*const ggml.impl.ggml_c.ggml_tensor = dst.src[5];
 
     // with kv_rows the kernel iterates over the mask columns and reads K/V rows through kv_rows
     const n_kv_cols: i64 = if (kv_rows) |r| r.ne[0] else K.ne[1];
@@ -271,14 +271,14 @@ pub fn launchFattn(
 
     const KQV = dst;
 
-    ggml.impl.assert(Q.type == ggml.impl.c.GGML_TYPE_F32, "Q->type == GGML_TYPE_F32");
-    ggml.impl.assert(KQV.type == ggml.impl.c.GGML_TYPE_F32, "KQV->type == GGML_TYPE_F32");
+    ggml.impl.assert(Q.type == ggml.impl.ggml_c.GGML_TYPE_F32, "Q->type == GGML_TYPE_F32");
+    ggml.impl.assert(KQV.type == ggml.impl.ggml_c.GGML_TYPE_F32, "KQV->type == GGML_TYPE_F32");
 
-    ggml.impl.assert(Q.nb[0] == ggml.impl.c.ggml_element_size(Q), "Q->nb[0] == ggml_element_size(Q)");
-    ggml.impl.assert(K.nb[0] == ggml.impl.c.ggml_element_size(K), "K->nb[0] == ggml_element_size(K)");
-    ggml.impl.assert(V.nb[0] == ggml.impl.c.ggml_element_size(V), "V->nb[0] == ggml_element_size(V)");
+    ggml.impl.assert(Q.nb[0] == ggml.impl.ggml_c.ggml_element_size(Q), "Q->nb[0] == ggml_element_size(Q)");
+    ggml.impl.assert(K.nb[0] == ggml.impl.ggml_c.ggml_element_size(K), "K->nb[0] == ggml_element_size(K)");
+    ggml.impl.assert(V.nb[0] == ggml.impl.ggml_c.ggml_element_size(V), "V->nb[0] == ggml_element_size(V)");
 
-    ggml.impl.assert(mask == null or mask.?.type == ggml.impl.c.GGML_TYPE_F16, "!mask || mask->type == GGML_TYPE_F16");
+    ggml.impl.assert(mask == null or mask.?.type == ggml.impl.ggml_c.GGML_TYPE_F16, "!mask || mask->type == GGML_TYPE_F16");
 
     const pool = ctx.pool();
     const main_stream = ctx.stream();
@@ -305,15 +305,15 @@ pub fn launchFattn(
     var nb22: usize = V.nb[2];
     var nb23: usize = V.nb[3];
 
-    if (a.need_f16_K and K.type != ggml.impl.c.GGML_TYPE_F16) {
-        const bs: usize = @intCast(ggml.impl.c.ggml_blck_size(K.type));
-        const ts: usize = ggml.impl.c.ggml_type_size(K.type);
+    if (a.need_f16_K and K.type != ggml.impl.ggml_c.GGML_TYPE_F16) {
+        const bs: usize = @intCast(ggml.impl.ggml_c.ggml_blck_size(K.type));
+        const ts: usize = ggml.impl.ggml_c.ggml_type_size(K.type);
 
         ggml.impl.assert(f16_extra.K != 0, "f16_extra.K != 0");
         const K_f16: ?*anyopaque = @ptrFromInt(f16_extra.K);
-        if (ggml.impl.c.ggml_is_contiguously_allocated(K)) {
+        if (ggml.impl.ggml_c.ggml_is_contiguously_allocated(K)) {
             const to_fp16 = ggml.cuda.convert.getToFp16(K.type).?;
-            to_fp16(K_data, K_f16, ggml.impl.c.ggml_nelements(K), main_stream);
+            to_fp16(K_data, K_f16, ggml.impl.ggml_c.ggml_nelements(K), main_stream);
 
             nb11 = nb11 * bs * sizeof_half / ts;
             nb12 = nb12 * bs * sizeof_half / ts;
@@ -333,21 +333,21 @@ pub fn launchFattn(
         K_data = @ptrCast(K_f16);
     }
 
-    if (a.need_f16_V and V.type != ggml.impl.c.GGML_TYPE_F16) {
+    if (a.need_f16_V and V.type != ggml.impl.ggml_c.GGML_TYPE_F16) {
         if (V_is_K_view) {
             V_data = K_data;
             nb21 = nb11;
             nb22 = nb12;
             nb23 = nb13;
         } else {
-            const bs: usize = @intCast(ggml.impl.c.ggml_blck_size(V.type));
-            const ts: usize = ggml.impl.c.ggml_type_size(V.type);
+            const bs: usize = @intCast(ggml.impl.ggml_c.ggml_blck_size(V.type));
+            const ts: usize = ggml.impl.ggml_c.ggml_type_size(V.type);
 
             ggml.impl.assert(f16_extra.V != 0, "f16_extra.V != 0");
             const V_f16: ?*anyopaque = @ptrFromInt(f16_extra.V);
-            if (ggml.impl.c.ggml_is_contiguously_allocated(V)) {
+            if (ggml.impl.ggml_c.ggml_is_contiguously_allocated(V)) {
                 const to_fp16 = ggml.cuda.convert.getToFp16(V.type).?;
-                to_fp16(V_data, V_f16, ggml.impl.c.ggml_nelements(V), main_stream);
+                to_fp16(V_data, V_f16, ggml.impl.ggml_c.ggml_nelements(V), main_stream);
                 V_data = @ptrCast(V_f16);
 
                 nb21 = nb21 * bs * sizeof_half / ts;
@@ -493,8 +493,8 @@ pub fn launchFattn(
         blocks_num.z = u32Of(@as(i64, ntiles_z_gqa) * K.ne[2] * Q.ne[3]);
 
         if (parallel_blocks > 1) {
-            _ = dst_tmp.alloc(@bitCast(@as(i64, parallel_blocks) * ggml.impl.c.ggml_nelements(KQV)));
-            _ = dst_tmp_meta.alloc(@bitCast(@as(i64, parallel_blocks) * ggml.impl.c.ggml_nrows(KQV)));
+            _ = dst_tmp.alloc(@bitCast(@as(i64, parallel_blocks) * ggml.impl.ggml_c.ggml_nelements(KQV)));
+            _ = dst_tmp_meta.alloc(@bitCast(@as(i64, parallel_blocks) * ggml.impl.ggml_c.ggml_nrows(KQV)));
         }
     }
 

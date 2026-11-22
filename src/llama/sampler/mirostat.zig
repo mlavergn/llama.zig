@@ -45,7 +45,7 @@ pub const Mirostat = struct {
 };
 
 /// Ports `llama_sampler_mirostat_name` (llama-sampler.cpp:2463 @b1b770d90).
-fn mirostatName(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]const u8 {
+fn mirostatName(smpl: [*c]const llama.impl.llama_c.struct_llama_sampler) callconv(.c) [*c]const u8 {
     _ = smpl;
     return "mirostat";
 }
@@ -54,7 +54,7 @@ fn mirostatName(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) 
 ///
 /// Estimates the Zipf exponent from the top `m` probabilities, derives the
 /// top-k that should give surprise `mu`, draws, and moves `mu` toward `tau`.
-fn mirostatApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.impl.c.llama_token_data_array) callconv(.c) void {
+fn mirostatApply(smpl: [*c]llama.impl.llama_c.struct_llama_sampler, cur_p: [*c]llama.impl.llama_c.llama_token_data_array) callconv(.c) void {
     const ctx = llama.sampler.core.ctxOf(Mirostat, smpl);
 
     llama.sampler.core.softmaxImpl(cur_p, true);
@@ -91,7 +91,7 @@ fn mirostatApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.i
 }
 
 /// Ports `llama_sampler_mirostat_clone` (llama-sampler.cpp:2503 @b1b770d90).
-fn mirostatClone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+fn mirostatClone(smpl: [*c]const llama.impl.llama_c.struct_llama_sampler) callconv(.c) [*c]llama.impl.llama_c.struct_llama_sampler {
     const ctx = llama.sampler.core.ctxOf(Mirostat, smpl);
     const result = llama_sampler_init_mirostat(ctx.n_vocab, ctx.seed, ctx.tau, ctx.eta, ctx.m);
 
@@ -103,7 +103,7 @@ fn mirostatClone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c)
 }
 
 /// Ports `llama_sampler_mirostat_reset` (llama-sampler.cpp:2518 @b1b770d90).
-fn mirostatReset(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+fn mirostatReset(smpl: [*c]llama.impl.llama_c.struct_llama_sampler) callconv(.c) void {
     const ctx = llama.sampler.core.ctxOf(Mirostat, smpl);
     ctx.mu = 2.0 * ctx.tau;
     ctx.seed_cur = llama.sampler.core.getRngSeed(ctx.seed);
@@ -111,12 +111,12 @@ fn mirostatReset(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void 
 }
 
 /// Ports `llama_sampler_mirostat_free` (llama-sampler.cpp:2525 @b1b770d90).
-fn mirostatFree(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+fn mirostatFree(smpl: [*c]llama.impl.llama_c.struct_llama_sampler) callconv(.c) void {
     llama.sampler.core.destroy(Mirostat, llama.sampler.core.ctxOf(Mirostat, smpl));
 }
 
 /// Ports `llama_sampler_mirostat_i` (llama-sampler.cpp:2529 @b1b770d90).
-pub var mirostat_iface: llama.impl.c.struct_llama_sampler_i = .{
+pub var mirostat_iface: llama.impl.llama_c.struct_llama_sampler_i = .{
     .name = mirostatName,
     .accept = null,
     .apply = mirostatApply,
@@ -135,7 +135,7 @@ pub var mirostat_iface: llama.impl.c.struct_llama_sampler_i = .{
 /// - `m`: how many top tokens estimate the exponent.
 ///
 /// Return: the sampler.
-pub export fn llama_sampler_init_mirostat(n_vocab: i32, seed: u32, tau: f32, eta: f32, m: i32) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+pub fn llama_sampler_init_mirostat(n_vocab: i32, seed: u32, tau: f32, eta: f32, m: i32) callconv(.c) [*c]llama.impl.llama_c.struct_llama_sampler {
     const seed_cur = llama.sampler.core.getRngSeed(seed);
 
     return llama.sampler.core.llama_sampler_init(&mirostat_iface, llama.sampler.core.create(Mirostat, .{
@@ -167,7 +167,7 @@ pub const MirostatV2 = struct {
 };
 
 /// Ports `llama_sampler_mirostat_v2_name` (llama-sampler.cpp:2576 @b1b770d90).
-fn mirostatV2Name(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]const u8 {
+fn mirostatV2Name(smpl: [*c]const llama.impl.llama_c.struct_llama_sampler) callconv(.c) [*c]const u8 {
     _ = smpl;
     return "mirostat-v2";
 }
@@ -176,7 +176,7 @@ fn mirostatV2Name(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c
 ///
 /// Cuts at the first candidate whose surprise exceeds `mu`, keeping at least
 /// one, draws, and moves `mu` toward `tau`.
-fn mirostatV2Apply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.impl.c.llama_token_data_array) callconv(.c) void {
+fn mirostatV2Apply(smpl: [*c]llama.impl.llama_c.struct_llama_sampler, cur_p: [*c]llama.impl.llama_c.llama_token_data_array) callconv(.c) void {
     const ctx = llama.sampler.core.ctxOf(MirostatV2, smpl);
 
     llama.sampler.core.softmaxImpl(cur_p, true);
@@ -204,7 +204,7 @@ fn mirostatV2Apply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama
 }
 
 /// Ports `llama_sampler_mirostat_v2_reset` (llama-sampler.cpp:2608 @b1b770d90).
-fn mirostatV2Reset(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+fn mirostatV2Reset(smpl: [*c]llama.impl.llama_c.struct_llama_sampler) callconv(.c) void {
     const ctx = llama.sampler.core.ctxOf(MirostatV2, smpl);
     ctx.mu = 2.0 * ctx.tau;
     ctx.seed_cur = llama.sampler.core.getRngSeed(ctx.seed);
@@ -212,7 +212,7 @@ fn mirostatV2Reset(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) voi
 }
 
 /// Ports `llama_sampler_mirostat_v2_clone` (llama-sampler.cpp:2615 @b1b770d90).
-fn mirostatV2Clone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+fn mirostatV2Clone(smpl: [*c]const llama.impl.llama_c.struct_llama_sampler) callconv(.c) [*c]llama.impl.llama_c.struct_llama_sampler {
     const ctx = llama.sampler.core.ctxOf(MirostatV2, smpl);
 
     const result = llama_sampler_init_mirostat_v2(ctx.seed, ctx.tau, ctx.eta);
@@ -225,12 +225,12 @@ fn mirostatV2Clone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.
 }
 
 /// Ports `llama_sampler_mirostat_v2_free` (llama-sampler.cpp:2631 @b1b770d90).
-fn mirostatV2Free(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+fn mirostatV2Free(smpl: [*c]llama.impl.llama_c.struct_llama_sampler) callconv(.c) void {
     llama.sampler.core.destroy(MirostatV2, llama.sampler.core.ctxOf(MirostatV2, smpl));
 }
 
 /// Ports `llama_sampler_mirostat_v2_i` (llama-sampler.cpp:2635 @b1b770d90).
-pub var mirostat_v2_iface: llama.impl.c.struct_llama_sampler_i = .{
+pub var mirostat_v2_iface: llama.impl.llama_c.struct_llama_sampler_i = .{
     .name = mirostatV2Name,
     .accept = null,
     .apply = mirostatV2Apply,
@@ -247,7 +247,7 @@ pub var mirostat_v2_iface: llama.impl.c.struct_llama_sampler_i = .{
 /// - `eta`: the learning rate.
 ///
 /// Return: the sampler.
-pub export fn llama_sampler_init_mirostat_v2(seed: u32, tau: f32, eta: f32) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+pub fn llama_sampler_init_mirostat_v2(seed: u32, tau: f32, eta: f32) callconv(.c) [*c]llama.impl.llama_c.struct_llama_sampler {
     const seed_cur = llama.sampler.core.getRngSeed(seed);
     return llama.sampler.core.llama_sampler_init(&mirostat_v2_iface, llama.sampler.core.create(MirostatV2, .{
         .seed = seed,
@@ -272,7 +272,7 @@ const AdaptiveP = struct {
     weighted_sum: f32,
     total_weight: f32,
     original_probs: std.ArrayList(f32),
-    pending_token_id: llama.impl.c.llama_token,
+    pending_token_id: llama.impl.llama_c.llama_token,
     pending_token_idx: i32,
 };
 
@@ -284,7 +284,7 @@ const SHARPNESS: f32 = 10.0;
 const INV_WIDTH: f32 = 1.0 / DISTRIBUTION_WIDTH;
 
 /// Ports `llama_sampler_adaptive_p_name` (llama-sampler.cpp:3742 @b1b770d90).
-fn adaptivePName(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]const u8 {
+fn adaptivePName(smpl: [*c]const llama.impl.llama_c.struct_llama_sampler) callconv(.c) [*c]const u8 {
     _ = smpl;
     return "adaptive-p";
 }
@@ -293,7 +293,7 @@ fn adaptivePName(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c)
 ///
 /// Re-weights candidates toward a target probability that adapts to the
 /// running average of what was picked, then draws.
-fn adaptivePApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.impl.c.llama_token_data_array) callconv(.c) void {
+fn adaptivePApply(smpl: [*c]llama.impl.llama_c.struct_llama_sampler, cur_p: [*c]llama.impl.llama_c.llama_token_data_array) callconv(.c) void {
     const ctx = llama.sampler.core.ctxOf(AdaptiveP, smpl);
 
     llama.sampler.core.softmaxImpl(cur_p, false);
@@ -332,24 +332,24 @@ fn adaptivePApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.
 ///
 /// Folds the selected token's original probability into the average, when
 /// the accepted token is the one this sampler picked.
-fn adaptivePAccept(smpl: [*c]llama.impl.c.struct_llama_sampler, token: llama.impl.c.llama_token) callconv(.c) void {
+fn adaptivePAccept(smpl: [*c]llama.impl.llama_c.struct_llama_sampler, token: llama.impl.llama_c.llama_token) callconv(.c) void {
     const ctx = llama.sampler.core.ctxOf(AdaptiveP, smpl);
     if (ctx.pending_token_id == token) {
-        llama.impl.assert(ctx.pending_token_id != llama.impl.c.LLAMA_TOKEN_NULL, llama.sampler.core.src, 3834, "ctx->pending_token_id != LLAMA_TOKEN_NULL");
+        llama.impl.assert(ctx.pending_token_id != llama.impl.llama_c.LLAMA_TOKEN_NULL, llama.sampler.core.src, 3834, "ctx->pending_token_id != LLAMA_TOKEN_NULL");
         llama.impl.assert(ctx.pending_token_idx != -1, llama.sampler.core.src, 3835, "ctx->pending_token_idx != -1");
         ctx.weighted_sum = @mulAdd(f32, ctx.decay, ctx.weighted_sum, ctx.original_probs.items[@intCast(ctx.pending_token_idx)]);
         ctx.total_weight = @mulAdd(f32, ctx.decay, ctx.total_weight, 1.0);
     }
-    ctx.pending_token_id = llama.impl.c.LLAMA_TOKEN_NULL;
+    ctx.pending_token_id = llama.impl.llama_c.LLAMA_TOKEN_NULL;
     ctx.pending_token_idx = -1;
 }
 
 /// Ports `llama_sampler_adaptive_p_reset` (llama-sampler.cpp:3810 @b1b770d90).
-fn adaptivePReset(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+fn adaptivePReset(smpl: [*c]llama.impl.llama_c.struct_llama_sampler) callconv(.c) void {
     const ctx = llama.sampler.core.ctxOf(AdaptiveP, smpl);
     ctx.weighted_sum = ctx.target / (1.0 - ctx.decay);
     ctx.total_weight = 1.0 / (1.0 - ctx.decay);
-    ctx.pending_token_id = llama.impl.c.LLAMA_TOKEN_NULL;
+    ctx.pending_token_id = llama.impl.llama_c.LLAMA_TOKEN_NULL;
     ctx.pending_token_idx = -1;
     ctx.seed_cur = llama.sampler.core.getRngSeed(ctx.seed);
     ctx.rng.seed(ctx.seed_cur);
@@ -359,7 +359,7 @@ fn adaptivePReset(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void
 ///
 /// Copies the average and the pending token but not the engine: the clone
 /// starts from a freshly seeded one, as the C++'s does.
-fn adaptivePClone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+fn adaptivePClone(smpl: [*c]const llama.impl.llama_c.struct_llama_sampler) callconv(.c) [*c]llama.impl.llama_c.struct_llama_sampler {
     const ctx = llama.sampler.core.ctxOf(AdaptiveP, smpl);
     const result = llama_sampler_init_adaptive_p(ctx.target, ctx.decay, ctx.seed);
     const result_ctx = llama.sampler.core.ctxOf(AdaptiveP, result);
@@ -373,14 +373,14 @@ fn adaptivePClone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c
 }
 
 /// Ports `llama_sampler_adaptive_p_free` (llama-sampler.cpp:3837 @b1b770d90).
-fn adaptivePFree(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+fn adaptivePFree(smpl: [*c]llama.impl.llama_c.struct_llama_sampler) callconv(.c) void {
     const ctx = llama.sampler.core.ctxOf(AdaptiveP, smpl);
     ctx.original_probs.deinit(std.heap.c_allocator);
     llama.sampler.core.destroy(AdaptiveP, ctx);
 }
 
 /// Ports `llama_sampler_adaptive_p_i` (llama-sampler.cpp:3841 @b1b770d90).
-var adaptive_p_iface: llama.impl.c.struct_llama_sampler_i = .{
+var adaptive_p_iface: llama.impl.llama_c.struct_llama_sampler_i = .{
     .name = adaptivePName,
     .accept = adaptivePAccept,
     .apply = adaptivePApply,
@@ -397,7 +397,7 @@ var adaptive_p_iface: llama.impl.c.struct_llama_sampler_i = .{
 /// - `seed`: the seed; `LLAMA_DEFAULT_SEED` picks a random one.
 ///
 /// Return: the sampler.
-pub export fn llama_sampler_init_adaptive_p(target: f32, decay: f32, seed: u32) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+pub fn llama_sampler_init_adaptive_p(target: f32, decay: f32, seed: u32) callconv(.c) [*c]llama.impl.llama_c.struct_llama_sampler {
     const seed_cur = llama.sampler.core.getRngSeed(seed);
     const clamped_decay = stdlib.libcxx.clamp(f32, decay, 0.0, 0.99);
     return llama.sampler.core.llama_sampler_init(&adaptive_p_iface, llama.sampler.core.create(AdaptiveP, .{
@@ -409,7 +409,7 @@ pub export fn llama_sampler_init_adaptive_p(target: f32, decay: f32, seed: u32) 
         .weighted_sum = target / (1.0 - clamped_decay),
         .total_weight = 1.0 / (1.0 - clamped_decay),
         .original_probs = .empty,
-        .pending_token_id = llama.impl.c.LLAMA_TOKEN_NULL,
+        .pending_token_id = llama.impl.llama_c.LLAMA_TOKEN_NULL,
         .pending_token_idx = -1,
     }));
 }

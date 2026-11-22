@@ -11,38 +11,38 @@
 //! build has its own twin, `tools/server/json_module.zig`.
 
 const std = @import("std");
-const j = @import("cli_fit").json;
+const cli_fit = @import("cli_fit");
 
-pub const errors = j.errors;
-pub const value = j.value;
-pub const parser = j.parser;
-pub const serializer = j.serializer;
-pub const dtoa = j.dtoa;
-pub const writer = j.writer;
-pub const trie = j.trie;
-pub const schema = j.schema;
-pub const schema_to_grammar = j.schema_to_grammar;
+pub const errors = cli_fit.json.errors;
+pub const value = cli_fit.json.value;
+pub const parser = cli_fit.json.parser;
+pub const serializer = cli_fit.json.serializer;
+pub const dtoa = cli_fit.json.dtoa;
+pub const writer = cli_fit.json.writer;
+pub const trie = cli_fit.json.trie;
+pub const schema = cli_fit.json.schema;
+pub const schema_to_grammar = cli_fit.json.schema_to_grammar;
 
-pub const Error = j.Error;
-pub const what = j.what;
+pub const Error = cli_fit.json.Error;
+pub const what = cli_fit.json.what;
 
-pub const Value = j.Value;
-pub const Type = j.Type;
-pub const Map = j.Map;
-pub const Member = j.Member;
+pub const Value = cli_fit.json.Value;
+pub const Type = cli_fit.json.Type;
+pub const Map = cli_fit.json.Map;
+pub const Member = cli_fit.json.Member;
 
-pub const parse = j.parse;
-pub const parseNoThrow = j.parseNoThrow;
+pub const parse = cli_fit.json.parse;
+pub const parseNoThrow = cli_fit.json.parseNoThrow;
 
-pub const ErrorHandler = j.ErrorHandler;
-pub const DumpOptions = j.DumpOptions;
-pub const dump = j.dump;
-pub const dumpSafe = j.dumpSafe;
-pub const dumpOptions = j.dumpOptions;
-pub const dumpTo = j.dumpTo;
+pub const ErrorHandler = cli_fit.json.ErrorHandler;
+pub const DumpOptions = cli_fit.json.DumpOptions;
+pub const dump = cli_fit.json.dump;
+pub const dumpSafe = cli_fit.json.dumpSafe;
+pub const dumpOptions = cli_fit.json.dumpOptions;
+pub const dumpTo = cli_fit.json.dumpTo;
 
-pub const Object = j.Object;
-pub const writeEscaped = j.writeEscaped;
+pub const Object = cli_fit.json.Object;
+pub const writeEscaped = cli_fit.json.writeEscaped;
 
 // -----------------------------------------------------------------------------
 // Unit Tests

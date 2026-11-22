@@ -140,7 +140,7 @@ pub const Options = struct {
     /// Upstream's libmtmd (`addMtmdRef`), built once and shared with
     /// `build/mtmd.zig`.
     mtmd_ref: *std.Build.Step.Compile,
-    /// `zigjinja`, the CLI's one dependency, for `llama-server`'s
+    /// `jinja`, the CLI's one dependency, for `llama-server`'s
     /// `cli/common_chat/` module: upstream's server parses the chat
     /// template with its Jinja engine at startup, `--no-jinja` or not, for
     /// the capabilities `/props` reports.

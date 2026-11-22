@@ -38,22 +38,18 @@
 //!   PEG_DIFF_STATS=1   lists every distinct error seen
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const win_child = @import("win_child.zig");
 const json = @import("json");
 const peg = @import("peg");
-const chat = @import("common_chat");
-const cpeg = chat.chat_peg;
+const common_chat = @import("common_chat");
 const peg_serialize = @import("peg_serialize.zig");
 
 extern fn ref_peg_run(prog: [*]const u8, len: usize, out_len: *usize) [*]u8;
 extern fn ref_peg_upstream(out_len: *usize) [*]u8;
 
 extern "c" fn alarm(seconds: c_uint) c_uint;
-
-const gpa = std.heap.smp_allocator;
-const ParserId = peg.ParserId;
 
 fn oom() noreturn {
     std.debug.print("FAIL: out of memory\n", .{});
@@ -168,17 +164,17 @@ const Desc = struct {
     n: u32 = 0,
 
     fn byte(self: *Desc, v: u8) void {
-        self.buf.append(gpa, v) catch oom();
+        self.buf.append(std.heap.smp_allocator, v) catch oom();
     }
     fn u32_(self: *Desc, v: u32) void {
-        self.buf.appendSlice(gpa, std.mem.asBytes(&v)) catch oom();
+        self.buf.appendSlice(std.heap.smp_allocator, std.mem.asBytes(&v)) catch oom();
     }
     fn i32_(self: *Desc, v: i32) void {
-        self.buf.appendSlice(gpa, std.mem.asBytes(&v)) catch oom();
+        self.buf.appendSlice(std.heap.smp_allocator, std.mem.asBytes(&v)) catch oom();
     }
     fn str(self: *Desc, s: []const u8) void {
         self.u32_(@intCast(s.len));
-        self.buf.appendSlice(gpa, s) catch oom();
+        self.buf.appendSlice(std.heap.smp_allocator, s) catch oom();
     }
     fn strs(self: *Desc, v: []const []const u8) void {
         self.u32_(@intCast(v.len));
@@ -284,8 +280,8 @@ const Desc = struct {
 threadlocal var harness_msg: ?[]u8 = null;
 
 fn harnessError(comptime fmt: []const u8, args: anytype) peg.Error {
-    if (harness_msg) |m| gpa.free(m);
-    harness_msg = std.fmt.allocPrint(gpa, fmt, args) catch oom();
+    if (harness_msg) |m| std.heap.smp_allocator.free(m);
+    harness_msg = std.fmt.allocPrint(std.heap.smp_allocator, fmt, args) catch oom();
     return error.RuntimeError;
 }
 
@@ -293,8 +289,8 @@ fn harnessError(comptime fmt: []const u8, args: anytype) peg.Error {
 fn errText(e: anyerror) []u8 {
     if (harness_msg) |m| {
         harness_msg = null;
-        defer gpa.free(m);
-        return std.fmt.allocPrint(gpa, "EX:{s}", .{m}) catch oom();
+        defer std.heap.smp_allocator.free(m);
+        return std.fmt.allocPrint(std.heap.smp_allocator, "EX:{s}", .{m}) catch oom();
     }
     const cls = switch (e) {
         error.InvalidArgument => "IA",
@@ -303,7 +299,7 @@ fn errText(e: anyerror) []u8 {
         error.RuntimeError => "RE",
         else => "EX",
     };
-    return std.fmt.allocPrint(gpa, "{s}:{s}", .{ cls, peg.what(e) }) catch oom();
+    return std.fmt.allocPrint(std.heap.smp_allocator, "{s}:{s}", .{ cls, peg.what(e) }) catch oom();
 }
 
 const Reader = struct {
@@ -335,22 +331,22 @@ const Reader = struct {
 };
 
 const Interp = struct {
-    cb: *cpeg.ChatBuilder,
+    cb: *common_chat.chat_peg.ChatBuilder,
     scratch: std.mem.Allocator,
-    slots: std.ArrayList(?ParserId) = .empty,
+    slots: std.ArrayList(?peg.ParserId) = .empty,
     n: u32 = 0,
 
-    fn get(self: *Interp, s: u32) peg.Error!ParserId {
+    fn get(self: *Interp, s: u32) peg.Error!peg.ParserId {
         if (s < self.slots.items.len) if (self.slots.items[s]) |id| return id;
         return harnessError("HE:unset slot {d}", .{s});
     }
-    fn put(self: *Interp, s: u32, id: ParserId) void {
+    fn put(self: *Interp, s: u32, id: peg.ParserId) void {
         while (self.slots.items.len <= s) self.slots.append(self.scratch, null) catch oom();
         self.slots.items[s] = id;
     }
-    fn list(self: *Interp, r: *Reader, exec: bool) peg.Error![]ParserId {
+    fn list(self: *Interp, r: *Reader, exec: bool) peg.Error![]peg.ParserId {
         const k = r.u32_();
-        const out = self.scratch.alloc(ParserId, k) catch oom();
+        const out = self.scratch.alloc(peg.ParserId, k) catch oom();
         for (out) |*x| {
             const s = r.u32_();
             x.* = if (exec) try self.get(s) else 0;
@@ -365,7 +361,7 @@ const Interp = struct {
 
     const BodyCtx = struct { it: *Interp, r: *Reader, called: bool = false };
 
-    fn runBody(c: *BodyCtx) peg.Error!ParserId {
+    fn runBody(c: *BodyCtx) peg.Error!peg.ParserId {
         c.called = true;
         const s = try c.it.body(c.r, true);
         if (s == NO_SLOT) return harnessError("HE:a body that returned nothing", .{});
@@ -493,8 +489,8 @@ const Interp = struct {
                 const raw = r.byte() != 0;
                 if (!exec) return;
                 const p = try self.get(s);
-                var v = json.parse(gpa, text) catch |e| return peg.errors.fromJson(e);
-                defer v.deinit(gpa);
+                var v = json.parse(std.heap.smp_allocator, text) catch |e| return peg.errors.fromJson(e);
+                defer v.deinit(std.heap.smp_allocator);
                 self.put(me, try b.schemaJson(p, name, &v, raw));
             },
             .rule => {
@@ -607,7 +603,7 @@ const Interp = struct {
                 const tools = r.str();
                 const par = r.byte() != 0;
                 const force = r.byte() != 0;
-                var o: cpeg.ChatBuilder.JsonToolsOptions = .{};
+                var o: common_chat.chat_peg.ChatBuilder.JsonToolsOptions = .{};
                 o.name_key = r.str();
                 o.args_key = r.str();
                 o.array_wrapped = r.byte() != 0;
@@ -617,13 +613,13 @@ const Interp = struct {
                 o.parameters_order = r.strs(self.scratch);
                 o.accept_openai_wrapper = r.byte() != 0;
                 if (!exec) return;
-                var v = json.parse(gpa, tools) catch |e| return peg.errors.fromJson(e);
-                defer v.deinit(gpa);
+                var v = json.parse(std.heap.smp_allocator, tools) catch |e| return peg.errors.fromJson(e);
+                defer v.deinit(std.heap.smp_allocator);
                 self.put(me, try cb.standardJsonTools(ss, se, &v, par, force, o));
             },
             .std_constructed_tools => {
                 const k = r.u32_();
-                var markers: std.ArrayList(cpeg.Marker) = .empty;
+                var markers: std.ArrayList(common_chat.chat_peg.Marker) = .empty;
                 for (0..k) |_| {
                     const key = r.str();
                     const val = r.str();
@@ -636,8 +632,8 @@ const Interp = struct {
                 const par = r.byte() != 0;
                 const force = r.byte() != 0;
                 if (!exec) return;
-                var v = json.parse(gpa, tools) catch |e| return peg.errors.fromJson(e);
-                defer v.deinit(gpa);
+                var v = json.parse(std.heap.smp_allocator, tools) catch |e| return peg.errors.fromJson(e);
+                defer v.deinit(std.heap.smp_allocator);
                 self.put(me, try cb.standardConstructedTools(markers.items, &v, par, force));
             },
             .py_style_tools => {
@@ -645,8 +641,8 @@ const Interp = struct {
                 const par = r.byte() != 0;
                 const lit = r.byte() != 0;
                 if (!exec) return;
-                var v = json.parse(gpa, tools) catch |e| return peg.errors.fromJson(e);
-                defer v.deinit(gpa);
+                var v = json.parse(std.heap.smp_allocator, tools) catch |e| return peg.errors.fromJson(e);
+                defer v.deinit(std.heap.smp_allocator);
                 self.put(me, try cb.pythonStyleToolCalls(&v, par, lit));
             },
             .set_root => {
@@ -660,9 +656,9 @@ const Interp = struct {
 
 /// A description through the port's builder, built.
 fn portBuild(ops: []const u8) peg.Error!peg.Arena {
-    var cb = try cpeg.ChatBuilder.init(gpa);
+    var cb = try common_chat.chat_peg.ChatBuilder.init(std.heap.smp_allocator);
     defer cb.deinit();
-    var scratch = std.heap.ArenaAllocator.init(gpa);
+    var scratch = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
     defer scratch.deinit();
     var it: Interp = .{ .cb = &cb, .scratch = scratch.allocator() };
     var r: Reader = .{ .buf = ops };
@@ -676,26 +672,26 @@ fn portBuild(ops: []const u8) peg.Error!peg.Arena {
 const Records = std.ArrayList([]const u8);
 
 fn rec(out: *Records, comptime fmt: []const u8, args: anytype) void {
-    out.append(gpa, std.fmt.allocPrint(gpa, fmt, args) catch oom()) catch oom();
+    out.append(std.heap.smp_allocator, std.fmt.allocPrint(std.heap.smp_allocator, fmt, args) catch oom()) catch oom();
 }
 
 /// `guard`: "G:" and the value, or "E:" and the exception.
 fn guardText(v: anyerror![]u8) []u8 {
     const s = v catch |e| {
         const t = errText(e);
-        defer gpa.free(t);
-        return std.fmt.allocPrint(gpa, "E:{s}", .{t}) catch oom();
+        defer std.heap.smp_allocator.free(t);
+        return std.fmt.allocPrint(std.heap.smp_allocator, "E:{s}", .{t}) catch oom();
     };
-    defer gpa.free(s);
-    return std.fmt.allocPrint(gpa, "G:{s}", .{s}) catch oom();
+    defer std.heap.smp_allocator.free(s);
+    return std.fmt.allocPrint(std.heap.smp_allocator, "G:{s}", .{s}) catch oom();
 }
 
 fn resultText(r: peg.ParseResult) []u8 {
     var s: std.ArrayList(u8) = .empty;
-    s.print(gpa, "{s} {d} {d}", .{ r.type.name(), r.start, r.end }) catch oom();
-    for (r.nodes) |n| s.print(gpa, " {d}", .{n}) catch oom();
-    for (r.invalid_utf8) |u| s.print(gpa, " !{d}+{d}", .{ u.pos, u.len }) catch oom();
-    return s.toOwnedSlice(gpa) catch oom();
+    s.print(std.heap.smp_allocator, "{s} {d} {d}", .{ r.type.name(), r.start, r.end }) catch oom();
+    for (r.nodes) |n| s.print(std.heap.smp_allocator, " {d}", .{n}) catch oom();
+    for (r.invalid_utf8) |u| s.print(std.heap.smp_allocator, " !{d}+{d}", .{ u.pos, u.len }) catch oom();
+    return s.toOwnedSlice(std.heap.smp_allocator) catch oom();
 }
 
 /// `ast_invalid_text` in peg_ref.cpp: every node's invalid UTF-8 runs and
@@ -704,28 +700,28 @@ fn astInvalidText(ast: *const peg.AstArena) anyerror![]u8 {
     var s: std.ArrayList(u8) = .empty;
     for (ast.nodes.items, 0..) |*n, i| {
         if (n.invalid_utf8.len == 0) continue;
-        try s.print(gpa, "\x1e{d}", .{i});
-        for (n.invalid_utf8) |u| try s.print(gpa, " {d}+{d}", .{ u.pos, u.len });
-        const t = try n.sanitizedText(gpa);
-        defer gpa.free(t);
-        try s.print(gpa, "\x1d{s}", .{t});
+        try s.print(std.heap.smp_allocator, "\x1e{d}", .{i});
+        for (n.invalid_utf8) |u| try s.print(std.heap.smp_allocator, " {d}+{d}", .{ u.pos, u.len });
+        const t = try n.sanitizedText(std.heap.smp_allocator);
+        defer std.heap.smp_allocator.free(t);
+        try s.print(std.heap.smp_allocator, "\x1d{s}", .{t});
     }
-    return s.toOwnedSlice(gpa);
+    return s.toOwnedSlice(std.heap.smp_allocator);
 }
 
-fn msgText(m: *const chat.Msg) []u8 {
+fn msgText(m: *const common_chat.Msg) []u8 {
     var s: std.ArrayList(u8) = .empty;
-    s.print(gpa, "{s}\x1f{s}\x1f{d}", .{ m.content, m.reasoning_content, m.tool_calls.items.len }) catch oom();
-    for (m.tool_calls.items) |tc| s.print(gpa, "\x1e{s}\x1d{s}\x1d{s}", .{ tc.name, tc.arguments, tc.id }) catch oom();
-    return s.toOwnedSlice(gpa) catch oom();
+    s.print(std.heap.smp_allocator, "{s}\x1f{s}\x1f{d}", .{ m.content, m.reasoning_content, m.tool_calls.items.len }) catch oom();
+    for (m.tool_calls.items) |tc| s.print(std.heap.smp_allocator, "\x1e{s}\x1d{s}\x1d{s}", .{ tc.name, tc.arguments, tc.id }) catch oom();
+    return s.toOwnedSlice(std.heap.smp_allocator) catch oom();
 }
 
 var after_close: usize = 0;
 
-fn mapperText(ctx: *peg.ParseContext, result: *const peg.ParseResult, kind: cpeg.Mapper.Kind) ![]u8 {
-    var m: chat.Msg = .{};
-    defer m.deinit(gpa);
-    var mapper = cpeg.Mapper.init(gpa, &m, kind);
+fn mapperText(ctx: *peg.ParseContext, result: *const peg.ParseResult, kind: common_chat.chat_peg.Mapper.Kind) ![]u8 {
+    var m: common_chat.Msg = .{};
+    defer m.deinit(std.heap.smp_allocator);
+    var mapper = common_chat.chat_peg.Mapper.init(std.heap.smp_allocator, &m, kind);
     defer mapper.deinit();
     const r = mapper.fromAst(&ctx.ast, result);
     if (mapper.after_close) after_close += 1;
@@ -734,49 +730,49 @@ fn mapperText(ctx: *peg.ParseContext, result: *const peg.ParseResult, kind: cpeg
 }
 
 fn parseRecords(arena: *const peg.Arena, input: []const u8, flags: u32, comptime tag: []const u8, tag_args: anytype, out: *Records) void {
-    var ctx = peg.ParseContext.init(gpa, input, flags) catch oom();
+    var ctx = peg.ParseContext.init(std.heap.smp_allocator, input, flags) catch oom();
     defer ctx.deinit();
     const result = arena.parse(&ctx, 0) catch |e| {
         const t = errText(e);
-        defer gpa.free(t);
+        defer std.heap.smp_allocator.free(t);
         rec(out, tag ++ "E:{s}", tag_args ++ .{t});
         return;
     };
     const rt = resultText(result);
-    defer gpa.free(rt);
+    defer std.heap.smp_allocator.free(rt);
     rec(out, tag ++ "{s}", tag_args ++ .{rt});
-    const ad = guardText(ctx.ast.dump(gpa));
-    defer gpa.free(ad);
+    const ad = guardText(ctx.ast.dump(std.heap.smp_allocator));
+    defer std.heap.smp_allocator.free(ad);
     rec(out, "A:{s}", .{ad});
     const vd = guardText(astInvalidText(&ctx.ast));
-    defer gpa.free(vd);
+    defer std.heap.smp_allocator.free(vd);
     rec(out, "V:{s}", .{vd});
-    inline for (.{ cpeg.Mapper.Kind.base, .gemma4, .minimax_m3 }, 0..) |kind, k| {
+    inline for (.{ common_chat.chat_peg.Mapper.Kind.base, .gemma4, .minimax_m3 }, 0..) |kind, k| {
         if (mapperText(&ctx, &result, kind)) |s| {
-            defer gpa.free(s);
+            defer std.heap.smp_allocator.free(s);
             rec(out, "M{d}:G:{s}", .{ k, s });
         } else |e| {
             const t = errText(e);
-            defer gpa.free(t);
+            defer std.heap.smp_allocator.free(t);
             rec(out, "M{d}:E:{s}", .{ k, t });
         }
     }
 }
 
-fn tagsText(t: *const cpeg.TaggedParseResult) []u8 {
+fn tagsText(t: *const common_chat.chat_peg.TaggedParseResult) []u8 {
     var s: std.ArrayList(u8) = .empty;
     const rt = resultText(t.result);
-    defer gpa.free(rt);
-    s.appendSlice(gpa, rt) catch oom();
-    for (t.tags.entries.items) |e| s.print(gpa, "\x1e{s}\x1d{s}", .{ e.key, e.value }) catch oom();
-    return s.toOwnedSlice(gpa) catch oom();
+    defer std.heap.smp_allocator.free(rt);
+    s.appendSlice(std.heap.smp_allocator, rt) catch oom();
+    for (t.tags.entries.items) |e| s.print(std.heap.smp_allocator, "\x1e{s}\x1d{s}", .{ e.key, e.value }) catch oom();
+    return s.toOwnedSlice(std.heap.smp_allocator) catch oom();
 }
 
-fn taggedText(tp: *const cpeg.TaggedPegParser, input: []const u8, which: u8) anyerror![]u8 {
+fn taggedText(tp: *const common_chat.chat_peg.TaggedPegParser, input: []const u8, which: u8) anyerror![]u8 {
     var t = switch (which) {
-        0 => try tp.parseAndExtract(gpa, input, peg.Flags.none),
-        1 => try tp.parseAndExtract(gpa, input, peg.Flags.lenient),
-        else => try tp.parseAnywhereAndExtract(gpa, input),
+        0 => try tp.parseAndExtract(std.heap.smp_allocator, input, peg.Flags.none),
+        1 => try tp.parseAndExtract(std.heap.smp_allocator, input, peg.Flags.lenient),
+        else => try tp.parseAnywhereAndExtract(std.heap.smp_allocator, input),
     };
     defer t.deinit();
     return tagsText(&t);
@@ -785,15 +781,15 @@ fn taggedText(tp: *const cpeg.TaggedPegParser, input: []const u8, which: u8) any
 var debug_buf: std.ArrayList(u8) = .empty;
 
 fn captureDebug(text: []const u8) void {
-    debug_buf.appendSlice(gpa, text) catch oom();
+    debug_buf.appendSlice(std.heap.smp_allocator, text) catch oom();
 }
 
 fn grammarText(a: *const peg.Arena, lazy: bool) anyerror![]u8 {
-    return peg.gbnf.grammar(gpa, a, lazy, .{});
+    return peg.gbnf.grammar(std.heap.smp_allocator, a, lazy, .{});
 }
 
 fn dumpRoot(a: *const peg.Arena) anyerror![]u8 {
-    return a.dump(gpa, a.root);
+    return a.dump(std.heap.smp_allocator, a.root);
 }
 
 /// One case through the port: the same records `run_case` writes.
@@ -806,23 +802,23 @@ fn runPortCase(kind: u8, text: []const u8, inputs: []const Input, out: *Records)
         rec(out, "B:ok", .{});
     } else |e| {
         const t = errText(e);
-        defer gpa.free(t);
+        defer std.heap.smp_allocator.free(t);
         rec(out, "B:E:{s}", .{t});
     }
     defer rec(out, "\x01", .{});
     const a = &(arena_opt orelse return);
     rec(out, "N:{d}", .{a.size()});
     const d = guardText(dumpRoot(a));
-    defer gpa.free(d);
+    defer std.heap.smp_allocator.free(d);
     rec(out, "D:{s}", .{d});
-    const saved = guardText(peg_serialize.save(gpa, a));
-    defer gpa.free(saved);
+    const saved = guardText(peg_serialize.save(std.heap.smp_allocator, a));
+    defer std.heap.smp_allocator.free(saved);
     rec(out, "S:{s}", .{saved});
     const g = guardText(grammarText(a, false));
-    defer gpa.free(g);
+    defer std.heap.smp_allocator.free(g);
     rec(out, "G:{s}", .{g});
     const l = guardText(grammarText(a, true));
-    defer gpa.free(l);
+    defer std.heap.smp_allocator.free(l);
     rec(out, "L:{s}", .{l});
     for (inputs) |in| {
         rec(out, "I:{s}", .{in.text});
@@ -839,21 +835,21 @@ fn runPortCase(kind: u8, text: []const u8, inputs: []const Input, out: *Records)
             const prev = peg.errors.stderr_sink;
             peg.errors.stderr_sink = captureDebug;
             defer peg.errors.stderr_sink = prev;
-            var ctx = peg.ParseContext.init(gpa, in.text, peg.Flags.lenient | peg.Flags.debug) catch oom();
+            var ctx = peg.ParseContext.init(std.heap.smp_allocator, in.text, peg.Flags.lenient | peg.Flags.debug) catch oom();
             defer ctx.deinit();
             const res = if (a.parse(&ctx, 0)) |r| resultText(r) else |e| blk: {
                 const t = errText(e);
-                defer gpa.free(t);
-                break :blk std.fmt.allocPrint(gpa, "E:{s}", .{t}) catch oom();
+                defer std.heap.smp_allocator.free(t);
+                break :blk std.fmt.allocPrint(std.heap.smp_allocator, "E:{s}", .{t}) catch oom();
             };
-            defer gpa.free(res);
+            defer std.heap.smp_allocator.free(res);
             rec(out, "X:{s}\n{s}", .{ res, debug_buf.items });
         }
         if (in.modes & MODE_TAGGED != 0) {
-            const tp: cpeg.TaggedPegParser = .{ .arena = a.* };
+            const tp: common_chat.chat_peg.TaggedPegParser = .{ .arena = a.* };
             inline for (0..3) |w| {
                 const t = guardText(taggedText(&tp, in.text, w));
-                defer gpa.free(t);
+                defer std.heap.smp_allocator.free(t);
                 rec(out, "T{d}:{s}", .{ w, t });
             }
         }
@@ -876,18 +872,18 @@ const Case = struct {
 var cases: std.ArrayList(Case) = .empty;
 
 fn caseProgram(c: Case, id: u32, prog: *std.ArrayList(u8)) void {
-    prog.appendSlice(gpa, std.mem.asBytes(&id)) catch oom();
-    prog.append(gpa, c.kind) catch oom();
+    prog.appendSlice(std.heap.smp_allocator, std.mem.asBytes(&id)) catch oom();
+    prog.append(std.heap.smp_allocator, c.kind) catch oom();
     const n: u32 = @intCast(c.text.len);
-    prog.appendSlice(gpa, std.mem.asBytes(&n)) catch oom();
-    prog.appendSlice(gpa, c.text) catch oom();
+    prog.appendSlice(std.heap.smp_allocator, std.mem.asBytes(&n)) catch oom();
+    prog.appendSlice(std.heap.smp_allocator, c.text) catch oom();
     const k: u32 = @intCast(c.inputs.len);
-    prog.appendSlice(gpa, std.mem.asBytes(&k)) catch oom();
+    prog.appendSlice(std.heap.smp_allocator, std.mem.asBytes(&k)) catch oom();
     for (c.inputs) |in| {
         const m: u32 = @intCast(in.text.len);
-        prog.appendSlice(gpa, std.mem.asBytes(&m)) catch oom();
-        prog.appendSlice(gpa, in.text) catch oom();
-        prog.append(gpa, in.modes) catch oom();
+        prog.appendSlice(std.heap.smp_allocator, std.mem.asBytes(&m)) catch oom();
+        prog.appendSlice(std.heap.smp_allocator, in.text) catch oom();
+        prog.append(std.heap.smp_allocator, in.modes) catch oom();
     }
 }
 
@@ -898,7 +894,7 @@ fn splitRecords(buf: []const u8, out: *Records) void {
     var i: usize = 0;
     while (i < buf.len) {
         const n = std.mem.readInt(u32, buf[i..][0..4], .little);
-        out.append(gpa, gpa.dupe(u8, buf[i + 4 ..][0..n]) catch oom()) catch oom();
+        out.append(std.heap.smp_allocator, std.heap.smp_allocator.dupe(u8, buf[i + 4 ..][0..n]) catch oom()) catch oom();
         i += 4 + n;
     }
 }
@@ -911,36 +907,36 @@ fn runForked(prog: ?[]const u8, out: *std.ArrayList(u8), seconds: c_uint) bool {
     if (comptime builtin.os.tag == .windows)
         return win_child.run(if (prog == null) "upstream" else "run", prog orelse "", out, seconds);
     var fds: [2]c_int = undefined;
-    if (libc.pipe(&fds) != 0) oom();
-    const pid = libc.fork();
+    if (std.c.pipe(&fds) != 0) oom();
+    const pid = std.c.fork();
     if (pid < 0) oom();
     if (pid == 0) {
-        _ = libc.close(fds[0]);
+        _ = std.c.close(fds[0]);
         // the converter's warnings go to stderr, as do the port's; the
         // debug trace is captured apart
-        const devnull = libc.open("/dev/null", .{ .ACCMODE = .WRONLY });
-        if (devnull >= 0) _ = libc.dup2(devnull, 2);
+        const devnull = std.c.open("/dev/null", .{ .ACCMODE = .WRONLY });
+        if (devnull >= 0) _ = std.c.dup2(devnull, 2);
         _ = alarm(seconds);
         var len: usize = 0;
         const p = if (prog) |pr| ref_peg_run(pr.ptr, pr.len, &len) else ref_peg_upstream(&len);
         var off: usize = 0;
         while (off < len) {
-            const k = libc.write(fds[1], p + off, len - off);
-            if (k <= 0) libc._exit(3);
+            const k = std.c.write(fds[1], p + off, len - off);
+            if (k <= 0) std.c._exit(3);
             off += @intCast(k);
         }
-        libc._exit(0);
+        std.c._exit(0);
     }
-    _ = libc.close(fds[1]);
+    _ = std.c.close(fds[1]);
     var chunk: [65536]u8 = undefined;
     while (true) {
-        const k = libc.read(fds[0], &chunk, chunk.len);
+        const k = std.c.read(fds[0], &chunk, chunk.len);
         if (k <= 0) break;
-        out.appendSlice(gpa, chunk[0..@intCast(k)]) catch oom();
+        out.appendSlice(std.heap.smp_allocator, chunk[0..@intCast(k)]) catch oom();
     }
-    _ = libc.close(fds[0]);
+    _ = std.c.close(fds[0]);
     var status: c_int = 0;
-    _ = libc.waitpid(pid, &status, 0);
+    _ = std.c.waitpid(pid, &status, 0);
     return status == 0;
 }
 
@@ -956,7 +952,7 @@ fn parseRefBatch(buf: []const u8, by_case: []?Records, first: usize) void {
             const n = std.mem.readInt(u32, buf[i..][0..4], .little);
             const r = buf[i + 4 ..][0..n];
             i += 4 + n;
-            list.append(gpa, gpa.dupe(u8, r) catch oom()) catch oom();
+            list.append(std.heap.smp_allocator, std.heap.smp_allocator.dupe(u8, r) catch oom()) catch oom();
             if (n == 1 and r[0] == 1) break;
         }
         by_case[id - first] = list;
@@ -1046,7 +1042,7 @@ fn strPool(comptime pool: []const []const u8) []const u8 {
 fn randomStr() []const u8 {
     if (chance(85)) return strPool(&literal_pool);
     const n = 1 + below(6);
-    const out = gpa.alloc(u8, n) catch oom();
+    const out = std.heap.smp_allocator.alloc(u8, n) catch oom();
     for (out) |*c| c.* = if (chance(70)) pick(u8, "abc<>/\"{}[]: \n\\") else @intCast(below(256));
     return out;
 }
@@ -1065,41 +1061,41 @@ fn genTools() []const u8 {
     const pnames = [_][]const u8{ "location", "unit", "days", "query", "q", "a", "b", "\xc3\xa9" };
     const ptypes = [_][]const u8{ "string", "integer", "number", "object", "array", "boolean" };
     if (chance(5)) return pick([]const u8, &.{ "{}", "5", "[]", "null", "[1,{}]" });
-    t.appendSlice(gpa, "[") catch oom();
+    t.appendSlice(std.heap.smp_allocator, "[") catch oom();
     const n = 1 + below(3);
     for (0..n) |i| {
-        if (i > 0) t.appendSlice(gpa, ",") catch oom();
+        if (i > 0) t.appendSlice(std.heap.smp_allocator, ",") catch oom();
         if (chance(4)) {
-            t.appendSlice(gpa, pick([]const u8, &.{ "{\"type\":\"function\"}", "7", "{\"function\":5}", "{\"function\":{\"name\":3}}", "{\"function\":{}}" })) catch oom();
+            t.appendSlice(std.heap.smp_allocator, pick([]const u8, &.{ "{\"type\":\"function\"}", "7", "{\"function\":5}", "{\"function\":{\"name\":3}}", "{\"function\":{}}" })) catch oom();
             continue;
         }
-        t.print(gpa, "{{\"type\":\"function\",\"function\":{{\"name\":\"{s}\"", .{fnames[below(fnames.len)]}) catch oom();
+        t.print(std.heap.smp_allocator, "{{\"type\":\"function\",\"function\":{{\"name\":\"{s}\"", .{fnames[below(fnames.len)]}) catch oom();
         if (chance(85)) {
-            t.appendSlice(gpa, ",\"parameters\":") catch oom();
+            t.appendSlice(std.heap.smp_allocator, ",\"parameters\":") catch oom();
             if (chance(8)) {
-                t.appendSlice(gpa, pick([]const u8, &.{ "null", "{}", "[1]", "\"s\"", "{\"properties\":[\"a\",\"b\"]}", "{\"properties\":5}" })) catch oom();
+                t.appendSlice(std.heap.smp_allocator, pick([]const u8, &.{ "null", "{}", "[1]", "\"s\"", "{\"properties\":[\"a\",\"b\"]}", "{\"properties\":5}" })) catch oom();
             } else {
-                t.appendSlice(gpa, "{\"type\":\"object\",\"properties\":{") catch oom();
+                t.appendSlice(std.heap.smp_allocator, "{\"type\":\"object\",\"properties\":{") catch oom();
                 const k = below(4);
                 for (0..k) |j| {
-                    if (j > 0) t.appendSlice(gpa, ",") catch oom();
-                    t.print(gpa, "\"{s}{d}\":{{\"type\":\"{s}\"}}", .{ pnames[below(pnames.len)], j, ptypes[below(ptypes.len)] }) catch oom();
+                    if (j > 0) t.appendSlice(std.heap.smp_allocator, ",") catch oom();
+                    t.print(std.heap.smp_allocator, "\"{s}{d}\":{{\"type\":\"{s}\"}}", .{ pnames[below(pnames.len)], j, ptypes[below(ptypes.len)] }) catch oom();
                 }
-                t.appendSlice(gpa, "}") catch oom();
-                if (k > 0 and chance(60)) t.print(gpa, ",\"required\":[\"{s}0\"]", .{pnames[0]}) catch oom();
-                t.appendSlice(gpa, "}") catch oom();
+                t.appendSlice(std.heap.smp_allocator, "}") catch oom();
+                if (k > 0 and chance(60)) t.print(std.heap.smp_allocator, ",\"required\":[\"{s}0\"]", .{pnames[0]}) catch oom();
+                t.appendSlice(std.heap.smp_allocator, "}") catch oom();
             }
         }
-        t.appendSlice(gpa, "}}") catch oom();
+        t.appendSlice(std.heap.smp_allocator, "}}") catch oom();
     }
-    t.appendSlice(gpa, "]") catch oom();
+    t.appendSlice(std.heap.smp_allocator, "]") catch oom();
     return t.items;
 }
 
 /// A random parser expression, written into `d`; its slot.
 fn genExpr(d: *Desc, depth: usize, avail: *std.ArrayList(u32)) u32 {
     const slot = genExprInner(d, depth, avail);
-    avail.append(gpa, slot) catch oom();
+    avail.append(std.heap.smp_allocator, slot) catch oom();
     return slot;
 }
 
@@ -1125,7 +1121,7 @@ fn genExprInner(d: *Desc, depth: usize, avail: *std.ArrayList(u32)) u32 {
             13 => blk: {
                 const w = d.op(.until_one_of);
                 const k = below(4);
-                const v = gpa.alloc([]const u8, k) catch oom();
+                const v = std.heap.smp_allocator.alloc([]const u8, k) catch oom();
                 for (v) |*s| s.* = randomStr();
                 d.strs(v);
                 break :blk w;
@@ -1219,7 +1215,7 @@ fn genExprInner(d: *Desc, depth: usize, avail: *std.ArrayList(u32)) u32 {
             const w = d.op(.ac);
             d.u32_(a);
             const k = below(4);
-            const v = gpa.alloc([]const u8, k) catch oom();
+            const v = std.heap.smp_allocator.alloc([]const u8, k) catch oom();
             for (v) |*s| s.* = randomStr();
             d.strs(v);
             return w;
@@ -1312,7 +1308,7 @@ fn genToolsCall(d: *Desc) u32 {
 fn genRandom() []const u8 {
     var d: Desc = .{};
     var avail: std.ArrayList(u32) = .empty;
-    defer avail.deinit(gpa);
+    defer avail.deinit(std.heap.smp_allocator);
     const n = 1 + below(3);
     var last: u32 = 0;
     for (0..n) |_| last = genExpr(&d, 0, &avail);
@@ -1392,7 +1388,7 @@ fn genGemma4() []const u8 {
     for ([_][]const u8{ "get_weather", "search" }) |name| {
         const opn = d.un(.tool_open, d.bin(.op_plus, d.un(.tool_name, d.lit(name)), d.un(.peek, d.lit("{"))));
         const t = d.un(.tool, d.seq(&.{ opn, d.un(.tool_args, d.strOp(.ref, "gemma4-dict")) }));
-        tool_choice = d.bin(.op_or_assign, tool_choice, d.rule(std.fmt.allocPrint(gpa, "tool-{s}", .{name}) catch oom(), t, false));
+        tool_choice = d.bin(.op_or_assign, tool_choice, d.rule(std.fmt.allocPrint(std.heap.smp_allocator, "tool-{s}", .{name}) catch oom(), t, false));
     }
     const call = d.plusLit(d.litPlus("<|tool_call>call:", tool_choice), "<tool_call|>");
     const tool_call = blk: {
@@ -1445,12 +1441,12 @@ fn genMinimax() []const u8 {
 
 const any_pool = [_][]const u8{ "a", "z", "Q", "0", " ", "\xc3\xa9", "\xc3\x83", "\xe6\x97\xa5", "\xf0\x9f\x98\x80", "\"", "}", "<", "\n", "\x0b" };
 
-fn derive(arena: *const peg.Arena, id: ParserId, depth: usize, out: *std.ArrayList(u8)) void {
+fn derive(arena: *const peg.Arena, id: peg.ParserId, depth: usize, out: *std.ArrayList(u8)) void {
     if (depth > 30 or out.items.len > 300) return;
     const p = arena.get(id) catch return;
     switch (p.*) {
         .epsilon, .start, .end, .and_, .not_ => {},
-        .literal => |l| out.appendSlice(gpa, l) catch oom(),
+        .literal => |l| out.appendSlice(std.heap.smp_allocator, l) catch oom(),
         .sequence => |c| for (c) |x| derive(arena, x, depth + 1, out),
         .choice => |c| if (c.len > 0) derive(arena, c[if (depth > 12) 0 else below(c.len)], depth + 1, out),
         .repetition => |r| {
@@ -1460,8 +1456,8 @@ fn derive(arena: *const peg.Arena, id: ParserId, depth: usize, out: *std.ArrayLi
             if (r.max_count >= 0) k = @min(k, @as(usize, @intCast(r.max_count)));
             for (0..k) |_| derive(arena, r.child, depth + 1, out);
         },
-        .any => out.appendSlice(gpa, pick([]const u8, &any_pool)) catch oom(),
-        .space => out.appendSlice(gpa, pick([]const u8, &.{ "", " ", "\n", " \t ", "\x0b\x0c\r" })) catch oom(),
+        .any => out.appendSlice(std.heap.smp_allocator, pick([]const u8, &any_pool)) catch oom(),
+        .space => out.appendSlice(std.heap.smp_allocator, pick([]const u8, &.{ "", " ", "\n", " \t ", "\x0b\x0c\r" })) catch oom(),
         .chars => |c| {
             const min: usize = @intCast(@max(c.min_count, 0));
             var k = min + below(3);
@@ -1476,14 +1472,14 @@ fn derive(arena: *const peg.Arena, id: ParserId, depth: usize, out: *std.ArrayLi
                 }
                 var buf: [4]u8 = undefined;
                 const s = json.trie.cptToUtf8(cp, &buf) catch continue;
-                out.appendSlice(gpa, s) catch oom();
+                out.appendSlice(std.heap.smp_allocator, s) catch oom();
             }
         },
         .string => |dl| {
             const parts = [_][]const u8{ "abc", "\\n", "\\\"", "\\u00e9", "\xc3\xa9", "x y", "\\\\", "'", "\\\"{", "}\\\"" };
             for (0..below(3)) |_| {
                 const s = pick([]const u8, &parts);
-                if (std.mem.indexOfScalar(u8, s, dl) == null) out.appendSlice(gpa, s) catch oom();
+                if (std.mem.indexOfScalar(u8, s, dl) == null) out.appendSlice(std.heap.smp_allocator, s) catch oom();
             }
         },
         .until => |ds| {
@@ -1493,7 +1489,7 @@ fn derive(arena: *const peg.Arena, id: ParserId, depth: usize, out: *std.ArrayLi
             for (ds) |dl| if (dl.len > 0 and std.mem.indexOf(u8, s, dl) != null) {
                 ok = false;
             };
-            if (ok) out.appendSlice(gpa, s) catch oom();
+            if (ok) out.appendSlice(std.heap.smp_allocator, s) catch oom();
         },
         .schema => |s| derive(arena, s.child, depth + 1, out),
         .rule => |r| derive(arena, r.child, depth + 1, out),
@@ -1507,15 +1503,15 @@ fn derive(arena: *const peg.Arena, id: ParserId, depth: usize, out: *std.ArrayLi
 
 fn mutateInput(s: []const u8) []const u8 {
     var t: std.ArrayList(u8) = .empty;
-    t.appendSlice(gpa, s) catch oom();
+    t.appendSlice(std.heap.smp_allocator, s) catch oom();
     for (0..1 + below(2)) |_| {
         switch (below(5)) {
             0 => if (t.items.len > 0) {
                 const i = below(t.items.len);
                 const n = @min(1 + below(4), t.items.len - i);
-                t.replaceRange(gpa, i, n, &.{}) catch oom();
+                t.replaceRange(std.heap.smp_allocator, i, n, &.{}) catch oom();
             },
-            1 => t.insertSlice(gpa, below(t.items.len + 1), randomStr()) catch oom(),
+            1 => t.insertSlice(std.heap.smp_allocator, below(t.items.len + 1), randomStr()) catch oom(),
             2 => if (t.items.len > 0) {
                 t.items[below(t.items.len)] = pick(u8, "\"{}[],: \\<>/a0\xff\xc3\x0b");
             },
@@ -1523,8 +1519,8 @@ fn mutateInput(s: []const u8) []const u8 {
             else => if (t.items.len > 1) {
                 const i = below(t.items.len);
                 const n = @min(1 + below(8), t.items.len - i);
-                const span = gpa.dupe(u8, t.items[i .. i + n]) catch oom();
-                t.insertSlice(gpa, i, span) catch oom();
+                const span = std.heap.smp_allocator.dupe(u8, t.items[i .. i + n]) catch oom();
+                t.insertSlice(std.heap.smp_allocator, i, span) catch oom();
             },
         }
     }
@@ -1544,7 +1540,7 @@ fn inputsFor(ops: []const u8, given: []const []const u8, n_derived: usize, n_mut
     var list: std.ArrayList(Input) = .empty;
     var arena_opt: ?peg.Arena = portBuild(ops) catch blk: {
         if (harness_msg) |m| {
-            gpa.free(m);
+            std.heap.smp_allocator.free(m);
             harness_msg = null;
         }
         break :blk null;
@@ -1552,23 +1548,23 @@ fn inputsFor(ops: []const u8, given: []const []const u8, n_derived: usize, n_mut
     defer if (arena_opt) |*a| a.deinit();
     const size = if (arena_opt) |a| a.size() else 0;
     var texts: std.ArrayList([]const u8) = .empty;
-    for (given) |g| texts.append(gpa, g) catch oom();
+    for (given) |g| texts.append(std.heap.smp_allocator, g) catch oom();
     if (arena_opt) |*a| {
         if (a.root != peg.invalid_parser_id) {
             for (0..n_derived) |_| {
                 var out: std.ArrayList(u8) = .empty;
                 derive(a, a.root, 0, &out);
-                texts.append(gpa, out.items) catch oom();
+                texts.append(std.heap.smp_allocator, out.items) catch oom();
             }
         }
     }
     const base = texts.items.len;
     for (0..n_mutated) |_| {
         const src = if (base > 0) texts.items[below(base)] else randomStr();
-        texts.append(gpa, mutateInput(src)) catch oom();
+        texts.append(std.heap.smp_allocator, mutateInput(src)) catch oom();
     }
-    if (texts.items.len == 0) texts.append(gpa, randomStr()) catch oom();
-    for (texts.items) |t| list.append(gpa, .{ .text = t, .modes = modesFor(t, size) }) catch oom();
+    if (texts.items.len == 0) texts.append(std.heap.smp_allocator, randomStr()) catch oom();
+    for (texts.items) |t| list.append(std.heap.smp_allocator, .{ .text = t, .modes = modesFor(t, size) }) catch oom();
     return list.items;
 }
 
@@ -1639,7 +1635,7 @@ fn printEscaped(s: []const u8) void {
 fn dropWarning(_: []const u8) void {}
 
 fn addCase(label: []const u8, kind: u8, text: []const u8, inputs: []const Input) void {
-    cases.append(gpa, .{ .label = label, .kind = kind, .text = text, .inputs = inputs }) catch oom();
+    cases.append(std.heap.smp_allocator, .{ .label = label, .kind = kind, .text = text, .inputs = inputs }) catch oom();
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -1647,8 +1643,8 @@ pub fn main(init: std.process.Init) !void {
     // Windows: this process may be the reference's child (win_child.zig),
     // with stderr dropped as `runForked`'s fork drops it
     if (comptime builtin.os.tag == .windows) if (win_child.childArgs(argv)) |c| {
-        const devnull = libc._open("NUL", 1); // _O_WRONLY
-        if (devnull >= 0) _ = libc._dup2(devnull, 2);
+        const devnull = stdlib.libc._open("NUL", 1); // _O_WRONLY
+        if (devnull >= 0) _ = stdlib.libc._dup2(devnull, 2);
         var len: usize = 0;
         const p = if (std.mem.eql(u8, c.mode, "upstream")) ref_peg_upstream(&len) else ref_peg_run(c.input.ptr, c.input.len, &len);
         std.process.exit(if (win_child.writeFile(c.out.ptr, p[0..len])) 0 else 3);
@@ -1686,7 +1682,7 @@ pub fn main(init: std.process.Init) !void {
             const kind = r.str()[0];
             const ops = r.str();
             const k = r.u32_();
-            const given = gpa.alloc([]const u8, k) catch oom();
+            const given = std.heap.smp_allocator.alloc([]const u8, k) catch oom();
             for (given) |*s| s.* = r.str();
             n_inputs += k;
             addCase("upstream", kind, ops, inputsFor(ops, given, 4 * scale, 6 * scale));
@@ -1766,28 +1762,28 @@ pub fn main(init: std.process.Init) !void {
     var start: usize = 0;
     while (start < cases.items.len) : (start += batch) {
         const end = @min(start + batch, cases.items.len);
-        const ref_by_case = gpa.alloc(?Records, end - start) catch oom();
-        defer gpa.free(ref_by_case);
+        const ref_by_case = std.heap.smp_allocator.alloc(?Records, end - start) catch oom();
+        defer std.heap.smp_allocator.free(ref_by_case);
         @memset(ref_by_case, null);
 
         var prog: std.ArrayList(u8) = .empty;
-        defer prog.deinit(gpa);
+        defer prog.deinit(std.heap.smp_allocator);
         for (cases.items[start..end], start..) |c, id| {
             if (filter) |f| if (std.mem.indexOf(u8, c.label, f) == null) continue;
             caseProgram(c, @intCast(id), &prog);
         }
         var buf: std.ArrayList(u8) = .empty;
-        defer buf.deinit(gpa);
+        defer buf.deinit(std.heap.smp_allocator);
         if (runForked(prog.items, &buf, 60)) {
             parseRefBatch(buf.items, ref_by_case, start);
         } else {
             for (cases.items[start..end], start..) |c, id| {
                 if (filter) |f| if (std.mem.indexOf(u8, c.label, f) == null) continue;
                 var one: std.ArrayList(u8) = .empty;
-                defer one.deinit(gpa);
+                defer one.deinit(std.heap.smp_allocator);
                 caseProgram(c, @intCast(id), &one);
                 var out: std.ArrayList(u8) = .empty;
-                defer out.deinit(gpa);
+                defer out.deinit(std.heap.smp_allocator);
                 if (runForked(one.items, &out, 10)) {
                     parseRefBatch(out.items, ref_by_case, start);
                 } else {
@@ -1819,7 +1815,7 @@ pub fn main(init: std.process.Init) !void {
                     if (want_stats) {
                         const at = std.mem.indexOf(u8, a, "E:").?;
                         const key = a[at..@min(a.len, at + 90)];
-                        const gop = stats.getOrPut(gpa, gpa.dupe(u8, key) catch oom()) catch oom();
+                        const gop = stats.getOrPut(std.heap.smp_allocator, std.heap.smp_allocator.dupe(u8, key) catch oom()) catch oom();
                         if (!gop.found_existing) gop.value_ptr.* = 0;
                         gop.value_ptr.* += 1;
                     }
@@ -1840,11 +1836,11 @@ pub fn main(init: std.process.Init) !void {
                     }
                 }
             }
-            for (port.items) |x| gpa.free(x);
-            port.deinit(gpa);
-            for (ref.items) |x| gpa.free(x);
+            for (port.items) |x| std.heap.smp_allocator.free(x);
+            port.deinit(std.heap.smp_allocator);
+            for (ref.items) |x| std.heap.smp_allocator.free(x);
             var refm = ref;
-            refm.deinit(gpa);
+            refm.deinit(std.heap.smp_allocator);
         }
     }
 

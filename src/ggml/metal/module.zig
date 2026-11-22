@@ -24,19 +24,6 @@ pub const ops = @import("ops.zig");
 pub const tuning = @import("tuning.zig");
 pub const tuning_table = @import("tuning_table.zig");
 
-comptime {
-    _ = backend;
-    _ = common;
-    _ = device_c;
-    _ = fusion;
-    _ = impl_c;
-    _ = kargs;
-    _ = library;
-    _ = ops;
-    _ = tuning;
-    _ = tuning_table;
-}
-
 // -----------------------------------------------------------------------------
 // Unit Tests
 

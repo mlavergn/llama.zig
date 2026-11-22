@@ -46,9 +46,6 @@ const llama = @import("llama");
 /// `common_json::dump_safe`'s text, for `LOG_JSON`; the tools reach it here.
 pub const json = @import("json/module.zig");
 
-const api = llama.api;
-const c = llama.impl.c;
-
 const MiB: i64 = 1024 * 1024;
 
 /// `__func__` inside a C++ lambda.
@@ -143,9 +140,9 @@ pub const Paths = []const [*:0]const u8;
 /// Ports `common_model_load` (common/common.cpp:1725 @b1b770d90): one file
 /// through `llama_model_load_from_file`, several through
 /// `llama_model_load_from_splits`.
-fn modelLoad(paths: Paths, mparams: c.llama_model_params) ?*c.llama_model {
-    if (paths.len == 1) return api.llama.llama_model_load_from_file(paths[0], mparams);
-    return api.llama.llama_model_load_from_splits(@ptrCast(@constCast(paths.ptr)), paths.len, mparams);
+fn modelLoad(paths: Paths, mparams: llama.impl.llama_c.llama_model_params) ?*llama.impl.llama_c.llama_model {
+    if (paths.len == 1) return llama.api.llama.llama_model_load_from_file(paths[0], mparams);
+    return llama.api.llama.llama_model_load_from_splits(@ptrCast(@constCast(paths.ptr)), paths.len, mparams);
 }
 
 /// Ports `common_fit_extra_model` (fit.h:18 @b1b770d90): a second model
@@ -153,8 +150,8 @@ fn modelLoad(paths: Paths, mparams: c.llama_model_params) ?*c.llama_model {
 /// follows the main one's, so it is measured again whenever that changes.
 pub const ExtraModel = struct {
     paths_model: Paths,
-    mparams: *c.llama_model_params,
-    cparams: *c.llama_context_params,
+    mparams: *llama.impl.llama_c.llama_model_params,
+    cparams: *llama.impl.llama_c.llama_context_params,
     /// The weights are already counted in the main model, as for an MTP
     /// context.
     shares_model: bool,
@@ -247,25 +244,25 @@ const Fitter = struct {
 /// original back. `install` is the constructor and `deinit` the destructor;
 /// the scope must not move between the two.
 const LogFilter = struct {
-    original_callback: c.ggml_log_callback,
+    original_callback: llama.impl.llama_c.ggml_log_callback,
     original_user_data: ?*anyopaque,
-    min_level: c.enum_ggml_log_level,
+    min_level: llama.impl.llama_c.enum_ggml_log_level,
 
-    fn install(self: *LogFilter, min_level: c.enum_ggml_log_level) void {
+    fn install(self: *LogFilter, min_level: llama.impl.llama_c.enum_ggml_log_level) void {
         self.* = .{ .original_callback = null, .original_user_data = null, .min_level = min_level };
-        api.impl.llama_log_get(&self.original_callback, &self.original_user_data);
-        api.impl.llama_log_set(LogFilter.callback, self);
+        llama.api.impl.llama_log_get(&self.original_callback, &self.original_user_data);
+        llama.api.impl.llama_log_set(LogFilter.callback, self);
     }
 
     fn deinit(self: *const LogFilter) void {
-        api.impl.llama_log_set(self.original_callback, self.original_user_data);
+        llama.api.impl.llama_log_set(self.original_callback, self.original_user_data);
     }
 
     /// Ports the lambda the constructor passes to `llama_log_set`
     /// (fit.cpp:36 @b1b770d90).
-    fn callback(level: c.enum_ggml_log_level, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
+    fn callback(level: llama.impl.llama_c.enum_ggml_log_level, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
         const ud: *const LogFilter = @ptrCast(@alignCast(user_data));
-        const level_eff = if (level >= ud.min_level) level else c.GGML_LOG_LEVEL_DEBUG;
+        const level_eff = if (level >= ud.min_level) level else llama.impl.llama_c.GGML_LOG_LEVEL_DEBUG;
         ud.original_callback.?(level_eff, text, ud.original_user_data);
     }
 };
@@ -279,14 +276,14 @@ const LogFilter = struct {
 fn deviceMemoryDataImpl(
     f: *Fitter,
     paths_model: Paths,
-    mparams: *const c.llama_model_params,
-    cparams: *const c.llama_context_params,
-    devs: *std.ArrayList(c.ggml_backend_dev_t),
+    mparams: *const llama.impl.llama_c.llama_model_params,
+    cparams: *const llama.impl.llama_c.llama_context_params,
+    devs: *std.ArrayList(llama.impl.llama_c.ggml_backend_dev_t),
     hp_ngl: *u32,
     hp_ngl_skip: *u32,
     hp_n_ctx_train: *u32,
     hp_n_expert: *u32,
-    log_level: c.enum_ggml_log_level,
+    log_level: llama.impl.llama_c.enum_ggml_log_level,
 ) Failure![]LlamaDeviceMemoryData {
     var log_scope: LogFilter = undefined;
     log_scope.install(log_level);
@@ -294,32 +291,32 @@ fn deviceMemoryDataImpl(
 
     var mparams_copy = mparams.*;
     mparams_copy.no_alloc = true;
-    mparams_copy.load_mode = c.LLAMA_LOAD_MODE_NONE;
+    mparams_copy.load_mode = llama.impl.llama_c.LLAMA_LOAD_MODE_NONE;
 
     const model = modelLoad(paths_model, mparams_copy) orelse
         return f.fail(error.Runtime, "failed to load model", .{});
-    defer api.model.llama_model_free(model);
+    defer llama.api.model.llama_model_free(model);
 
-    const ctx = api.context.llama_init_from_model(model, cparams.*) orelse
+    const ctx = llama.api.context.llama_init_from_model(model, cparams.*) orelse
         return f.fail(error.Runtime, "failed to create llama_context from model", .{});
-    defer api.context.llama_free(ctx);
+    defer llama.api.context.llama_free(ctx);
 
-    const nd: usize = @intCast(api.model.llama_model_n_devices(model));
+    const nd: usize = @intCast(llama.api.model.llama_model_n_devices(model));
     const ret = try f.arena.alloc(LlamaDeviceMemoryData, nd + 1);
     @memset(ret, .{});
     const host = &ret[nd];
 
-    const memory_breakdown = try api.context.llama_get_memory_breakdown(ctx, f.arena);
+    const memory_breakdown = try llama.api.context.llama_get_memory_breakdown(ctx, f.arena);
     for (memory_breakdown) |e| {
-        if (c.ggml_backend_buft_is_host(e.buft)) {
+        if (llama.impl.llama_c.ggml_backend_buft_is_host(e.buft)) {
             host.mb.model +%= e.model;
             host.mb.context +%= e.context;
             host.mb.compute +%= e.compute;
             continue;
         }
-        const dev = c.ggml_backend_buft_get_device(e.buft) orelse continue;
+        const dev = llama.impl.llama_c.ggml_backend_buft_get_device(e.buft) orelse continue;
         for (0..nd) |i| {
-            if (dev == api.model.llama_model_get_device(model, @intCast(i))) {
+            if (dev == llama.api.model.llama_model_get_device(model, @intCast(i))) {
                 ret[i].mb.model +%= e.model;
                 ret[i].mb.context +%= e.context;
                 ret[i].mb.compute +%= e.compute;
@@ -333,28 +330,28 @@ fn deviceMemoryDataImpl(
         // still in place, the logger's user data on a frame about to unwind.
         // The defers above release them instead. Unreachable in practice:
         // the CPU backend is always registered.
-        const cpu_dev = c.ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_CPU) orelse
+        const cpu_dev = llama.impl.llama_c.ggml_backend_dev_by_type(llama.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_CPU) orelse
             return f.fail(error.Runtime, "no CPU backend found", .{});
         var free: usize = 0;
         var total: usize = 0;
-        c.ggml_backend_dev_memory(cpu_dev, &free, &total);
+        llama.impl.llama_c.ggml_backend_dev_memory(cpu_dev, &free, &total);
         host.free = @bitCast(free);
         host.total = @bitCast(total);
     }
     for (0..nd) |i| {
-        const dev = api.model.llama_model_get_device(model, @intCast(i));
+        const dev = llama.api.model.llama_model_get_device(model, @intCast(i));
 
         var free: usize = 0;
         var total: usize = 0;
-        c.ggml_backend_dev_memory(dev, &free, &total);
+        llama.impl.llama_c.ggml_backend_dev_memory(dev, &free, &total);
 
         // Some non-GPU accelerator backends, such as BLAS, report 0/0 and
         // rely on the host-memory fallback. A GPU-like backend keeps 0/0, so
         // that nothing is assigned to a device with an unknown budget.
         if (free == 0 and total == 0) {
-            const t = c.ggml_backend_dev_type(dev);
-            if (t == c.GGML_BACKEND_DEVICE_TYPE_GPU or t == c.GGML_BACKEND_DEVICE_TYPE_IGPU) {
-                f.log.wrn("%s: device %s did not report memory; --fit will not use it\n", .{ @as([*:0]const u8, "common_get_device_memory_data_impl"), c.ggml_backend_dev_name(dev) });
+            const t = llama.impl.llama_c.ggml_backend_dev_type(dev);
+            if (t == llama.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_GPU or t == llama.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_IGPU) {
+                f.log.wrn("%s: device %s did not report memory; --fit will not use it\n", .{ @as([*:0]const u8, "common_get_device_memory_data_impl"), llama.impl.llama_c.ggml_backend_dev_name(dev) });
             } else {
                 free = @bitCast(host.free);
                 total = @bitCast(host.total);
@@ -365,14 +362,14 @@ fn deviceMemoryDataImpl(
     }
 
     devs.clearRetainingCapacity();
-    for (0..nd) |i| try devs.append(f.arena, api.model.llama_model_get_device(model, @intCast(i)));
+    for (0..nd) |i| try devs.append(f.arena, llama.api.model.llama_model_get_device(model, @intCast(i)));
 
-    hp_ngl.* = @bitCast(api.model.llama_model_n_layer(model));
-    if (mparams.load_mtp) hp_ngl.* +%= @bitCast(api.model.llama_model_n_layer_nextn(model));
+    hp_ngl.* = @bitCast(llama.api.model.llama_model_n_layer(model));
+    if (mparams.load_mtp) hp_ngl.* +%= @bitCast(llama.api.model.llama_model_n_layer_nextn(model));
     // without MTP the NextN layers hold no weights but the model loader still counts them for n_gpu_layers
-    hp_ngl_skip.* = if (mparams.load_mtp) 0 else @bitCast(api.model.llama_model_n_layer_nextn(model));
-    hp_n_ctx_train.* = @bitCast(api.model.llama_model_n_ctx_train(model));
-    hp_n_expert.* = @bitCast(api.model.llama_model_n_expert(model));
+    hp_ngl_skip.* = if (mparams.load_mtp) 0 else @bitCast(llama.api.model.llama_model_n_layer_nextn(model));
+    hp_n_ctx_train.* = @bitCast(llama.api.model.llama_model_n_ctx_train(model));
+    hp_n_expert.* = @bitCast(llama.api.model.llama_model_n_expert(model));
 
     try memoryBreakdownPrint(f.arena, f.log, ctx);
 
@@ -401,14 +398,14 @@ pub fn getDeviceMemoryData(
     gpa: std.mem.Allocator,
     log: Log,
     paths_model: Paths,
-    mparams: *const c.llama_model_params,
-    cparams: *const c.llama_context_params,
-    devs: *std.ArrayList(c.ggml_backend_dev_t),
+    mparams: *const llama.impl.llama_c.llama_model_params,
+    cparams: *const llama.impl.llama_c.llama_context_params,
+    devs: *std.ArrayList(llama.impl.llama_c.ggml_backend_dev_t),
     hp_ngl: *u32,
     hp_ngl_skip: *u32,
     hp_n_ctx_train: *u32,
     hp_n_expert: *u32,
-    log_level: c.enum_ggml_log_level,
+    log_level: llama.impl.llama_c.enum_ggml_log_level,
 ) ![]DeviceMemoryData {
     var arena_state: std.heap.ArenaAllocator = .init(gpa);
     defer arena_state.deinit();
@@ -416,7 +413,7 @@ pub fn getDeviceMemoryData(
     defer patterns.deinit();
     var f: Fitter = .{ .arena = arena_state.allocator(), .patterns = &patterns, .log = log };
 
-    var arena_devs: std.ArrayList(c.ggml_backend_dev_t) = .empty;
+    var arena_devs: std.ArrayList(llama.impl.llama_c.ggml_backend_dev_t) = .empty;
     const impl_ret = deviceMemoryDataImpl(&f, paths_model, mparams, cparams, &arena_devs, hp_ngl, hp_ngl_skip, hp_n_ctx_train, hp_n_expert, log_level) catch |e| switch (e) {
         error.Fit, error.Runtime => {
             log.err("%s\n", .{f.what.ptr});
@@ -460,14 +457,14 @@ const Ngl = struct {
 const FitImpl = struct {
     f: *Fitter,
     paths_model: Paths,
-    mparams: *c.llama_model_params,
-    cparams: *c.llama_context_params,
+    mparams: *llama.impl.llama_c.llama_model_params,
+    cparams: *llama.impl.llama_c.llama_context_params,
     tensor_split: ?[*]f32,
-    tensor_buft_overrides: ?[*]c.llama_model_tensor_buft_override,
+    tensor_buft_overrides: ?[*]llama.impl.llama_c.llama_model_tensor_buft_override,
     extra: ?*const ExtraModel,
-    log_level: c.enum_ggml_log_level,
+    log_level: llama.impl.llama_c.enum_ggml_log_level,
 
-    devs: std.ArrayList(c.ggml_backend_dev_t) = .empty,
+    devs: std.ArrayList(llama.impl.llama_c.ggml_backend_dev_t) = .empty,
     hp_ngl: u32 = 0, // hparams.n_gpu_layers
     hp_nsk: u32 = 0, // number of skipped NextN layers, counted by the model loader but not by hp_ngl
     hp_nct: u32 = 0,
@@ -480,7 +477,7 @@ const FitImpl = struct {
     /// The context that memory was measured at.
     n_ctx_extra: u32 = 0,
 
-    fn measure(self: *FitImpl, mparams: *const c.llama_model_params) Failure![]LlamaDeviceMemoryData {
+    fn measure(self: *FitImpl, mparams: *const llama.impl.llama_c.llama_model_params) Failure![]LlamaDeviceMemoryData {
         return deviceMemoryDataImpl(self.f, self.paths_model, mparams, self.cparams, &self.devs, &self.hp_ngl, &self.hp_nsk, &self.hp_nct, &self.hp_nex, self.log_level);
     }
 
@@ -493,7 +490,7 @@ const FitImpl = struct {
         const extra = self.extra orelse return;
 
         if (self.dmds_extra.len == 0 or self.n_ctx_extra != self.cparams.n_ctx) {
-            var devs_extra: std.ArrayList(c.ggml_backend_dev_t) = .empty;
+            var devs_extra: std.ArrayList(llama.impl.llama_c.ggml_backend_dev_t) = .empty;
             var ngl_extra: u32 = 0;
             var nsk_extra: u32 = 0;
             var nct_extra: u32 = 0;
@@ -566,7 +563,7 @@ const FitImpl = struct {
     /// Ports the lambda `set_ngl_tensor_split_tbo` (fit.cpp:635 @b1b770d90):
     /// writes a layer assignment into `mparams` through the caller's
     /// `tensor_split` and override buffers.
-    fn setNglTensorSplitTbo(self: *FitImpl, ngl_per_device: []const Ngl, overflow_bufts: []const c.ggml_backend_buffer_type_t, mparams: *c.llama_model_params) Failure!void {
+    fn setNglTensorSplitTbo(self: *FitImpl, ngl_per_device: []const Ngl, overflow_bufts: []const llama.impl.llama_c.ggml_backend_buffer_type_t, mparams: *llama.impl.llama_c.llama_model_params) Failure!void {
         const nd = self.nd;
         var n_gpu_layers: u32 = 0;
         for (0..nd) |id| {
@@ -605,7 +602,7 @@ const FitImpl = struct {
                     return self.f.fail(error.Fit, "llama_max_tensor_buft_overrides() == {d} is insufficient for model", .{self.ntbo});
                 }
                 tbo[itbo].pattern = try self.overflowPattern(il, if (il == il0) ngl_per_device[id].overflow_type else .moe);
-                tbo[itbo].buft = if (il == il0) overflow_bufts[id] else c.ggml_backend_cpu_buffer_type();
+                tbo[itbo].buft = if (il == il0) overflow_bufts[id] else llama.impl.llama_c.ggml_backend_cpu_buffer_type();
                 itbo += 1;
             }
             il0 +%= ngl_per_device[id].n_part;
@@ -618,7 +615,7 @@ const FitImpl = struct {
 
     /// Ports the lambda `get_memory_for_layers` (fit.cpp:690 @b1b770d90): the
     /// memory each device would use for a layer assignment.
-    fn memoryForLayers(self: *FitImpl, func_name: [*:0]const u8, ngl_per_device: []const Ngl, overflow_bufts: []const c.ggml_backend_buffer_type_t) Failure![]i64 {
+    fn memoryForLayers(self: *FitImpl, func_name: [*:0]const u8, ngl_per_device: []const Ngl, overflow_bufts: []const llama.impl.llama_c.ggml_backend_buffer_type_t) Failure![]i64 {
         var mparams_copy = self.mparams.*;
         try self.setNglTensorSplitTbo(ngl_per_device, overflow_bufts, &mparams_copy);
 
@@ -660,21 +657,21 @@ fn divMiB(size: usize) i64 {
 fn fitImpl(
     f: *Fitter,
     paths_model: Paths,
-    mparams: *c.llama_model_params,
-    cparams: *c.llama_context_params,
+    mparams: *llama.impl.llama_c.llama_model_params,
+    cparams: *llama.impl.llama_c.llama_context_params,
     tensor_split: ?[*]f32,
-    tensor_buft_overrides: ?[*]c.llama_model_tensor_buft_override,
+    tensor_buft_overrides: ?[*]llama.impl.llama_c.llama_model_tensor_buft_override,
     margins_s: [*]const usize,
     n_ctx_min: u32,
     extra: ?*const ExtraModel,
-    log_level: c.enum_ggml_log_level,
+    log_level: llama.impl.llama_c.enum_ggml_log_level,
 ) Failure!void {
     const func: [*:0]const u8 = "common_params_fit_impl";
     const log = f.log;
-    if (mparams.split_mode == c.LLAMA_SPLIT_MODE_TENSOR) {
+    if (mparams.split_mode == llama.impl.llama_c.LLAMA_SPLIT_MODE_TENSOR) {
         return f.fail(error.Fit, "llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort", .{});
     }
-    const default_mparams = api.model.llama_model_default_params();
+    const default_mparams = llama.api.model.llama_model_default_params();
 
     var s: FitImpl = .{
         .f = f,
@@ -726,7 +723,7 @@ fn fitImpl(
     {
         var max_length: usize = 0;
         for (devs, 0..) |dev, id| {
-            dev_names[id] = try std.fmt.allocPrintSentinel(f.arena, "{s} ({s})", .{ std.mem.span(c.ggml_backend_dev_name(dev)), std.mem.span(c.ggml_backend_dev_description(dev)) }, 0);
+            dev_names[id] = try std.fmt.allocPrintSentinel(f.arena, "{s} ({s})", .{ std.mem.span(llama.impl.llama_c.ggml_backend_dev_name(dev)), std.mem.span(llama.impl.llama_c.ggml_backend_dev_description(dev)) }, 0);
             max_length = @max(max_length, dev_names[id].len);
         }
         for (dev_names) |*dn| {
@@ -890,7 +887,7 @@ fn fitImpl(
                 if (mparams.tensor_split[id] != 0.0) return f.fail(error.Fit, "model_params::tensor_split already set by user, abort", .{});
             }
         }
-        if (mparams.split_mode == c.LLAMA_SPLIT_MODE_ROW) {
+        if (mparams.split_mode == llama.impl.llama_c.LLAMA_SPLIT_MODE_ROW) {
             return f.fail(error.Fit, "changing weight allocation for LLAMA_SPLIT_MODE_ROW not implemented, abort", .{});
         }
     }
@@ -907,12 +904,12 @@ fn fitImpl(
     //     contiguous slice of the model
     //   - for a MoE model, the same but with all MoE tensors in system memory
 
-    s.ntbo = api.llama.llama_max_tensor_buft_overrides();
+    s.ntbo = llama.api.llama.llama_max_tensor_buft_overrides();
 
     var global_surplus_cpu_moe: i64 = 0;
     if (s.hp_nex > 0) {
         const pattern_moe_all = "blk\\.\\d+\\.ffn_(up|down|gate_up|gate)_(ch|)exps"; // matches all MoE tensors
-        const cpu_buft = c.ggml_backend_cpu_buffer_type();
+        const cpu_buft = llama.impl.llama_c.ggml_backend_cpu_buffer_type();
         tbo[0] = .{ .pattern = pattern_moe_all, .buft = cpu_buft };
         tbo[1] = .{ .pattern = null, .buft = null };
         mparams.tensor_buft_overrides = tbo;
@@ -944,8 +941,8 @@ fn fitImpl(
     }
 
     // Which buffer type the first partial layer of each device overflows to.
-    var overflow_bufts = try f.arena.alloc(c.ggml_backend_buffer_type_t, nd);
-    for (overflow_bufts) |*b| b.* = c.ggml_backend_cpu_buffer_type();
+    var overflow_bufts = try f.arena.alloc(llama.impl.llama_c.ggml_backend_buffer_type_t, nd);
+    for (overflow_bufts) |*b| b.* = llama.impl.llama_c.ggml_backend_cpu_buffer_type();
 
     var ngl_per_device = try f.arena.alloc(Ngl, nd);
     @memset(ngl_per_device, .{});
@@ -1109,8 +1106,8 @@ fn fitImpl(
             ngl_per_device_test[id].n_part +%= 1;
             if (ngl_per_device_test[id_dense_start_test].n_part == 0) id_dense_start_test += 1;
             ngl_per_device_test[id].overflow_type = .up;
-            const overflow_bufts_test = try f.arena.dupe(c.ggml_backend_buffer_type_t, overflow_bufts);
-            if (id < nd - 1) overflow_bufts_test[id] = c.ggml_backend_dev_buffer_type(devs[id + 1]);
+            const overflow_bufts_test = try f.arena.dupe(llama.impl.llama_c.ggml_backend_buffer_type_t, overflow_bufts);
+            if (id < nd - 1) overflow_bufts_test[id] = llama.impl.llama_c.ggml_backend_dev_buffer_type(devs[id + 1]);
             log.trc("%s: trying to fit one extra layer with overflow_type=LAYER_FRACTION_UP\n", .{func});
             var mem_test = try s.memoryForLayers(func, ngl_per_device_test, overflow_bufts_test);
             if (mem_test[id] < targets[id] and (id + 1 == nd or mem_test[id + 1] < targets[id + 1])) {
@@ -1191,21 +1188,21 @@ pub fn fitParams(
     patterns: *Patterns,
     log: Log,
     paths_model: Paths,
-    mparams: *c.llama_model_params,
-    cparams: *c.llama_context_params,
+    mparams: *llama.impl.llama_c.llama_model_params,
+    cparams: *llama.impl.llama_c.llama_context_params,
     tensor_split: ?[*]f32,
-    tensor_buft_overrides: ?[*]c.llama_model_tensor_buft_override,
+    tensor_buft_overrides: ?[*]llama.impl.llama_c.llama_model_tensor_buft_override,
     margins: [*]const usize,
     n_ctx_min: u32,
     extra: ?*const ExtraModel,
-    log_level: c.enum_ggml_log_level,
+    log_level: llama.impl.llama_c.enum_ggml_log_level,
 ) error{OutOfMemory}!Status {
     const func: [*:0]const u8 = "common_fit_params";
     var arena_state: std.heap.ArenaAllocator = .init(gpa);
     defer arena_state.deinit();
     var f: Fitter = .{ .arena = arena_state.allocator(), .patterns = patterns, .log = log };
 
-    const t0_us = api.llama.llama_time_us();
+    const t0_us = llama.api.llama.llama_time_us();
     var status: Status = .success;
     if (fitImpl(&f, paths_model, mparams, cparams, tensor_split, tensor_buft_overrides, margins, n_ctx_min, extra, log_level)) {
         log.trc("%s: successfully fit params to free device memory\n", .{func});
@@ -1220,7 +1217,7 @@ pub fn fitParams(
         },
         error.OutOfMemory => return error.OutOfMemory,
     }
-    const t1_us = api.llama.llama_time_us();
+    const t1_us = llama.api.llama.llama_time_us();
     log.trc("%s: fitting params to free memory took %.2f seconds\n", .{ func, @as(f64, @floatFromInt(t1_us - t0_us)) * 1e-6 });
     return status;
 }
@@ -1249,18 +1246,18 @@ pub const MemoryBreakdownRow = struct {
 /// - `ctx`: the context to break down.
 ///
 /// Return: the rows, from `arena`.
-pub fn memoryBreakdownRows(arena: std.mem.Allocator, ctx: ?*const c.struct_llama_context) ![]MemoryBreakdownRow {
-    const model = api.context.llama_get_model(ctx);
+pub fn memoryBreakdownRows(arena: std.mem.Allocator, ctx: ?*const llama.impl.llama_c.struct_llama_context) ![]MemoryBreakdownRow {
+    const model = llama.api.context.llama_get_model(ctx);
 
-    const devices = try arena.alloc(c.ggml_backend_dev_t, @intCast(api.model.llama_model_n_devices(model)));
-    for (devices, 0..) |*d, i| d.* = api.model.llama_model_get_device(model, @intCast(i));
+    const devices = try arena.alloc(llama.impl.llama_c.ggml_backend_dev_t, @intCast(llama.api.model.llama_model_n_devices(model)));
+    for (devices, 0..) |*d, i| d.* = llama.api.model.llama_model_get_device(model, @intCast(i));
 
-    const memory_breakdown = try api.context.llama_get_memory_breakdown(ctx, arena);
+    const memory_breakdown = try llama.api.context.llama_get_memory_breakdown(ctx, arena);
 
     const desc_prefixes_strip = [_][]const u8{ "NVIDIA ", "GeForce ", "Tesla ", "AMD ", "Radeon ", "Instinct " };
 
     // Buffer types already reported, so none is counted twice.
-    var seen_buffer_types: std.ArrayList(c.ggml_backend_buffer_type_t) = .empty;
+    var seen_buffer_types: std.ArrayList(llama.impl.llama_c.ggml_backend_buffer_type_t) = .empty;
 
     // Running breakdown for each device and for the host.
     const mb_dev = try arena.alloc(MemoryBreakdownData, devices.len);
@@ -1268,14 +1265,14 @@ pub fn memoryBreakdownRows(arena: std.mem.Allocator, ctx: ?*const c.struct_llama
     var mb_host: MemoryBreakdownData = .{};
 
     for (memory_breakdown) |e| {
-        if (c.ggml_backend_buft_is_host(e.buft)) {
+        if (llama.impl.llama_c.ggml_backend_buft_is_host(e.buft)) {
             mb_host.model +%= e.model;
             mb_host.context +%= e.context;
             mb_host.compute +%= e.compute;
             try seen_buffer_types.append(arena, e.buft);
             continue;
         }
-        if (c.ggml_backend_buft_get_device(e.buft)) |dev| {
+        if (llama.impl.llama_c.ggml_backend_buft_get_device(e.buft)) |dev| {
             for (devices, 0..) |d, i_dev| {
                 if (d == dev) {
                     mb_dev[i_dev].model +%= e.model;
@@ -1291,18 +1288,18 @@ pub fn memoryBreakdownRows(arena: std.mem.Allocator, ctx: ?*const c.struct_llama
     var rows: std.ArrayList(MemoryBreakdownRow) = .empty;
 
     for (devices, mb_dev) |dev, mb| {
-        var desc: []const u8 = std.mem.span(c.ggml_backend_dev_description(dev));
+        var desc: []const u8 = std.mem.span(llama.impl.llama_c.ggml_backend_dev_description(dev));
         for (desc_prefixes_strip) |prefix| {
             if (std.mem.startsWith(u8, desc, prefix)) desc = desc[prefix.len..];
         }
 
         var free: usize = 0;
         var total: usize = 0;
-        c.ggml_backend_dev_memory(dev, &free, &total);
+        llama.impl.llama_c.ggml_backend_dev_memory(dev, &free, &total);
 
         try rows.append(arena, .{
             .kind = .device,
-            .name = try arena.dupe(u8, std.mem.span(c.ggml_backend_dev_name(dev))),
+            .name = try arena.dupe(u8, std.mem.span(llama.impl.llama_c.ggml_backend_dev_name(dev))),
             .description = try arena.dupe(u8, desc),
             .total = @bitCast(total),
             .free = @bitCast(free),
@@ -1322,10 +1319,10 @@ pub fn memoryBreakdownRows(arena: std.mem.Allocator, ctx: ?*const c.struct_llama
 
     // all remaining buffer types
     for (memory_breakdown) |e| {
-        if (std.mem.indexOfScalar(c.ggml_backend_buffer_type_t, seen_buffer_types.items, e.buft) != null) continue;
+        if (std.mem.indexOfScalar(llama.impl.llama_c.ggml_backend_buffer_type_t, seen_buffer_types.items, e.buft) != null) continue;
         try rows.append(arena, .{
             .kind = .buffer_type,
-            .name = try arena.dupe(u8, std.mem.span(c.ggml_backend_buft_name(e.buft))),
+            .name = try arena.dupe(u8, std.mem.span(llama.impl.llama_c.ggml_backend_buft_name(e.buft))),
             .model = e.model,
             .context = e.context,
             .compute = e.compute,
@@ -1351,11 +1348,11 @@ pub fn memoryBreakdownRows(arena: std.mem.Allocator, ctx: ?*const c.struct_llama
 pub fn fitMeasure(
     arena: std.mem.Allocator,
     paths_model: Paths,
-    mparams: *const c.llama_model_params,
-    cparams: *const c.llama_context_params,
+    mparams: *const llama.impl.llama_c.llama_model_params,
+    cparams: *const llama.impl.llama_c.llama_context_params,
     n_ctx_train: ?*u32,
     n_ctx: ?*u32,
-    log_level: c.enum_ggml_log_level,
+    log_level: llama.impl.llama_c.enum_ggml_log_level,
     what_out: *[]const u8,
 ) ![]MemoryBreakdownRow {
     var log_scope: LogFilter = undefined;
@@ -1364,22 +1361,22 @@ pub fn fitMeasure(
 
     var mparams_copy = mparams.*;
     mparams_copy.no_alloc = true;
-    mparams_copy.load_mode = c.LLAMA_LOAD_MODE_NONE;
+    mparams_copy.load_mode = llama.impl.llama_c.LLAMA_LOAD_MODE_NONE;
 
     const model = modelLoad(paths_model, mparams_copy) orelse {
         what_out.* = "failed to load model";
         return error.Runtime;
     };
-    defer api.model.llama_model_free(model);
+    defer llama.api.model.llama_model_free(model);
 
-    const ctx = api.context.llama_init_from_model(model, cparams.*) orelse {
+    const ctx = llama.api.context.llama_init_from_model(model, cparams.*) orelse {
         what_out.* = "failed to create llama_context from model";
         return error.Runtime;
     };
-    defer api.context.llama_free(ctx);
+    defer llama.api.context.llama_free(ctx);
 
-    if (n_ctx_train) |p| p.* = @bitCast(api.model.llama_model_n_ctx_train(model));
-    if (n_ctx) |p| p.* = api.context.llama_n_ctx(ctx);
+    if (n_ctx_train) |p| p.* = @bitCast(llama.api.model.llama_model_n_ctx_train(model));
+    if (n_ctx) |p| p.* = llama.api.context.llama_n_ctx(ctx);
 
     return memoryBreakdownRows(arena, ctx);
 }
@@ -1394,7 +1391,7 @@ pub fn fitMeasure(
 /// - `ctx`: the context to break down.
 ///
 /// Return: nothing; `error.OutOfMemory` where the C would throw.
-pub fn memoryBreakdownPrint(gpa: std.mem.Allocator, log: Log, ctx: ?*const c.struct_llama_context) !void {
+pub fn memoryBreakdownPrint(gpa: std.mem.Allocator, log: Log, ctx: ?*const llama.impl.llama_c.struct_llama_context) !void {
     const func: [*:0]const u8 = "common_memory_breakdown_print";
     var arena_state: std.heap.ArenaAllocator = .init(gpa);
     defer arena_state.deinit();
@@ -1531,10 +1528,10 @@ pub fn fitPrint(
     log: Log,
     out: *std.Io.Writer,
     paths_model: Paths,
-    mparams: *c.llama_model_params,
-    cparams: *c.llama_context_params,
+    mparams: *llama.impl.llama_c.llama_model_params,
+    cparams: *llama.impl.llama_c.llama_context_params,
 ) !void {
-    var devs: std.ArrayList(c.ggml_backend_dev_t) = .empty;
+    var devs: std.ArrayList(llama.impl.llama_c.ggml_backend_dev_t) = .empty;
     defer devs.deinit(gpa);
     var hp_ngl: u32 = 0; // hparams.n_gpu_layers
     var hp_nsk: u32 = 0; // number of skipped NextN layers, counted by the model loader but not by hp_ngl
@@ -1546,8 +1543,8 @@ pub fn fitPrint(
     var patterns: Patterns = try .init(gpa);
     defer patterns.deinit();
     var f: Fitter = .{ .arena = arena_state.allocator(), .patterns = &patterns, .log = log };
-    var arena_devs: std.ArrayList(c.ggml_backend_dev_t) = .empty;
-    const dmd = deviceMemoryDataImpl(&f, paths_model, mparams, cparams, &arena_devs, &hp_ngl, &hp_nsk, &hp_nct, &hp_nex, c.GGML_LOG_LEVEL_ERROR) catch |e| switch (e) {
+    var arena_devs: std.ArrayList(llama.impl.llama_c.ggml_backend_dev_t) = .empty;
+    const dmd = deviceMemoryDataImpl(&f, paths_model, mparams, cparams, &arena_devs, &hp_ngl, &hp_nsk, &hp_nct, &hp_nex, llama.impl.llama_c.GGML_LOG_LEVEL_ERROR) catch |e| switch (e) {
         error.Fit, error.Runtime => {
             const w = std.mem.span(f.what.ptr);
             const n = @min(w.len, print_what.len - 1);
@@ -1561,7 +1558,7 @@ pub fn fitPrint(
     if (dmd.len != devs.items.len + 1) std.process.abort(); // GGML_ASSERT
 
     for (devs.items, 0..) |dev, id| {
-        try out.print("{s} ", .{std.mem.span(c.ggml_backend_dev_name(dev))});
+        try out.print("{s} ", .{std.mem.span(llama.impl.llama_c.ggml_backend_dev_name(dev))});
         try out.print("{d} ", .{dmd[id].mb.model / 1024 / 1024});
         try out.print("{d} ", .{dmd[id].mb.context / 1024 / 1024});
         try out.print("{d} ", .{dmd[id].mb.compute / 1024 / 1024});

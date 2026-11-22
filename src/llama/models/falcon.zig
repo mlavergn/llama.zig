@@ -87,7 +87,7 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
         b.cb(attn_norm, "attn_norm", il);
 
         // Self-attention.
-        var cur: *llama.impl.c.ggml_tensor = undefined;
+        var cur: *llama.impl.llama_c.ggml_tensor = undefined;
         {
             if (layer.attn_norm_2 != null) {
                 // Falcon-40B.
@@ -114,9 +114,9 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
         }
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
-            attn_norm = llama.impl.c.ggml_get_rows(ctx, attn_norm, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpL = llama.impl.llama_c.ggml_get_rows(ctx, inpL, inp_out_ids);
+            attn_norm = llama.impl.llama_c.ggml_get_rows(ctx, attn_norm, inp_out_ids);
         }
 
         const ffn_inp = cur;
@@ -127,8 +127,8 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
             b.cb(cur, "ffn_out", il);
         }
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
-        cur = llama.impl.c.ggml_add(ctx, cur, inpL);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, inpL);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

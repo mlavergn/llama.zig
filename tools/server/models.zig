@@ -32,13 +32,15 @@
 //! the condition variable is a pthread one, as `queue.zig`'s are.
 
 const std = @import("std");
+const mtmd = @import("mtmd");
+const llama = @import("llama");
+const common_chat = @import("common_chat");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 const builtin = @import("builtin");
-const tc = @import("tools_common");
+const tools_common = @import("tools_common");
 const json = @import("json");
 
-const Allocator = std.mem.Allocator;
 const ResultQueue = mod.queue.Response(*mod.result.Result);
 
 /// Ports `DEFAULT_STOP_TIMEOUT` (server-models.cpp:40 @b1b770d90): seconds.
@@ -68,7 +70,7 @@ const child_addr = "127.0.0.1";
 const stream_lookup_timeout_ms = 250;
 
 fn timeMs() i64 {
-    return tc.c.ggml_time_ms();
+    return llama.impl.llama_c.ggml_time_ms();
 }
 
 // -----------------------------------------------------------------------------
@@ -82,8 +84,8 @@ pub const SharedProc = struct {
     refs: std.atomic.Value(u32) = .init(1),
     proc: ServerSubproc,
 
-    pub fn create() Allocator.Error!*SharedProc {
-        const self = try mod.context.gpa.create(SharedProc);
+    pub fn create() std.mem.Allocator.Error!*SharedProc {
+        const self = try std.heap.c_allocator.create(SharedProc);
         self.* = .{ .proc = .{ .sproc = .{} } };
         return self;
     }
@@ -96,7 +98,7 @@ pub const SharedProc = struct {
     pub fn release(self: *SharedProc) void {
         if (self.refs.fetchSub(1, .acq_rel) == 1) {
             self.proc.sproc.deinit();
-            mod.context.gpa.destroy(self);
+            std.heap.c_allocator.destroy(self);
         }
     }
 };
@@ -193,7 +195,7 @@ fn roleTypeFromStr(str: []const u8) RoleType {
 const StringSet = struct {
     items: std.ArrayList([]const u8) = .empty,
 
-    fn insert(self: *StringSet, a: Allocator, s: []const u8) Allocator.Error!void {
+    fn insert(self: *StringSet, a: std.mem.Allocator, s: []const u8) std.mem.Allocator.Error!void {
         var lo: usize = 0;
         var hi = self.items.items.len;
         while (lo < hi) {
@@ -209,7 +211,7 @@ const StringSet = struct {
         return false;
     }
 
-    fn clone(self: *const StringSet, a: Allocator) Allocator.Error!StringSet {
+    fn clone(self: *const StringSet, a: std.mem.Allocator) std.mem.Allocator.Error!StringSet {
         var out: StringSet = .{};
         for (self.items.items) |s| try out.items.append(a, try a.dupe(u8, s));
         return out;
@@ -219,7 +221,7 @@ const StringSet = struct {
         self.items = .empty;
     }
 
-    fn joinComma(self: *const StringSet, a: Allocator) Allocator.Error![]const u8 {
+    fn joinComma(self: *const StringSet, a: std.mem.Allocator) std.mem.Allocator.Error![]const u8 {
         return std.mem.join(a, ", ", self.items.items);
     }
 };
@@ -251,7 +253,7 @@ pub const Meta = struct {
     memory: mod.models_sched.MemoryInfo = .{},
 
     /// The C++ copy: every string and value deep-copied into `a`.
-    pub fn clone(self: *const Meta, a: Allocator) mod.common.Error!Meta {
+    pub fn clone(self: *const Meta, a: std.mem.Allocator) common_chat.exception.Error!Meta {
         var out = self.*;
         out.preset = try presetCall(self.preset.clone(a));
         out.name = try a.dupe(u8, self.name);
@@ -291,14 +293,14 @@ pub const Meta = struct {
     /// @b1b770d90): the child's command line from the preset, with the
     /// router's host, the child's port, its name as alias and the router's
     /// log colours.
-    pub fn updateArgs(self: *Meta, a: Allocator, ctx_preset: *const mod.preset.Context, bin_path: []const u8) mod.common.Error!void {
+    pub fn updateArgs(self: *Meta, a: std.mem.Allocator, ctx_preset: *const mod.preset.Context, bin_path: []const u8) common_chat.exception.Error!void {
         // update params
         unsetReservedArgs(a, &self.preset, false);
         try presetCall(self.preset.setOption(a, ctx_preset, "LLAMA_ARG_HOST", child_addr));
         try presetCall(self.preset.setOption(a, ctx_preset, "LLAMA_ARG_PORT", try std.fmt.allocPrint(a, "{d}", .{self.port})));
         try presetCall(self.preset.setOption(a, ctx_preset, "LLAMA_ARG_ALIAS", self.name));
         // the child output goes through the router to its terminal, so it follows the router colors
-        try presetCall(self.preset.setOption(a, ctx_preset, "LLAMA_ARG_LOG_COLORS", if (tc.log.getColors()) "on" else "off"));
+        try presetCall(self.preset.setOption(a, ctx_preset, "LLAMA_ARG_LOG_COLORS", if (tools_common.log.getColors()) "on" else "off"));
         // TODO: maybe validate preset before rendering ?
         // render args
         var args = try presetCall(self.preset.toArgs(a, bin_path));
@@ -319,24 +321,24 @@ pub const Meta = struct {
     /// its output modalities from its GGUF metadata, resolved from the
     /// cache without downloading. `base` is the router's own parameters:
     /// its model and `--no-mmproj` apply to every child.
-    pub fn updateCaps(self: *Meta, a: Allocator, base: *const tc.params.Params) mod.common.Error!void {
+    pub fn updateCaps(self: *Meta, a: std.mem.Allocator, base: *const tools_common.params.Params) common_chat.exception.Error!void {
         // reset to the default so a failed refresh cannot keep old values
         self.architecture = try mod.common.serverModelArchitectureJson(a, false, false, false, &.{"text"});
         self.n_ctx_train = 0;
 
-        var arena = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer arena.deinit();
         const sa = arena.allocator();
 
         // resolve the model file offline; do not download
-        var params = tc.params.Params.init(sa) catch return error.OutOfMemory;
+        var params = tools_common.params.Params.init(sa) catch return error.OutOfMemory;
         params.model = base.model;
         // --no-mmproj applies to child models and blocks auto-attached projectors
         params.no_mmproj = base.no_mmproj;
         self.resolveModel(sa, &params) catch |e| {
             if (e == error.OutOfMemory) return error.OutOfMemory;
-            const w = if (e == error.Throw) tc.arg.what() else mod.context.whatOf(e);
-            tc.log.wrn("failed to resolve the model of '%s': %s\n", .{ try mod.common.zs(sa, self.name), try mod.common.zs(sa, w) });
+            const w = if (e == error.Throw) tools_common.arg.what() else mod.context.whatOf(e);
+            tools_common.log.wrn("failed to resolve the model of '%s': %s\n", .{ try mod.common.zs(sa, self.name), try mod.common.zs(sa, w) });
             return;
         };
 
@@ -345,7 +347,7 @@ pub const Meta = struct {
         var gen_audio = false;
         if (!params.no_mmproj and params.mmproj.path.len != 0) {
             // mtmd_get_cap_from_file() returns no capabilities on a bad file, it does not throw
-            const caps = tc.c.mtmd_get_cap_from_file(try mod.common.zs(sa, params.mmproj.path));
+            const caps = mtmd.mtmd.mtmd_get_cap_from_file(try mod.common.zs(sa, params.mmproj.path));
             inp_image = caps.inp_vision;
             inp_audio = caps.inp_audio;
             gen_audio = caps.gen_audio;
@@ -354,7 +356,7 @@ pub const Meta = struct {
         // read the output modalities and the trained context from the GGUF metadata
         var output_modalities: []const []const u8 = &.{"text"};
         if (params.model.path.len != 0) {
-            const info = tc.common.getGgufInfo(params.model.path);
+            const info = tools_common.common.getGgufInfo(params.model.path);
             // same rule as mtmd_helper_get_capabilities()
             const can_chat = !gen_audio or info.has_chat_tmpl;
             output_modalities = mod.common.serverModelOutputModalities(info.decision_type, can_chat, gen_audio);
@@ -365,7 +367,7 @@ pub const Meta = struct {
         self.architecture = try mod.common.serverModelArchitectureJson(a, inp_image, inp_audio, false, output_modalities);
     }
 
-    fn resolveModel(self: *Meta, a: Allocator, params: *tc.params.Params) anyerror!void {
+    fn resolveModel(self: *Meta, a: std.mem.Allocator, params: *tools_common.params.Params) anyerror!void {
         try self.preset.applyToParams(params, &.{
             "LLAMA_ARG_MODEL",
             "LLAMA_ARG_MODEL_URL",
@@ -384,7 +386,7 @@ pub const Meta = struct {
 /// The `architecture` arm of `update_status` (server-models.cpp:1419
 /// @b1b770d90), from its line 1416: each of the loaded child's `input_modalities` and
 /// `output_modalities` that is an array of strings replaces the router's.
-fn mergeChildArchitecture(a: Allocator, arch: *json.Value, loaded_info: *const json.Value) !void {
+fn mergeChildArchitecture(a: std.mem.Allocator, arch: *json.Value, loaded_info: *const json.Value) !void {
     if (!loaded_info.contains("architecture") or !(try loaded_info.at("architecture")).isObject()) {
         return;
     }
@@ -409,10 +411,10 @@ fn mergeChildArchitecture(a: Allocator, arch: *json.Value, loaded_info: *const j
 }
 
 /// A preset method's `error.Throw` as the `std::runtime_error` it is.
-fn presetCall(r: anytype) mod.common.Error!@typeInfo(@TypeOf(r)).error_union.payload {
+fn presetCall(r: anytype) common_chat.exception.Error!@typeInfo(@TypeOf(r)).error_union.payload {
     return r catch |e| switch (e) {
         error.OutOfMemory => error.OutOfMemory,
-        error.Throw => mod.common.throw(error.RuntimeError, "{s}", .{tc.arg.what()}),
+        error.Throw => common_chat.exception.throw(error.RuntimeError, "{s}", .{tools_common.arg.what()}),
     };
 }
 
@@ -428,7 +430,7 @@ fn isBrowserOriginHeader(key: []const u8) bool {
 /// `headers` without the browser origin headers.
 ///
 /// Return: borrows `headers`' strings; the map is `a`'s.
-fn childRequestHeaders(a: Allocator, headers: *const mod.http.StringMap) !mod.http.StringMap {
+fn childRequestHeaders(a: std.mem.Allocator, headers: *const mod.http.StringMap) !mod.http.StringMap {
     var out: mod.http.StringMap = .{};
     for (headers.entries.items) |e| {
         if (!isBrowserOriginHeader(e.key)) {
@@ -441,7 +443,7 @@ fn childRequestHeaders(a: Allocator, headers: *const mod.http.StringMap) !mod.ht
 
 /// Ports `unset_reserved_args` (server-models.cpp:285 @b1b770d90): the
 /// options a child must not inherit.
-fn unsetReservedArgs(a: Allocator, preset: *mod.preset.Preset, unset_model_args: bool) void {
+fn unsetReservedArgs(a: std.mem.Allocator, preset: *mod.preset.Preset, unset_model_args: bool) void {
     preset.unsetOption(a, "LLAMA_ARG_SSL_KEY_FILE");
     preset.unsetOption(a, "LLAMA_ARG_SSL_CERT_FILE");
     preset.unsetOption(a, "LLAMA_API_KEY");
@@ -467,7 +469,7 @@ fn unsetReservedArgs(a: Allocator, preset: *mod.preset.Preset, unset_model_args:
 /// on macOS. `std.process.executablePath` fails where `realpath` does;
 /// upstream then keeps dyld's unresolved path, so dyld is asked here too,
 /// through std's declaration of it.
-pub fn getServerExecPath(a: Allocator) mod.common.Error![]const u8 {
+pub fn getServerExecPath(a: std.mem.Allocator) common_chat.exception.Error![]const u8 {
     if (comptime builtin.os.tag.isDarwin()) {
         var small_path: [std.c.PATH_MAX]u8 = undefined;
         var size: u32 = small_path.len;
@@ -485,13 +487,13 @@ pub fn getServerExecPath(a: Allocator) mod.common.Error![]const u8 {
                 if (stdlib.fs.realPathAlloc(a, p)) |r| return r;
                 return a.dupe(u8, p);
             }
-            return mod.common.throw(error.RuntimeError, "_NSGetExecutablePath failed after buffer resize", .{});
+            return common_chat.exception.throw(error.RuntimeError, "_NSGetExecutablePath failed after buffer resize", .{});
         }
     } else {
         var path: [4096]u8 = undefined;
         const target = stdlib.fs.readLink("/proc/self/exe", &path) orelse "";
         if (target.len == 0) {
-            return mod.common.throw(error.RuntimeError, "failed to resolve /proc/self/exe", .{});
+            return common_chat.exception.throw(error.RuntimeError, "failed to resolve /proc/self/exe", .{});
         }
         return a.dupe(u8, target);
     }
@@ -499,7 +501,7 @@ pub fn getServerExecPath(a: Allocator) mod.common.Error![]const u8 {
 
 /// Ports `get_environment` (server-models.cpp:306 @b1b770d90), its POSIX
 /// arm.
-fn getEnvironment(a: Allocator) Allocator.Error![]const []const u8 {
+fn getEnvironment(a: std.mem.Allocator) std.mem.Allocator.Error![]const []const u8 {
     var env: std.ArrayList([]const u8) = .empty;
     const inherited = stdlib.env.map() orelse return env.items;
     var it = inherited.iterator();
@@ -530,8 +532,8 @@ const Monitor = struct {
         deadline: i64 = 0, // force-kill time in ms, 0 when no stop is pending
 
         fn deinit(self: *Watched) void {
-            mod.context.gpa.free(self.name);
-            for (&self.buf) |*b| b.deinit(mod.context.gpa);
+            std.heap.c_allocator.free(self.name);
+            for (&self.buf) |*b| b.deinit(std.heap.c_allocator);
             self.proc.release();
         }
     };
@@ -555,7 +557,7 @@ const Monitor = struct {
     /// Ports the constructor of `server_monitor` (server-models.cpp:53
     /// @b1b770d90): starts the thread.
     fn create(models: *Models) !*Monitor {
-        const self = try mod.context.gpa.create(Monitor);
+        const self = try std.heap.c_allocator.create(Monitor);
         self.* = .{ .models = models, .waiter = mod.subproc.Waiter.init() };
         self.th = try std.Thread.spawn(.{}, run, .{self});
         return self;
@@ -569,23 +571,23 @@ const Monitor = struct {
         };
         if (self.th) |t| t.join();
         for (self.children.items) |*ch| ch.deinit();
-        self.children.deinit(mod.context.gpa);
-        self.cmds.deinit(mod.context.gpa);
+        self.children.deinit(std.heap.c_allocator);
+        self.cmds.deinit(std.heap.c_allocator);
         self.waiter.deinit();
-        mod.context.gpa.destroy(self);
+        std.heap.c_allocator.destroy(self);
     }
 
     /// Ports `watch` (server-models.cpp:64 @b1b770d90), a member of
     /// `server_monitor`: thread-safe. `kill_after` above 0 force-kills the
     /// child after that many seconds.
     fn watch(self: *Monitor, name: []const u8, proc: *SharedProc, role: RoleType, port: c_int, kill_after: c_int) !void {
-        var ch: Watched = .{ .name = try mod.context.gpa.dupe(u8, name), .proc = proc.acquire(), .role = role, .port = port };
+        var ch: Watched = .{ .name = try std.heap.c_allocator.dupe(u8, name), .proc = proc.acquire(), .role = role, .port = port };
         if (kill_after > 0) {
             ch.deadline = timeMs() + @as(i64, kill_after) * 1000;
         }
         if (!ch.proc.proc.hasOutput()) {
-            const z = try mod.common.zs(mod.context.gpa, name);
-            defer mod.context.gpa.free(std.mem.span(z));
+            const z = try mod.common.zs(std.heap.c_allocator, name);
+            defer std.heap.c_allocator.free(std.mem.span(z));
             mod.common.srv(.err, "watch", "failed to get stdout/stderr of child process for name=%s\n", .{z});
             ch.eof = true;
         }
@@ -595,7 +597,7 @@ const Monitor = struct {
     /// Ports `stop` (server-models.cpp:81 @b1b770d90), a member of
     /// `server_monitor`: thread-safe.
     fn stop(self: *Monitor, name: []const u8, stop_timeout: c_int, send_exit: bool) !void {
-        try self.push(.{ .type = .stop, .name = try mod.context.gpa.dupe(u8, name), .stop_timeout = stop_timeout, .send_exit = send_exit });
+        try self.push(.{ .type = .stop, .name = try std.heap.c_allocator.dupe(u8, name), .stop_timeout = stop_timeout, .send_exit = send_exit });
     }
 
     /// Ports `push` (server-models.cpp:104 @b1b770d90), a member of
@@ -604,7 +606,7 @@ const Monitor = struct {
         {
             self.mu.lock();
             defer self.mu.unlock();
-            try self.cmds.append(mod.context.gpa, cmd);
+            try self.cmds.append(std.heap.c_allocator, cmd);
         }
         self.waiter.wake();
     }
@@ -615,7 +617,7 @@ const Monitor = struct {
     /// Return: true if the loop should exit.
     fn handleCommands(self: *Monitor) bool {
         var batch: std.ArrayList(Cmd) = .empty;
-        defer batch.deinit(mod.context.gpa);
+        defer batch.deinit(std.heap.c_allocator);
         {
             self.mu.lock();
             defer self.mu.unlock();
@@ -625,15 +627,15 @@ const Monitor = struct {
         for (batch.items) |*cmd| {
             if (quit) {
                 if (cmd.child) |*ch| ch.deinit();
-                if (cmd.type == .stop) mod.context.gpa.free(cmd.name);
+                if (cmd.type == .stop) std.heap.c_allocator.free(cmd.name);
                 continue;
             }
             switch (cmd.type) {
-                .watch => self.children.append(mod.context.gpa, cmd.child.?) catch |err| switch (err) {
+                .watch => self.children.append(std.heap.c_allocator, cmd.child.?) catch |err| switch (err) {
                     error.OutOfMemory => {},
                 },
                 .stop => {
-                    defer mod.context.gpa.free(cmd.name);
+                    defer std.heap.c_allocator.free(cmd.name);
                     // the newest child with this name is the one the registry knows
                     var i = self.children.items.len;
                     while (i > 0) {
@@ -681,7 +683,7 @@ const Monitor = struct {
             if (n == 0) {
                 break;
             }
-            buf.appendSlice(mod.context.gpa, chunk[0..@intCast(n)]) catch |err| switch (err) {
+            buf.appendSlice(std.heap.c_allocator, chunk[0..@intCast(n)]) catch |err| switch (err) {
                 error.OutOfMemory => {},
             };
             var start: usize = 0;
@@ -705,12 +707,12 @@ const Monitor = struct {
     /// Ports `on_line` (server-models.cpp:187 @b1b770d90), a member of
     /// `server_monitor`: stderr is the child's log, stdout its commands.
     fn onLine(self: *Monitor, ch: *Watched, which: mod.subproc.Stream, line: []const u8) void {
-        const z = mod.context.gpa.dupeSentinel(u8, line, 0) catch return;
-        defer mod.context.gpa.free(z);
+        const z = std.heap.c_allocator.dupeSentinel(u8, line, 0) catch return;
+        defer std.heap.c_allocator.free(z);
         if (which == .stderr) {
-            tc.log.out("[%5d] %s", .{ ch.port, z.ptr }); // forward log
+            tools_common.log.out("[%5d] %s", .{ ch.port, z.ptr }); // forward log
         } else if (std.mem.startsWith(u8, line, cmd_child_to_router_state)) {
-            tc.log.dbg("[%5d] %s", .{ ch.port, z.ptr }); // prevent spamming the log
+            tools_common.log.dbg("[%5d] %s", .{ ch.port, z.ptr }); // prevent spamming the log
             self.models.handleChildState(ch.name, line);
         } else {
             mod.common.srv(.wrn, "on_line", "[%5d] unexpected output on the command pipe: %s", .{ ch.port, z.ptr });
@@ -721,11 +723,11 @@ const Monitor = struct {
     /// `server_monitor`.
     fn run(self: *Monitor) void {
         var procs: std.ArrayList(*ServerSubproc) = .empty;
-        defer procs.deinit(mod.context.gpa);
+        defer procs.deinit(std.heap.c_allocator);
         var owners: std.ArrayList(usize) = .empty;
-        defer owners.deinit(mod.context.gpa);
+        defer owners.deinit(std.heap.c_allocator);
         var ready: std.ArrayList(bool) = .empty;
-        defer ready.deinit(mod.context.gpa);
+        defer ready.deinit(std.heap.c_allocator);
         while (true) {
             if (self.handleCommands()) {
                 return;
@@ -748,18 +750,18 @@ const Monitor = struct {
             owners.clearRetainingCapacity();
             for (self.children.items, 0..) |*ch, i| {
                 if (!ch.eof) {
-                    procs.append(mod.context.gpa, &ch.proc.proc) catch |err| switch (err) {
+                    procs.append(std.heap.c_allocator, &ch.proc.proc) catch |err| switch (err) {
                         error.OutOfMemory => {},
                     };
-                    owners.append(mod.context.gpa, i) catch |err| switch (err) {
+                    owners.append(std.heap.c_allocator, i) catch |err| switch (err) {
                         error.OutOfMemory => {},
                     };
                 }
             }
-            ready.resize(mod.context.gpa, procs.items.len) catch |err| switch (err) {
+            ready.resize(std.heap.c_allocator, procs.items.len) catch |err| switch (err) {
                 error.OutOfMemory => {},
             };
-            self.waiter.wait(mod.context.gpa, procs.items, ready.items, timeout) catch |err| switch (err) {
+            self.waiter.wait(std.heap.c_allocator, procs.items, ready.items, timeout) catch |err| switch (err) {
                 error.OutOfMemory => {},
             };
             for (owners.items, 0..) |idx, i| {
@@ -774,7 +776,7 @@ const Monitor = struct {
             while (i < self.children.items.len) {
                 const it = &self.children.items[i];
                 if (it.deadline != 0 and now >= it.deadline and !it.proc.proc.stopped.load(.acquire)) {
-                    const z = mod.common.zs(mod.context.gpa, it.name) catch "";
+                    const z = mod.common.zs(std.heap.c_allocator, it.name) catch "";
                     mod.common.srv(.wrn, "run", "force-killing child process for name=%s after timeout\n", .{z});
                     it.proc.proc.terminate();
                     it.deadline = 0;
@@ -783,7 +785,7 @@ const Monitor = struct {
                     const exit_code = it.proc.proc.join();
                     it.proc.proc.stopped.store(true, .release);
                     self.models.onChildExit(it.name, it.proc, it.role, exit_code);
-                    const z = mod.common.zs(mod.context.gpa, it.name) catch "";
+                    const z = mod.common.zs(std.heap.c_allocator, it.name) catch "";
                     mod.common.srv(.inf, "run", "instance name=%s exited with status %d\n", .{ z, exit_code });
                     var removed = self.children.orderedRemove(i);
                     removed.deinit();
@@ -808,11 +810,11 @@ pub const Instance = struct {
     download_stop_requested: bool = false, // a client asked the download to stop (pause or cancel)
 
     fn create(meta_src: *const Meta, subproc: *SharedProc) !*Instance {
-        const self = try mod.context.gpa.create(Instance);
-        self.* = .{ .arena = .init(mod.context.gpa), .subproc = subproc, .meta = undefined };
+        const self = try std.heap.c_allocator.create(Instance);
+        self.* = .{ .arena = .init(std.heap.c_allocator), .subproc = subproc, .meta = undefined };
         errdefer {
             self.arena.deinit();
-            mod.context.gpa.destroy(self);
+            std.heap.c_allocator.destroy(self);
         }
         self.meta = try meta_src.clone(self.arena.allocator());
         // the member's initializer in the C++: a meta built by hand, as a
@@ -826,10 +828,10 @@ pub const Instance = struct {
     fn destroy(self: *Instance) void {
         self.subproc.release();
         self.arena.deinit();
-        mod.context.gpa.destroy(self);
+        std.heap.c_allocator.destroy(self);
     }
 
-    pub fn alloc(self: *Instance) Allocator {
+    pub fn alloc(self: *Instance) std.mem.Allocator {
         return self.arena.allocator();
     }
 
@@ -868,13 +870,13 @@ const ConvModelTracker = struct {
         defer self.mu.unlock();
         const ticket = self.next_ticket;
         self.next_ticket += 1;
-        const gop = try self.map.getOrPut(mod.context.gpa, conv_id);
+        const gop = try self.map.getOrPut(std.heap.c_allocator, conv_id);
         if (gop.found_existing) {
-            mod.context.gpa.free(gop.value_ptr.model);
+            std.heap.c_allocator.free(gop.value_ptr.model);
         } else {
-            gop.key_ptr.* = try mod.context.gpa.dupe(u8, conv_id);
+            gop.key_ptr.* = try std.heap.c_allocator.dupe(u8, conv_id);
         }
-        gop.value_ptr.* = .{ .model = try mod.context.gpa.dupe(u8, model), .ticket = ticket };
+        gop.value_ptr.* = .{ .model = try std.heap.c_allocator.dupe(u8, model), .ticket = ticket };
         return ticket;
     }
 
@@ -892,7 +894,7 @@ const ConvModelTracker = struct {
     /// `conv_model_tracker`.
     ///
     /// Return: a copy owned by `a`, or null.
-    fn lookup(self: *ConvModelTracker, a: Allocator, conv_id: []const u8) !?[]const u8 {
+    fn lookup(self: *ConvModelTracker, a: std.mem.Allocator, conv_id: []const u8) !?[]const u8 {
         if (conv_id.len == 0) {
             return null;
         }
@@ -911,8 +913,8 @@ const ConvModelTracker = struct {
         self.mu.lock();
         defer self.mu.unlock();
         if (self.map.fetchRemove(conv_id)) |kv| {
-            mod.context.gpa.free(kv.key);
-            mod.context.gpa.free(kv.value.model);
+            std.heap.c_allocator.free(kv.key);
+            std.heap.c_allocator.free(kv.value.model);
         }
     }
 };
@@ -948,7 +950,7 @@ pub const UnfinishedDownload = struct {
     partials: []const mod.download.Partial = &.{},
 
     /// The C++ copy.
-    fn clone(self: *const UnfinishedDownload, a: Allocator) Allocator.Error!UnfinishedDownload {
+    fn clone(self: *const UnfinishedDownload, a: std.mem.Allocator) std.mem.Allocator.Error!UnfinishedDownload {
         const sidecars = try a.alloc([]const u8, self.sidecars.len);
         for (self.sidecars, sidecars) |s, *d| d.* = try a.dupe(u8, s);
         const partials = try a.alloc(mod.download.Partial, self.partials.len);
@@ -965,17 +967,17 @@ fn hasSidecar(sidecars: []const []const u8, kind: []const u8) bool {
 
 /// Ports `check_sidecar` (server-models.cpp:510 @b1b770d90): reject a
 /// sidecar kind no download can pull.
-fn checkSidecar(a: Allocator, kind: []const u8) mod.common.Error!void {
+fn checkSidecar(a: std.mem.Allocator, kind: []const u8) common_chat.exception.Error!void {
     var kinds: [mod.download.sidecars.len][]const u8 = undefined;
     for (mod.download.sidecars, 0..) |s, i| kinds[i] = s.name;
     if (!hasSidecar(&kinds, kind)) {
-        return mod.common.throw(error.InvalidArgument, "unknown sidecar '{s}', expected one of {s}", .{ kind, try std.mem.join(a, ", ", &kinds) });
+        return common_chat.exception.throw(error.InvalidArgument, "unknown sidecar '{s}', expected one of {s}", .{ kind, try std.mem.join(a, ", ", &kinds) });
     }
 }
 
 /// Ports `parse_sidecars` (server-models.cpp:521 @b1b770d90): the sidecars a
 /// download asks for; by default the ones `-hf` pulls without a draft type.
-fn parseSidecars(a: Allocator, body: *const json.Value) mod.common.Error![]const []const u8 {
+fn parseSidecars(a: std.mem.Allocator, body: *const json.Value) common_chat.exception.Error![]const []const u8 {
     var defaults: std.ArrayList([]const u8) = .empty;
     for (mod.download.sidecars) |s| {
         if (!s.draft) {
@@ -1001,7 +1003,7 @@ fn parseSidecars(a: Allocator, body: *const json.Value) mod.common.Error![]const
 /// Ports `sidecar_download_opts` (server-models.cpp:536 @b1b770d90): the
 /// download options of a model with its sidecars, the plan a removal purges
 /// partials from.
-fn sidecarDownloadOpts(params: *const tc.params.Params, sidecars: []const []const u8) mod.download.Opts {
+fn sidecarDownloadOpts(params: *const tools_common.params.Params, sidecars: []const []const u8) mod.download.Opts {
     var opts: mod.download.Opts = .{};
     opts.bearer_token = params.hf_token;
     for (sidecars) |kind| {
@@ -1022,8 +1024,8 @@ fn modelHfRepo(meta: *const Meta) []const u8 {
 
 /// Ports `cached_sidecars` (server-models.cpp:556 @b1b770d90): the sidecar
 /// kinds of a HF repo present on disk, as the offline plan resolves them.
-fn cachedSidecars(a: Allocator, hf_repo: []const u8) mod.common.Error![]const []const u8 {
-    var model: tc.params.Model = .{};
+fn cachedSidecars(a: std.mem.Allocator, hf_repo: []const u8) common_chat.exception.Error![]const []const u8 {
+    var model: tools_common.params.Model = .{};
     model.hf_repo = hf_repo;
 
     var opts: mod.download.Opts = .{};
@@ -1037,7 +1039,7 @@ fn cachedSidecars(a: Allocator, hf_repo: []const u8) mod.common.Error![]const []
 
 /// Ports `set_child_env` (server-models.cpp:570 @b1b770d90): replace any
 /// inherited value of `key` in a child environment.
-fn setChildEnv(a: Allocator, env: *std.ArrayList([]const u8), key: []const u8, value: []const u8) Allocator.Error!void {
+fn setChildEnv(a: std.mem.Allocator, env: *std.ArrayList([]const u8), key: []const u8, value: []const u8) std.mem.Allocator.Error!void {
     const prefix = try std.mem.concat(a, u8, &.{ key, "=" });
     var i: usize = 0;
     while (i < env.items.len) {
@@ -1052,7 +1054,7 @@ fn setChildEnv(a: Allocator, env: *std.ArrayList([]const u8), key: []const u8, v
 
 /// Ports `unfinished_downloads_path` (server-models.cpp:578 @b1b770d90):
 /// where the unfinished downloads are remembered, inside the model cache.
-fn unfinishedDownloadsPath(a: Allocator) mod.common.Error![]const u8 {
+fn unfinishedDownloadsPath(a: std.mem.Allocator) common_chat.exception.Error![]const u8 {
     return std.mem.concat(a, u8, &.{ try mod.hf_cache.getCachePath(), "/unfinished-downloads.json" });
 }
 
@@ -1068,7 +1070,7 @@ pub const UnfinishedDownloads = struct {
     downloads: std.ArrayList(UnfinishedDownload) = .empty,
     arena: std.heap.ArenaAllocator = .init(std.heap.c_allocator),
 
-    fn alloc(self: *UnfinishedDownloads) Allocator {
+    fn alloc(self: *UnfinishedDownloads) std.mem.Allocator {
         return self.arena.allocator();
     }
 
@@ -1079,7 +1081,7 @@ pub const UnfinishedDownloads = struct {
     /// Ports `load` (server-models.cpp:582 @b1b770d90), a member of
     /// `server_unfinished_downloads`: read the record an earlier run left.
     fn load(self: *UnfinishedDownloads) !void {
-        var scratch = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var scratch = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer scratch.deinit();
         const sa = scratch.allocator();
         const path = try unfinishedDownloadsPath(sa);
@@ -1089,11 +1091,11 @@ pub const UnfinishedDownloads = struct {
         defer self.mutex.unlock();
         self.parse(sa, raw) catch |e| {
             if (e == error.OutOfMemory) return error.OutOfMemory;
-            tc.log.wrn("failed to read unfinished downloads: %s\n", .{try mod.common.zs(sa, mod.context.whatOf(e))});
+            tools_common.log.wrn("failed to read unfinished downloads: %s\n", .{try mod.common.zs(sa, mod.context.whatOf(e))});
         };
     }
 
-    fn parse(self: *UnfinishedDownloads, sa: Allocator, raw: []const u8) mod.common.Error!void {
+    fn parse(self: *UnfinishedDownloads, sa: std.mem.Allocator, raw: []const u8) common_chat.exception.Error!void {
         var data = try json.parse(sa, raw);
         // `data.value("downloads", json::array())`, on anything but an object a type_error
         if (!data.isObject()) {
@@ -1132,15 +1134,15 @@ pub const UnfinishedDownloads = struct {
     /// `server_unfinished_downloads`: write the record back; the caller holds
     /// the mutex.
     fn save(self: *UnfinishedDownloads) void {
-        var scratch = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var scratch = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer scratch.deinit();
         const sa = scratch.allocator();
         self.saveImpl(sa) catch |e| {
-            tc.log.wrn("failed to record unfinished downloads: %s\n", .{mod.common.zs(sa, mod.context.whatOf(e)) catch ""});
+            tools_common.log.wrn("failed to record unfinished downloads: %s\n", .{mod.common.zs(sa, mod.context.whatOf(e)) catch ""});
         };
     }
 
-    fn saveImpl(self: *UnfinishedDownloads, sa: Allocator) mod.common.Error!void {
+    fn saveImpl(self: *UnfinishedDownloads, sa: std.mem.Allocator) common_chat.exception.Error!void {
         var list = json.Value.emptyArray();
         for (self.downloads.items) |*d| {
             var partials = json.Value.emptyArray();
@@ -1191,7 +1193,7 @@ pub const UnfinishedDownloads = struct {
     /// `server_unfinished_downloads`: record a download that starts,
     /// replacing an earlier record of the same model, and delete the partials
     /// of that record the new plan no longer writes.
-    fn add(self: *UnfinishedDownloads, dl: *const UnfinishedDownload) Allocator.Error!void {
+    fn add(self: *UnfinishedDownloads, dl: *const UnfinishedDownload) std.mem.Allocator.Error!void {
         self.mutex.lock();
         defer self.mutex.unlock();
         var stale: []const mod.download.Partial = &.{};
@@ -1239,7 +1241,7 @@ pub const UnfinishedDownloads = struct {
     /// and delete its partials.
     ///
     /// Return: false when the download is not recorded with that kind.
-    fn removeSidecar(self: *UnfinishedDownloads, model: []const u8, kind: []const u8) Allocator.Error!bool {
+    fn removeSidecar(self: *UnfinishedDownloads, model: []const u8, kind: []const u8) std.mem.Allocator.Error!bool {
         self.mutex.lock();
         defer self.mutex.unlock();
         const i = self.findIdx(model) orelse return false;
@@ -1270,7 +1272,7 @@ pub const UnfinishedDownloads = struct {
     /// `server_unfinished_downloads`: every recorded download.
     ///
     /// Return: a copy, owned by `a`.
-    fn getAll(self: *UnfinishedDownloads, a: Allocator) Allocator.Error![]UnfinishedDownload {
+    fn getAll(self: *UnfinishedDownloads, a: std.mem.Allocator) std.mem.Allocator.Error![]UnfinishedDownload {
         self.mutex.lock();
         defer self.mutex.unlock();
         const out = try a.alloc(UnfinishedDownload, self.downloads.items.len);
@@ -1304,7 +1306,7 @@ pub const Models = struct {
 
     ctx_preset: *mod.preset.Context,
 
-    base_params: tc.params.Params,
+    base_params: tools_common.params.Params,
     bin_path: []const u8 = "",
     base_env: []const []const u8 = &.{},
     base_preset: mod.preset.Preset = .{}, // base preset from llama-server CLI args
@@ -1328,26 +1330,26 @@ pub const Models = struct {
 
     /// Ports the constructor of `server_models` (server-models.cpp:411
     /// @b1b770d90). `self` must not move afterwards.
-    pub fn init(self: *Models, params: *const tc.params.Params, argv: []const [:0]const u8) !void {
+    pub fn init(self: *Models, params: *const tools_common.params.Params, argv: []const [:0]const u8) !void {
         self.* = .{
-            .ctx_preset = try mod.preset.Context.create(mod.context.gpa, .server),
+            .ctx_preset = try mod.preset.Context.create(std.heap.c_allocator, .server),
             .base_params = params.*,
             .sched = .{ .models = self },
-            .sse = try ResultQueue.init(mod.context.gpa),
+            .sse = try ResultQueue.init(std.heap.c_allocator),
         };
         const a = self.arena.allocator();
         self.base_env = try getEnvironment(a);
         self.base_preset = try presetCall(self.ctx_preset.loadFromArgs(argv));
         self.monitor = try Monitor.create(self);
         // propagate base params to child
-        unsetReservedArgs(mod.context.gpa, &self.base_preset, true);
+        unsetReservedArgs(std.heap.c_allocator, &self.base_preset, true);
 
         // do not propagate these options, but allow preset to explicitly set them
-        self.base_preset.unsetOption(mod.context.gpa, "LLAMA_ARG_LOG_FILE");
+        self.base_preset.unsetOption(std.heap.c_allocator, "LLAMA_ARG_LOG_FILE");
         // set binary path
         self.bin_path = getServerExecPath(a) catch |e| blk: {
             if (e == error.OutOfMemory) return error.OutOfMemory;
-            const w = try mod.common.zs(a, mod.common.what(e));
+            const w = try mod.common.zs(a, common_chat.exception.what(e));
             mod.common.srv(.wrn, "server_models", "failed to get server executable path: %s\n", .{w});
             mod.common.srv(.wrn, "server_models", "using original argv[0] as fallback: %s\n", .{argv[0].ptr});
             break :blk argv[0];
@@ -1364,9 +1366,9 @@ pub const Models = struct {
         if (self.monitor) |m| m.destroy();
         self.monitor = null;
         for (self.mapping.items) |inst| inst.destroy();
-        self.mapping.deinit(mod.context.gpa);
+        self.mapping.deinit(std.heap.c_allocator);
         self.unfinished_downloads.deinit();
-        self.base_preset.deinit(mod.context.gpa);
+        self.base_preset.deinit(std.heap.c_allocator);
         self.sse.deinit();
         self.ctx_preset.destroy();
         self.stopping_arena.deinit();
@@ -1398,7 +1400,7 @@ pub const Models = struct {
             self.mapping.items[i] = inst;
             return;
         }
-        try self.mapping.insert(mod.context.gpa, i, inst);
+        try self.mapping.insert(std.heap.c_allocator, i, inst);
     }
 
     /// `mapping[name]`: the instance, created empty (with its name) when
@@ -1420,18 +1422,18 @@ pub const Models = struct {
 
     /// Ports `add_model` (server-models.cpp:447 @b1b770d90): not thread-safe,
     /// the caller holds the mutex.
-    fn addModel(self: *Models, meta: *Meta) mod.common.Error!void {
-        var scratch = std.heap.ArenaAllocator.init(mod.context.gpa);
+    fn addModel(self: *Models, meta: *Meta) common_chat.exception.Error!void {
+        var scratch = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer scratch.deinit();
         const sa = scratch.allocator();
         if (self.find(meta.name) != null) {
-            return mod.common.throw(error.RuntimeError, "model '{s}' appears multiple times", .{meta.name});
+            return common_chat.exception.throw(error.RuntimeError, "model '{s}' appears multiple times", .{meta.name});
         }
 
         // check model name does not conflict with existing aliases
         for (self.mapping.items) |inst| {
             if (inst.meta.aliases.contains(meta.name)) {
-                return mod.common.throw(error.RuntimeError, "model name '{s}' conflicts with alias of model '{s}'", .{ meta.name, inst.meta.name });
+                return common_chat.exception.throw(error.RuntimeError, "model name '{s}' conflicts with alias of model '{s}'", .{ meta.name, inst.meta.name });
             }
         }
 
@@ -1462,11 +1464,11 @@ pub const Models = struct {
         // validate aliases do not conflict with existing names or aliases
         for (meta.aliases.items.items) |alias| {
             if (self.find(alias) != null) {
-                return mod.common.throw(error.RuntimeError, "alias '{s}' for model '{s}' conflicts with existing model name", .{ alias, meta.name });
+                return common_chat.exception.throw(error.RuntimeError, "alias '{s}' for model '{s}' conflicts with existing model name", .{ alias, meta.name });
             }
             for (self.mapping.items) |inst| {
                 if (inst.meta.aliases.contains(alias)) {
-                    return mod.common.throw(error.RuntimeError, "alias '{s}' for model '{s}' conflicts with alias of model '{s}'", .{ alias, meta.name, inst.meta.name });
+                    return common_chat.exception.throw(error.RuntimeError, "alias '{s}' for model '{s}' conflicts with alias of model '{s}'", .{ alias, meta.name, inst.meta.name });
                 }
             }
         }
@@ -1486,8 +1488,8 @@ pub const Models = struct {
     }
 
     fn notifySseImpl(self: *Models, event: []const u8, model_id: []const u8, data: ?*const json.Value) !void {
-        const result = try mod.result.Result.create(mod.context.gpa, .router);
-        errdefer result.destroy(mod.context.gpa);
+        const result = try mod.result.Result.create(std.heap.c_allocator, .router);
+        errdefer result.destroy(std.heap.c_allocator);
         const a = result.alloc();
         var o = mod.common.Obj.init(a);
         try o.put("model", model_id);
@@ -1507,7 +1509,7 @@ pub const Models = struct {
     /// running model whose source changed or went is unloaded, and the
     /// others are added or updated.
     pub fn loadModels(self: *Models) !void {
-        var scratch = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var scratch = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer scratch.deinit();
         const sa = scratch.allocator();
         const ctx = self.ctx_preset;
@@ -1515,20 +1517,20 @@ pub const Models = struct {
         // Phase 1: load presets from all sources - pure I/O, no lock needed
         // 1. cached models
         var cached_models = try presetCall(ctx.loadFromCache());
-        defer cached_models.deinit(mod.context.gpa);
+        defer cached_models.deinit(std.heap.c_allocator);
         mod.common.srv(.trc, "load_models", "Loaded %zu cached model presets from %s\n", .{ cached_models.count(), try mod.common.zs(sa, try mod.hf_cache.getCachePath()) });
         // 2. local models from --models-dir
         var local_models: mod.preset.Presets = .{};
-        defer local_models.deinit(mod.context.gpa);
+        defer local_models.deinit(std.heap.c_allocator);
         if (self.base_params.models_dir.len != 0) {
             local_models = try presetCall(ctx.loadFromModelsDir(self.base_params.models_dir));
             mod.common.srv(.trc, "load_models", "Loaded %zu local model presets from %s\n", .{ local_models.count(), try mod.common.zs(sa, self.base_params.models_dir) });
         }
         // 3. custom-path models from presets
         var global: mod.preset.Preset = .{};
-        defer global.deinit(mod.context.gpa);
+        defer global.deinit(std.heap.c_allocator);
         var custom_presets: mod.preset.Presets = .{};
-        defer custom_presets.deinit(mod.context.gpa);
+        defer custom_presets.deinit(std.heap.c_allocator);
         if (self.base_params.models_preset.len != 0) {
             custom_presets = try presetCall(ctx.loadFromIni(self.base_params.models_preset, &global));
             mod.common.srv(.trc, "load_models", "Loaded %zu custom model presets from %s\n", .{ custom_presets.count(), try mod.common.zs(sa, self.base_params.models_preset) });
@@ -1537,33 +1539,33 @@ pub const Models = struct {
         // cascade, apply global preset first
         {
             const t1 = try presetCall(ctx.cascade(&global, &cached_models));
-            cached_models.deinit(mod.context.gpa);
+            cached_models.deinit(std.heap.c_allocator);
             cached_models = t1;
             const t2 = try presetCall(ctx.cascade(&global, &local_models));
-            local_models.deinit(mod.context.gpa);
+            local_models.deinit(std.heap.c_allocator);
             local_models = t2;
             const t3 = try presetCall(ctx.cascade(&global, &custom_presets));
-            custom_presets.deinit(mod.context.gpa);
+            custom_presets.deinit(std.heap.c_allocator);
             custom_presets = t3;
         }
 
         // note: if a model exists in both cached and local, local takes precedence
         var final_presets: mod.preset.Presets = .{};
-        defer final_presets.deinit(mod.context.gpa);
+        defer final_presets.deinit(std.heap.c_allocator);
         var source_map: std.StringHashMapUnmanaged(Source) = .empty;
         for (cached_models.entries.items) |*p| {
-            try final_presets.putOwned(mod.context.gpa, try p.clone(mod.context.gpa));
+            try final_presets.putOwned(std.heap.c_allocator, try p.clone(std.heap.c_allocator));
             try source_map.put(sa, p.name, .cache);
         }
         for (local_models.entries.items) |*p| {
-            try final_presets.putOwned(mod.context.gpa, try p.clone(mod.context.gpa));
+            try final_presets.putOwned(std.heap.c_allocator, try p.clone(std.heap.c_allocator));
             try source_map.put(sa, p.name, .models_dir);
         }
         for (custom_presets.entries.items) |*custom| {
             if (final_presets.get(custom.name)) |target| {
-                try presetCall(target.merge(mod.context.gpa, custom));
+                try presetCall(target.merge(std.heap.c_allocator, custom));
             } else {
-                try final_presets.putOwned(mod.context.gpa, try custom.clone(mod.context.gpa));
+                try final_presets.putOwned(std.heap.c_allocator, try custom.clone(std.heap.c_allocator));
             }
             try source_map.put(sa, custom.name, .preset);
         }
@@ -1571,7 +1573,7 @@ pub const Models = struct {
         // overlay router's own CLI args on top of every model preset so that
         // e.g. `llama-server --temp 0` is honoured by all child processes
         for (final_presets.entries.items) |*p| {
-            try presetCall(p.merge(mod.context.gpa, &self.base_preset));
+            try presetCall(p.merge(std.heap.c_allocator, &self.base_preset));
         }
 
         const Src = struct {
@@ -1588,7 +1590,7 @@ pub const Models = struct {
             var preset_paths: StringSet = .{};
             // the `add_hf_path` lambda (server-models.cpp:805 @b1b770d90)
             const AddHfPath = struct {
-                fn f(ar: Allocator, paths: *StringSet, preset: *const mod.preset.Preset, repo_key: []const u8, file_key: []const u8) !void {
+                fn f(ar: std.mem.Allocator, paths: *StringSet, preset: *const mod.preset.Preset, repo_key: []const u8, file_key: []const u8) !void {
                     const hf_repo = preset.getOption(repo_key) orelse return;
                     if (hf_repo.len == 0) return;
                     const hf_file = preset.getOption(file_key) orelse "";
@@ -1600,7 +1602,7 @@ pub const Models = struct {
             };
             for (custom_presets.entries.items) |*p| {
                 const val = p.getOption(mod.preset.env_dedup_cache_models) orelse continue;
-                if (!tc.arg.isTruthy(val)) continue;
+                if (!tools_common.arg.isTruthy(val)) continue;
                 try AddHfPath.f(sa, &preset_paths, p, "LLAMA_ARG_HF_REPO", "LLAMA_ARG_HF_FILE");
                 try AddHfPath.f(sa, &preset_paths, p, "LLAMA_ARG_SPEC_DRAFT_HF_REPO", "LLAMA_ARG_SPEC_DRAFT_MODEL");
             }
@@ -1648,12 +1650,12 @@ pub const Models = struct {
                 var models_to_load: std.ArrayList([]const u8) = .empty;
                 for (self.mapping.items) |inst| {
                     const val = inst.meta.preset.getOption(mod.preset.env_load_on_startup) orelse continue;
-                    if (tc.arg.isTruthy(val)) {
-                        try models_to_load.append(mod.context.gpa, try mod.context.gpa.dupe(u8, inst.meta.name));
+                    if (tools_common.arg.isTruthy(val)) {
+                        try models_to_load.append(std.heap.c_allocator, try std.heap.c_allocator.dupe(u8, inst.meta.name));
                     }
                 }
                 if (@as(c_int, @intCast(models_to_load.items.len)) > self.base_params.models_max) {
-                    return mod.common.throw(error.RuntimeError, "number of models to load on startup ({d}) exceeds models_max ({d})", .{ models_to_load.items.len, self.base_params.models_max });
+                    return common_chat.exception.throw(error.RuntimeError, "number of models to load on startup ({d}) exceeds models_max ({d})", .{ models_to_load.items.len, self.base_params.models_max });
                 }
 
                 // to be lazy-loaded after main() setup phase is completed
@@ -1804,7 +1806,7 @@ pub const Models = struct {
     /// The `log_available_models` (server-models.cpp:848 @b1b770d90) lambda
     /// of `load_models`: each model with where it came from.
     fn logAvailableModels(self: *Models) !void {
-        var scratch = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var scratch = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer scratch.deinit();
         const sa = scratch.allocator();
         mod.common.srv(.inf, "operator()", "Available models (%zu):\n", .{self.mapping.items.len});
@@ -1832,9 +1834,9 @@ pub const Models = struct {
     fn applyStopTimeout(self: *Models) void {
         for (self.mapping.items) |inst| {
             if (inst.meta.preset.getOption(mod.preset.env_stop_timeout)) |val| {
-                const z = mod.context.gpa.dupeSentinel(u8, val, 0) catch continue;
-                defer mod.context.gpa.free(z);
-                inst.meta.stop_timeout = tc.arg.stoi(z) catch blk: {
+                const z = std.heap.c_allocator.dupeSentinel(u8, val, 0) catch continue;
+                defer std.heap.c_allocator.free(z);
+                inst.meta.stop_timeout = tools_common.arg.stoi(z) catch blk: {
                     mod.common.srv(.wrn, "operator()", "invalid stop-timeout value '%s' for model '%s', using default %d seconds\n", .{ z.ptr, mod.common.zs(inst.alloc(), inst.meta.name) catch "", @as(c_int, default_stop_timeout) });
                     break :blk default_stop_timeout;
                 };
@@ -1855,8 +1857,8 @@ pub const Models = struct {
     pub fn loadStartupModels(self: *Models) !void {
         var to_load: std.ArrayList([]const u8) = .empty;
         defer {
-            for (to_load.items) |s| mod.context.gpa.free(s);
-            to_load.deinit(mod.context.gpa);
+            for (to_load.items) |s| std.heap.c_allocator.free(s);
+            to_load.deinit(std.heap.c_allocator);
         }
         {
             self.mutex.lock();
@@ -1868,8 +1870,8 @@ pub const Models = struct {
             self.startup_models = null;
         }
         for (to_load.items) |name| {
-            const z = try mod.common.zs(mod.context.gpa, name);
-            defer mod.context.gpa.free(std.mem.span(z));
+            const z = try mod.common.zs(std.heap.c_allocator, name);
+            defer std.heap.c_allocator.free(std.mem.span(z));
             mod.common.srv(.inf, "load_startup_models", "(startup) loading model %s\n", .{z});
             try self.load(name, .{});
         }
@@ -1894,7 +1896,7 @@ pub const Models = struct {
     /// Ports `get_meta` (server-models.cpp:1122 @b1b770d90): a copy of a
     /// model's metadata, by name or alias, reloading the list first when a
     /// download finished (thread-safe).
-    pub fn getMeta(self: *Models, a: Allocator, name: []const u8) !?Meta {
+    pub fn getMeta(self: *Models, a: std.mem.Allocator, name: []const u8) !?Meta {
         self.mutex.lock();
         if (self.need_reload) {
             self.mutex.unlock();
@@ -1916,7 +1918,7 @@ pub const Models = struct {
 
     /// Ports `get_all_meta` (server-models.cpp:1142 @b1b770d90): a copy of
     /// every model's metadata (thread-safe).
-    pub fn getAllMeta(self: *Models, a: Allocator) ![]Meta {
+    pub fn getAllMeta(self: *Models, a: std.mem.Allocator) ![]Meta {
         self.mutex.lock();
         if (self.need_reload) {
             self.mutex.unlock();
@@ -1934,7 +1936,7 @@ pub const Models = struct {
 
     /// Ports `unfinished_downloads_get` (server-models.cpp:701 @b1b770d90):
     /// downloads that never finished, with their sidecar kinds (thread-safe).
-    pub fn unfinishedDownloadsGet(self: *Models, a: Allocator) Allocator.Error![]UnfinishedDownload {
+    pub fn unfinishedDownloadsGet(self: *Models, a: std.mem.Allocator) std.mem.Allocator.Error![]UnfinishedDownload {
         return self.unfinished_downloads.getAll(a);
     }
 
@@ -1943,18 +1945,18 @@ pub const Models = struct {
     /// and its partial files; throws for a name that is not recorded
     /// (thread-safe).
     pub fn unfinishedDownloadsRemove(self: *Models, name: []const u8) !void {
-        var scratch = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var scratch = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer scratch.deinit();
         const sa = scratch.allocator();
         // under the lock, so a download of the same tag cannot start while its files go
         self.mutex.lock();
         defer self.mutex.unlock();
         if (self.find(name) != null) {
-            return mod.common.throw(error.InvalidArgument, "model '{s}' is downloading", .{name});
+            return common_chat.exception.throw(error.InvalidArgument, "model '{s}' is downloading", .{name});
         }
         // a name with no record is no model: its files belong to the cached tags of the repo
         if (!self.unfinished_downloads.remove(name)) {
-            return mod.common.throw(error.RuntimeError, "model name={s} is not found", .{name});
+            return common_chat.exception.throw(error.RuntimeError, "model name={s} is not found", .{name});
         }
         const ok = try mod.download.remove(sa, name);
         mod.common.srv(.inf, "unfinished_downloads_remove", "removing unfinished download name=%s (%s)\n", .{ try mod.common.zs(sa, name), @as([*:0]const u8, if (ok) "succeeded" else "nothing cached") });
@@ -1966,14 +1968,14 @@ pub const Models = struct {
     /// `kind` of a model that is not in use, its files and partials
     /// (thread-safe).
     pub fn removeSidecar(self: *Models, name: []const u8, kind: []const u8) !bool {
-        var scratch = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var scratch = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer scratch.deinit();
         const sa = scratch.allocator();
         self.mutex.lock();
         defer self.mutex.unlock();
         if (self.find(name)) |it| {
             if (it.meta.isRunning() or it.meta.status == .downloading) {
-                return mod.common.throw(error.InvalidArgument, "model '{s}' is in use, unload it first", .{name});
+                return common_chat.exception.throw(error.InvalidArgument, "model '{s}' is in use, unload it first", .{name});
             }
         }
         // a sidecar that only ever landed as a partial is still something removed
@@ -1988,7 +1990,7 @@ pub const Models = struct {
     /// without options: spawn a child for the model (thread-safe); a model
     /// not unloaded is left alone.
     pub fn load(self: *Models, name: []const u8, opts: LoadOptions) !void {
-        var scratch = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var scratch = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer scratch.deinit();
         const sa = scratch.allocator();
         // the fake load time of a model; a download worker loads none
@@ -1999,7 +2001,7 @@ pub const Models = struct {
 
         if (opts.custom_meta == null) {
             if (!self.hasModel(name)) {
-                return mod.common.throw(error.RuntimeError, "model name={s} is not found", .{name});
+                return common_chat.exception.throw(error.RuntimeError, "model name={s} is not found", .{name});
             }
             if (opts.role == .instance) {
                 try self.sched.makeRoom(name);
@@ -2020,13 +2022,13 @@ pub const Models = struct {
             if (self.find(name)) |it| {
                 const cur = &it.meta;
                 if (cur.status == .downloading) {
-                    return mod.common.throw(error.InvalidArgument, "model '{s}' is already downloading", .{name});
+                    return common_chat.exception.throw(error.InvalidArgument, "model '{s}' is already downloading", .{name});
                 }
                 if (cur.isRunning()) {
-                    return mod.common.throw(error.InvalidArgument, "model '{s}' is running, unload it first", .{name});
+                    return common_chat.exception.throw(error.InvalidArgument, "model '{s}' is running, unload it first", .{name});
                 }
                 if (cur.source != .cache) {
-                    return mod.common.throw(error.InvalidArgument, "model '{s}' already exists", .{name});
+                    return common_chat.exception.throw(error.InvalidArgument, "model '{s}' already exists", .{name});
                 }
                 mod.common.srv(.inf, "load", "resuming download for model '%s'\n", .{try mod.common.zs(sa, name)});
             }
@@ -2040,7 +2042,7 @@ pub const Models = struct {
                 for (d.partials) |p| {
                     for (opts.partials) |q| {
                         if (std.mem.eql(u8, q.path, p.path)) {
-                            return mod.common.throw(error.InvalidArgument, "model '{s}' shares files with the download of '{s}' on its way, retry once it is done", .{ name, d.model });
+                            return common_chat.exception.throw(error.InvalidArgument, "model '{s}' shares files with the download of '{s}' on its way, retry once it is done", .{ name, d.model });
                         }
                     }
                 }
@@ -2059,7 +2061,7 @@ pub const Models = struct {
         // threads to each observe capacity and all proceed to load.
         // Download workers do not use models_max slots.
         if (opts.role == .instance and self.sched.limitsExceeded(name, false)) {
-            return mod.common.throw(error.RuntimeError, "model limit reached, try again later", .{});
+            return common_chat.exception.throw(error.RuntimeError, "model limit reached, try again later", .{});
         }
 
         // prepare new instance info
@@ -2069,7 +2071,7 @@ pub const Models = struct {
         meta.last_used = timeMs();
 
         if (meta.port <= 0) {
-            return mod.common.throw(error.RuntimeError, "failed to get a port number", .{});
+            return common_chat.exception.throw(error.RuntimeError, "failed to get a port number", .{});
         }
 
         const proc = try SharedProc.create();
@@ -2119,7 +2121,7 @@ pub const Models = struct {
             // the child writes its commands to stdout and its logs to stderr
             const options = stdlib.subproc.option_no_window;
             if (!proc.proc.sproc.create(child_args, options, child_env.items, null)) {
-                return mod.common.throw(error.RuntimeError, "failed to spawn server instance", .{});
+                return common_chat.exception.throw(error.RuntimeError, "failed to spawn server instance", .{});
             }
         }
 
@@ -2224,8 +2226,8 @@ pub const Models = struct {
     pub fn unload(self: *Models, name: []const u8) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
-        const z = try mod.common.zs(mod.context.gpa, name);
-        defer mod.context.gpa.free(std.mem.span(z));
+        const z = try mod.common.zs(std.heap.c_allocator, name);
+        defer std.heap.c_allocator.free(std.mem.span(z));
         if (self.find(name)) |it| {
             if (it.meta.status == .downloading) {
                 mod.common.srv(.inf, "unload", "cancelling download for model name=%s\n", .{z});
@@ -2261,8 +2263,8 @@ pub const Models = struct {
         defer self.mutex.unlock();
         self.sched.cancelMeasurements();
         for (self.mapping.items) |inst| {
-            const z = mod.common.zs(mod.context.gpa, inst.meta.name) catch continue;
-            defer mod.context.gpa.free(std.mem.span(z));
+            const z = mod.common.zs(std.heap.c_allocator, inst.meta.name) catch continue;
+            defer std.heap.c_allocator.free(std.mem.span(z));
             if (inst.meta.status == .downloading) {
                 mod.common.srv(.inf, "unload_all", "cancelling download for model name=%s\n", .{z});
                 inst.download_stop_requested = true;
@@ -2326,7 +2328,7 @@ pub const Models = struct {
         }
         // broadcast status change to SSE
         {
-            var scratch = std.heap.ArenaAllocator.init(mod.context.gpa);
+            var scratch = std.heap.ArenaAllocator.init(std.heap.c_allocator);
             defer scratch.deinit();
             const sa = scratch.allocator();
             var data = mod.common.Obj.init(sa);
@@ -2356,7 +2358,7 @@ pub const Models = struct {
     /// a download child's progress, or its end, which marks the instance to
     /// be erased on the next reload.
     pub fn updateDownloadProgress(self: *Models, name: []const u8, progress: *const mod.download.Progress, done: bool, ok: bool) void {
-        var scratch = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var scratch = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer scratch.deinit();
         const sa = scratch.allocator();
         var curr: json.Value = .null;
@@ -2428,7 +2430,7 @@ pub const Models = struct {
     /// the disk and out of the list; only cache models can be removed
     /// (thread-safe).
     pub fn remove(self: *Models, name: []const u8) !bool {
-        var scratch = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var scratch = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer scratch.deinit();
         const sa = scratch.allocator();
         const z = try mod.common.zs(sa, name);
@@ -2439,10 +2441,10 @@ pub const Models = struct {
         defer self.mutex.unlock();
 
         const it = self.find(name) orelse {
-            return mod.common.throw(error.RuntimeError, "model name={s} is not found", .{name});
+            return common_chat.exception.throw(error.RuntimeError, "model name={s} is not found", .{name});
         };
         if (it.meta.source != .cache) {
-            return mod.common.throw(error.RuntimeError, "model name={s} is not removable (not from cache)", .{name});
+            return common_chat.exception.throw(error.RuntimeError, "model name={s} is not removable (not from cache)", .{name});
         }
 
         if (it.meta.status == .downloading) {
@@ -2506,12 +2508,12 @@ pub const Models = struct {
     /// Return: false if the model was ready (or sleeping), true after
     /// waiting; throws if the load fails or `should_stop` fires.
     pub fn ensureModelReady(self: *Models, name: []const u8, should_stop: ?mod.http.ShouldStop) !bool {
-        var scratch = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var scratch = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer scratch.deinit();
         const sa = scratch.allocator();
         const z = try mod.common.zs(sa, name);
         const meta = (try self.getMeta(sa, name)) orelse {
-            return mod.common.throw(error.RuntimeError, "model name={s} is not found", .{name});
+            return common_chat.exception.throw(error.RuntimeError, "model name={s} is not found", .{name});
         };
         const stopping = blk: {
             self.mutex.lock();
@@ -2561,7 +2563,7 @@ pub const Models = struct {
 
     /// The waiting loop of `ensure_model_ready`, from `saw_loading`
     /// (server-models.cpp:1639 @b1b770d90) on, with the mutex held.
-    fn ensureWait(self: *Models, sa: Allocator, name: []const u8, should_stop: ?mod.http.ShouldStop, queued: *bool, did_load: *bool) !void {
+    fn ensureWait(self: *Models, sa: std.mem.Allocator, name: []const u8, should_stop: ?mod.http.ShouldStop, queued: *bool, did_load: *bool) !void {
         const z = try mod.common.zs(sa, name);
         var saw_loading = false;
         while (true) {
@@ -2574,7 +2576,7 @@ pub const Models = struct {
                     queued.* = true;
                 }
                 if (should_stop) |ss| if (ss.call()) {
-                    return mod.common.throw(error.RuntimeError, "request cancelled while waiting for model name={s}", .{name});
+                    return common_chat.exception.throw(error.RuntimeError, "request cancelled while waiting for model name={s}", .{name});
                 };
                 _ = self.cv.timedWait(&self.mutex, 200 * std.time.ns_per_ms);
                 continue;
@@ -2593,7 +2595,7 @@ pub const Models = struct {
                 if (did_load.* or saw_loading) {
                     // a spawn happened and the instance came back down
                     if (it.meta.isFailed()) {
-                        return mod.common.throw(error.RuntimeError, "model name={s} failed to load", .{name});
+                        return common_chat.exception.throw(error.RuntimeError, "model name={s} failed to load", .{name});
                     }
                     break; // unloaded by another code path, caller reports "not running"
                 }
@@ -2604,7 +2606,7 @@ pub const Models = struct {
 
             if (should_stop) |ss| if (ss.call()) {
                 // if a model was evicted for us, the free slot goes to the next waiter
-                return mod.common.throw(error.RuntimeError, "request cancelled while waiting for model name={s}", .{name});
+                return common_chat.exception.throw(error.RuntimeError, "request cancelled while waiting for model name={s}", .{name});
             };
 
             // our turn: our model is at the head, and a slot really did free up
@@ -2637,14 +2639,14 @@ pub const Models = struct {
     /// forwarded to the model's child; a detached request (one belonging to
     /// a replay session) ignores its client hanging up.
     pub fn proxyRequest(self: *Models, req: *const mod.http.Req, method: []const u8, name: []const u8, update_last_used: bool, detached: bool) !*mod.http.Res {
-        var scratch = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var scratch = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer scratch.deinit();
         const sa = scratch.allocator();
         const meta = (try self.getMeta(sa, name)) orelse {
-            return mod.common.throw(error.RuntimeError, "model name={s} is not found", .{name});
+            return common_chat.exception.throw(error.RuntimeError, "model name={s} is not found", .{name});
         };
         if (!meta.isRunning()) {
-            return mod.common.throw(error.InvalidArgument, "model name={s} is not running", .{name});
+            return common_chat.exception.throw(error.InvalidArgument, "model name={s} is not running", .{name});
         }
         {
             self.mutex.lock();
@@ -2680,8 +2682,8 @@ pub const Models = struct {
             "",
         );
 
-        const cleanup = try mod.context.gpa.create(ProxyCleanup);
-        cleanup.* = .{ .models = self, .name = try mod.context.gpa.dupe(u8, name) };
+        const cleanup = try std.heap.c_allocator.create(ProxyCleanup);
+        cleanup.* = .{ .models = self, .name = try std.heap.c_allocator.dupe(u8, name) };
         const p: *mod.proxy.Proxy = @fieldParentPtr("base", res);
         p.cleanup = .{ .ctx = cleanup, .func = ProxyCleanup.run };
 
@@ -2691,12 +2693,12 @@ pub const Models = struct {
     /// Ports `proxy_ws` (server-models.cpp:1772 @b1b770d90): forward a
     /// websocket connection to the child, returning when either side closes.
     pub fn proxyWs(self: *Models, req: *const mod.http.Req, conn: *mod.http.WsConn, name: []const u8) !void {
-        var scratch = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var scratch = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer scratch.deinit();
         const sa = scratch.allocator();
 
         const SendError = struct {
-            fn f(a: Allocator, cn: *mod.http.WsConn, message: []const u8) !void {
+            fn f(a: std.mem.Allocator, cn: *mod.http.WsConn, message: []const u8) !void {
                 var err = mod.common.Obj.init(a);
                 try err.put("type", "server_error");
                 try err.put("code", @as(json.Value, .null));
@@ -2730,7 +2732,7 @@ pub const Models = struct {
             url = try std.mem.concat(sa, u8, &.{ url, "?", req.query_string });
         }
         // the client library adds its own upgrade headers
-        var headers: mod.httplib.client.HeadersMap = .{};
+        var headers: mod.httplib.detail.Headers = .{};
         for (req.headers.entries.items) |e| {
             const lower = try sa.dupe(u8, e.key);
             for (lower) |*ch| ch.* = std.ascii.toLower(ch.*);
@@ -2743,7 +2745,7 @@ pub const Models = struct {
         }
 
         {
-            var upstream = mod.httplib.ws.WebSocketClient.init(mod.context.gpa, url, headers);
+            var upstream = mod.httplib.ws.WebSocketClient.init(std.heap.c_allocator, url, headers);
             defer upstream.deinit();
             if (!try upstream.connect()) {
                 try SendError.f(sa, conn, try std.fmt.allocPrint(sa, "failed to connect to model name={s}", .{name}));
@@ -2752,9 +2754,9 @@ pub const Models = struct {
                 const Pump = struct {
                     fn run(cn: *mod.http.WsConn, up: *mod.httplib.ws.WebSocketClient) void {
                         var msg: std.ArrayList(u8) = .empty;
-                        defer msg.deinit(mod.context.gpa);
+                        defer msg.deinit(std.heap.c_allocator);
                         while (true) {
-                            const res = cn.read(mod.context.gpa, &msg) catch 0;
+                            const res = cn.read(std.heap.c_allocator, &msg) catch 0;
                             if (res == 0 or !(if (res == 1) up.send(msg.items) else up.sendBinary(msg.items))) {
                                 break;
                             }
@@ -2765,9 +2767,9 @@ pub const Models = struct {
                 const pump = try std.Thread.spawn(.{}, Pump.run, .{ conn, &upstream });
                 // child to client
                 var msg: std.ArrayList(u8) = .empty;
-                defer msg.deinit(mod.context.gpa);
+                defer msg.deinit(std.heap.c_allocator);
                 while (true) {
-                    const res = upstream.read(mod.context.gpa, &msg) catch .fail;
+                    const res = upstream.read(std.heap.c_allocator, &msg) catch .fail;
                     if (res == .fail or !(if (res == .text) conn.send(msg.items) else conn.sendBinary(msg.items))) {
                         break;
                     }
@@ -2799,7 +2801,7 @@ pub const Models = struct {
     ///     state = sleeping    -> payload = {}
     ///     state = measuring   -> payload = {result: "measured", min, max} or {result: "failed", error}
     fn handleChildState(self: *Models, name: []const u8, raw_input: []const u8) void {
-        var scratch = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var scratch = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer scratch.deinit();
         const sa = scratch.allocator();
         var state: mod.context.ServerState = undefined;
@@ -2897,8 +2899,8 @@ const ProxyCleanup = struct {
     fn run(ctx: ?*anyopaque) void {
         const self: *ProxyCleanup = @ptrCast(@alignCast(ctx.?));
         defer {
-            mod.context.gpa.free(self.name);
-            mod.context.gpa.destroy(self);
+            std.heap.c_allocator.free(self.name);
+            std.heap.c_allocator.destroy(self);
         }
         const models = self.models;
         models.mutex.lock();
@@ -2922,14 +2924,14 @@ fn serverStateFromStr(str: []const u8) mod.context.ServerState {
     if (std.mem.eql(u8, str, "loading")) return .loading;
     if (std.mem.eql(u8, str, "ready")) return .ready;
     if (std.mem.eql(u8, str, "sleeping")) return .sleeping;
-    _ = tc.c.ggml_abort("tools/server/server-common.h", 819, "GGML_ASSERT(%s) failed", "false && \"invalid server_state string\"");
+    _ = llama.impl.llama_c.ggml_abort("tools/server/server-common.h", 819, "GGML_ASSERT(%s) failed", "false && \"invalid server_state string\"");
     unreachable;
 }
 
 /// The `preset_options_for_compare` (server-models.cpp:884 @b1b770d90)
 /// lambda of `load_models`: `update_args()` injects HOST, PORT, ALIAS and
 /// LOG_COLORS, so they are stripped before comparing presets.
-fn presetOptionsEqualForCompare(a: Allocator, x: *const mod.preset.Preset, y: *const mod.preset.Preset) !bool {
+fn presetOptionsEqualForCompare(a: std.mem.Allocator, x: *const mod.preset.Preset, y: *const mod.preset.Preset) !bool {
     var px = try x.clone(a);
     var py = try y.clone(a);
     for ([_]*mod.preset.Preset{ &px, &py }) |p| {
@@ -3012,7 +3014,7 @@ pub const Role = struct {
                 mod.common.srv(.inf, "operator()", "%s", .{@as([*:0]const u8, "child server monitoring thread started, waiting for EOF on stdin...\n")});
                 var eof = false;
                 var line: std.ArrayList(u8) = .empty;
-                defer line.deinit(mod.context.gpa);
+                defer line.deinit(std.heap.c_allocator);
                 outer: while (true) {
                     line.clearRetainingCapacity();
                     // std::getline(std::cin, line)
@@ -3032,7 +3034,7 @@ pub const Role = struct {
                         }
                         got_any = true;
                         if (ch[0] == '\n') break;
-                        line.append(mod.context.gpa, ch[0]) catch |err| switch (err) {
+                        line.append(std.heap.c_allocator, ch[0]) catch |err| switch (err) {
                             error.OutOfMemory => {},
                         };
                     }
@@ -3053,7 +3055,7 @@ pub const Role = struct {
     /// Ports `notify_to_router` (server-common.cpp:2339 @b1b770d90): a state
     /// line on the reserved stdout, which the router reads.
     pub fn notifyToRouter(self: *Role, state: []const u8, payload: *const json.Value) void {
-        var arena = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer arena.deinit();
         const a = arena.allocator();
         var o = mod.common.Obj.init(a);
@@ -3100,7 +3102,7 @@ const SseClient = struct {
         const client_id = sse_client_id_counter.fetchAdd(1, .monotonic);
         mod.common.srv(.dbg, "server_models_sse_client", "new SSE client connected, assigned client_id=%d\n", .{client_id});
         try q.addWaitingTaskId(client_id);
-        var ids = try mod.queue.IdSet.init(mod.context.gpa);
+        var ids = try mod.queue.IdSet.init(std.heap.c_allocator);
         try ids.insert(client_id);
         return .{ .queue_results = q, .client_id = client_id, .ids = ids };
     }
@@ -3126,8 +3128,8 @@ const SseClient = struct {
                 // continue waiting otherwise
                 continue;
             };
-            if (tc.log.verbosity_thold >= tc.log.level_debug) {
-                var arena = std.heap.ArenaAllocator.init(mod.context.gpa);
+            if (tools_common.log.verbosity_thold >= tools_common.log.level_debug) {
+                var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
                 defer arena.deinit();
                 const a = arena.allocator();
                 if (result.toJson(a)) |v| {
@@ -3183,7 +3185,7 @@ fn routerValidateModel(name: *[]const u8, models: *Models, models_autoload: bool
 }
 
 /// Ports `is_autoload` (server-models.cpp:2000 @b1b770d90).
-fn isAutoload(params: *const tc.params.Params, req: *const mod.http.Req) bool {
+fn isAutoload(params: *const tools_common.params.Params, req: *const mod.http.Req) bool {
     const autoload = req.getParam("autoload", "");
     if (autoload.len == 0) {
         return params.models_autoload;
@@ -3194,7 +3196,7 @@ fn isAutoload(params: *const tc.params.Params, req: *const mod.http.Req) bool {
 
 /// Ports `encode_qs` (server-models.cpp:2011 @b1b770d90): percent encode one
 /// query or path component.
-fn encodeQs(a: Allocator, in: []const u8) ![]const u8 {
+fn encodeQs(a: std.mem.Allocator, in: []const u8) ![]const u8 {
     var out: std.ArrayList(u8) = .empty;
     try out.ensureTotalCapacity(a, in.len * 3);
     for (in) |ch| {
@@ -3212,7 +3214,7 @@ fn encodeQs(a: Allocator, in: []const u8) ![]const u8 {
 /// Ports `resolve_child_for_conv` (server-models.cpp:2032 @b1b770d90): the
 /// ready child that owns a conversation's stream session, through the
 /// conv_id -> model map.
-fn resolveChildForConv(a: Allocator, models: *Models, conversation_id: []const u8) !?Meta {
+fn resolveChildForConv(a: std.mem.Allocator, models: *Models, conversation_id: []const u8) !?Meta {
     if (conversation_id.len == 0) {
         return null;
     }
@@ -3226,7 +3228,7 @@ fn resolveChildForConv(a: Allocator, models: *Models, conversation_id: []const u
 
 /// Ports `server_models_routes` (server-models.h:394 @b1b770d90).
 pub const ModelsRoutes = struct {
-    params: tc.params.Params,
+    params: tools_common.params.Params,
     ui_settings: json.Value = json.Value.emptyObject(), // Primary: new name
     ui_arena: std.heap.ArenaAllocator = .init(std.heap.c_allocator),
     stopping: std.atomic.Value(bool) = .init(false), // for graceful disconnecting SSE clients during shutdown
@@ -3253,7 +3255,7 @@ pub const ModelsRoutes = struct {
 
     /// Ports the constructor of `server_models_routes` (server-models.h:394
     /// @b1b770d90). `self` must not move afterwards.
-    pub fn init(self: *ModelsRoutes, params: *const tc.params.Params, argv: []const [:0]const u8) !void {
+    pub fn init(self: *ModelsRoutes, params: *const tools_common.params.Params, argv: []const [:0]const u8) !void {
         self.* = .{ .params = params.*, .models = undefined };
         try self.models.init(params, argv);
         errdefer self.models.deinit();
@@ -3261,7 +3263,7 @@ pub const ModelsRoutes = struct {
         if (cfg.len != 0) {
             const json_settings = json.parse(self.ui_arena.allocator(), cfg) catch |e| {
                 const w = try mod.common.zs(self.ui_arena.allocator(), mod.context.whatOf(e));
-                tc.log.err("%s: failed to parse UI config: %s\n", .{ @as([*:0]const u8, "server_models_routes"), w });
+                tools_common.log.err("%s: failed to parse UI config: %s\n", .{ @as([*:0]const u8, "server_models_routes"), w });
                 return e;
             };
             self.ui_settings = json_settings;
@@ -3285,7 +3287,7 @@ pub const ModelsRoutes = struct {
     /// Ports `init_routes` (server-models.cpp:2048 @b1b770d90).
     fn initRoutes(self: *ModelsRoutes) !void {
         if (!stdlib.subproc.Subproc.isSupported()) {
-            return mod.common.throw(error.RuntimeError, "subprocess is not enabled on this build", .{});
+            return common_chat.exception.throw(error.RuntimeError, "subprocess is not enabled on this build", .{});
         }
 
         self.get_router_props = self.handler(getRouterProps);
@@ -3308,7 +3310,7 @@ pub const ModelsRoutes = struct {
         const name = req.getParam("model", "");
         if (name.len == 0) {
             // main instance
-            const res = try mod.http.Res.create(mod.context.gpa);
+            const res = try mod.http.Res.create(std.heap.c_allocator);
             errdefer res.destroy();
             const a = res.allocator();
             var dgs = mod.common.Obj.init(a);
@@ -3342,7 +3344,7 @@ pub const ModelsRoutes = struct {
         const method = "GET";
         var name: []const u8 = req.getParam("model", "");
         const autoload = isAutoload(&self.params, req);
-        const error_res = try mod.http.Res.create(mod.context.gpa);
+        const error_res = try mod.http.Res.create(std.heap.c_allocator);
         var keep_error = true;
         defer if (!keep_error) error_res.destroy();
         errdefer if (keep_error) error_res.destroy();
@@ -3351,8 +3353,8 @@ pub const ModelsRoutes = struct {
         }
         keep_error = false;
         // `name` lives in the error response's arena until it goes
-        const canonical = try mod.context.gpa.dupe(u8, name);
-        defer mod.context.gpa.free(canonical);
+        const canonical = try std.heap.c_allocator.dupe(u8, name);
+        defer std.heap.c_allocator.free(canonical);
         if (autoload) {
             _ = try self.models.ensureModelReady(canonical, req.should_stop);
         }
@@ -3362,7 +3364,7 @@ pub const ModelsRoutes = struct {
     /// The `proxy_post` lambda (server-models.cpp:2116 @b1b770d90).
     fn proxyPost(self: *ModelsRoutes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         const method = "POST";
-        const error_res = try mod.http.Res.create(mod.context.gpa);
+        const error_res = try mod.http.Res.create(std.heap.c_allocator);
         var keep_error = true;
         defer if (!keep_error) error_res.destroy();
         errdefer if (keep_error) error_res.destroy();
@@ -3389,8 +3391,8 @@ pub const ModelsRoutes = struct {
             return error_res;
         }
         keep_error = false;
-        const canonical = try mod.context.gpa.dupe(u8, name);
-        defer mod.context.gpa.free(canonical);
+        const canonical = try std.heap.c_allocator.dupe(u8, name);
+        defer std.heap.c_allocator.free(canonical);
         // a session request that waited for a load detaches from the client socket: the
         // client may have dropped during the wait (page reload) and the session buffer must
         // still receive the generation for a later resume
@@ -3410,7 +3412,7 @@ pub const ModelsRoutes = struct {
     fn proxyWsImpl(self: *ModelsRoutes, req: *const mod.http.Req, conn: *mod.http.WsConn) !void {
         var name: []const u8 = req.getParam("model", "");
         const autoload = isAutoload(&self.params, req);
-        const error_res = try mod.http.Res.create(mod.context.gpa);
+        const error_res = try mod.http.Res.create(std.heap.c_allocator);
         defer error_res.destroy();
         if (!try routerValidateModel(&name, &self.models, autoload, error_res)) {
             // error_res holds {"error": {...}}, send it as a websocket error event
@@ -3429,7 +3431,7 @@ pub const ModelsRoutes = struct {
 
     /// The `post_router_models_load` lambda (server-models.cpp:2147 @b1b770d90).
     fn postRouterModelsLoad(self: *ModelsRoutes, req: *const mod.http.Req) anyerror!*mod.http.Res {
-        const res = try mod.http.Res.create(mod.context.gpa);
+        const res = try mod.http.Res.create(std.heap.c_allocator);
         errdefer res.destroy();
         const a = res.allocator();
         var body = try json.parse(a, req.body);
@@ -3458,7 +3460,7 @@ pub const ModelsRoutes = struct {
         if (reload) {
             try self.models.loadModels();
         }
-        const res = try mod.http.Res.create(mod.context.gpa);
+        const res = try mod.http.Res.create(std.heap.c_allocator);
         errdefer res.destroy();
         const a = res.allocator();
         var models_json = json.Value.emptyArray();
@@ -3591,7 +3593,7 @@ pub const ModelsRoutes = struct {
 
     /// The `post_router_models_unload` lambda (server-models.cpp:2295 @b1b770d90).
     fn postRouterModelsUnload(self: *ModelsRoutes, req: *const mod.http.Req) anyerror!*mod.http.Res {
-        const res = try mod.http.Res.create(mod.context.gpa);
+        const res = try mod.http.Res.create(std.heap.c_allocator);
         errdefer res.destroy();
         const a = res.allocator();
         var body = try json.parse(a, req.body);
@@ -3616,10 +3618,10 @@ pub const ModelsRoutes = struct {
 
     /// The `get_router_models_sse` lambda (server-models.cpp:2313 @b1b770d90).
     fn getRouterModelsSse(self: *ModelsRoutes, req: *const mod.http.Req) anyerror!*mod.http.Res {
-        const sse = try mod.context.gpa.create(SseRes);
-        errdefer mod.context.gpa.destroy(sse);
+        const sse = try std.heap.c_allocator.create(SseRes);
+        errdefer std.heap.c_allocator.destroy(sse);
         sse.* = .{
-            .res = .{ .arena = .init(mod.context.gpa), .vtable = &SseRes.vtable },
+            .res = .{ .arena = .init(std.heap.c_allocator), .vtable = &SseRes.vtable },
             .routes = self,
             .client = try SseClient.init(&self.models.sse),
             .should_stop = req.should_stop,
@@ -3633,18 +3635,18 @@ pub const ModelsRoutes = struct {
     /// The `post_router_models` lambda (server-models.cpp:2331 @b1b770d90):
     /// download a model from the hub in a child, with its sidecars.
     fn postRouterModels(self: *ModelsRoutes, req: *const mod.http.Req) anyerror!*mod.http.Res {
-        const res = try mod.http.Res.create(mod.context.gpa);
+        const res = try mod.http.Res.create(std.heap.c_allocator);
         errdefer res.destroy();
         const a = res.allocator();
 
         var body = try json.parse(a, req.body);
         const name = mod.common.jsonValue(&body, "model", []const u8, "");
         if (name.len == 0) {
-            return mod.common.throw(error.InvalidArgument, "model must be a non-empty string", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "model must be a non-empty string", .{});
         }
         const sidecars = try parseSidecars(a, &body);
 
-        var model: tc.params.Model = .{};
+        var model: tools_common.params.Model = .{};
         model.hf_repo = name;
 
         // validate by fetching metadata, through the plan the download follows
@@ -3657,7 +3659,7 @@ pub const ModelsRoutes = struct {
 
         // a tag that resolves no file has nothing to download
         if (plan.preset.path.len == 0 and plan.primary.path.len == 0 and (try mod.download.planSidecars(a, &plan)).len == 0) {
-            return mod.common.throw(error.InvalidArgument, "model '{s}' resolves no file to download", .{name});
+            return common_chat.exception.throw(error.InvalidArgument, "model '{s}' resolves no file to download", .{name});
         }
 
         // then, proceed with the actual download; load() decides over an existing entry
@@ -3681,13 +3683,13 @@ pub const ModelsRoutes = struct {
 
     /// The `del_router_models` lambda (server-models.cpp:2376 @b1b770d90).
     fn delRouterModels(self: *ModelsRoutes, req: *const mod.http.Req) anyerror!*mod.http.Res {
-        const res = try mod.http.Res.create(mod.context.gpa);
+        const res = try mod.http.Res.create(std.heap.c_allocator);
         errdefer res.destroy();
         const a = res.allocator();
 
         const name = req.getParam("model", "");
         if (name.len == 0) {
-            return mod.common.throw(error.InvalidArgument, "model must be a non-empty string", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "model must be a non-empty string", .{});
         }
 
         // a sidecar alone goes, the model keeps its files
@@ -3725,7 +3727,7 @@ pub const ModelsRoutes = struct {
     /// `GET /v1/stream?conv_id=<id>&from=N`, proxied to the child that owns
     /// the conversation.
     fn routerStreamGet(self: *ModelsRoutes, req: *const mod.http.Req) anyerror!*mod.http.Res {
-        const res = try mod.http.Res.create(mod.context.gpa);
+        const res = try mod.http.Res.create(std.heap.c_allocator);
         var keep = true;
         defer if (!keep) res.destroy();
         errdefer if (keep) res.destroy();
@@ -3779,7 +3781,7 @@ pub const ModelsRoutes = struct {
     /// @b1b770d90): `POST /v1/streams/lookup`, each id asked of only the
     /// child that owns it.
     fn routerStreamsLookup(self: *ModelsRoutes, req: *const mod.http.Req) anyerror!*mod.http.Res {
-        const res = try mod.http.Res.create(mod.context.gpa);
+        const res = try mod.http.Res.create(std.heap.c_allocator);
         errdefer res.destroy();
         const a = res.allocator();
         var requested: std.ArrayList([]const u8) = .empty;
@@ -3848,7 +3850,7 @@ pub const ModelsRoutes = struct {
     /// @b1b770d90): `DELETE /v1/stream?conv_id=<id>`, forwarded to the
     /// owning child only.
     fn routerStreamDelete(self: *ModelsRoutes, req: *const mod.http.Req) anyerror!*mod.http.Res {
-        const res = try mod.http.Res.create(mod.context.gpa);
+        const res = try mod.http.Res.create(std.heap.c_allocator);
         errdefer res.destroy();
         const a = res.allocator();
         const conv_id = req.getParam("conv_id", "");
@@ -3894,18 +3896,18 @@ const SseRes = struct {
         const self: *SseRes = @fieldParentPtr("res", r);
         self.client.deinit();
         self.res.arena.deinit();
-        mod.context.gpa.destroy(self);
+        std.heap.c_allocator.destroy(self);
     }
 
     /// The `next` (server-models.cpp:2318 @b1b770d90) lambda of
     /// `get_router_models_sse`.
-    fn next(ctx: ?*anyopaque, out: *std.ArrayList(u8), a: Allocator) anyerror!bool {
+    fn next(ctx: ?*anyopaque, out: *std.ArrayList(u8), a: std.mem.Allocator) anyerror!bool {
         const self: *SseRes = @ptrCast(@alignCast(ctx.?));
         const result = self.client.next(self.routes, self.should_stop) orelse {
             return false; // client disconnected or should_stop
         };
-        defer result.destroy(mod.context.gpa);
-        var scratch = std.heap.ArenaAllocator.init(mod.context.gpa);
+        defer result.destroy(std.heap.c_allocator);
+        var scratch = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer scratch.deinit();
         var v = try result.toJson(scratch.allocator());
         const d = try mod.common.safeJsonToStr(scratch.allocator(), &v);
@@ -3917,7 +3919,7 @@ const SseRes = struct {
 };
 
 /// `json(std::vector<std::string>)` / `json(std::set<std::string>)`.
-fn stringsArray(a: Allocator, items: []const []const u8) !json.Value {
+fn stringsArray(a: std.mem.Allocator, items: []const []const u8) !json.Value {
     var arr = json.Value.emptyArray();
     for (items) |s| try arr.pushBack(a, try json.Value.initString(a, s));
     return arr;

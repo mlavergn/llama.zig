@@ -34,31 +34,6 @@ pub const ssm = @import("ssm.zig");
 pub const vecinline = @import("vecinline.zig");
 pub const window = @import("window.zig");
 
-comptime {
-    _ = activation;
-    _ = arith;
-    _ = attention;
-    _ = common;
-    _ = conv;
-    _ = custom;
-    _ = dup;
-    _ = gather;
-    _ = linalg;
-    _ = norm;
-    _ = pad;
-    _ = pool;
-    _ = recurrent;
-    _ = reduce;
-    _ = repeat;
-    _ = rope;
-    _ = softmax;
-    _ = sgemm;
-    _ = sort;
-    _ = ssm;
-    _ = vecinline;
-    _ = window;
-}
-
 test {
     @import("std").testing.refAllDecls(@This());
 }

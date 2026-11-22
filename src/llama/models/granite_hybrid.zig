@@ -175,12 +175,12 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     const inp_out_ids = b.buildInpOutIds();
 
     // The positions, when RoPE is on.
-    var inp_pos: ?*llama.impl.c.ggml_tensor = null;
+    var inp_pos: ?*llama.impl.llama_c.ggml_tensor = null;
     if (hp.hasRope(0)) {
         inp_pos = b.buildInpPos();
     }
 
-    var cur: *llama.impl.c.ggml_tensor = undefined;
+    var cur: *llama.impl.llama_c.ggml_tensor = undefined;
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
@@ -201,8 +201,8 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         }
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
         // FFN.
@@ -224,7 +224,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 
     // Granite scales the logits.
     if (hp.f_logit_scale != 0.0) {
-        cur = llama.impl.c.ggml_scale(ctx, cur, 1.0 / hp.f_logit_scale);
+        cur = llama.impl.llama_c.ggml_scale(ctx, cur, 1.0 / hp.f_logit_scale);
     }
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;
@@ -232,7 +232,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 
 /// Ports `llama_model_granite_hybrid::graph`'s `build_attention_layer`
 /// (models/granite-hybrid.cpp:202 @b1b770d90).
-fn buildAttentionLayer(model: *const llama.model.Model, b: *const llama.graph.Builder, cur_: *llama.impl.c.ggml_tensor, inp_pos: ?*llama.impl.c.ggml_tensor, inp_attn: *llama.graph.InpAttnKv, n_embd_head: i64, il: c_int) *llama.impl.c.ggml_tensor {
+fn buildAttentionLayer(model: *const llama.model.Model, b: *const llama.graph.Builder, cur_: *llama.impl.llama_c.ggml_tensor, inp_pos: ?*llama.impl.llama_c.ggml_tensor, inp_attn: *llama.graph.InpAttnKv, n_embd_head: i64, il: c_int) *llama.impl.llama_c.ggml_tensor {
     const hp = b.hparams;
     const layer = &model.layers[@intCast(il)];
 
@@ -257,7 +257,7 @@ fn buildAttentionLayer(model: *const llama.model.Model, b: *const llama.graph.Bu
 
 /// Ports `llama_model_granite_hybrid::graph`'s `build_layer_ffn`
 /// (models/granite-hybrid.cpp:225 @b1b770d90).
-fn buildLayerFfn(model: *const llama.model.Model, b: *const llama.graph.Builder, cur_: *llama.impl.c.ggml_tensor, inpSA: *llama.impl.c.ggml_tensor, il: c_int) *llama.impl.c.ggml_tensor {
+fn buildLayerFfn(model: *const llama.model.Model, b: *const llama.graph.Builder, cur_: *llama.impl.llama_c.ggml_tensor, inpSA: *llama.impl.llama_c.ggml_tensor, il: c_int) *llama.impl.llama_c.ggml_tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const layer = &model.layers[@intCast(il)];
@@ -265,9 +265,9 @@ fn buildLayerFfn(model: *const llama.model.Model, b: *const llama.graph.Builder,
 
     // Granite scales the residual.
     if (hp.f_residual_scale != 0.0) {
-        cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_residual_scale);
+        cur = llama.impl.llama_c.ggml_scale(ctx, cur, hp.f_residual_scale);
     }
-    const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+    const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
     b.cb(ffn_inp, "ffn_inp", il);
 
     // The feed-forward network, not MoE.
@@ -304,7 +304,7 @@ fn buildLayerFfn(model: *const llama.model.Model, b: *const llama.graph.Builder,
             const ffn_shexp = b.buildFfn(cur, layer.ffn_up_shexp, null, layer.ffn_up_shexp_s, layer.ffn_gate_shexp, null, layer.ffn_gate_shexp_s, layer.ffn_down_shexp, null, layer.ffn_down_shexp_s, null, .silu, .par, il);
             b.cb(ffn_shexp, "ffn_shexp", il);
 
-            cur = llama.impl.c.ggml_add(ctx, moe_out, ffn_shexp);
+            cur = llama.impl.llama_c.ggml_add(ctx, moe_out, ffn_shexp);
             b.cb(cur, "ffn_out", il);
         } else {
             cur = moe_out;
@@ -313,9 +313,9 @@ fn buildLayerFfn(model: *const llama.model.Model, b: *const llama.graph.Builder,
 
     // Granite scales the residual.
     if (hp.f_residual_scale != 0.0) {
-        cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_residual_scale);
+        cur = llama.impl.llama_c.ggml_scale(ctx, cur, hp.f_residual_scale);
     }
-    cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+    cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
     b.cb(cur, "ffn_out", il);
 
     cur = b.buildCvec(cur, il);

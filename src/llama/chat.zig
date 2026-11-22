@@ -428,7 +428,7 @@ fn eql(a: []const u8, b: []const u8) bool {
 ///
 /// Return: the prompt's length in bytes, narrowed to `int32_t` as the C++'s
 /// `return dest.size()` does; or -1 for `.unknown`.
-pub fn applyTemplate(tmpl: Template, chat: []const mod.impl.c.llama_chat_message, out: *std.ArrayList(u8), add_ass: bool) i32 {
+pub fn applyTemplate(tmpl: Template, chat: []const mod.impl.llama_c.llama_chat_message, out: *std.ArrayList(u8), add_ass: bool) i32 {
     if (tmpl == .unknown) return -1;
     out.clearRetainingCapacity();
     format(tmpl, chat, .{ .list = out }, add_ass) catch mod.impl.abort("llama-chat.cpp", 249, "std::bad_alloc");
@@ -436,7 +436,7 @@ pub fn applyTemplate(tmpl: Template, chat: []const mod.impl.c.llama_chat_message
 }
 
 /// The body of `llm_chat_apply_template`, one branch per template family.
-fn format(tmpl: Template, chat: []const mod.impl.c.llama_chat_message, ss: Stream, add_ass: bool) error{OutOfMemory}!void {
+fn format(tmpl: Template, chat: []const mod.impl.llama_c.llama_chat_message, ss: Stream, add_ass: bool) error{OutOfMemory}!void {
     switch (tmpl) {
         .unknown => unreachable,
         .chatml => {
@@ -1034,7 +1034,7 @@ test "chatml applies, and unknown leaves the output alone" {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(std.heap.c_allocator);
     try out.appendSlice(std.heap.c_allocator, "kept");
-    const chat = [_]mod.impl.c.llama_chat_message{
+    const chat = [_]mod.impl.llama_c.llama_chat_message{
         .{ .role = "system", .content = "be brief" },
         .{ .role = "user", .content = "hi" },
     };
@@ -1048,7 +1048,7 @@ test "chatml applies, and unknown leaves the output alone" {
 test "trim and the openchat role go through the C library" {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(std.heap.c_allocator);
-    const chat = [_]mod.impl.c.llama_chat_message{.{ .role = "user", .content = " \t hi \n" }};
+    const chat = [_]mod.impl.llama_c.llama_chat_message{.{ .role = "user", .content = " \t hi \n" }};
     _ = applyTemplate(.openchat, &chat, &out, false);
     try std.testing.expectEqualStrings("GPT4 Correct User:  \t hi \n<|end_of_turn|>", out.items);
     _ = applyTemplate(.llama_3, &chat, &out, false);

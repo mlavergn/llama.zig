@@ -13,7 +13,7 @@
 const std = @import("std");
 
 /// `llama.h`, translated from `cli/c_import.h` by `build.zig`.
-const c = @import("llama_h");
+const llama_h = @import("llama_h");
 
 /// How many tokens to generate when the caller does not say.
 const default_predict: usize = 24;
@@ -49,22 +49,22 @@ pub fn main(init: std.process.Init) !void {
     var stdout = std.Io.File.stdout().writerStreaming(init.io, &buffer);
     const out = &stdout.interface;
 
-    c.llama_backend_init();
-    defer c.llama_backend_free();
+    llama_h.llama_backend_init();
+    defer llama_h.llama_backend_free();
 
-    var model_params = c.llama_model_default_params();
+    var model_params = llama_h.llama_model_default_params();
     // The whole point of this check is that the Metal path works, so the model
     // goes entirely to the GPU rather than falling back to CPU on a bad build.
     model_params.n_gpu_layers = 99;
 
-    const model = c.llama_model_load_from_file(model_path.ptr, model_params) orelse
+    const model = llama_h.llama_model_load_from_file(model_path.ptr, model_params) orelse
         return error.ModelLoadFailed;
-    defer c.llama_model_free(model);
+    defer llama_h.llama_model_free(model);
 
-    const vocab = c.llama_model_get_vocab(model) orelse return error.NoVocab;
+    const vocab = llama_h.llama_model_get_vocab(model) orelse return error.NoVocab;
 
-    var tokens: [max_prompt_tokens]c.llama_token = undefined;
-    const n_prompt = c.llama_tokenize(
+    var tokens: [max_prompt_tokens]llama_h.llama_token = undefined;
+    const n_prompt = llama_h.llama_tokenize(
         vocab,
         prompt.ptr,
         @intCast(prompt.len),
@@ -75,19 +75,19 @@ pub fn main(init: std.process.Init) !void {
     );
     if (n_prompt < 0) return error.TokenizeFailed;
 
-    var ctx_params = c.llama_context_default_params();
+    var ctx_params = llama_h.llama_context_default_params();
     ctx_params.n_ctx = max_prompt_tokens;
     ctx_params.n_batch = max_prompt_tokens;
 
-    const ctx = c.llama_init_from_model(model, ctx_params) orelse return error.ContextFailed;
-    defer c.llama_free(ctx);
+    const ctx = llama_h.llama_init_from_model(model, ctx_params) orelse return error.ContextFailed;
+    defer llama_h.llama_free(ctx);
 
-    const sampler = c.llama_sampler_chain_init(c.llama_sampler_chain_default_params()) orelse
+    const sampler = llama_h.llama_sampler_chain_init(llama_h.llama_sampler_chain_default_params()) orelse
         return error.SamplerFailed;
-    defer c.llama_sampler_free(sampler);
+    defer llama_h.llama_sampler_free(sampler);
     // Greedy, so the output is a function of the model and prompt alone. A
     // sampler with any randomness would make this check unable to fail loudly.
-    c.llama_sampler_chain_add(sampler, c.llama_sampler_init_greedy());
+    llama_h.llama_sampler_chain_add(sampler, llama_h.llama_sampler_init_greedy());
 
     try out.print("{s}", .{prompt});
     try out.flush();
@@ -96,24 +96,24 @@ pub fn main(init: std.process.Init) !void {
     // and the batch built at the end of one iteration is not read until the
     // decode at the top of the next. So the sampled token lives out here,
     // outside the loop, where its lifetime covers both.
-    var id: c.llama_token = undefined;
+    var id: llama_h.llama_token = undefined;
 
-    var batch = c.llama_batch_get_one(&tokens, n_prompt);
+    var batch = llama_h.llama_batch_get_one(&tokens, n_prompt);
     var generated: usize = 0;
     while (generated < n_predict) : (generated += 1) {
-        if (c.llama_decode(ctx, batch) != 0) return error.DecodeFailed;
+        if (llama_h.llama_decode(ctx, batch) != 0) return error.DecodeFailed;
 
-        id = c.llama_sampler_sample(sampler, ctx, -1);
-        if (c.llama_vocab_is_eog(vocab, id)) break;
+        id = llama_h.llama_sampler_sample(sampler, ctx, -1);
+        if (llama_h.llama_vocab_is_eog(vocab, id)) break;
 
         var piece: [256]u8 = undefined;
-        const n = c.llama_token_to_piece(vocab, id, &piece, piece.len, 0, true);
+        const n = llama_h.llama_token_to_piece(vocab, id, &piece, piece.len, 0, true);
         if (n > 0) {
             try out.print("{s}", .{piece[0..@intCast(n)]});
             try out.flush();
         }
 
-        batch = c.llama_batch_get_one(&id, 1);
+        batch = llama_h.llama_batch_get_one(&id, 1);
     }
 
     try out.print("\n", .{});

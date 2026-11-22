@@ -13,10 +13,8 @@ const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
 
-const Allocator = std.mem.Allocator;
-
 const Build = struct {
-    a: Allocator,
+    a: std.mem.Allocator,
     inputs: *const common_chat.template.GenerationParams,
     has_tools: bool,
     has_response_format: bool,
@@ -79,7 +77,7 @@ const Build = struct {
 };
 
 /// The `{"type": ..., <key>: <text>}` block pushed onto the rebuilt content.
-fn block(a: Allocator, ty: []const u8, key: []const u8, text: []const u8) common_chat.exception.Error!json.Value {
+fn block(a: std.mem.Allocator, ty: []const u8, key: []const u8, text: []const u8) common_chat.exception.Error!json.Value {
     var v = json.Value.emptyObject();
     try v.set(a, "type", try json.Value.from(a, ty));
     try v.set(a, key, try json.Value.from(a, text));
@@ -88,7 +86,7 @@ fn block(a: Allocator, ty: []const u8, key: []const u8, text: []const u8) common
 
 /// The messages rebuilt as the template expects: a system or assistant
 /// message's reasoning and content as typed blocks.
-fn adjustMessages(a: Allocator, messages: *const json.Value) common_chat.exception.Error!json.Value {
+fn adjustMessages(a: std.mem.Allocator, messages: *const json.Value) common_chat.exception.Error!json.Value {
     var adjusted_messages = json.Value.emptyArray();
     var it = @constCast(messages).items();
     while (it.next()) |item| {
@@ -137,7 +135,7 @@ fn adjustMessages(a: Allocator, messages: *const json.Value) common_chat.excepti
 /// Ports `common_chat_params_init_ministral_3` (parsers/ministral3.cpp:3 @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
-pub fn init(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
+pub fn init(a: std.mem.Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
     var data: common_chat.params.ChatParams = .{};
 
     // Build up messages to follow the format: https://huggingface.co/mistralai/Ministral-3-14B-Reasoning-2512/blob/main/chat_template.jinja

@@ -23,6 +23,7 @@
 //!   headers (`uniformRealF32`, `NormalF32`).
 
 const std = @import("std");
+const llama = @import("llama");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 
@@ -125,7 +126,7 @@ pub fn setInputsChecked(st: *mod.clip.EncodeState) mod.clip.Error!bool {
                 slot_pos[@intCast(idx[i])] = pos[i];
             }
             st.setInputI32("inp_pos", pos);
-            mod.impl.c.ggml_backend_tensor_set(st.getInpTensor("inp_kv_idx"), idx.ptr, 0, idx.len * @sizeOf(i64));
+            llama.impl.llama_c.ggml_backend_tensor_set(st.getInpTensor("inp_kv_idx"), idx.ptr, 0, idx.len * @sizeOf(i64));
 
             // each frame sees itself and the n_window - 1 frames before it
             const n_ctx = usz(es.n_ctx);
@@ -821,7 +822,7 @@ pub fn setInputsChecked(st: *mod.clip.EncodeState) mod.clip.Error!bool {
             } else {
                 // flow matching starts from gaussian noise, std = libm.sqrt(temp), no noise at temp 0
                 const t = st.getInpTensor("inp_noise");
-                const noise = try allocF32(usz(mod.impl.c.ggml_nelements(t)), 0);
+                const noise = try allocF32(usz(llama.impl.llama_c.ggml_nelements(t)), 0);
                 defer std.heap.c_allocator.free(noise);
                 if (params.temp > 0.0) {
                     var dist: NormalF32 = .{ .mean = 0.0, .stddev = @sqrt(@as(f32, params.temp)) };
@@ -908,8 +909,8 @@ pub fn setInputsChecked(st: *mod.clip.EncodeState) mod.clip.Error!bool {
                 try st.setGenStateIn();
                 // the "pos" slot leads the state
                 var base: f32 = 0.0;
-                mod.impl.c.ggml_backend_tensor_get(params.gen_state.?.slots.items[0], &base, 0, @sizeOf(f32));
-                try st.setLfm3aWindowInputs(@intFromFloat(base), @intCast(mod.impl.c.ggml_nelements(st.getInpTensor("positions"))), hparams.wav_tfm_swa);
+                llama.impl.llama_c.ggml_backend_tensor_get(params.gen_state.?.slots.items[0], &base, 0, @sizeOf(f32));
+                try st.setLfm3aWindowInputs(@intFromFloat(base), @intCast(llama.impl.llama_c.ggml_nelements(st.getInpTensor("positions"))), hparams.wav_tfm_swa);
             } else {
                 // rows of the merged per-codebook tables; a masked codebook (-1) takes row 0, the mask drops it
                 const n_cbu: usize = @intCast(n_cb);
@@ -934,7 +935,7 @@ pub fn setInputsChecked(st: *mod.clip.EncodeState) mod.clip.Error!bool {
                     codes[i] +%= @truncate(@as(i64, @intCast(i)) * n_vocab);
                 }
                 st.setInputI32("inp_codes", codes);
-                if (mod.impl.c.ggml_graph_get_tensor(gf, "inp_mask") != null) st.setInputF32("inp_mask", mask);
+                if (llama.impl.llama_c.ggml_graph_get_tensor(gf, "inp_mask") != null) st.setInputF32("inp_mask", mask);
             }
         },
         .drama3_gen => {
@@ -983,7 +984,7 @@ pub fn setInputsChecked(st: *mod.clip.EncodeState) mod.clip.Error!bool {
                 st.setInputF32("inp_scale", &scale);
 
                 var pos: f32 = 0.0;
-                mod.impl.c.ggml_backend_tensor_get(params.gen_state.?.slots.items[0], &pos, 0, @sizeOf(f32));
+                llama.impl.llama_c.ggml_backend_tensor_get(params.gen_state.?.slots.items[0], &pos, 0, @sizeOf(f32));
                 const inp_pos = [1]i32{@intFromFloat(pos)};
                 st.setInputI32("inp_pos", &inp_pos);
 
@@ -1066,7 +1067,7 @@ pub fn setInputsChecked(st: *mod.clip.EncodeState) mod.clip.Error!bool {
             // Pull weight to host.
             const src = try allocF32(usz(n_embd * n_pos_e), 0);
             defer std.heap.c_allocator.free(src);
-            mod.impl.c.ggml_backend_tensor_get(src_t, src.ptr, 0, mod.impl.c.ggml_nbytes(src_t));
+            llama.impl.llama_c.ggml_backend_tensor_get(src_t, src.ptr, 0, llama.impl.llama_c.ggml_nbytes(src_t));
 
             // dst[(y*out_w + x) * n_embd + c]
             const dst = try allocF32(ne0 * usz(out_h) * usz(out_w), 0);
@@ -1292,19 +1293,19 @@ pub fn setInputsChecked(st: *mod.clip.EncodeState) mod.clip.Error!bool {
         // PROJECTOR_TYPE_NEMOTRON_TRANSCRIBE
         .nemotron_transcribe => {
             mod.impl.ggmlAssert(imgs.entries.items.len == 1, "mtmd-subcontext.cpp", 2059, "imgs.entries.size() == 1");
-            const positions = try allocI32(usz(mod.impl.c.ggml_nelements(st.getInpTensor("positions"))), 0);
+            const positions = try allocI32(usz(llama.impl.llama_c.ggml_nelements(st.getInpTensor("positions"))), 0);
             defer std.heap.c_allocator.free(positions);
             for (positions, 0..) |*p, i| p.* = @intCast(i);
             st.setInputI32("positions", positions);
             mod.impl.ggmlAssert(params.enc_state != null, "mtmd-subcontext.cpp", 2065, "params->enc_state != nullptr");
             st.setInputF32("inp_norm", params.enc_state.?.mel_norm.items);
-            if (mod.impl.c.ggml_graph_get_tensor(gf, "spk_prev") != null) {
+            if (llama.impl.llama_c.ggml_graph_get_tensor(gf, "spk_prev") != null) {
                 st.setInputF32("spk_prev", params.enc_state.?.spk_prev.items);
             }
         },
         .parakeet => {
             mod.impl.ggmlAssert(imgs.entries.items.len == 1, "mtmd-subcontext.cpp", 2073, "imgs.entries.size() == 1");
-            const attn_mask = mod.impl.c.ggml_graph_get_tensor(gf, "attn_mask");
+            const attn_mask = llama.impl.llama_c.ggml_graph_get_tensor(gf, "attn_mask");
             const n_q: c_int = @intCast(attn_mask.*.ne[1]);
             const n_k: c_int = @intCast(attn_mask.*.ne[0]);
             const n_frames = imgs.entries.items[0].nx();
@@ -1336,7 +1337,7 @@ pub fn setInputsChecked(st: *mod.clip.EncodeState) mod.clip.Error!bool {
 
             // local attention skew mask: zeroes out the probs that were
             // computed for keys outside the valid sliding window.
-            const local_mask = mod.impl.c.ggml_graph_get_tensor(gf, "local_mask");
+            const local_mask = llama.impl.llama_c.ggml_graph_get_tensor(gf, "local_mask");
             if (local_mask != null) {
                 const lm_k: c_int = @intCast(local_mask.*.ne[0]);
                 const lm_q: c_int = @intCast(local_mask.*.ne[1]);
@@ -1370,11 +1371,11 @@ pub fn setInputsChecked(st: *mod.clip.EncodeState) mod.clip.Error!bool {
             // relative positional distances, scaled by the frequency into angles
             {
                 // window_size is only known after graph construction: read it back
-                const rel_pos = mod.impl.c.ggml_graph_get_tensor(gf, "rel_positions");
+                const rel_pos = llama.impl.llama_c.ggml_graph_get_tensor(gf, "rel_positions");
                 const window_size: c_int = @intCast(rel_pos.*.ne[1]);
                 const pos = try allocF32(usz(window_size), 0);
                 defer std.heap.c_allocator.free(pos);
-                if (mod.impl.c.ggml_graph_get_tensor(gf, "local_mask") != null) {
+                if (llama.impl.llama_c.ggml_graph_get_tensor(gf, "local_mask") != null) {
                     const att_left = @divTrunc(window_size, 2);
                     for (pos, 0..) |*p, t| p.* = @floatFromInt(att_left - @as(c_int, @intCast(t)));
                 } else {
@@ -1566,15 +1567,15 @@ fn g4vName(buf: *[96]u8, bid: usize, comptime suffix: [*:0]const u8) [*:0]const 
 
 /// The `upload` lambda (mtmd-subcontext.cpp:2244 @b1b770d90): the same permutation
 /// for every tile of the stacked image.
-fn upload(gf: ?*mod.impl.c.ggml_cgraph, name: [*:0]const u8, idx: []const i32) void {
-    const t = mod.impl.c.ggml_graph_get_tensor(gf, name);
+fn upload(gf: ?*llama.impl.llama_c.ggml_cgraph, name: [*:0]const u8, idx: []const i32) void {
+    const t = llama.impl.llama_c.ggml_graph_get_tensor(gf, name);
     mod.impl.ggmlAssert(t != null, "mtmd-subcontext.cpp", 2247, "t");
-    mod.impl.ggmlAssert(@rem(mod.impl.c.ggml_nelements(t), @as(i64, @intCast(idx.len))) == 0, "mtmd-subcontext.cpp", 2247, "ggml_nelements(t) % (int64_t) idx.size() == 0");
-    const n_rep: usize = @intCast(@as(c_int, @truncate(@as(i64, @intCast(@as(usize, @intCast(mod.impl.c.ggml_nelements(t))) / idx.len)))));
+    mod.impl.ggmlAssert(@rem(llama.impl.llama_c.ggml_nelements(t), @as(i64, @intCast(idx.len))) == 0, "mtmd-subcontext.cpp", 2247, "ggml_nelements(t) % (int64_t) idx.size() == 0");
+    const n_rep: usize = @intCast(@as(c_int, @truncate(@as(i64, @intCast(@as(usize, @intCast(llama.impl.llama_c.ggml_nelements(t))) / idx.len)))));
     const buf = std.heap.c_allocator.alloc(i32, idx.len * n_rep) catch mod.impl.abort("mtmd-subcontext.cpp", 2255, "std::bad_alloc");
     defer std.heap.c_allocator.free(buf);
     for (0..n_rep) |i| @memcpy(buf[i * idx.len ..][0..idx.len], idx);
-    mod.impl.c.ggml_backend_tensor_set(t, buf.ptr, 0, mod.impl.c.ggml_nbytes(t));
+    llama.impl.llama_c.ggml_backend_tensor_set(t, buf.ptr, 0, llama.impl.llama_c.ggml_nbytes(t));
 }
 
 /// Ports `n_output_tokens` (mtmd-model.cpp:3850 @b1b770d90), a member of `mtmd_model`: the number of

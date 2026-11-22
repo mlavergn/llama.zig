@@ -15,8 +15,8 @@
 //!
 //! `scripts/opt-diff` compiles the reference `ggml-opt.cpp` with each of its
 //! 37 unmangled exports renamed to `ref_*` on the command line, the method
-//! `scripts/repack-diff` uses. The port is this file's `opt` module, and the
-//! root declares `ggml_opt_exports = false` so it defines **no** symbols:
+//! `scripts/repack-diff` uses. The port is this file's `opt` module, which
+//! defines **no** symbols on its own (they export from `src/ggml/lib.zig`):
 //! the port is reached only through Zig, the reference only through `ref_*`,
 //! and the `ggml-opt.o` inside `libggml.a` — which still defines the real
 //! names — is never pulled in, because nothing references them. One
@@ -46,13 +46,8 @@
 
 const std = @import("std");
 const stdlib = @import("stdlib");
-const libc = @import("stdlib").libc;
-const libcxx = @import("stdlib").libcxx;
 const opt = @import("opt");
-const c = @import("ggml_c");
-
-/// Keeps `src/ggml/opt.zig` from defining its C symbols in this binary.
-pub const ggml_opt_exports = false;
+const ggml_c = @import("ggml_c");
 
 extern fn opt_ref_uniform(seed: u32, a: i64, b: i64, out: [*]i64, count: usize) u32;
 extern fn opt_ref_shuffle(seed: u32, v: [*]i64, n: usize, reps: usize) u32;
@@ -68,43 +63,43 @@ extern "c" fn unlink(path: [*:0]const u8) c_int;
 /// One side's 37 entry points. Field `x` is `ggml_opt_x`; its type is the
 /// header's.
 const Api = struct {
-    dataset_init: *const @TypeOf(c.ggml_opt_dataset_init),
-    dataset_free: *const @TypeOf(c.ggml_opt_dataset_free),
-    dataset_ndata: *const @TypeOf(c.ggml_opt_dataset_ndata),
-    dataset_data: *const @TypeOf(c.ggml_opt_dataset_data),
-    dataset_labels: *const @TypeOf(c.ggml_opt_dataset_labels),
-    dataset_shuffle: *const @TypeOf(c.ggml_opt_dataset_shuffle),
-    dataset_get_batch: *const @TypeOf(c.ggml_opt_dataset_get_batch),
-    dataset_get_batch_host: *const @TypeOf(c.ggml_opt_dataset_get_batch_host),
-    get_default_optimizer_params: *const @TypeOf(c.ggml_opt_get_default_optimizer_params),
-    get_constant_optimizer_params: *const @TypeOf(c.ggml_opt_get_constant_optimizer_params),
-    default_params: *const @TypeOf(c.ggml_opt_default_params),
-    init: *const @TypeOf(c.ggml_opt_init),
-    free: *const @TypeOf(c.ggml_opt_free),
-    reset: *const @TypeOf(c.ggml_opt_reset),
-    static_graphs: *const @TypeOf(c.ggml_opt_static_graphs),
-    inputs: *const @TypeOf(c.ggml_opt_inputs),
-    outputs: *const @TypeOf(c.ggml_opt_outputs),
-    labels: *const @TypeOf(c.ggml_opt_labels),
-    loss: *const @TypeOf(c.ggml_opt_loss),
-    pred: *const @TypeOf(c.ggml_opt_pred),
-    ncorrect: *const @TypeOf(c.ggml_opt_ncorrect),
-    grad_acc: *const @TypeOf(c.ggml_opt_grad_acc),
-    result_init: *const @TypeOf(c.ggml_opt_result_init),
-    result_free: *const @TypeOf(c.ggml_opt_result_free),
-    result_reset: *const @TypeOf(c.ggml_opt_result_reset),
-    result_ndata: *const @TypeOf(c.ggml_opt_result_ndata),
-    result_loss: *const @TypeOf(c.ggml_opt_result_loss),
-    result_pred: *const @TypeOf(c.ggml_opt_result_pred),
-    result_accuracy: *const @TypeOf(c.ggml_opt_result_accuracy),
-    prepare_alloc: *const @TypeOf(c.ggml_opt_prepare_alloc),
-    alloc: *const @TypeOf(c.ggml_opt_alloc),
-    eval: *const @TypeOf(c.ggml_opt_eval),
-    epoch: *const @TypeOf(c.ggml_opt_epoch),
-    epoch_callback_progress_bar: *const @TypeOf(c.ggml_opt_epoch_callback_progress_bar),
-    fit: *const @TypeOf(c.ggml_opt_fit),
-    context_optimizer_type: *const @TypeOf(c.ggml_opt_context_optimizer_type),
-    optimizer_name: *const @TypeOf(c.ggml_opt_optimizer_name),
+    dataset_init: *const @TypeOf(ggml_c.ggml_opt_dataset_init),
+    dataset_free: *const @TypeOf(ggml_c.ggml_opt_dataset_free),
+    dataset_ndata: *const @TypeOf(ggml_c.ggml_opt_dataset_ndata),
+    dataset_data: *const @TypeOf(ggml_c.ggml_opt_dataset_data),
+    dataset_labels: *const @TypeOf(ggml_c.ggml_opt_dataset_labels),
+    dataset_shuffle: *const @TypeOf(ggml_c.ggml_opt_dataset_shuffle),
+    dataset_get_batch: *const @TypeOf(ggml_c.ggml_opt_dataset_get_batch),
+    dataset_get_batch_host: *const @TypeOf(ggml_c.ggml_opt_dataset_get_batch_host),
+    get_default_optimizer_params: *const @TypeOf(ggml_c.ggml_opt_get_default_optimizer_params),
+    get_constant_optimizer_params: *const @TypeOf(ggml_c.ggml_opt_get_constant_optimizer_params),
+    default_params: *const @TypeOf(ggml_c.ggml_opt_default_params),
+    init: *const @TypeOf(ggml_c.ggml_opt_init),
+    free: *const @TypeOf(ggml_c.ggml_opt_free),
+    reset: *const @TypeOf(ggml_c.ggml_opt_reset),
+    static_graphs: *const @TypeOf(ggml_c.ggml_opt_static_graphs),
+    inputs: *const @TypeOf(ggml_c.ggml_opt_inputs),
+    outputs: *const @TypeOf(ggml_c.ggml_opt_outputs),
+    labels: *const @TypeOf(ggml_c.ggml_opt_labels),
+    loss: *const @TypeOf(ggml_c.ggml_opt_loss),
+    pred: *const @TypeOf(ggml_c.ggml_opt_pred),
+    ncorrect: *const @TypeOf(ggml_c.ggml_opt_ncorrect),
+    grad_acc: *const @TypeOf(ggml_c.ggml_opt_grad_acc),
+    result_init: *const @TypeOf(ggml_c.ggml_opt_result_init),
+    result_free: *const @TypeOf(ggml_c.ggml_opt_result_free),
+    result_reset: *const @TypeOf(ggml_c.ggml_opt_result_reset),
+    result_ndata: *const @TypeOf(ggml_c.ggml_opt_result_ndata),
+    result_loss: *const @TypeOf(ggml_c.ggml_opt_result_loss),
+    result_pred: *const @TypeOf(ggml_c.ggml_opt_result_pred),
+    result_accuracy: *const @TypeOf(ggml_c.ggml_opt_result_accuracy),
+    prepare_alloc: *const @TypeOf(ggml_c.ggml_opt_prepare_alloc),
+    alloc: *const @TypeOf(ggml_c.ggml_opt_alloc),
+    eval: *const @TypeOf(ggml_c.ggml_opt_eval),
+    epoch: *const @TypeOf(ggml_c.ggml_opt_epoch),
+    epoch_callback_progress_bar: *const @TypeOf(ggml_c.ggml_opt_epoch_callback_progress_bar),
+    fit: *const @TypeOf(ggml_c.ggml_opt_fit),
+    context_optimizer_type: *const @TypeOf(ggml_c.ggml_opt_context_optimizer_type),
+    optimizer_name: *const @TypeOf(ggml_c.ggml_opt_optimizer_name),
 };
 
 comptime {
@@ -146,25 +141,25 @@ const Run = struct {
     api: *const Api,
     tr: *Trace,
     /// The backend under test, which the scheduler prefers.
-    backend: c.ggml_backend_t,
+    backend: ggml_c.ggml_backend_t,
     /// The CPU backend, the scheduler's last.
-    cpu: c.ggml_backend_t,
+    cpu: ggml_c.ggml_backend_t,
     /// Trace every node the scheduler computes.
     nodes: bool,
     /// The scheduler, made fresh for each scenario.
-    sched: c.ggml_backend_sched_t = null,
+    sched: ggml_c.ggml_backend_sched_t = null,
 
-    fn newSched(self: *Run) c.ggml_backend_sched_t {
-        var backends: [2]c.ggml_backend_t = .{ self.backend, self.cpu };
+    fn newSched(self: *Run) ggml_c.ggml_backend_sched_t {
+        var backends: [2]ggml_c.ggml_backend_t = .{ self.backend, self.cpu };
         const n: c_int = if (self.backend == self.cpu) 1 else 2;
-        const s = c.ggml_backend_sched_new(&backends, null, n, c.GGML_DEFAULT_GRAPH_SIZE, false, true);
-        if (self.nodes) c.ggml_backend_sched_set_eval_callback(s, &nodeCallback, self.tr);
+        const s = ggml_c.ggml_backend_sched_new(&backends, null, n, ggml_c.GGML_DEFAULT_GRAPH_SIZE, false, true);
+        if (self.nodes) ggml_c.ggml_backend_sched_set_eval_callback(s, &nodeCallback, self.tr);
         self.sched = s;
         return s;
     }
 
     fn freeSched(self: *Run) void {
-        c.ggml_backend_sched_free(self.sched);
+        ggml_c.ggml_backend_sched_free(self.sched);
         self.sched = null;
     }
 };
@@ -177,18 +172,18 @@ fn hashBytes(bytes: []const u8) u64 {
     return std.hash.Wyhash.hash(0, bytes);
 }
 
-fn nodeCallback(t: [*c]c.ggml_tensor, ask: bool, ud: ?*anyopaque) callconv(.c) bool {
+fn nodeCallback(t: [*c]ggml_c.ggml_tensor, ask: bool, ud: ?*anyopaque) callconv(.c) bool {
     if (ask) return true;
     const tr: *Trace = @ptrCast(@alignCast(ud));
-    const tt: *c.ggml_tensor = @ptrCast(t);
-    const n = c.ggml_nbytes(t);
+    const tt: *ggml_c.ggml_tensor = @ptrCast(t);
+    const n = ggml_c.ggml_nbytes(t);
     const buf = std.heap.c_allocator.alloc(u8, n) catch @panic("oom");
     defer std.heap.c_allocator.free(buf);
-    c.ggml_backend_tensor_get(t, buf.ptr, 0, n);
+    ggml_c.ggml_backend_tensor_get(t, buf.ptr, 0, n);
     tr.add("node {s} op={s} type={d} ne={d},{d},{d},{d} flags={x} h={x}", .{
-        std.mem.sliceTo(&tt.name, 0), std.mem.span(c.ggml_op_desc(t)), tt.type,
-        tt.ne[0],                     tt.ne[1],                        tt.ne[2],
-        tt.ne[3],                     tt.flags,                        hashBytes(buf),
+        std.mem.sliceTo(&tt.name, 0), std.mem.span(ggml_c.ggml_op_desc(t)), tt.type,
+        tt.ne[0],                     tt.ne[1],                             tt.ne[2],
+        tt.ne[3],                     tt.flags,                             hashBytes(buf),
     });
     // The sources by name and kind: the optimizer's momenta and parameter
     // tensor are leaves, never computed, so this is the only place their
@@ -196,9 +191,9 @@ fn nodeCallback(t: [*c]c.ggml_tensor, ask: bool, ud: ?*anyopaque) callconv(.c) b
     // without it.
     for (tt.src, 0..) |s, i| {
         if (s == null) continue;
-        const st: *c.ggml_tensor = @ptrCast(s);
+        const st: *ggml_c.ggml_tensor = @ptrCast(s);
         tr.add("  src{d} {s} op={s} type={d} ne={d},{d},{d},{d} flags={x}", .{
-            i, std.mem.sliceTo(&st.name, 0), std.mem.span(c.ggml_op_desc(s)), st.type, st.ne[0], st.ne[1], st.ne[2], st.ne[3], st.flags,
+            i, std.mem.sliceTo(&st.name, 0), std.mem.span(ggml_c.ggml_op_desc(s)), st.type, st.ne[0], st.ne[1], st.ne[2], st.ne[3], st.flags,
         });
     }
     return true;
@@ -214,13 +209,13 @@ fn bits64(x: f64) u64 {
 
 /// Records a tensor's identity and contents: every value when it is small,
 /// a hash otherwise.
-fn recTensor(r: *Run, tag: []const u8, t: [*c]c.ggml_tensor) void {
+fn recTensor(r: *Run, tag: []const u8, t: [*c]ggml_c.ggml_tensor) void {
     if (t == null) {
         r.tr.add("{s}: null", .{tag});
         return;
     }
-    const tt: *c.ggml_tensor = @ptrCast(t);
-    const n = c.ggml_nbytes(t);
+    const tt: *ggml_c.ggml_tensor = @ptrCast(t);
+    const n = ggml_c.ggml_nbytes(t);
     var line: std.ArrayList(u8) = .empty;
     defer line.deinit(std.heap.c_allocator);
     line.print(std.heap.c_allocator, "{s}: '{s}' type={d} ne={d},{d},{d},{d} flags={x}", .{
@@ -229,7 +224,7 @@ fn recTensor(r: *Run, tag: []const u8, t: [*c]c.ggml_tensor) void {
     if (tt.buffer != null or tt.data != null) {
         const buf = std.heap.c_allocator.alloc(u8, n) catch @panic("oom");
         defer std.heap.c_allocator.free(buf);
-        c.ggml_backend_tensor_get(t, buf.ptr, 0, n);
+        ggml_c.ggml_backend_tensor_get(t, buf.ptr, 0, n);
         if (n <= 64) {
             line.appendSlice(std.heap.c_allocator, " =") catch @panic("oom");
             for (buf) |b| line.print(std.heap.c_allocator, "{x:0>2}", .{b}) catch @panic("oom");
@@ -244,7 +239,7 @@ fn recTensor(r: *Run, tag: []const u8, t: [*c]c.ggml_tensor) void {
 
 /// Records every answer a result gives, on bits, with and without the
 /// optional uncertainty pointers.
-fn recResult(r: *Run, tag: []const u8, res: c.ggml_opt_result_t) void {
+fn recResult(r: *Run, tag: []const u8, res: ggml_c.ggml_opt_result_t) void {
     const a = r.api;
     var nd: i64 = -99;
     a.result_ndata(res, &nd);
@@ -274,7 +269,7 @@ fn recResult(r: *Run, tag: []const u8, res: c.ggml_opt_result_t) void {
 
 /// Records what a context exposes: its tensors' names and shapes, whether
 /// its graphs are static, and its optimizer.
-fn recContext(r: *Run, tag: []const u8, ctx: c.ggml_opt_context_t) void {
+fn recContext(r: *Run, tag: []const u8, ctx: ggml_c.ggml_opt_context_t) void {
     const a = r.api;
     r.tr.add("{s}: static={} optimizer={d}", .{ tag, a.static_graphs(ctx), a.context_optimizer_type(ctx) });
     const getters = .{ .{ "inputs", a.inputs }, .{ "outputs", a.outputs }, .{ "labels", a.labels }, .{ "loss", a.loss }, .{ "pred", a.pred }, .{ "ncorrect", a.ncorrect } };
@@ -283,10 +278,10 @@ fn recContext(r: *Run, tag: []const u8, ctx: c.ggml_opt_context_t) void {
         if (t == null) {
             r.tr.add("{s}.{s}: null", .{ tag, g[0] });
         } else {
-            const tt: *c.ggml_tensor = @ptrCast(t);
+            const tt: *ggml_c.ggml_tensor = @ptrCast(t);
             r.tr.add("{s}.{s}: '{s}' op={s} type={d} ne={d},{d},{d},{d} flags={x}", .{
-                tag,      g[0],     std.mem.sliceTo(&tt.name, 0), std.mem.span(c.ggml_op_desc(t)), tt.type,
-                tt.ne[0], tt.ne[1], tt.ne[2],                     tt.ne[3],                        tt.flags,
+                tag,      g[0],     std.mem.sliceTo(&tt.name, 0), std.mem.span(ggml_c.ggml_op_desc(t)), tt.type,
+                tt.ne[0], tt.ne[1], tt.ne[2],                     tt.ne[3],                             tt.flags,
             });
         }
     }
@@ -301,25 +296,25 @@ const ndata: i64 = 6;
 
 /// Ports test-opt.cpp's `helper_ctx_data`.
 const Helper = struct {
-    datasets_supervised: [ndata]c.ggml_opt_dataset_t,
-    data_batch: [ndata][*c]c.ggml_tensor,
-    labels_batch: [ndata][*c]c.ggml_tensor,
-    dataset_unsupervised: c.ggml_opt_dataset_t,
-    ctx_static: ?*c.ggml_context,
-    ctx_compute: ?*c.ggml_context,
-    opt_params: c.struct_ggml_opt_params,
-    opt_ctx: c.ggml_opt_context_t,
-    inputs: [*c]c.ggml_tensor,
-    weights: [*c]c.ggml_tensor,
-    outputs: [*c]c.ggml_tensor,
-    buf: c.ggml_backend_buffer_t,
-    result: c.ggml_opt_result_t,
-    result2: c.ggml_opt_result_t,
+    datasets_supervised: [ndata]ggml_c.ggml_opt_dataset_t,
+    data_batch: [ndata][*c]ggml_c.ggml_tensor,
+    labels_batch: [ndata][*c]ggml_c.ggml_tensor,
+    dataset_unsupervised: ggml_c.ggml_opt_dataset_t,
+    ctx_static: ?*ggml_c.ggml_context,
+    ctx_compute: ?*ggml_c.ggml_context,
+    opt_params: ggml_c.struct_ggml_opt_params,
+    opt_ctx: ggml_c.ggml_opt_context_t,
+    inputs: [*c]ggml_c.ggml_tensor,
+    weights: [*c]ggml_c.ggml_tensor,
+    outputs: [*c]ggml_c.ggml_tensor,
+    buf: ggml_c.ggml_backend_buffer_t,
+    result: ggml_c.ggml_opt_result_t,
+    result2: ggml_c.ggml_opt_result_t,
 };
 
 /// test-opt.cpp's `helper_get_test_opt_pars`, through the running side's
 /// own default parameters.
-fn testOptPars(userdata: ?*anyopaque) callconv(.c) c.struct_ggml_opt_optimizer_params {
+fn testOptPars(userdata: ?*anyopaque) callconv(.c) ggml_c.struct_ggml_opt_optimizer_params {
     var result = g_run.api.get_default_optimizer_params(userdata);
     result.adamw.alpha = 1.0;
     result.adamw.beta1 = 0.0;
@@ -331,31 +326,31 @@ fn testOptPars(userdata: ?*anyopaque) callconv(.c) c.struct_ggml_opt_optimizer_p
     return result;
 }
 
-fn newCtx(size: usize) ?*c.ggml_context {
-    return c.ggml_init(.{ .mem_size = size, .mem_buffer = null, .no_alloc = true });
+fn newCtx(size: usize) ?*ggml_c.ggml_context {
+    return ggml_c.ggml_init(.{ .mem_size = size, .mem_buffer = null, .no_alloc = true });
 }
 
 fn computeCtxSize() usize {
-    return @as(usize, c.GGML_DEFAULT_GRAPH_SIZE) * c.ggml_tensor_overhead() + 3 * c.ggml_graph_overhead();
+    return @as(usize, ggml_c.GGML_DEFAULT_GRAPH_SIZE) * ggml_c.ggml_tensor_overhead() + 3 * ggml_c.ggml_graph_overhead();
 }
 
 /// Ports test-opt.cpp's `helper_get_ctx_data`.
 fn helperInit(
     r: *Run,
-    optim: c.enum_ggml_opt_optimizer_type,
+    optim: ggml_c.enum_ggml_opt_optimizer_type,
     init_opt_ctx: bool,
     optimizer_defaults: bool,
     nbatch_logical: i64,
     nbatch_physical: i64,
-    loss_type: c.enum_ggml_opt_loss_type,
+    loss_type: ggml_c.enum_ggml_opt_loss_type,
 ) Helper {
     const a = r.api;
     var h: Helper = undefined;
     var ndata_shard: i64 = 1;
     while (ndata_shard <= ndata) : (ndata_shard += 1) {
-        const dataset = a.dataset_init(c.GGML_TYPE_F32, c.GGML_TYPE_F32, ne_datapoint, ne_label, ndata, ndata_shard);
-        const data: [*]f32 = @ptrCast(c.ggml_get_data_f32(a.dataset_data(dataset)));
-        const labels: [*]f32 = @ptrCast(c.ggml_get_data_f32(a.dataset_labels(dataset)));
+        const dataset = a.dataset_init(ggml_c.GGML_TYPE_F32, ggml_c.GGML_TYPE_F32, ne_datapoint, ne_label, ndata, ndata_shard);
+        const data: [*]f32 = @ptrCast(ggml_c.ggml_get_data_f32(a.dataset_data(dataset)));
+        const labels: [*]f32 = @ptrCast(ggml_c.ggml_get_data_f32(a.dataset_labels(dataset)));
         for (0..ndata) |idata| {
             for (0..ne_datapoint) |id| data[idata * ne_datapoint + id] = @floatFromInt(16 * idata + id);
             for (0..ne_label) |il| labels[idata * ne_label + il] = @floatFromInt(16 * (16 * idata + il));
@@ -363,34 +358,34 @@ fn helperInit(
         h.datasets_supervised[@intCast(ndata_shard - 1)] = dataset;
     }
 
-    h.dataset_unsupervised = a.dataset_init(c.GGML_TYPE_F32, c.GGML_TYPE_F32, 1, 0, ndata, 1);
-    const data: [*]f32 = @ptrCast(c.ggml_get_data_f32(a.dataset_data(h.dataset_unsupervised)));
+    h.dataset_unsupervised = a.dataset_init(ggml_c.GGML_TYPE_F32, ggml_c.GGML_TYPE_F32, 1, 0, ndata, 1);
+    const data: [*]f32 = @ptrCast(ggml_c.ggml_get_data_f32(a.dataset_data(h.dataset_unsupervised)));
     for (0..ndata) |idata| data[idata] = @floatFromInt(idata);
 
-    h.ctx_static = newCtx(@as(usize, 2 * ndata + 2) * c.ggml_tensor_overhead());
+    h.ctx_static = newCtx(@as(usize, 2 * ndata + 2) * ggml_c.ggml_tensor_overhead());
     h.ctx_compute = newCtx(computeCtxSize());
 
     var nb: i64 = 1;
     while (nb <= ndata) : (nb += 1) {
-        h.data_batch[@intCast(nb - 1)] = c.ggml_new_tensor_1d(h.ctx_static, c.GGML_TYPE_F32, nb * ne_datapoint);
-        h.labels_batch[@intCast(nb - 1)] = c.ggml_new_tensor_1d(h.ctx_static, c.GGML_TYPE_F32, nb * ne_label);
+        h.data_batch[@intCast(nb - 1)] = ggml_c.ggml_new_tensor_1d(h.ctx_static, ggml_c.GGML_TYPE_F32, nb * ne_datapoint);
+        h.labels_batch[@intCast(nb - 1)] = ggml_c.ggml_new_tensor_1d(h.ctx_static, ggml_c.GGML_TYPE_F32, nb * ne_label);
     }
 
-    h.inputs = c.ggml_new_tensor_1d(h.ctx_static, c.GGML_TYPE_F32, nbatch_physical);
-    _ = c.ggml_set_name(h.inputs, "inputs");
+    h.inputs = ggml_c.ggml_new_tensor_1d(h.ctx_static, ggml_c.GGML_TYPE_F32, nbatch_physical);
+    _ = ggml_c.ggml_set_name(h.inputs, "inputs");
 
-    h.weights = c.ggml_new_tensor_1d(h.ctx_static, c.GGML_TYPE_F32, 1);
-    _ = c.ggml_set_name(h.weights, "weights");
-    c.ggml_set_param(h.weights);
+    h.weights = ggml_c.ggml_new_tensor_1d(h.ctx_static, ggml_c.GGML_TYPE_F32, 1);
+    _ = ggml_c.ggml_set_name(h.weights, "weights");
+    ggml_c.ggml_set_param(h.weights);
 
-    const intermediary = c.ggml_add(h.ctx_compute, h.inputs, h.weights);
+    const intermediary = ggml_c.ggml_add(h.ctx_compute, h.inputs, h.weights);
 
-    h.outputs = c.ggml_scale(h.ctx_compute, intermediary, 1.0);
-    _ = c.ggml_set_name(h.outputs, "outputs");
+    h.outputs = ggml_c.ggml_scale(h.ctx_compute, intermediary, 1.0);
+    _ = ggml_c.ggml_set_name(h.outputs, "outputs");
 
-    h.buf = c.ggml_backend_alloc_ctx_tensors(h.ctx_static, r.backend);
+    h.buf = ggml_c.ggml_backend_alloc_ctx_tensors(h.ctx_static, r.backend);
     const w0: f32 = @as(f32, @floatFromInt(ndata)) / 2;
-    c.ggml_backend_tensor_set(h.weights, &w0, 0, @sizeOf(f32));
+    ggml_c.ggml_backend_tensor_set(h.weights, &w0, 0, @sizeOf(f32));
 
     const opt_period: i32 = @intCast(@divTrunc(nbatch_logical, nbatch_physical));
 
@@ -414,23 +409,23 @@ fn helperFree(r: *Run, h: *Helper) void {
     a.result_free(h.result);
     a.result_free(h.result2);
     a.free(h.opt_ctx);
-    c.ggml_backend_buffer_free(h.buf);
-    c.ggml_free(h.ctx_static);
-    c.ggml_free(h.ctx_compute);
+    ggml_c.ggml_backend_buffer_free(h.buf);
+    ggml_c.ggml_free(h.ctx_static);
+    ggml_c.ggml_free(h.ctx_compute);
     for (h.datasets_supervised) |d| a.dataset_free(d);
     a.dataset_free(h.dataset_unsupervised);
     r.freeSched();
 }
 
-fn recWeights(r: *Run, tag: []const u8, w: [*c]c.ggml_tensor) void {
+fn recWeights(r: *Run, tag: []const u8, w: [*c]ggml_c.ggml_tensor) void {
     var v: f32 = undefined;
-    c.ggml_backend_tensor_get(w, &v, 0, @sizeOf(f32));
+    ggml_c.ggml_backend_tensor_get(w, &v, 0, @sizeOf(f32));
     r.tr.add("{s}: w={x}", .{ tag, bits32(v) });
 }
 
-fn recLoss(r: *Run, tag: []const u8, ctx: c.ggml_opt_context_t) void {
+fn recLoss(r: *Run, tag: []const u8, ctx: ggml_c.ggml_opt_context_t) void {
     var v: f32 = undefined;
-    c.ggml_backend_tensor_get(r.api.loss(ctx), &v, 0, @sizeOf(f32));
+    ggml_c.ggml_backend_tensor_get(r.api.loss(ctx), &v, 0, @sizeOf(f32));
     r.tr.add("{s}: loss={x}", .{ tag, bits32(v) });
 }
 
@@ -439,9 +434,9 @@ fn recLoss(r: *Run, tag: []const u8, ctx: c.ggml_opt_context_t) void {
 
 /// Ports test-opt.cpp's `test_dataset`, both through tensors and through
 /// `get_batch_host`, recording every batch.
-fn scenarioDataset(r: *Run, optim: c.enum_ggml_opt_optimizer_type, shuffle: bool) void {
+fn scenarioDataset(r: *Run, optim: ggml_c.enum_ggml_opt_optimizer_type, shuffle: bool) void {
     const a = r.api;
-    var h = helperInit(r, optim, true, true, 1, 1, c.GGML_OPT_LOSS_TYPE_SUM);
+    var h = helperInit(r, optim, true, true, 1, 1, ggml_c.GGML_OPT_LOSS_TYPE_SUM);
     defer helperFree(r, &h);
 
     var ndata_shard: i64 = 1;
@@ -472,14 +467,14 @@ fn scenarioDataset(r: *Run, optim: c.enum_ggml_opt_optimizer_type, shuffle: bool
 }
 
 /// Ports test-opt.cpp's `test_grad`.
-fn scenarioGrad(r: *Run, optim: c.enum_ggml_opt_optimizer_type) void {
+fn scenarioGrad(r: *Run, optim: ggml_c.enum_ggml_opt_optimizer_type) void {
     const a = r.api;
-    var h = helperInit(r, optim, true, false, 999999, 1, c.GGML_OPT_LOSS_TYPE_SUM);
+    var h = helperInit(r, optim, true, false, 999999, 1, ggml_c.GGML_OPT_LOSS_TYPE_SUM);
     defer helperFree(r, &h);
     for (0..ndata) |idata| {
         const idataf: f32 = @floatFromInt(idata);
         a.alloc(h.opt_ctx, true);
-        c.ggml_backend_tensor_set(h.inputs, &idataf, 0, c.ggml_nbytes(h.inputs));
+        ggml_c.ggml_backend_tensor_set(h.inputs, &idataf, 0, ggml_c.ggml_nbytes(h.inputs));
         a.eval(h.opt_ctx, h.result);
         recTensor(r, "grad_acc", a.grad_acc(h.opt_ctx, h.weights));
         recWeights(r, "grad", h.weights);
@@ -488,9 +483,9 @@ fn scenarioGrad(r: *Run, optim: c.enum_ggml_opt_optimizer_type) void {
 }
 
 /// Ports test-opt.cpp's `test_forward_backward`.
-fn scenarioForwardBackward(r: *Run, optim: c.enum_ggml_opt_optimizer_type, high_level: bool, shuffle: bool) void {
+fn scenarioForwardBackward(r: *Run, optim: ggml_c.enum_ggml_opt_optimizer_type, high_level: bool, shuffle: bool) void {
     const a = r.api;
-    var h = helperInit(r, optim, true, false, 1, 1, c.GGML_OPT_LOSS_TYPE_SUM);
+    var h = helperInit(r, optim, true, false, 1, 1, ggml_c.GGML_OPT_LOSS_TYPE_SUM);
     defer helperFree(r, &h);
     recContext(r, "fb.ctx", h.opt_ctx);
     recResult(r, "fb.initial", h.result);
@@ -503,7 +498,7 @@ fn scenarioForwardBackward(r: *Run, optim: c.enum_ggml_opt_optimizer_type, high_
         for (0..ndata) |idata| {
             const idataf: f32 = @floatFromInt(idata);
             a.alloc(h.opt_ctx, false);
-            c.ggml_backend_tensor_set(h.inputs, &idataf, 0, c.ggml_nbytes(h.inputs));
+            ggml_c.ggml_backend_tensor_set(h.inputs, &idataf, 0, ggml_c.ggml_nbytes(h.inputs));
             a.eval(h.opt_ctx, h.result);
             recLoss(r, "fb.fwd", h.opt_ctx);
         }
@@ -512,13 +507,13 @@ fn scenarioForwardBackward(r: *Run, optim: c.enum_ggml_opt_optimizer_type, high_
     recResult(r, "fb.after_forward", h.result);
 
     var w0: f32 = undefined;
-    c.ggml_backend_tensor_get(h.weights, &w0, 0, @sizeOf(f32));
+    ggml_c.ggml_backend_tensor_get(h.weights, &w0, 0, @sizeOf(f32));
     for (0..10) |_| {
         a.alloc(h.opt_ctx, true);
         a.eval(h.opt_ctx, h.result);
         recWeights(r, "fb.leak", h.weights);
     }
-    c.ggml_backend_tensor_set(h.weights, &w0, 0, @sizeOf(f32));
+    ggml_c.ggml_backend_tensor_set(h.weights, &w0, 0, @sizeOf(f32));
 
     a.reset(h.opt_ctx, false);
     a.result_reset(h.result);
@@ -532,7 +527,7 @@ fn scenarioForwardBackward(r: *Run, optim: c.enum_ggml_opt_optimizer_type, high_
         for (0..ndata) |idata| {
             const idataf: f32 = @floatFromInt(idata);
             a.alloc(h.opt_ctx, true);
-            c.ggml_backend_tensor_set(h.inputs, &idataf, 0, c.ggml_nbytes(h.inputs));
+            ggml_c.ggml_backend_tensor_set(h.inputs, &idataf, 0, ggml_c.ggml_nbytes(h.inputs));
             a.eval(h.opt_ctx, h.result);
             recLoss(r, "fb.bwd", h.opt_ctx);
             recWeights(r, "fb.bwd", h.weights);
@@ -546,17 +541,17 @@ fn scenarioForwardBackward(r: *Run, optim: c.enum_ggml_opt_optimizer_type, high_
     for (0..3) |idata| {
         const idataf: f32 = @floatFromInt(idata);
         a.alloc(h.opt_ctx, true);
-        c.ggml_backend_tensor_set(h.inputs, &idataf, 0, c.ggml_nbytes(h.inputs));
+        ggml_c.ggml_backend_tensor_set(h.inputs, &idataf, 0, ggml_c.ggml_nbytes(h.inputs));
         a.eval(h.opt_ctx, h.result);
         recWeights(r, "fb.after_opt_reset", h.weights);
     }
 }
 
 /// Ports test-opt.cpp's `test_epoch_vs_fit`.
-fn scenarioEpochVsFit(r: *Run, optim: c.enum_ggml_opt_optimizer_type) void {
+fn scenarioEpochVsFit(r: *Run, optim: ggml_c.enum_ggml_opt_optimizer_type) void {
     const a = r.api;
     {
-        var h = helperInit(r, optim, true, true, 1, 1, c.GGML_OPT_LOSS_TYPE_SUM);
+        var h = helperInit(r, optim, true, true, 1, 1, ggml_c.GGML_OPT_LOSS_TYPE_SUM);
         defer helperFree(r, &h);
         a.dataset_shuffle(h.opt_ctx, h.dataset_unsupervised, -1);
         a.epoch(h.opt_ctx, h.dataset_unsupervised, h.result, null, ndata, null, null);
@@ -564,17 +559,17 @@ fn scenarioEpochVsFit(r: *Run, optim: c.enum_ggml_opt_optimizer_type) void {
         recResult(r, "evf.epoch", h.result);
     }
     {
-        var h = helperInit(r, optim, false, true, 1, 1, c.GGML_OPT_LOSS_TYPE_SUM);
+        var h = helperInit(r, optim, false, true, 1, 1, ggml_c.GGML_OPT_LOSS_TYPE_SUM);
         defer helperFree(r, &h);
-        a.fit(r.sched, h.ctx_compute, h.inputs, h.outputs, h.dataset_unsupervised, c.GGML_OPT_LOSS_TYPE_SUM, optim, a.get_default_optimizer_params, 1, 1, 0.0, true);
+        a.fit(r.sched, h.ctx_compute, h.inputs, h.outputs, h.dataset_unsupervised, ggml_c.GGML_OPT_LOSS_TYPE_SUM, optim, a.get_default_optimizer_params, 1, 1, 0.0, true);
         recWeights(r, "evf.fit", h.weights);
     }
 }
 
 /// Ports test-opt.cpp's `test_idata_split`, for both optimizers.
-fn scenarioIdataSplit(r: *Run, optim: c.enum_ggml_opt_optimizer_type, high_level: bool) void {
+fn scenarioIdataSplit(r: *Run, optim: ggml_c.enum_ggml_opt_optimizer_type, high_level: bool) void {
     const a = r.api;
-    var h = helperInit(r, optim, true, false, 1, 1, c.GGML_OPT_LOSS_TYPE_SUM);
+    var h = helperInit(r, optim, true, false, 1, 1, ggml_c.GGML_OPT_LOSS_TYPE_SUM);
     defer helperFree(r, &h);
     const idata_split = @divTrunc(ndata * 2, 3);
     for (1..5) |epoch| {
@@ -585,14 +580,14 @@ fn scenarioIdataSplit(r: *Run, optim: c.enum_ggml_opt_optimizer_type, high_level
             while (idata < idata_split) : (idata += 1) {
                 const idataf: f32 = @floatFromInt(idata);
                 a.alloc(h.opt_ctx, true);
-                c.ggml_backend_tensor_set(h.inputs, &idataf, 0, c.ggml_nbytes(h.inputs));
+                ggml_c.ggml_backend_tensor_set(h.inputs, &idataf, 0, ggml_c.ggml_nbytes(h.inputs));
                 a.eval(h.opt_ctx, h.result);
                 recLoss(r, "split.train", h.opt_ctx);
             }
             while (idata < ndata) : (idata += 1) {
                 const idataf: f32 = @floatFromInt(idata);
                 a.alloc(h.opt_ctx, false);
-                c.ggml_backend_tensor_set(h.inputs, &idataf, 0, c.ggml_nbytes(h.inputs));
+                ggml_c.ggml_backend_tensor_set(h.inputs, &idataf, 0, ggml_c.ggml_nbytes(h.inputs));
                 a.eval(h.opt_ctx, h.result2);
                 recLoss(r, "split.eval", h.opt_ctx);
             }
@@ -608,7 +603,7 @@ fn scenarioIdataSplit(r: *Run, optim: c.enum_ggml_opt_optimizer_type, high_level
 
 /// Ports test-opt.cpp's `test_gradient_accumulation`, for both optimizers
 /// — the C++ test runs AdamW only.
-fn scenarioGradAccum(r: *Run, optim: c.enum_ggml_opt_optimizer_type, nbatch_physical: i64, loss_type: c.enum_ggml_opt_loss_type) void {
+fn scenarioGradAccum(r: *Run, optim: ggml_c.enum_ggml_opt_optimizer_type, nbatch_physical: i64, loss_type: ggml_c.enum_ggml_opt_loss_type) void {
     const a = r.api;
     var h = helperInit(r, optim, true, false, 6, nbatch_physical, loss_type);
     defer helperFree(r, &h);
@@ -617,7 +612,7 @@ fn scenarioGradAccum(r: *Run, optim: c.enum_ggml_opt_optimizer_type, nbatch_phys
         while (idata < ndata) : (idata += nbatch_physical) {
             var idataf: [2]f32 = .{ @floatFromInt(idata), @floatFromInt(idata + 1) };
             a.alloc(h.opt_ctx, true);
-            c.ggml_backend_tensor_set(h.inputs, &idataf, 0, @intCast(nbatch_physical * 4));
+            ggml_c.ggml_backend_tensor_set(h.inputs, &idataf, 0, @intCast(nbatch_physical * 4));
             a.eval(h.opt_ctx, h.result);
             recTensor(r, "accum.grad_acc", a.grad_acc(h.opt_ctx, h.weights));
             recWeights(r, "accum", h.weights);
@@ -631,7 +626,7 @@ fn scenarioGradAccum(r: *Run, optim: c.enum_ggml_opt_optimizer_type, nbatch_phys
 
 /// test-opt.cpp's `helper_get_regression_opt_pars`, recording each call
 /// with the parameters as they stand before the step.
-fn regressionOptPars(userdata: ?*anyopaque) callconv(.c) c.struct_ggml_opt_optimizer_params {
+fn regressionOptPars(userdata: ?*anyopaque) callconv(.c) ggml_c.struct_ggml_opt_optimizer_params {
     const epoch: i64 = @as(*const i64, @ptrCast(@alignCast(userdata))).*;
     var result = g_run.api.get_default_optimizer_params(null);
     result.adamw.alpha = 0.1;
@@ -642,14 +637,14 @@ fn regressionOptPars(userdata: ?*anyopaque) callconv(.c) c.struct_ggml_opt_optim
     return result;
 }
 
-var g_params_watch: [8][*c]c.ggml_tensor = undefined;
+var g_params_watch: [8][*c]ggml_c.ggml_tensor = undefined;
 var g_params_watch_n: usize = 0;
 
 /// Ports test-opt.cpp's `test_regression`, shortened, then again with the
 /// paths it never takes: physical batches smaller than logical ones
 /// (gradient accumulation through `ggml_opt_fit`), a shuffled dataset, a
 /// validation split, and the progress output.
-fn scenarioRegression(r: *Run, optim: c.enum_ggml_opt_optimizer_type, variant: u8) void {
+fn scenarioRegression(r: *Run, optim: ggml_c.enum_ggml_opt_optimizer_type, variant: u8) void {
     const a = r.api;
     const ndata_regression: i64 = if (variant == 0) 201 else 200;
     const nbatch_physical: i64 = if (variant == 0) ndata_regression else 10;
@@ -661,38 +656,38 @@ fn scenarioRegression(r: *Run, optim: c.enum_ggml_opt_optimizer_type, variant: u
     var prng = std.Random.DefaultPrng.init(12345);
     const rand = prng.random();
 
-    const dataset = a.dataset_init(c.GGML_TYPE_F32, c.GGML_TYPE_F32, 1, 1, ndata_regression, if (variant == 0) ndata_regression else 2);
+    const dataset = a.dataset_init(ggml_c.GGML_TYPE_F32, ggml_c.GGML_TYPE_F32, 1, 1, ndata_regression, if (variant == 0) ndata_regression else 2);
     defer a.dataset_free(dataset);
-    const data: [*]f32 = @ptrCast(c.ggml_get_data_f32(a.dataset_data(dataset)));
-    const labels: [*]f32 = @ptrCast(c.ggml_get_data_f32(a.dataset_labels(dataset)));
+    const data: [*]f32 = @ptrCast(ggml_c.ggml_get_data_f32(a.dataset_data(dataset)));
+    const labels: [*]f32 = @ptrCast(ggml_c.ggml_get_data_f32(a.dataset_labels(dataset)));
     for (0..@intCast(ndata_regression)) |idata| {
         const x: f32 = -100.0 + 200.0 * @as(f32, @floatFromInt(idata)) / @as(f32, @floatFromInt(ndata_regression - 1));
         data[idata] = x;
         labels[idata] = 1.2 * x + 3.4 + 0.1 * (rand.float(f32) - 0.5);
     }
 
-    const ctx_static = newCtx(3 * c.ggml_tensor_overhead());
-    defer c.ggml_free(ctx_static);
+    const ctx_static = newCtx(3 * ggml_c.ggml_tensor_overhead());
+    defer ggml_c.ggml_free(ctx_static);
     const ctx_compute = newCtx(computeCtxSize());
-    defer c.ggml_free(ctx_compute);
+    defer ggml_c.ggml_free(ctx_compute);
 
-    const x = c.ggml_new_tensor_2d(ctx_static, c.GGML_TYPE_F32, 1, nbatch_physical);
-    _ = c.ggml_set_name(x, "x");
-    const pa = c.ggml_new_tensor_1d(ctx_static, c.GGML_TYPE_F32, 1);
-    _ = c.ggml_set_name(pa, "a");
-    c.ggml_set_param(pa);
-    const pb = c.ggml_new_tensor_1d(ctx_static, c.GGML_TYPE_F32, 1);
-    _ = c.ggml_set_name(pb, "b");
-    c.ggml_set_param(pb);
-    const f = c.ggml_add(ctx_compute, c.ggml_mul(ctx_compute, x, pa), pb);
-    _ = c.ggml_set_name(f, "f");
+    const x = ggml_c.ggml_new_tensor_2d(ctx_static, ggml_c.GGML_TYPE_F32, 1, nbatch_physical);
+    _ = ggml_c.ggml_set_name(x, "x");
+    const pa = ggml_c.ggml_new_tensor_1d(ctx_static, ggml_c.GGML_TYPE_F32, 1);
+    _ = ggml_c.ggml_set_name(pa, "a");
+    ggml_c.ggml_set_param(pa);
+    const pb = ggml_c.ggml_new_tensor_1d(ctx_static, ggml_c.GGML_TYPE_F32, 1);
+    _ = ggml_c.ggml_set_name(pb, "b");
+    ggml_c.ggml_set_param(pb);
+    const f = ggml_c.ggml_add(ctx_compute, ggml_c.ggml_mul(ctx_compute, x, pa), pb);
+    _ = ggml_c.ggml_set_name(f, "f");
 
-    const buf = c.ggml_backend_alloc_ctx_tensors(ctx_static, r.backend);
-    defer c.ggml_backend_buffer_free(buf);
+    const buf = ggml_c.ggml_backend_alloc_ctx_tensors(ctx_static, r.backend);
+    defer ggml_c.ggml_backend_buffer_free(buf);
     const a0: f32 = 1.0;
     const b0: f32 = 3.0;
-    c.ggml_backend_tensor_set(pa, &a0, 0, 4);
-    c.ggml_backend_tensor_set(pb, &b0, 0, 4);
+    ggml_c.ggml_backend_tensor_set(pa, &a0, 0, 4);
+    ggml_c.ggml_backend_tensor_set(pb, &b0, 0, 4);
 
     g_params_watch[0] = pa;
     g_params_watch[1] = pb;
@@ -703,7 +698,7 @@ fn scenarioRegression(r: *Run, optim: c.enum_ggml_opt_optimizer_type, variant: u
     defer r.freeSched();
     const text = captureStderr(r, struct {
         fn call(rr: *Run, args: anytype) void {
-            rr.api.fit(args[0], args[1], args[2], args[3], args[4], c.GGML_OPT_LOSS_TYPE_MEAN_SQUARED_ERROR, args[5], &regressionOptPars, args[6], args[7], args[8], args[9]);
+            rr.api.fit(args[0], args[1], args[2], args[3], args[4], ggml_c.GGML_OPT_LOSS_TYPE_MEAN_SQUARED_ERROR, args[5], &regressionOptPars, args[6], args[7], args[8], args[9]);
         }
     }.call, .{ sched, ctx_compute, x, f, dataset, optim, nepoch, nbatch_logical, val_split, silent });
     recText(r, "regression.stderr", text);
@@ -728,16 +723,16 @@ const n_mlp_data: i64 = 64;
 const mlp_batch: i64 = 8;
 
 const Mlp = struct {
-    ctx_static: ?*c.ggml_context,
-    buf: c.ggml_backend_buffer_t,
-    inputs: [*c]c.ggml_tensor,
-    w1: [*c]c.ggml_tensor,
-    b1: [*c]c.ggml_tensor,
-    w2: [*c]c.ggml_tensor,
-    b2: [*c]c.ggml_tensor,
-    dataset: c.ggml_opt_dataset_t,
+    ctx_static: ?*ggml_c.ggml_context,
+    buf: ggml_c.ggml_backend_buffer_t,
+    inputs: [*c]ggml_c.ggml_tensor,
+    w1: [*c]ggml_c.ggml_tensor,
+    b1: [*c]ggml_c.ggml_tensor,
+    w2: [*c]ggml_c.ggml_tensor,
+    b2: [*c]ggml_c.ggml_tensor,
+    dataset: ggml_c.ggml_opt_dataset_t,
 
-    fn params(self: *const Mlp) [4][*c]c.ggml_tensor {
+    fn params(self: *const Mlp) [4][*c]ggml_c.ggml_tensor {
         return .{ self.w1, self.b1, self.w2, self.b2 };
     }
 };
@@ -747,33 +742,33 @@ const Mlp = struct {
 fn mlpInit(r: *Run, with_inputs: bool) Mlp {
     const a = r.api;
     var m: Mlp = undefined;
-    m.ctx_static = newCtx(8 * c.ggml_tensor_overhead());
-    m.inputs = if (with_inputs) c.ggml_new_tensor_2d(m.ctx_static, c.GGML_TYPE_F32, n_in, mlp_batch) else null;
-    if (with_inputs) _ = c.ggml_set_name(m.inputs, "inputs");
-    m.w1 = c.ggml_new_tensor_2d(m.ctx_static, c.GGML_TYPE_F32, n_in, n_hidden);
-    m.b1 = c.ggml_new_tensor_1d(m.ctx_static, c.GGML_TYPE_F32, n_hidden);
-    m.w2 = c.ggml_new_tensor_2d(m.ctx_static, c.GGML_TYPE_F32, n_hidden, n_out);
-    m.b2 = c.ggml_new_tensor_1d(m.ctx_static, c.GGML_TYPE_F32, n_out);
+    m.ctx_static = newCtx(8 * ggml_c.ggml_tensor_overhead());
+    m.inputs = if (with_inputs) ggml_c.ggml_new_tensor_2d(m.ctx_static, ggml_c.GGML_TYPE_F32, n_in, mlp_batch) else null;
+    if (with_inputs) _ = ggml_c.ggml_set_name(m.inputs, "inputs");
+    m.w1 = ggml_c.ggml_new_tensor_2d(m.ctx_static, ggml_c.GGML_TYPE_F32, n_in, n_hidden);
+    m.b1 = ggml_c.ggml_new_tensor_1d(m.ctx_static, ggml_c.GGML_TYPE_F32, n_hidden);
+    m.w2 = ggml_c.ggml_new_tensor_2d(m.ctx_static, ggml_c.GGML_TYPE_F32, n_hidden, n_out);
+    m.b2 = ggml_c.ggml_new_tensor_1d(m.ctx_static, ggml_c.GGML_TYPE_F32, n_out);
     const names = [_][*:0]const u8{ "w1", "b1", "w2", "b2" };
     for (m.params(), names) |p, name| {
-        _ = c.ggml_set_name(p, name);
-        c.ggml_set_param(p);
+        _ = ggml_c.ggml_set_name(p, name);
+        ggml_c.ggml_set_param(p);
     }
-    m.buf = c.ggml_backend_alloc_ctx_tensors(m.ctx_static, r.backend);
+    m.buf = ggml_c.ggml_backend_alloc_ctx_tensors(m.ctx_static, r.backend);
 
     var prng = std.Random.DefaultPrng.init(0x5eed);
     const rand = prng.random();
     for (m.params()) |p| {
-        const n: usize = @intCast(c.ggml_nelements(p));
+        const n: usize = @intCast(ggml_c.ggml_nelements(p));
         const vals = std.heap.c_allocator.alloc(f32, n) catch @panic("oom");
         defer std.heap.c_allocator.free(vals);
         for (vals) |*v| v.* = (rand.float(f32) - 0.5) * 0.8;
-        c.ggml_backend_tensor_set(p, vals.ptr, 0, n * 4);
+        ggml_c.ggml_backend_tensor_set(p, vals.ptr, 0, n * 4);
     }
 
-    m.dataset = a.dataset_init(c.GGML_TYPE_F32, c.GGML_TYPE_F32, n_in, n_out, n_mlp_data, 2);
-    const data: [*]f32 = @ptrCast(c.ggml_get_data_f32(a.dataset_data(m.dataset)));
-    const labels: [*]f32 = @ptrCast(c.ggml_get_data_f32(a.dataset_labels(m.dataset)));
+    m.dataset = a.dataset_init(ggml_c.GGML_TYPE_F32, ggml_c.GGML_TYPE_F32, n_in, n_out, n_mlp_data, 2);
+    const data: [*]f32 = @ptrCast(ggml_c.ggml_get_data_f32(a.dataset_data(m.dataset)));
+    const labels: [*]f32 = @ptrCast(ggml_c.ggml_get_data_f32(a.dataset_labels(m.dataset)));
     for (0..@intCast(n_mlp_data)) |i| {
         var x: [n_in]f32 = undefined;
         for (&x) |*v| v.* = rand.float(f32) * 2 - 1;
@@ -790,14 +785,14 @@ fn mlpInit(r: *Run, with_inputs: bool) Mlp {
 
 fn mlpFree(r: *Run, m: *Mlp) void {
     r.api.dataset_free(m.dataset);
-    c.ggml_backend_buffer_free(m.buf);
-    c.ggml_free(m.ctx_static);
+    ggml_c.ggml_backend_buffer_free(m.buf);
+    ggml_c.ggml_free(m.ctx_static);
 }
 
-fn mlpForward(m: *const Mlp, ctx: ?*c.ggml_context, inputs: [*c]c.ggml_tensor) [*c]c.ggml_tensor {
-    const h1 = c.ggml_relu(ctx, c.ggml_add(ctx, c.ggml_mul_mat(ctx, m.w1, inputs), m.b1));
-    const out = c.ggml_add(ctx, c.ggml_mul_mat(ctx, m.w2, h1), m.b2);
-    _ = c.ggml_set_name(out, "logits");
+fn mlpForward(m: *const Mlp, ctx: ?*ggml_c.ggml_context, inputs: [*c]ggml_c.ggml_tensor) [*c]ggml_c.ggml_tensor {
+    const h1 = ggml_c.ggml_relu(ctx, ggml_c.ggml_add(ctx, ggml_c.ggml_mul_mat(ctx, m.w1, inputs), m.b1));
+    const out = ggml_c.ggml_add(ctx, ggml_c.ggml_mul_mat(ctx, m.w2, h1), m.b2);
+    _ = ggml_c.ggml_set_name(out, "logits");
     return out;
 }
 
@@ -806,7 +801,7 @@ fn recParams(r: *Run, tag: []const u8, m: *const Mlp) void {
 }
 
 /// Records each callback's arguments and the result it is handed.
-fn recordingCallback(train: bool, ctx: c.ggml_opt_context_t, dataset: c.ggml_opt_dataset_t, result: c.ggml_opt_result_t, ibatch: i64, ibatch_max: i64, t_start_us: i64) callconv(.c) void {
+fn recordingCallback(train: bool, ctx: ggml_c.ggml_opt_context_t, dataset: ggml_c.ggml_opt_dataset_t, result: ggml_c.ggml_opt_result_t, ibatch: i64, ibatch_max: i64, t_start_us: i64) callconv(.c) void {
     _ = ctx;
     _ = dataset;
     g_run.tr.add("cb train={} ibatch={d}/{d} t_start>0={}", .{ train, ibatch, ibatch_max, t_start_us > 0 });
@@ -816,13 +811,13 @@ fn recordingCallback(train: bool, ctx: c.ggml_opt_context_t, dataset: c.ggml_opt
 /// A cross-entropy classifier on static graphs, trained with
 /// `ggml_opt_epoch`: predictions, correct counts, accuracies, a validation
 /// split, gradient accumulation when `opt_period > 1`, the progress bar.
-fn scenarioMlpStatic(r: *Run, optim: c.enum_ggml_opt_optimizer_type, opt_period: i32, progress: bool) void {
+fn scenarioMlpStatic(r: *Run, optim: ggml_c.enum_ggml_opt_optimizer_type, opt_period: i32, progress: bool) void {
     const loss_type = staticClassifierLoss(r);
     const a = r.api;
     var m = mlpInit(r, true);
     defer mlpFree(r, &m);
     const ctx_compute = newCtx(computeCtxSize());
-    defer c.ggml_free(ctx_compute);
+    defer ggml_c.ggml_free(ctx_compute);
     const outputs = mlpForward(&m, ctx_compute, m.inputs);
 
     var p = a.default_params(r.newSched(), loss_type);
@@ -873,7 +868,7 @@ fn scenarioMlpStatic(r: *Run, optim: c.enum_ggml_opt_optimizer_type, opt_period:
 /// The same network on dynamic graphs: a fresh compute context and forward
 /// graph every step, `ggml_opt_prepare_alloc`, forward-only and backward
 /// steps mixed, with gradient accumulation.
-fn scenarioMlpDynamic(r: *Run, optim: c.enum_ggml_opt_optimizer_type, loss_type: c.enum_ggml_opt_loss_type, opt_period: i32) void {
+fn scenarioMlpDynamic(r: *Run, optim: ggml_c.enum_ggml_opt_optimizer_type, loss_type: ggml_c.enum_ggml_opt_loss_type, opt_period: i32) void {
     const a = r.api;
     var m = mlpInit(r, false);
     defer mlpFree(r, &m);
@@ -894,21 +889,21 @@ fn scenarioMlpDynamic(r: *Run, optim: c.enum_ggml_opt_optimizer_type, loss_type:
     var host_labels: [mlp_batch * n_out]f32 = undefined;
     for (0..10) |step| {
         const ctx_compute = newCtx(computeCtxSize());
-        defer c.ggml_free(ctx_compute);
-        const inputs = c.ggml_new_tensor_2d(ctx_compute, c.GGML_TYPE_F32, n_in, mlp_batch);
-        _ = c.ggml_set_name(inputs, "inputs");
+        defer ggml_c.ggml_free(ctx_compute);
+        const inputs = ggml_c.ggml_new_tensor_2d(ctx_compute, ggml_c.GGML_TYPE_F32, n_in, mlp_batch);
+        _ = ggml_c.ggml_set_name(inputs, "inputs");
         const outputs = mlpForward(&m, ctx_compute, inputs);
-        const gf = c.ggml_new_graph_custom(ctx_compute, c.GGML_DEFAULT_GRAPH_SIZE, true);
-        c.ggml_build_forward_expand(gf, outputs);
+        const gf = ggml_c.ggml_new_graph_custom(ctx_compute, ggml_c.GGML_DEFAULT_GRAPH_SIZE, true);
+        ggml_c.ggml_build_forward_expand(gf, outputs);
 
         a.prepare_alloc(ctx, ctx_compute, gf, inputs, outputs);
         const backward = step % 5 != 4;
         a.alloc(ctx, backward);
         recContext(r, "dyn.ctx", ctx);
         a.dataset_get_batch_host(m.dataset, &host_data, @sizeOf(@TypeOf(host_data)), &host_labels, @intCast(step % 8));
-        c.ggml_backend_tensor_set(inputs, &host_data, 0, @sizeOf(@TypeOf(host_data)));
+        ggml_c.ggml_backend_tensor_set(inputs, &host_data, 0, @sizeOf(@TypeOf(host_data)));
         const labels = a.labels(ctx);
-        if (labels != null) c.ggml_backend_tensor_set(labels, &host_labels, 0, @sizeOf(@TypeOf(host_labels)));
+        if (labels != null) ggml_c.ggml_backend_tensor_set(labels, &host_labels, 0, @sizeOf(@TypeOf(host_labels)));
         a.eval(ctx, res);
         r.tr.add("dyn step {d} backward={}", .{ step, backward });
         recResult(r, "dyn.result", res);
@@ -916,7 +911,7 @@ fn scenarioMlpDynamic(r: *Run, optim: c.enum_ggml_opt_optimizer_type, loss_type:
     }
 }
 
-fn testOptParsSmall(userdata: ?*anyopaque) callconv(.c) c.struct_ggml_opt_optimizer_params {
+fn testOptParsSmall(userdata: ?*anyopaque) callconv(.c) ggml_c.struct_ggml_opt_optimizer_params {
     var result = g_run.api.get_default_optimizer_params(userdata);
     result.adamw.alpha = 0.02;
     result.adamw.beta1 = 0.8;
@@ -937,25 +932,25 @@ fn testOptParsSmall(userdata: ?*anyopaque) callconv(.c) c.struct_ggml_opt_optimi
 /// run the operation". Measured. On Metal the static scenarios therefore use
 /// mean squared error over the same one-hot labels; cross-entropy runs there
 /// through dynamic graphs, where those nodes are not pre-allocated.
-fn staticClassifierLoss(r: *const Run) c.enum_ggml_opt_loss_type {
-    return if (r.backend == r.cpu) c.GGML_OPT_LOSS_TYPE_CROSS_ENTROPY else c.GGML_OPT_LOSS_TYPE_MEAN_SQUARED_ERROR;
+fn staticClassifierLoss(r: *const Run) ggml_c.enum_ggml_opt_loss_type {
+    return if (r.backend == r.cpu) ggml_c.GGML_OPT_LOSS_TYPE_CROSS_ENTROPY else ggml_c.GGML_OPT_LOSS_TYPE_MEAN_SQUARED_ERROR;
 }
 
 /// A context allocated for the forward pass only.
-fn scenarioForwardOnly(r: *Run, optim: c.enum_ggml_opt_optimizer_type, loss_type_in: c.enum_ggml_opt_loss_type) void {
-    const loss_type = if (loss_type_in == c.GGML_OPT_LOSS_TYPE_CROSS_ENTROPY) staticClassifierLoss(r) else loss_type_in;
+fn scenarioForwardOnly(r: *Run, optim: ggml_c.enum_ggml_opt_optimizer_type, loss_type_in: ggml_c.enum_ggml_opt_loss_type) void {
+    const loss_type = if (loss_type_in == ggml_c.GGML_OPT_LOSS_TYPE_CROSS_ENTROPY) staticClassifierLoss(r) else loss_type_in;
     const a = r.api;
     var m = mlpInit(r, true);
     defer mlpFree(r, &m);
     const ctx_compute = newCtx(computeCtxSize());
-    defer c.ggml_free(ctx_compute);
+    defer ggml_c.ggml_free(ctx_compute);
     const outputs = mlpForward(&m, ctx_compute, m.inputs);
     var p = a.default_params(r.newSched(), loss_type);
     defer r.freeSched();
     p.ctx_compute = ctx_compute;
     p.inputs = m.inputs;
     p.outputs = outputs;
-    p.build_type = c.GGML_OPT_BUILD_TYPE_FORWARD;
+    p.build_type = ggml_c.GGML_OPT_BUILD_TYPE_FORWARD;
     p.optimizer = optim;
     const ctx = a.init(p);
     defer a.free(ctx);
@@ -972,7 +967,7 @@ fn scenarioForwardOnly(r: *Run, optim: c.enum_ggml_opt_optimizer_type, loss_type
 
 fn scenarioMisc(r: *Run) void {
     const a = r.api;
-    for ([_]c.enum_ggml_opt_optimizer_type{ 0, 1, 2, 3, 99, 0xffffffff }) |o| {
+    for ([_]ggml_c.enum_ggml_opt_optimizer_type{ 0, 1, 2, 3, 99, 0xffffffff }) |o| {
         r.tr.add("optimizer_name({d}) = {s}", .{ o, std.mem.span(a.optimizer_name(o)) });
     }
     const d = a.get_default_optimizer_params(null);
@@ -982,7 +977,7 @@ fn scenarioMisc(r: *Run) void {
     k.sgd.wd = 0.456;
     const kk = a.get_constant_optimizer_params(&k);
     r.tr.add("constant pars bytes={x}", .{std.mem.asBytes(&kk)});
-    for ([_]c.enum_ggml_opt_loss_type{ 0, 1, 2, 3 }) |lt| {
+    for ([_]ggml_c.enum_ggml_opt_loss_type{ 0, 1, 2, 3 }) |lt| {
         const p = a.default_params(null, lt);
         const got = p.get_opt_pars.?(null);
         r.tr.add("default_params lt={d} sched={} ctx={} in={} out={} loss={d} build={d} period={d} ud={} opt={d} pars={x}", .{
@@ -1004,7 +999,7 @@ fn scenarioShuffle(r: *Run) void {
     const a = r.api;
     // A context is only the engine's holder here; a forward-only one on a
     // one-node graph is the cheapest that `ggml_opt_init` accepts.
-    const p = a.default_params(r.newSched(), c.GGML_OPT_LOSS_TYPE_SUM);
+    const p = a.default_params(r.newSched(), ggml_c.GGML_OPT_LOSS_TYPE_SUM);
     defer r.freeSched();
     const ctx = a.init(p);
     defer a.free(ctx);
@@ -1012,9 +1007,9 @@ fn scenarioShuffle(r: *Run) void {
     const sizes = [_]i64{ 1, 2, 3, 7, 64, 1000, 4099, 70001 };
     for (sizes) |n| {
         const shard: i64 = if (@rem(n, 7) == 0) 7 else 1;
-        const ds = a.dataset_init(c.GGML_TYPE_I32, c.GGML_TYPE_I32, 1, 0, n, shard);
+        const ds = a.dataset_init(ggml_c.GGML_TYPE_I32, ggml_c.GGML_TYPE_I32, 1, 0, n, shard);
         defer a.dataset_free(ds);
-        const data: [*]i32 = @ptrCast(@alignCast(c.ggml_get_data(a.dataset_data(ds))));
+        const data: [*]i32 = @ptrCast(@alignCast(ggml_c.ggml_get_data(a.dataset_data(ds))));
         for (0..@intCast(n)) |i| data[i] = @intCast(i);
         const out = std.heap.c_allocator.alloc(i32, @intCast(n)) catch @panic("oom");
         defer std.heap.c_allocator.free(out);
@@ -1044,8 +1039,8 @@ fn libcxxOracle() usize {
     for (ranges) |rg| {
         for ([_]u32{ 5489, 1, 0xdeadbeef }) |seed| {
             const tail_ref = opt_ref_uniform(seed, rg[0], rg[1], &want, want.len);
-            var g = libcxx.Mt19937.init(seed);
-            for (&got) |*v| v.* = libcxx.uniformInt(i64, &g, rg[0], rg[1]);
+            var g = stdlib.libcxx.Mt19937.init(seed);
+            for (&got) |*v| v.* = stdlib.libcxx.uniformInt(i64, &g, rg[0], rg[1]);
             const tail_port = g.next();
             for (want, got, 0..) |w, p, i| {
                 checks += 1;
@@ -1071,8 +1066,8 @@ fn libcxxOracle() usize {
                 v_port[i] = @intCast(i);
             }
             const tail_ref = opt_ref_shuffle(5489, &v_ref, n, reps);
-            var g = libcxx.Mt19937.init(5489);
-            for (0..reps) |_| libcxx.shuffle(i64, v_port[0..n], &g);
+            var g = stdlib.libcxx.Mt19937.init(5489);
+            for (0..reps) |_| stdlib.libcxx.shuffle(i64, v_port[0..n], &g);
             const tail_port = g.next();
             checks += n + 1;
             if (!std.mem.eql(i64, v_ref[0..n], v_port[0..n]) or tail_ref != tail_port) {
@@ -1088,127 +1083,127 @@ fn libcxxOracle() usize {
 // Assertions
 
 /// Runs `body` in a child and reports whether it died of SIGABRT.
-fn aborts(body: *const fn (api: *const Api, sched: c.ggml_backend_sched_t) void, api: *const Api, sched: c.ggml_backend_sched_t) bool {
-    const pid = libc.fork();
+fn aborts(body: *const fn (api: *const Api, sched: ggml_c.ggml_backend_sched_t) void, api: *const Api, sched: ggml_c.ggml_backend_sched_t) bool {
+    const pid = std.c.fork();
     if (pid == 0) {
-        const devnull = libc.open("/dev/null", .{ .ACCMODE = .WRONLY });
-        _ = libc.dup2(devnull, 2);
+        const devnull = std.c.open("/dev/null", .{ .ACCMODE = .WRONLY });
+        _ = std.c.dup2(devnull, 2);
         body(api, sched);
-        libc._exit(0);
+        std.c._exit(0);
     }
     var status: c_int = 0;
-    _ = libc.waitpid(pid, &status, 0);
+    _ = std.c.waitpid(pid, &status, 0);
     return (status & 0x7f) == 6;
 }
 
 const abort_cases = .{
     .{ "dataset_init ne_datapoint=0", struct {
-        fn f(a: *const Api, _: c.ggml_backend_sched_t) void {
-            _ = a.dataset_init(c.GGML_TYPE_F32, c.GGML_TYPE_F32, 0, 1, 4, 1);
+        fn f(a: *const Api, _: ggml_c.ggml_backend_sched_t) void {
+            _ = a.dataset_init(ggml_c.GGML_TYPE_F32, ggml_c.GGML_TYPE_F32, 0, 1, 4, 1);
         }
     }.f },
     .{ "dataset_init ne_label=-1", struct {
-        fn f(a: *const Api, _: c.ggml_backend_sched_t) void {
-            _ = a.dataset_init(c.GGML_TYPE_F32, c.GGML_TYPE_F32, 1, -1, 4, 1);
+        fn f(a: *const Api, _: ggml_c.ggml_backend_sched_t) void {
+            _ = a.dataset_init(ggml_c.GGML_TYPE_F32, ggml_c.GGML_TYPE_F32, 1, -1, 4, 1);
         }
     }.f },
     .{ "dataset_init ndata=0", struct {
-        fn f(a: *const Api, _: c.ggml_backend_sched_t) void {
-            _ = a.dataset_init(c.GGML_TYPE_F32, c.GGML_TYPE_F32, 1, 1, 0, 1);
+        fn f(a: *const Api, _: ggml_c.ggml_backend_sched_t) void {
+            _ = a.dataset_init(ggml_c.GGML_TYPE_F32, ggml_c.GGML_TYPE_F32, 1, 1, 0, 1);
         }
     }.f },
     .{ "dataset_init ndata_shard=0", struct {
-        fn f(a: *const Api, _: c.ggml_backend_sched_t) void {
-            _ = a.dataset_init(c.GGML_TYPE_F32, c.GGML_TYPE_F32, 1, 1, 4, 0);
+        fn f(a: *const Api, _: ggml_c.ggml_backend_sched_t) void {
+            _ = a.dataset_init(ggml_c.GGML_TYPE_F32, ggml_c.GGML_TYPE_F32, 1, 1, 4, 0);
         }
     }.f },
     .{ "dataset_init ok", struct {
-        fn f(a: *const Api, _: c.ggml_backend_sched_t) void {
-            a.dataset_free(a.dataset_init(c.GGML_TYPE_F32, c.GGML_TYPE_F32, 1, 0, 4, 1));
+        fn f(a: *const Api, _: ggml_c.ggml_backend_sched_t) void {
+            a.dataset_free(a.dataset_init(ggml_c.GGML_TYPE_F32, ggml_c.GGML_TYPE_F32, 1, 0, 4, 1));
         }
     }.f },
     .{ "shuffle idata > ndata", struct {
-        fn f(a: *const Api, s: c.ggml_backend_sched_t) void {
+        fn f(a: *const Api, s: ggml_c.ggml_backend_sched_t) void {
             const ctx = a.init(a.default_params(s, 0));
-            a.dataset_shuffle(ctx, a.dataset_init(c.GGML_TYPE_F32, c.GGML_TYPE_F32, 1, 0, 4, 1), 5);
+            a.dataset_shuffle(ctx, a.dataset_init(ggml_c.GGML_TYPE_F32, ggml_c.GGML_TYPE_F32, 1, 0, 4, 1), 5);
         }
     }.f },
     .{ "shuffle idata % shard", struct {
-        fn f(a: *const Api, s: c.ggml_backend_sched_t) void {
+        fn f(a: *const Api, s: ggml_c.ggml_backend_sched_t) void {
             const ctx = a.init(a.default_params(s, 0));
-            a.dataset_shuffle(ctx, a.dataset_init(c.GGML_TYPE_F32, c.GGML_TYPE_F32, 1, 0, 4, 2), 3);
+            a.dataset_shuffle(ctx, a.dataset_init(ggml_c.GGML_TYPE_F32, ggml_c.GGML_TYPE_F32, 1, 0, 4, 2), 3);
         }
     }.f },
     .{ "get_batch_host labels mismatch", struct {
-        fn f(a: *const Api, _: c.ggml_backend_sched_t) void {
+        fn f(a: *const Api, _: ggml_c.ggml_backend_sched_t) void {
             var buf: [16]f32 = undefined;
-            a.dataset_get_batch_host(a.dataset_init(c.GGML_TYPE_F32, c.GGML_TYPE_F32, 1, 0, 4, 1), &buf, 16, &buf, 0);
+            a.dataset_get_batch_host(a.dataset_init(ggml_c.GGML_TYPE_F32, ggml_c.GGML_TYPE_F32, 1, 0, 4, 1), &buf, 16, &buf, 0);
         }
     }.f },
     .{ "get_batch_host past the end", struct {
-        fn f(a: *const Api, _: c.ggml_backend_sched_t) void {
+        fn f(a: *const Api, _: ggml_c.ggml_backend_sched_t) void {
             var buf: [16]f32 = undefined;
-            a.dataset_get_batch_host(a.dataset_init(c.GGML_TYPE_F32, c.GGML_TYPE_F32, 1, 0, 4, 1), &buf, 8, null, 2);
+            a.dataset_get_batch_host(a.dataset_init(ggml_c.GGML_TYPE_F32, ggml_c.GGML_TYPE_F32, 1, 0, 4, 1), &buf, 8, null, 2);
         }
     }.f },
     .{ "get_batch_host partial shard", struct {
-        fn f(a: *const Api, _: c.ggml_backend_sched_t) void {
+        fn f(a: *const Api, _: ggml_c.ggml_backend_sched_t) void {
             var buf: [16]f32 = undefined;
-            a.dataset_get_batch_host(a.dataset_init(c.GGML_TYPE_F32, c.GGML_TYPE_F32, 1, 0, 4, 2), &buf, 4, null, 0);
+            a.dataset_get_batch_host(a.dataset_init(ggml_c.GGML_TYPE_F32, ggml_c.GGML_TYPE_F32, 1, 0, 4, 2), &buf, 4, null, 0);
         }
     }.f },
     .{ "init opt_period=0", struct {
-        fn f(a: *const Api, s: c.ggml_backend_sched_t) void {
+        fn f(a: *const Api, s: ggml_c.ggml_backend_sched_t) void {
             var p = a.default_params(s, 0);
             p.opt_period = 0;
             _ = a.init(p);
         }
     }.f },
     .{ "init dynamic with outputs", struct {
-        fn f(a: *const Api, s: c.ggml_backend_sched_t) void {
-            var t: c.ggml_tensor = std.mem.zeroes(c.ggml_tensor);
+        fn f(a: *const Api, s: ggml_c.ggml_backend_sched_t) void {
+            var t: ggml_c.ggml_tensor = std.mem.zeroes(ggml_c.ggml_tensor);
             var p = a.default_params(s, 0);
             p.outputs = &t;
             _ = a.init(p);
         }
     }.f },
     .{ "eval without alloc", struct {
-        fn f(a: *const Api, s: c.ggml_backend_sched_t) void {
+        fn f(a: *const Api, s: ggml_c.ggml_backend_sched_t) void {
             a.eval(a.init(a.default_params(s, 0)), null);
         }
     }.f },
     .{ "epoch on dynamic graphs", struct {
-        fn f(a: *const Api, s: c.ggml_backend_sched_t) void {
+        fn f(a: *const Api, s: ggml_c.ggml_backend_sched_t) void {
             a.epoch(a.init(a.default_params(s, 0)), null, null, null, -1, null, null);
         }
     }.f },
     .{ "alloc dynamic without prepare", struct {
-        fn f(a: *const Api, s: c.ggml_backend_sched_t) void {
+        fn f(a: *const Api, s: ggml_c.ggml_backend_sched_t) void {
             a.alloc(a.init(a.default_params(s, 0)), true);
         }
     }.f },
     .{ "prepare_alloc on static graphs", struct {
-        fn f(a: *const Api, s: c.ggml_backend_sched_t) void {
-            const ctx_static = newCtx(4 * c.ggml_tensor_overhead());
-            const in = c.ggml_new_tensor_1d(ctx_static, c.GGML_TYPE_F32, 1);
-            const w = c.ggml_new_tensor_1d(ctx_static, c.GGML_TYPE_F32, 1);
-            c.ggml_set_param(w);
-            _ = c.ggml_backend_alloc_ctx_tensors(ctx_static, c.ggml_backend_sched_get_backend(s, 0));
+        fn f(a: *const Api, s: ggml_c.ggml_backend_sched_t) void {
+            const ctx_static = newCtx(4 * ggml_c.ggml_tensor_overhead());
+            const in = ggml_c.ggml_new_tensor_1d(ctx_static, ggml_c.GGML_TYPE_F32, 1);
+            const w = ggml_c.ggml_new_tensor_1d(ctx_static, ggml_c.GGML_TYPE_F32, 1);
+            ggml_c.ggml_set_param(w);
+            _ = ggml_c.ggml_backend_alloc_ctx_tensors(ctx_static, ggml_c.ggml_backend_sched_get_backend(s, 0));
             const cc = newCtx(computeCtxSize());
             var p = a.default_params(s, 1);
             p.ctx_compute = cc;
             p.inputs = in;
-            p.outputs = c.ggml_add(cc, in, w);
+            p.outputs = ggml_c.ggml_add(cc, in, w);
             const ctx = a.init(p);
             a.prepare_alloc(ctx, cc, null, null, null);
         }
     }.f },
 };
 
-fn abortChecks(cpu: c.ggml_backend_t) usize {
-    var backends: [1]c.ggml_backend_t = .{cpu};
-    const sched = c.ggml_backend_sched_new(&backends, null, 1, c.GGML_DEFAULT_GRAPH_SIZE, false, true);
-    defer c.ggml_backend_sched_free(sched);
+fn abortChecks(cpu: ggml_c.ggml_backend_t) usize {
+    var backends: [1]ggml_c.ggml_backend_t = .{cpu};
+    const sched = ggml_c.ggml_backend_sched_new(&backends, null, 1, ggml_c.GGML_DEFAULT_GRAPH_SIZE, false, true);
+    defer ggml_c.ggml_backend_sched_free(sched);
     var checks: usize = 0;
     inline for (abort_cases) |case| {
         const ref = aborts(case[1], &ref_api, sched);
@@ -1244,22 +1239,22 @@ fn captureStderr(r: *Run, comptime body: anytype, args: anytype) []const u8 {
     const fd = mkstemp(&name);
     if (fd < 0) @panic("mkstemp");
     _ = unlink(&name);
-    _ = libc.fflush(null); // every stream: `stderr` is `__stderrp` on Darwin, `stderr` on glibc
+    _ = stdlib.libc.fflush(null); // every stream: `stderr` is `__stderrp` on Darwin, `stderr` on glibc
     const saved = dup(2);
-    _ = libc.dup2(fd, 2);
+    _ = std.c.dup2(fd, 2);
     body(r, args);
-    _ = libc.fflush(null); // every stream: `stderr` is `__stderrp` on Darwin, `stderr` on glibc
-    _ = libc.dup2(saved, 2);
-    _ = libc.close(saved);
-    _ = libc.lseek(fd, 0, std.c.SEEK.SET);
+    _ = stdlib.libc.fflush(null); // every stream: `stderr` is `__stderrp` on Darwin, `stderr` on glibc
+    _ = std.c.dup2(saved, 2);
+    _ = std.c.close(saved);
+    _ = std.c.lseek(fd, 0, std.c.SEEK.SET);
     var out: std.ArrayList(u8) = .empty;
     var chunk: [4096]u8 = undefined;
     while (true) {
-        const got = libc.read(fd, &chunk, chunk.len);
+        const got = std.c.read(fd, &chunk, chunk.len);
         if (got <= 0) break;
         out.appendSlice(r.tr.arena, chunk[0..@intCast(got)]) catch @panic("oom");
     }
-    _ = libc.close(fd);
+    _ = std.c.close(fd);
     maskTimes(out.items);
     return out.items;
 }
@@ -1297,14 +1292,14 @@ const Backend = enum { cpu, metal };
 
 /// With `OPT_DIFF_VERBOSE` set, names each scenario on stderr as it starts,
 /// so an abort says where it happened.
-fn mark(r: *Run, name: []const u8, optim: c.enum_ggml_opt_optimizer_type) void {
+fn mark(r: *Run, name: []const u8, optim: ggml_c.enum_ggml_opt_optimizer_type) void {
     if (std.c.getenv("OPT_DIFF_VERBOSE") != null) {
         std.debug.print("[{s}] {s} optim={d} nodes={}\n", .{ if (r.api == &ref_api) "ref" else "port", name, optim, r.nodes });
     }
 }
 
 fn runScenarios(r: *Run) void {
-    const optims = [_]c.enum_ggml_opt_optimizer_type{ c.GGML_OPT_OPTIMIZER_TYPE_ADAMW, c.GGML_OPT_OPTIMIZER_TYPE_SGD };
+    const optims = [_]ggml_c.enum_ggml_opt_optimizer_type{ ggml_c.GGML_OPT_OPTIMIZER_TYPE_ADAMW, ggml_c.GGML_OPT_OPTIMIZER_TYPE_SGD };
     if (!r.nodes) {
         mark(r, "Misc", 0);
         scenarioMisc(r);
@@ -1340,7 +1335,7 @@ fn runScenarios(r: *Run) void {
         mark(r, "ForwardBackward", optim);
         scenarioForwardBackward(r, optim, true, true);
         for ([_]i64{ 2, 1 }) |nbp| {
-            for ([_]c.enum_ggml_opt_loss_type{ c.GGML_OPT_LOSS_TYPE_SUM, c.GGML_OPT_LOSS_TYPE_MEAN }) |lt| {
+            for ([_]ggml_c.enum_ggml_opt_loss_type{ ggml_c.GGML_OPT_LOSS_TYPE_SUM, ggml_c.GGML_OPT_LOSS_TYPE_MEAN }) |lt| {
                 mark(r, "GradAccum", optim);
                 scenarioGradAccum(r, optim, nbp, lt);
             }
@@ -1350,26 +1345,26 @@ fn runScenarios(r: *Run) void {
         mark(r, "MlpStatic", optim);
         scenarioMlpStatic(r, optim, 2, false);
         mark(r, "MlpDynamic", optim);
-        scenarioMlpDynamic(r, optim, c.GGML_OPT_LOSS_TYPE_CROSS_ENTROPY, 1);
+        scenarioMlpDynamic(r, optim, ggml_c.GGML_OPT_LOSS_TYPE_CROSS_ENTROPY, 1);
         mark(r, "MlpDynamic", optim);
-        scenarioMlpDynamic(r, optim, c.GGML_OPT_LOSS_TYPE_CROSS_ENTROPY, 3);
+        scenarioMlpDynamic(r, optim, ggml_c.GGML_OPT_LOSS_TYPE_CROSS_ENTROPY, 3);
         mark(r, "MlpDynamic", optim);
-        scenarioMlpDynamic(r, optim, c.GGML_OPT_LOSS_TYPE_MEAN_SQUARED_ERROR, 2);
+        scenarioMlpDynamic(r, optim, ggml_c.GGML_OPT_LOSS_TYPE_MEAN_SQUARED_ERROR, 2);
         mark(r, "ForwardOnly", optim);
-        scenarioForwardOnly(r, optim, c.GGML_OPT_LOSS_TYPE_CROSS_ENTROPY);
+        scenarioForwardOnly(r, optim, ggml_c.GGML_OPT_LOSS_TYPE_CROSS_ENTROPY);
         mark(r, "ForwardOnly", optim);
-        scenarioForwardOnly(r, optim, c.GGML_OPT_LOSS_TYPE_MEAN_SQUARED_ERROR);
+        scenarioForwardOnly(r, optim, ggml_c.GGML_OPT_LOSS_TYPE_MEAN_SQUARED_ERROR);
     }
 }
 
 pub fn main() !void {
-    _ = libc.setenv("GGML_NO_BACKTRACE", "1", 1);
-    c.ggml_log_set(&quietLog, null);
+    _ = stdlib.libc.setenv("GGML_NO_BACKTRACE", "1", 1);
+    ggml_c.ggml_log_set(&quietLog, null);
 
-    const cpu_dev = c.ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_CPU);
-    const gpu_dev = c.ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_GPU);
-    const cpu = c.ggml_backend_dev_init(cpu_dev, null);
-    c.ggml_backend_cpu_set_n_threads(cpu, 4);
+    const cpu_dev = ggml_c.ggml_backend_dev_by_type(ggml_c.GGML_BACKEND_DEVICE_TYPE_CPU);
+    const gpu_dev = ggml_c.ggml_backend_dev_by_type(ggml_c.GGML_BACKEND_DEVICE_TYPE_GPU);
+    const cpu = ggml_c.ggml_backend_dev_init(cpu_dev, null);
+    ggml_c.ggml_backend_cpu_set_n_threads(cpu, 4);
 
     var total: usize = 0;
 
@@ -1382,7 +1377,7 @@ pub fn main() !void {
     std.debug.print("  assertions: {d} cases\n", .{aborted});
     total += aborted;
 
-    const metal = if (gpu_dev != null) c.ggml_backend_dev_init(gpu_dev, null) else null;
+    const metal = if (gpu_dev != null) ggml_c.ggml_backend_dev_init(gpu_dev, null) else null;
 
     for ([_]Backend{ .cpu, .metal }) |which| {
         const backend = if (which == .cpu) cpu else metal;
@@ -1425,14 +1420,14 @@ pub fn main() !void {
         }
     }
 
-    c.ggml_backend_free(metal);
-    c.ggml_backend_free(cpu);
+    ggml_c.ggml_backend_free(metal);
+    ggml_c.ggml_backend_free(cpu);
     std.debug.print("opt-diff: {d} checks, all identical\n", .{total});
 }
 
 /// Drops ggml's log output, except errors, which are printed: an abort
 /// from inside a backend logs its reason rather than asserting.
-fn quietLog(level: c.enum_ggml_log_level, text: [*c]const u8, ud: ?*anyopaque) callconv(.c) void {
+fn quietLog(level: ggml_c.enum_ggml_log_level, text: [*c]const u8, ud: ?*anyopaque) callconv(.c) void {
     _ = ud;
-    if (level == c.GGML_LOG_LEVEL_ERROR) std.debug.print("{s}", .{std.mem.span(text)});
+    if (level == ggml_c.GGML_LOG_LEVEL_ERROR) std.debug.print("{s}", .{std.mem.span(text)});
 }

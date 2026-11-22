@@ -97,13 +97,13 @@ pub const Cparams = struct {
     /// memory, see `llama_set_embeddings_nextn_dev`.
     embeddings_nextn_dev: bool = false,
 
-    ctx_type: mod.impl.c.enum_llama_context_type = 0,
+    ctx_type: mod.impl.llama_c.enum_llama_context_type = 0,
     /// The RoPE scaling the context resolved: the parameter, or the
     /// model's trained one when unspecified.
-    rope_scaling_type: mod.impl.c.enum_llama_rope_scaling_type = 0,
-    pooling_type: mod.impl.c.enum_llama_pooling_type = 0,
+    rope_scaling_type: mod.impl.llama_c.enum_llama_rope_scaling_type = 0,
+    pooling_type: mod.impl.llama_c.enum_llama_pooling_type = 0,
 
-    cb_eval: mod.impl.c.ggml_backend_sched_eval_callback = null,
+    cb_eval: mod.impl.llama_c.ggml_backend_sched_eval_callback = null,
     cb_eval_user_data: ?*anyopaque = null,
 
     /// The other context, `llama_context *`, opaque here.

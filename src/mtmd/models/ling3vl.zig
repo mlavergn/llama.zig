@@ -9,6 +9,7 @@
 //! ports and the line it began at.
 
 const std = @import("std");
+const llama = @import("llama");
 const mtmd = @import("../module.zig");
 
 /// The `add_pos` lambda's captures.
@@ -21,13 +22,13 @@ const PosCtx = struct {
 fn addPos(ctx: ?*anyopaque, g: *mtmd.graph.Graph, cur: mtmd.graph.T, layer: *const mtmd.model.Layer) mtmd.graph.T {
     _ = layer;
     const p: *PosCtx = @ptrCast(@alignCast(ctx.?));
-    return mtmd.impl.c.ggml_rope_multi(g.ctx0, cur, p.positions, null, @divTrunc(g.d_head, 2), &p.mrope_sections, mtmd.impl.c.GGML_ROPE_TYPE_VISION, 32768, 10000, 1, 0, 1, 32, 1);
+    return llama.impl.llama_c.ggml_rope_multi(g.ctx0, cur, p.positions, null, @divTrunc(g.d_head, 2), &p.mrope_sections, llama.impl.llama_c.GGML_ROPE_TYPE_VISION, 32768, 10000, 1, 0, 1, 32, 1);
 }
 
 /// Ports `build` (ling3vl.cpp:3 @b1b770d90), a member of `mtmd_graph_ling3vl`
 /// (mtmd/models/models.h:84 @b1b770d90), which derives from `mtmd_graph_qwen3vl` for
 /// `build_inp_temporal_merge` alone.
-pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*llama.impl.llama_c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
     const model = g.model;
@@ -51,30 +52,30 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
 
     // spatial merge
     {
-        inp = mtmd.impl.c.ggml_permute(ctx0, inp, 1, 2, 0, 3); // [w, h, c, b] -> [c, w, h, b]
-        inp = mtmd.impl.c.ggml_cont_4d(ctx0, inp, n_embd * 2, @divTrunc(g.n_patches_x, 2), g.n_patches_y, batch_size);
-        inp = mtmd.impl.c.ggml_reshape_4d(ctx0, inp, n_embd * 2, @divTrunc(g.n_patches_x, 2), 2, batch_size * @divTrunc(g.n_patches_y, 2));
-        inp = mtmd.impl.c.ggml_permute(ctx0, inp, 0, 2, 1, 3);
-        inp = mtmd.impl.c.ggml_cont_3d(ctx0, inp, n_embd, g.n_patches_x * g.n_patches_y, batch_size);
+        inp = llama.impl.llama_c.ggml_permute(ctx0, inp, 1, 2, 0, 3); // [w, h, c, b] -> [c, w, h, b]
+        inp = llama.impl.llama_c.ggml_cont_4d(ctx0, inp, n_embd * 2, @divTrunc(g.n_patches_x, 2), g.n_patches_y, batch_size);
+        inp = llama.impl.llama_c.ggml_reshape_4d(ctx0, inp, n_embd * 2, @divTrunc(g.n_patches_x, 2), 2, batch_size * @divTrunc(g.n_patches_y, 2));
+        inp = llama.impl.llama_c.ggml_permute(ctx0, inp, 0, 2, 1, 3);
+        inp = llama.impl.llama_c.ggml_cont_3d(ctx0, inp, n_embd, g.n_patches_x * g.n_patches_y, batch_size);
     }
 
     // add patch bias
     if (model.patch_bias != null) {
-        inp = mtmd.impl.c.ggml_add(ctx0, inp, model.patch_bias);
+        inp = llama.impl.llama_c.ggml_add(ctx0, inp, model.patch_bias);
         g.cb(inp, "patch_bias", -1);
     }
 
     // calculate absolute position embedding and apply
-    var learned_pos_embd = g.resizePositionEmbeddings(mtmd.impl.c.GGML_SCALE_MODE_BILINEAR | mtmd.impl.c.GGML_SCALE_FLAG_ALIGN_CORNERS);
-    learned_pos_embd = mtmd.impl.c.ggml_cont_4d(ctx0, learned_pos_embd, n_embd * 2, @divTrunc(g.n_patches_x, 2), g.n_patches_y, batch_size);
-    learned_pos_embd = mtmd.impl.c.ggml_reshape_4d(ctx0, learned_pos_embd, n_embd * 2, @divTrunc(g.n_patches_x, 2), 2, batch_size * @divTrunc(g.n_patches_y, 2));
-    learned_pos_embd = mtmd.impl.c.ggml_permute(ctx0, learned_pos_embd, 0, 2, 1, 3);
-    learned_pos_embd = mtmd.impl.c.ggml_cont_3d(ctx0, learned_pos_embd, n_embd, g.n_patches_x * g.n_patches_y, batch_size);
+    var learned_pos_embd = g.resizePositionEmbeddings(llama.impl.llama_c.GGML_SCALE_MODE_BILINEAR | llama.impl.llama_c.GGML_SCALE_FLAG_ALIGN_CORNERS);
+    learned_pos_embd = llama.impl.llama_c.ggml_cont_4d(ctx0, learned_pos_embd, n_embd * 2, @divTrunc(g.n_patches_x, 2), g.n_patches_y, batch_size);
+    learned_pos_embd = llama.impl.llama_c.ggml_reshape_4d(ctx0, learned_pos_embd, n_embd * 2, @divTrunc(g.n_patches_x, 2), 2, batch_size * @divTrunc(g.n_patches_y, 2));
+    learned_pos_embd = llama.impl.llama_c.ggml_permute(ctx0, learned_pos_embd, 0, 2, 1, 3);
+    learned_pos_embd = llama.impl.llama_c.ggml_cont_3d(ctx0, learned_pos_embd, n_embd, g.n_patches_x * g.n_patches_y, batch_size);
 
     const num_position_ids = n_pos * 4; // m-rope requires 4 dim per position
-    const positions = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, num_position_ids);
-    _ = mtmd.impl.c.ggml_set_name(positions, "positions");
-    mtmd.impl.c.ggml_set_input(positions);
+    const positions = llama.impl.llama_c.ggml_new_tensor_1d(ctx0, llama.impl.llama_c.GGML_TYPE_I32, num_position_ids);
+    _ = llama.impl.llama_c.ggml_set_name(positions, "positions");
+    llama.impl.llama_c.ggml_set_input(positions);
     pc.positions = positions;
 
     const inpL = g.buildVit(inp, n_pos, norm_t, hparams.ffn_op, learned_pos_embd, .{ .ctx = &pc, .f = addPos }, .{});
@@ -87,12 +88,12 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     embeddings = g.buildNorm(embeddings, model.mm_input_norm_w, model.mm_input_norm_b, norm_t, g.eps, -1);
     g.cb(embeddings, "merger_norm", -1);
 
-    embeddings = mtmd.impl.c.ggml_reshape_3d(ctx0, embeddings, n_embd * 4, @divTrunc(n_pos, 4), batch_size);
+    embeddings = llama.impl.llama_c.ggml_reshape_3d(ctx0, embeddings, n_embd * 4, @divTrunc(n_pos, 4), batch_size);
 
     embeddings = g.buildFfn(embeddings, model.mm_0_w, model.mm_0_b, null, null, model.mm_1_w, model.mm_1_b, .gelu, -1);
 
     // build the graph
-    mtmd.impl.c.ggml_build_forward_expand(g.gf, embeddings);
+    llama.impl.llama_c.ggml_build_forward_expand(g.gf, embeddings);
 
     return g.gf;
 }

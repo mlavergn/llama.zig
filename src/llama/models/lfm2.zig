@@ -223,7 +223,7 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
 
 /// The constructor's `build_attn_block` lambda (models/lfm2.cpp:165
 /// @b1b770d90): Q/K norms, RoPE and attention.
-fn buildAttnBlock(model: *const llama.model.Model, b: *const llama.graph.Builder, cur_: *llama.impl.c.ggml_tensor, inp_pos: *llama.impl.c.ggml_tensor, inp_attn: anytype, il: c_int) *llama.impl.c.ggml_tensor {
+fn buildAttnBlock(model: *const llama.model.Model, b: *const llama.graph.Builder, cur_: *llama.impl.llama_c.ggml_tensor, inp_pos: *llama.impl.llama_c.ggml_tensor, inp_attn: anytype, il: c_int) *llama.impl.llama_c.ggml_tensor {
     const hp = b.hparams;
     const layer = &model.layers[@intCast(il)];
     llama.impl.assert(hp.nEmbdVGqa(@intCast(il)) == hp.nEmbdKGqa(@intCast(il)), "models/lfm2.cpp", 169, "hparams.n_embd_v_gqa(il) == hparams.n_embd_k_gqa(il)");
@@ -262,7 +262,7 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
     var cur = b.buildInpEmbd(model.tok_embd.?);
     b.cb(cur, "model.embed_tokens", -1);
 
-    llama.impl.c.ggml_build_forward_expand(b.gf, cur);
+    llama.impl.llama_c.ggml_build_forward_expand(b.gf, cur);
 
     const inp_hybrid = if (iswa) b.buildInpMemHybridIswa() else b.buildInpMemHybrid();
 
@@ -288,11 +288,11 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
         }
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            prev_cur = llama.impl.c.ggml_get_rows(ctx, prev_cur, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            prev_cur = llama.impl.llama_c.ggml_get_rows(ctx, prev_cur, inp_out_ids);
         }
 
-        cur = llama.impl.c.ggml_add(ctx, prev_cur, cur);
+        cur = llama.impl.llama_c.ggml_add(ctx, prev_cur, cur);
 
         const ffn_norm_out = b.buildNorm(cur, layer.ffn_norm, null, .rms, il);
         b.cb(ffn_norm_out, "model.layers.{}.ffn_norm", il);
@@ -301,7 +301,7 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
         // The C++ names the norm's output here, not the FFN's.
         b.cb(ffn_norm_out, "model.layers.{}.ffn_out", il);
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_out);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_out);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
@@ -365,9 +365,9 @@ const InpAttnMedia = struct {
         for (is_media, 0..) |*m, i| m.* = isMedia(ubatch, i);
 
         const m = self.base.self_attn_mask.raw.?;
-        llama.impl.assert(llama.impl.c.ggml_backend_buffer_is_host(m.buffer), "models/lfm2.cpp", 292, "ggml_backend_buffer_is_host(self_attn_mask.raw->buffer)");
-        if (m.type == llama.impl.c.GGML_TYPE_F16) {
-            self.fillMask(u16, @ptrCast(@alignCast(m.data)), ubatch, is_media, llama.impl.c.ggml_fp32_to_fp16(0.0), llama.impl.c.ggml_fp32_to_fp16(-std.math.inf(f32)));
+        llama.impl.assert(llama.impl.llama_c.ggml_backend_buffer_is_host(m.buffer), "models/lfm2.cpp", 292, "ggml_backend_buffer_is_host(self_attn_mask.raw->buffer)");
+        if (m.type == llama.impl.llama_c.GGML_TYPE_F16) {
+            self.fillMask(u16, @ptrCast(@alignCast(m.data)), ubatch, is_media, llama.impl.llama_c.ggml_fp32_to_fp16(0.0), llama.impl.llama_c.ggml_fp32_to_fp16(-std.math.inf(f32)));
         } else {
             self.fillMask(f32, @ptrCast(@alignCast(m.data)), ubatch, is_media, 0.0, -std.math.inf(f32));
         }
@@ -380,9 +380,9 @@ const InpAttnMedia = struct {
 /// right.
 const InpConvMask = struct {
     /// F32 `[1, n_tokens]`.
-    left: ?*llama.impl.c.ggml_tensor = null,
+    left: ?*llama.impl.llama_c.ggml_tensor = null,
     /// F32 `[1, n_tokens]`.
-    right: ?*llama.impl.c.ggml_tensor = null,
+    right: ?*llama.impl.llama_c.ggml_tensor = null,
 
     /// Ports `llm_graph_input_conv_mask`'s `set_input` (models/lfm2.cpp:307
     /// @b1b770d90).
@@ -402,8 +402,8 @@ const InpConvMask = struct {
             data_right[i] = @floatFromInt(@intFromBool(is_next and !(isMedia(ubatch, i) and !isMedia(ubatch, i + 1))));
             data_left[i + 1] = @floatFromInt(@intFromBool(is_next));
         }
-        llama.impl.c.ggml_backend_tensor_set(self.left, data_left.ptr, 0, llama.impl.c.ggml_nbytes(self.left));
-        llama.impl.c.ggml_backend_tensor_set(self.right, data_right.ptr, 0, llama.impl.c.ggml_nbytes(self.right));
+        llama.impl.llama_c.ggml_backend_tensor_set(self.left, data_left.ptr, 0, llama.impl.llama_c.ggml_nbytes(self.left));
+        llama.impl.llama_c.ggml_backend_tensor_set(self.right, data_right.ptr, 0, llama.impl.llama_c.ggml_nbytes(self.right));
     }
 };
 
@@ -427,23 +427,23 @@ fn buildGraphDecision(model: *const llama.model.Model, b: *const llama.graph.Bui
     const inp_pos = b.buildInpPos();
     const inp_out_ids = b.buildInpOutIds();
 
-    const type_mask: llama.impl.c.enum_ggml_type = if (b.cparams.flash_attn) llama.impl.c.GGML_TYPE_F16 else llama.impl.c.GGML_TYPE_F32;
+    const type_mask: llama.impl.llama_c.enum_ggml_type = if (b.cparams.flash_attn) llama.impl.llama_c.GGML_TYPE_F16 else llama.impl.llama_c.GGML_TYPE_F32;
 
     var inp_attn: [2]*llama.graph.InpAttnNoCache = undefined;
     for ([_]bool{ false, true }) |is_head| {
         const inp = std.heap.c_allocator.create(InpAttnMedia) catch oom();
         inp.* = .{ .base = .{ .hparams = hp, .cparams = b.cparams.*, .debug = 0 }, .is_head = is_head };
-        inp.base.self_attn_mask.raw = llama.impl.c.ggml_new_tensor_4d(ctx, type_mask, n_tokens, n_tokens, 1, 1);
-        llama.impl.c.ggml_set_input(inp.base.self_attn_mask.raw);
+        inp.base.self_attn_mask.raw = llama.impl.llama_c.ggml_new_tensor_4d(ctx, type_mask, n_tokens, n_tokens, 1, 1);
+        llama.impl.llama_c.ggml_set_input(inp.base.self_attn_mask.raw);
         inp_attn[@intFromBool(is_head)] = &b.res.addInput(InpAttnMedia, inp).base;
     }
 
     const inp_conv = std.heap.c_allocator.create(InpConvMask) catch oom();
     inp_conv.* = .{};
-    inp_conv.left = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_F32, 1, n_tokens);
-    inp_conv.right = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_F32, 1, n_tokens);
-    llama.impl.c.ggml_set_input(inp_conv.left);
-    llama.impl.c.ggml_set_input(inp_conv.right);
+    inp_conv.left = llama.impl.llama_c.ggml_new_tensor_2d(ctx, llama.impl.llama_c.GGML_TYPE_F32, 1, n_tokens);
+    inp_conv.right = llama.impl.llama_c.ggml_new_tensor_2d(ctx, llama.impl.llama_c.GGML_TYPE_F32, 1, n_tokens);
+    llama.impl.llama_c.ggml_set_input(inp_conv.left);
+    llama.impl.llama_c.ggml_set_input(inp_conv.right);
     const conv_left = inp_conv.left.?;
     const conv_right = inp_conv.right.?;
     _ = b.res.addInput(InpConvMask, inp_conv);
@@ -460,30 +460,30 @@ fn buildGraphDecision(model: *const llama.model.Model, b: *const llama.graph.Bui
             const bcx = b.buildLoraMm(layer.shortconv.in_proj.?, cur, null);
             b.cb(bcx, "model.layers.{}.conv.in_proj", il);
 
-            const es: usize = llama.impl.c.ggml_element_size(bcx);
+            const es: usize = llama.impl.llama_c.ggml_element_size(bcx);
             const row: usize = @intCast(n_embd);
-            const bv: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, bcx, n_embd, n_tokens, bcx.nb[1], 0 * row * es);
-            const cv: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, bcx, n_embd, n_tokens, bcx.nb[1], 1 * row * es);
-            const xv: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, bcx, n_embd, n_tokens, bcx.nb[1], 2 * row * es);
+            const bv: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_2d(ctx, bcx, n_embd, n_tokens, bcx.nb[1], 0 * row * es);
+            const cv: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_2d(ctx, bcx, n_embd, n_tokens, bcx.nb[1], 1 * row * es);
+            const xv: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_2d(ctx, bcx, n_embd, n_tokens, bcx.nb[1], 2 * row * es);
 
             // A centred 3-tap conv; a tap outside the sequence reads 0.
-            const bx: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul(ctx, bv, xv);
-            const bxp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_pad_ext(ctx, bx, 0, 0, 1, 1, 0, 0, 0, 0);
-            const prv: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, bxp, n_embd, n_tokens, bxp.nb[1], 0);
-            const nxt: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, bxp, n_embd, n_tokens, bxp.nb[1], 2 * bxp.nb[1]);
+            const bx: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_mul(ctx, bv, xv);
+            const bxp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_pad_ext(ctx, bx, 0, 0, 1, 1, 0, 0, 0, 0);
+            const prv: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_2d(ctx, bxp, n_embd, n_tokens, bxp.nb[1], 0);
+            const nxt: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_2d(ctx, bxp, n_embd, n_tokens, bxp.nb[1], 2 * bxp.nb[1]);
 
             llama.impl.assert(hp.n_shortconv_l_cache == 3, "models/lfm2.cpp", 376, "hparams.n_shortconv_l_cache == 3");
-            const taps: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_transpose(ctx, layer.shortconv.conv));
-            const tap0: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_1d(ctx, taps, n_embd, 0 * taps.nb[1]);
-            const tap1: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_1d(ctx, taps, n_embd, 1 * taps.nb[1]);
-            const tap2: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_1d(ctx, taps, n_embd, 2 * taps.nb[1]);
+            const taps: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_cont(ctx, llama.impl.llama_c.ggml_transpose(ctx, layer.shortconv.conv));
+            const tap0: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_1d(ctx, taps, n_embd, 0 * taps.nb[1]);
+            const tap1: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_1d(ctx, taps, n_embd, 1 * taps.nb[1]);
+            const tap2: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_1d(ctx, taps, n_embd, 2 * taps.nb[1]);
 
-            var y: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul(ctx, bx, tap1);
-            y = llama.impl.c.ggml_add(ctx, y, llama.impl.c.ggml_mul(ctx, llama.impl.c.ggml_mul(ctx, prv, tap0), conv_left));
-            y = llama.impl.c.ggml_add(ctx, y, llama.impl.c.ggml_mul(ctx, llama.impl.c.ggml_mul(ctx, nxt, tap2), conv_right));
+            var y: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_mul(ctx, bx, tap1);
+            y = llama.impl.llama_c.ggml_add(ctx, y, llama.impl.llama_c.ggml_mul(ctx, llama.impl.llama_c.ggml_mul(ctx, prv, tap0), conv_left));
+            y = llama.impl.llama_c.ggml_add(ctx, y, llama.impl.llama_c.ggml_mul(ctx, llama.impl.llama_c.ggml_mul(ctx, nxt, tap2), conv_right));
             b.cb(y, "model.layers.{}.conv.conv", il);
 
-            cur = b.buildLoraMm(layer.shortconv.out_proj.?, llama.impl.c.ggml_mul(ctx, cv, y), null);
+            cur = b.buildLoraMm(layer.shortconv.out_proj.?, llama.impl.llama_c.ggml_mul(ctx, cv, y), null);
             b.cb(cur, "model.layers.{}.conv.out_proj", il);
         } else {
             const qkv = b.buildQkv(layer, cur, n_embd_head, b.n_head, hp.nHeadKv(@intCast(il)), il);
@@ -500,12 +500,12 @@ fn buildGraphDecision(model: *const llama.model.Model, b: *const llama.graph.Bui
             b.cb(cur, "model.layers.{}.self_attn.out_proj", il);
         }
 
-        cur = llama.impl.c.ggml_add(ctx, cur, inpL);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, inpL);
 
         var ffn_out = b.buildNorm(cur, layer.ffn_norm, null, .rms, il);
         ffn_out = b.buildFfn(ffn_out, layer.ffn_up, null, layer.ffn_up_s, layer.ffn_gate, null, layer.ffn_gate_s, layer.ffn_down, null, layer.ffn_down_s, null, .silu, .par, il);
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_out);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_out);
         b.cb(cur, "l_out", il);
     }
 
@@ -515,7 +515,7 @@ fn buildGraphDecision(model: *const llama.model.Model, b: *const llama.graph.Bui
     cur = buildDecisionHead(model, b, cur, inp_attn[1], inp_out_ids);
 
     b.res.t_embd = cur;
-    llama.impl.c.ggml_build_forward_expand(b.gf, cur);
+    llama.impl.llama_c.ggml_build_forward_expand(b.gf, cur);
 }
 
 /// Ports `llama_model_lfm2::graph_decision`'s `build_decision_head`
@@ -523,7 +523,7 @@ fn buildGraphDecision(model: *const llama.model.Model, b: *const llama.graph.Bui
 /// (`modern_bert.zig`'s `buildDecisionHead`) with the head counts of the
 /// head layers. The question type is not a graph input, so the head is
 /// evaluated once per type: `[n_decision_types, n_outputs]`.
-fn buildDecisionHead(model: *const llama.model.Model, b: *const llama.graph.Builder, inp: *llama.impl.c.ggml_tensor, inp_attn: *llama.graph.InpAttnNoCache, inp_out_ids: *llama.impl.c.ggml_tensor) *llama.impl.c.ggml_tensor {
+fn buildDecisionHead(model: *const llama.model.Model, b: *const llama.graph.Builder, inp: *llama.impl.llama_c.ggml_tensor, inp_attn: *llama.graph.InpAttnNoCache, inp_out_ids: *llama.impl.llama_c.ggml_tensor) *llama.impl.llama_c.ggml_tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
@@ -531,12 +531,12 @@ fn buildDecisionHead(model: *const llama.model.Model, b: *const llama.graph.Buil
     const n_layer_enc: c_int = n_layer - @as(c_int, @intCast(hp.n_layer_decision));
     const type_embd = model.type_embd.?;
 
-    var scores: ?*llama.impl.c.ggml_tensor = null;
+    var scores: ?*llama.impl.llama_c.ggml_tensor = null;
 
     var it: u32 = 0;
     while (it < n_decision_types) : (it += 1) {
-        const type_row = llama.impl.c.ggml_view_1d(ctx, type_embd, b.n_embd, it * type_embd.nb[1]);
-        var inpL: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, inp, type_row);
+        const type_row = llama.impl.llama_c.ggml_view_1d(ctx, type_embd, b.n_embd, it * type_embd.nb[1]);
+        var inpL: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, inp, type_row);
 
         var il: c_int = n_layer_enc;
         while (il < n_layer) : (il += 1) {
@@ -552,11 +552,11 @@ fn buildDecisionHead(model: *const llama.model.Model, b: *const llama.graph.Buil
             b.cb(cur, "kqv_out", il);
 
             if (il == n_layer - 1) {
-                cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-                inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
+                cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+                inpL = llama.impl.llama_c.ggml_get_rows(ctx, inpL, inp_out_ids);
             }
 
-            const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpL);
+            const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpL);
             b.cb(ffn_inp, "ffn_inp", il);
 
             cur = b.buildNorm(ffn_inp, layer.ffn_norm, layer.ffn_norm_b, .norm, il);
@@ -564,16 +564,16 @@ fn buildDecisionHead(model: *const llama.model.Model, b: *const llama.graph.Buil
 
             cur = b.buildFfn(cur, layer.ffn_up, layer.ffn_up_b, null, null, null, null, layer.ffn_down, layer.ffn_down_b, null, null, .relu, .seq, il);
 
-            inpL = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+            inpL = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
         }
 
         // The scorer.
         var cur = b.buildNorm(inpL, model.cls_norm, model.cls_norm_b, .norm, -1);
-        cur = llama.impl.c.ggml_add(ctx, b.buildLoraMm(model.cls.?, cur, null), model.cls_b);
-        cur = llama.impl.c.ggml_gelu_erf(ctx, cur);
-        cur = llama.impl.c.ggml_add(ctx, b.buildLoraMm(model.cls_out.?, cur, null), model.cls_out_b);
+        cur = llama.impl.llama_c.ggml_add(ctx, b.buildLoraMm(model.cls.?, cur, null), model.cls_b);
+        cur = llama.impl.llama_c.ggml_gelu_erf(ctx, cur);
+        cur = llama.impl.llama_c.ggml_add(ctx, b.buildLoraMm(model.cls_out.?, cur, null), model.cls_out_b);
 
-        scores = if (scores) |s| llama.impl.c.ggml_concat(ctx, s, cur, 0) else cur;
+        scores = if (scores) |s| llama.impl.llama_c.ggml_concat(ctx, s, cur, 0) else cur;
     }
     b.cb(scores.?, "decision_scores", -1);
 

@@ -223,49 +223,49 @@ const Graph = struct {
     b: *const llama.graph.Builder,
     model: *const llama.model.Model,
     /// Keys `[n_mem, n_entry, n_tokens]`.
-    bank_k: ?*llama.impl.c.ggml_tensor = null,
+    bank_k: ?*llama.impl.llama_c.ggml_tensor = null,
     /// Values `[n_entry, n_mem, n_tokens]`.
-    bank_vt: ?*llama.impl.c.ggml_tensor = null,
+    bank_vt: ?*llama.impl.llama_c.ggml_tensor = null,
 
     /// Ports `llama_model_metis16::graph`'s `stream_mean` (models/metis16.cpp:173
     /// @b1b770d90). Streams are kept stream-innermost: `[n_stream, n_embd, n_tokens]`.
-    fn streamMean(self: *const Graph, x: *llama.impl.c.ggml_tensor) *llama.impl.c.ggml_tensor {
+    fn streamMean(self: *const Graph, x: *llama.impl.llama_c.ggml_tensor) *llama.impl.llama_c.ggml_tensor {
         const ctx = self.b.ctx0;
-        const mean = llama.impl.c.ggml_mean(ctx, llama.impl.c.ggml_reshape_2d(ctx, x, x.ne[0], x.ne[1] * x.ne[2]));
-        return llama.impl.c.ggml_reshape_2d(ctx, mean, x.ne[1], x.ne[2]);
+        const mean = llama.impl.llama_c.ggml_mean(ctx, llama.impl.llama_c.ggml_reshape_2d(ctx, x, x.ne[0], x.ne[1] * x.ne[2]));
+        return llama.impl.llama_c.ggml_reshape_2d(ctx, mean, x.ne[1], x.ne[2]);
     }
 
     /// Ports `llama_model_metis16::graph`'s `hc_read` (models/metis16.cpp:179
     /// @b1b770d90): the normalized sublayer input.
-    fn hcRead(self: *const Graph, x: *llama.impl.c.ggml_tensor, mix: *llama.impl.c.ggml_tensor, read: *llama.impl.c.ggml_tensor, norm: ?*llama.impl.c.ggml_tensor, p: c_int, mixed: **llama.impl.c.ggml_tensor, il: c_int) *llama.impl.c.ggml_tensor {
+    fn hcRead(self: *const Graph, x: *llama.impl.llama_c.ggml_tensor, mix: *llama.impl.llama_c.ggml_tensor, read: *llama.impl.llama_c.ggml_tensor, norm: ?*llama.impl.llama_c.ggml_tensor, p: c_int, mixed: **llama.impl.llama_c.ggml_tensor, il: c_int) *llama.impl.llama_c.ggml_tensor {
         const ctx = self.b.ctx0;
         const pu: usize = @intCast(p);
         const n_s = x.ne[0];
-        const x2 = llama.impl.c.ggml_reshape_2d(ctx, x, n_s, x.ne[1] * x.ne[2]);
+        const x2 = llama.impl.llama_c.ggml_reshape_2d(ctx, x, n_s, x.ne[1] * x.ne[2]);
 
-        const m = llama.impl.c.ggml_view_2d(ctx, mix, n_s, n_s, mix.nb[1], pu * mix.nb[2]);
-        mixed.* = llama.impl.c.ggml_mul_mat(ctx, m, x2);
+        const m = llama.impl.llama_c.ggml_view_2d(ctx, mix, n_s, n_s, mix.nb[1], pu * mix.nb[2]);
+        mixed.* = llama.impl.llama_c.ggml_mul_mat(ctx, m, x2);
 
-        const r = llama.impl.c.ggml_reshape_2d(ctx, llama.impl.c.ggml_view_1d(ctx, read, n_s, pu * read.nb[1]), n_s, 1);
-        const src = llama.impl.c.ggml_reshape_2d(ctx, llama.impl.c.ggml_mul_mat(ctx, r, x2), x.ne[1], x.ne[2]);
+        const r = llama.impl.llama_c.ggml_reshape_2d(ctx, llama.impl.llama_c.ggml_view_1d(ctx, read, n_s, pu * read.nb[1]), n_s, 1);
+        const src = llama.impl.llama_c.ggml_reshape_2d(ctx, llama.impl.llama_c.ggml_mul_mat(ctx, r, x2), x.ne[1], x.ne[2]);
         return self.b.buildNorm(src, norm, null, .rms, il);
     }
 
     /// Ports `llama_model_metis16::graph`'s `hc_write` (models/metis16.cpp:192 @b1b770d90).
-    fn hcWrite(self: *const Graph, mixed: *llama.impl.c.ggml_tensor, write: *llama.impl.c.ggml_tensor, update: *llama.impl.c.ggml_tensor, p: c_int) *llama.impl.c.ggml_tensor {
+    fn hcWrite(self: *const Graph, mixed: *llama.impl.llama_c.ggml_tensor, write: *llama.impl.llama_c.ggml_tensor, update: *llama.impl.llama_c.ggml_tensor, p: c_int) *llama.impl.llama_c.ggml_tensor {
         const ctx = self.b.ctx0;
         const pu: usize = @intCast(p);
         const n_s = mixed.ne[0];
-        const w = llama.impl.c.ggml_reshape_2d(ctx, llama.impl.c.ggml_view_1d(ctx, write, n_s, pu * write.nb[1]), 1, n_s);
-        const u = llama.impl.c.ggml_reshape_2d(ctx, update, 1, update.ne[0] * update.ne[1]);
-        const out = llama.impl.c.ggml_add(ctx, mixed, llama.impl.c.ggml_mul_mat(ctx, w, u));
-        return llama.impl.c.ggml_reshape_3d(ctx, out, n_s, update.ne[0], update.ne[1]);
+        const w = llama.impl.llama_c.ggml_reshape_2d(ctx, llama.impl.llama_c.ggml_view_1d(ctx, write, n_s, pu * write.nb[1]), 1, n_s);
+        const u = llama.impl.llama_c.ggml_reshape_2d(ctx, update, 1, update.ne[0] * update.ne[1]);
+        const out = llama.impl.llama_c.ggml_add(ctx, mixed, llama.impl.llama_c.ggml_mul_mat(ctx, w, u));
+        return llama.impl.llama_c.ggml_reshape_3d(ctx, out, n_s, update.ne[0], update.ne[1]);
     }
 
     /// Ports `llama_model_metis16::graph`'s `mem_read` (models/metis16.cpp:201
     /// @b1b770d90): blends the retrieved entries into the streams and returns
     /// their summary.
-    fn memRead(self: *const Graph, x: **llama.impl.c.ggml_tensor) *llama.impl.c.ggml_tensor {
+    fn memRead(self: *const Graph, x: **llama.impl.llama_c.ggml_tensor) *llama.impl.llama_c.ggml_tensor {
         const b = self.b;
         const ctx = b.ctx0;
         const model = self.model;
@@ -274,29 +274,29 @@ const Graph = struct {
         const n_embd = b.n_embd;
         const n_tokens = b.n_tokens;
 
-        const x_e = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_permute(ctx, x.*, 1, 0, 2, 3));
+        const x_e = llama.impl.llama_c.ggml_cont(ctx, llama.impl.llama_c.ggml_permute(ctx, x.*, 1, 0, 2, 3));
 
-        var q = llama.impl.c.ggml_mul_mat(ctx, model.depth_mem_query, llama.impl.c.ggml_reshape_2d(ctx, x_e, n_embd, n_s * n_tokens));
-        q = llama.impl.c.ggml_reshape_3d(ctx, llama.impl.c.ggml_add(ctx, q, model.depth_mem_query_b), n_m, n_s, n_tokens);
+        var q = llama.impl.llama_c.ggml_mul_mat(ctx, model.depth_mem_query, llama.impl.llama_c.ggml_reshape_2d(ctx, x_e, n_embd, n_s * n_tokens));
+        q = llama.impl.llama_c.ggml_reshape_3d(ctx, llama.impl.llama_c.ggml_add(ctx, q, model.depth_mem_query_b), n_m, n_s, n_tokens);
 
-        var kq = llama.impl.c.ggml_mul_mat(ctx, self.bank_k, q);
-        kq = llama.impl.c.ggml_soft_max_ext(ctx, kq, null, 1.0 / stdlib.libm.sqrtfInt(n_m), 0.0);
+        var kq = llama.impl.llama_c.ggml_mul_mat(ctx, self.bank_k, q);
+        kq = llama.impl.llama_c.ggml_soft_max_ext(ctx, kq, null, 1.0 / stdlib.libm.sqrtfInt(n_m), 0.0);
 
-        const ret = llama.impl.c.ggml_mul_mat(ctx, self.bank_vt, kq);
-        var proj = llama.impl.c.ggml_mul_mat(ctx, model.depth_mem_out, llama.impl.c.ggml_reshape_2d(ctx, ret, n_m, n_s * n_tokens));
-        proj = llama.impl.c.ggml_reshape_3d(ctx, llama.impl.c.ggml_add(ctx, proj, model.depth_mem_out_b), n_embd, n_s, n_tokens);
+        const ret = llama.impl.llama_c.ggml_mul_mat(ctx, self.bank_vt, kq);
+        var proj = llama.impl.llama_c.ggml_mul_mat(ctx, model.depth_mem_out, llama.impl.llama_c.ggml_reshape_2d(ctx, ret, n_m, n_s * n_tokens));
+        proj = llama.impl.llama_c.ggml_reshape_3d(ctx, llama.impl.llama_c.ggml_add(ctx, proj, model.depth_mem_out_b), n_embd, n_s, n_tokens);
 
-        var gate = llama.impl.c.ggml_sum_rows(ctx, llama.impl.c.ggml_mul(ctx, x_e, model.depth_mem_stream_gate));
-        gate = llama.impl.c.ggml_sigmoid(ctx, llama.impl.c.ggml_add(ctx, gate, llama.impl.c.ggml_reshape_2d(ctx, model.depth_mem_stream_gate_b, 1, n_s)));
+        var gate = llama.impl.llama_c.ggml_sum_rows(ctx, llama.impl.llama_c.ggml_mul(ctx, x_e, model.depth_mem_stream_gate));
+        gate = llama.impl.llama_c.ggml_sigmoid(ctx, llama.impl.llama_c.ggml_add(ctx, gate, llama.impl.llama_c.ggml_reshape_2d(ctx, model.depth_mem_stream_gate_b, 1, n_s)));
 
-        const proj_s = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_permute(ctx, proj, 1, 0, 2, 3));
-        x.* = llama.impl.c.ggml_add(ctx, x.*, llama.impl.c.ggml_mul(ctx, proj_s, llama.impl.c.ggml_reshape_3d(ctx, gate, n_s, 1, n_tokens)));
+        const proj_s = llama.impl.llama_c.ggml_cont(ctx, llama.impl.llama_c.ggml_permute(ctx, proj, 1, 0, 2, 3));
+        x.* = llama.impl.llama_c.ggml_add(ctx, x.*, llama.impl.llama_c.ggml_mul(ctx, proj_s, llama.impl.llama_c.ggml_reshape_3d(ctx, gate, n_s, 1, n_tokens)));
 
         return self.streamMean(proj_s);
     }
 
     /// Ports `llama_model_metis16::graph`'s `mem_write` (models/metis16.cpp:226 @b1b770d90).
-    fn memWrite(self: *Graph, x: *llama.impl.c.ggml_tensor, summary: ?*llama.impl.c.ggml_tensor, entropy: ?*llama.impl.c.ggml_tensor, confidence: ?*llama.impl.c.ggml_tensor, cont_: ?*llama.impl.c.ggml_tensor, entry: c_int) void {
+    fn memWrite(self: *Graph, x: *llama.impl.llama_c.ggml_tensor, summary: ?*llama.impl.llama_c.ggml_tensor, entropy: ?*llama.impl.llama_c.ggml_tensor, confidence: ?*llama.impl.llama_c.ggml_tensor, cont_: ?*llama.impl.llama_c.ggml_tensor, entry: c_int) void {
         const b = self.b;
         const ctx = b.ctx0;
         const model = self.model;
@@ -304,36 +304,36 @@ const Graph = struct {
 
         var cont = cont_;
         if (cont == null) {
-            cont = llama.impl.c.ggml_scale(ctx, confidence, 0.0);
+            cont = llama.impl.llama_c.ggml_scale(ctx, confidence, 0.0);
         }
-        const meta = llama.impl.c.ggml_concat(ctx, llama.impl.c.ggml_concat(ctx, summary, entropy, 0), llama.impl.c.ggml_concat(ctx, confidence, cont, 0), 0);
+        const meta = llama.impl.llama_c.ggml_concat(ctx, llama.impl.llama_c.ggml_concat(ctx, summary, entropy, 0), llama.impl.llama_c.ggml_concat(ctx, confidence, cont, 0), 0);
 
-        var e = llama.impl.c.ggml_add(ctx, llama.impl.c.ggml_mul_mat(ctx, model.depth_mem_state_write, self.streamMean(x)), llama.impl.c.ggml_mul_mat(ctx, model.depth_mem_meta_write, meta));
-        e = llama.impl.c.ggml_add(ctx, e, llama.impl.c.ggml_view_1d(ctx, model.depth_mem_entry_bias, n_m, @as(usize, @intCast(entry)) * model.depth_mem_entry_bias.?.nb[1]));
+        var e = llama.impl.llama_c.ggml_add(ctx, llama.impl.llama_c.ggml_mul_mat(ctx, model.depth_mem_state_write, self.streamMean(x)), llama.impl.llama_c.ggml_mul_mat(ctx, model.depth_mem_meta_write, meta));
+        e = llama.impl.llama_c.ggml_add(ctx, e, llama.impl.llama_c.ggml_view_1d(ctx, model.depth_mem_entry_bias, n_m, @as(usize, @intCast(entry)) * model.depth_mem_entry_bias.?.nb[1]));
 
-        var k = llama.impl.c.ggml_add(ctx, llama.impl.c.ggml_mul_mat(ctx, model.depth_mem_key, e), model.depth_mem_key_b);
-        var v = llama.impl.c.ggml_add(ctx, llama.impl.c.ggml_mul_mat(ctx, model.depth_mem_value, e), model.depth_mem_value_b);
-        k = llama.impl.c.ggml_reshape_3d(ctx, k, n_m, 1, b.n_tokens);
-        v = llama.impl.c.ggml_reshape_3d(ctx, v, 1, n_m, b.n_tokens);
-        self.bank_k = if (self.bank_k) |bk| llama.impl.c.ggml_concat(ctx, bk, k, 1) else k;
-        self.bank_vt = if (self.bank_vt) |bv| llama.impl.c.ggml_concat(ctx, bv, v, 0) else v;
+        var k = llama.impl.llama_c.ggml_add(ctx, llama.impl.llama_c.ggml_mul_mat(ctx, model.depth_mem_key, e), model.depth_mem_key_b);
+        var v = llama.impl.llama_c.ggml_add(ctx, llama.impl.llama_c.ggml_mul_mat(ctx, model.depth_mem_value, e), model.depth_mem_value_b);
+        k = llama.impl.llama_c.ggml_reshape_3d(ctx, k, n_m, 1, b.n_tokens);
+        v = llama.impl.llama_c.ggml_reshape_3d(ctx, v, 1, n_m, b.n_tokens);
+        self.bank_k = if (self.bank_k) |bk| llama.impl.llama_c.ggml_concat(ctx, bk, k, 1) else k;
+        self.bank_vt = if (self.bank_vt) |bv| llama.impl.llama_c.ggml_concat(ctx, bv, v, 0) else v;
     }
 
     /// Ports `llama_model_metis16::graph`'s `route_features` (models/metis16.cpp:246 @b1b770d90).
-    fn routeFeatures(self: *const Graph, state: *llama.impl.c.ggml_tensor, summary: ?*llama.impl.c.ggml_tensor, diff: ?*llama.impl.c.ggml_tensor, history: ?*llama.impl.c.ggml_tensor) *llama.impl.c.ggml_tensor {
+    fn routeFeatures(self: *const Graph, state: *llama.impl.llama_c.ggml_tensor, summary: ?*llama.impl.llama_c.ggml_tensor, diff: ?*llama.impl.llama_c.ggml_tensor, history: ?*llama.impl.llama_c.ggml_tensor) *llama.impl.llama_c.ggml_tensor {
         const ctx = self.b.ctx0;
         const model = self.model;
-        var f = llama.impl.c.ggml_mul_mat(ctx, model.depth_mem_route_state, state);
+        var f = llama.impl.llama_c.ggml_mul_mat(ctx, model.depth_mem_route_state, state);
         if (summary) |s| {
-            f = llama.impl.c.ggml_add(ctx, f, llama.impl.c.ggml_mul_mat(ctx, model.depth_mem_route_retr, s));
+            f = llama.impl.llama_c.ggml_add(ctx, f, llama.impl.llama_c.ggml_mul_mat(ctx, model.depth_mem_route_retr, s));
         }
         if (diff) |d| {
-            f = llama.impl.c.ggml_add(ctx, f, llama.impl.c.ggml_mul_mat(ctx, model.depth_mem_route_diff, d));
+            f = llama.impl.llama_c.ggml_add(ctx, f, llama.impl.llama_c.ggml_mul_mat(ctx, model.depth_mem_route_diff, d));
         }
         if (history) |h| {
-            f = llama.impl.c.ggml_add(ctx, f, llama.impl.c.ggml_mul_mat(ctx, model.depth_mem_route_hist, h));
+            f = llama.impl.llama_c.ggml_add(ctx, f, llama.impl.llama_c.ggml_mul_mat(ctx, model.depth_mem_route_hist, h));
         }
-        return llama.impl.c.ggml_tanh(ctx, llama.impl.c.ggml_add(ctx, f, model.depth_mem_route_b));
+        return llama.impl.llama_c.ggml_tanh(ctx, llama.impl.llama_c.ggml_add(ctx, f, model.depth_mem_route_b));
     }
 
     /// Ports the constructor of `llama_model_metis16`'s `graph` (models/metis16.cpp:261 @b1b770d90).
@@ -357,20 +357,20 @@ const Graph = struct {
         const inp = b.buildInpMemHybrid();
         const inp_out_ids = b.buildInpOutIds();
 
-        var x: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_repeat_4d(ctx, llama.impl.c.ggml_reshape_3d(ctx, inpL, 1, n_embd, n_tokens), n_s, n_embd, n_tokens, 1);
-        x = llama.impl.c.ggml_add(ctx, x, model.stream_embd);
+        var x: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_repeat_4d(ctx, llama.impl.llama_c.ggml_reshape_3d(ctx, inpL, 1, n_embd, n_tokens), n_s, n_embd, n_tokens, 1);
+        x = llama.impl.llama_c.ggml_add(ctx, x, model.stream_embd);
         b.cb(x, "streams_in", -1);
 
         var prev_state = self.streamMean(x);
-        var history: ?*llama.impl.c.ggml_tensor = null; // routing history, [n_route, n_tokens]
-        var cont: ?*llama.impl.c.ggml_tensor = null; // depth head reading of the last pass, [1, n_tokens]
+        var history: ?*llama.impl.llama_c.ggml_tensor = null; // routing history, [n_route, n_tokens]
+        var cont: ?*llama.impl.llama_c.ggml_tensor = null; // depth head reading of the last pass, [1, n_tokens]
         var n_entry: c_int = 0;
 
         var p: c_int = 0;
         while (p < n_p) : (p += 1) {
-            var summ: ?*llama.impl.c.ggml_tensor = null;
-            var ent: ?*llama.impl.c.ggml_tensor = null;
-            var conf: ?*llama.impl.c.ggml_tensor = null;
+            var summ: ?*llama.impl.llama_c.ggml_tensor = null;
+            var ent: ?*llama.impl.llama_c.ggml_tensor = null;
+            var conf: ?*llama.impl.llama_c.ggml_tensor = null;
 
             var il_p: c_int = 0;
             while (il_p < n_phys) : (il_p += 1) {
@@ -380,23 +380,23 @@ const Graph = struct {
                 const is_attn = !hp.isRecr(ilu);
                 const writes = is_attn or il_p == n_phys - 1;
 
-                const retrieved: ?*llama.impl.c.ggml_tensor = if (self.bank_k != null) self.memRead(&x) else null;
+                const retrieved: ?*llama.impl.llama_c.ggml_tensor = if (self.bank_k != null) self.memRead(&x) else null;
                 const feats = self.routeFeatures(self.streamMean(x), retrieved, null, history);
 
-                var mixed: *llama.impl.c.ggml_tensor = undefined;
+                var mixed: *llama.impl.llama_c.ggml_tensor = undefined;
                 var cur = self.hcRead(x, layer.hc_attn_mix.?, layer.hc_attn_read.?, layer.attn_norm, p, &mixed, il);
                 if (is_attn) {
                     var qkv = b.buildLoraMm(layer.wqkv.?, cur, null);
-                    const lora = llama.impl.c.ggml_mul_mat(ctx, layer.attn_pass_lora_up, llama.impl.c.ggml_mul_mat(ctx, layer.attn_pass_lora_down, cur));
-                    qkv = llama.impl.c.ggml_add(ctx, qkv, llama.impl.c.ggml_mul(ctx, lora, llama.impl.c.ggml_view_1d(ctx, layer.attn_pass_gate, 1, @as(usize, @intCast(p)) * layer.attn_pass_gate.?.nb[0])));
+                    const lora = llama.impl.llama_c.ggml_mul_mat(ctx, layer.attn_pass_lora_up, llama.impl.llama_c.ggml_mul_mat(ctx, layer.attn_pass_lora_down, cur));
+                    qkv = llama.impl.llama_c.ggml_add(ctx, qkv, llama.impl.llama_c.ggml_mul(ctx, lora, llama.impl.llama_c.ggml_view_1d(ctx, layer.attn_pass_gate, 1, @as(usize, @intCast(p)) * layer.attn_pass_gate.?.nb[0])));
 
                     const n_head: i64 = hp.nHead(ilu);
                     const n_head_kv: i64 = hp.nHeadKv(ilu);
-                    const es: usize = llama.impl.c.ggml_element_size(qkv);
+                    const es: usize = llama.impl.llama_c.ggml_element_size(qkv);
                     const hd: usize = @intCast(n_hd);
-                    const Q = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_view_3d(ctx, qkv, n_hd, n_head, n_tokens, hd * es, qkv.nb[1], 0));
-                    const K = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_view_3d(ctx, qkv, n_hd, n_head_kv, n_tokens, hd * es, qkv.nb[1], hd * @as(usize, @intCast(n_head)) * es));
-                    const V = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_view_3d(ctx, qkv, n_hd, n_head_kv, n_tokens, hd * es, qkv.nb[1], hd * @as(usize, @intCast(n_head + n_head_kv)) * es));
+                    const Q = llama.impl.llama_c.ggml_cont(ctx, llama.impl.llama_c.ggml_view_3d(ctx, qkv, n_hd, n_head, n_tokens, hd * es, qkv.nb[1], 0));
+                    const K = llama.impl.llama_c.ggml_cont(ctx, llama.impl.llama_c.ggml_view_3d(ctx, qkv, n_hd, n_head_kv, n_tokens, hd * es, qkv.nb[1], hd * @as(usize, @intCast(n_head)) * es));
+                    const V = llama.impl.llama_c.ggml_cont(ctx, llama.impl.llama_c.ggml_view_3d(ctx, qkv, n_hd, n_head_kv, n_tokens, hd * es, qkv.nb[1], hd * @as(usize, @intCast(n_head + n_head_kv)) * es));
 
                     cur = b.buildAttn(inp.getAttn(), layer.wo, null, null, Q, K, V, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_hd), il);
                 } else {
@@ -407,12 +407,12 @@ const Graph = struct {
 
                 cur = self.hcRead(x, layer.hc_ffn_mix.?, layer.hc_ffn_read.?, layer.ffn_norm, p, &mixed, il);
                 {
-                    const latent = llama.impl.c.ggml_mul_mat(ctx, layer.ffn_latent_down, cur);
-                    var logits = llama.impl.c.ggml_mul_mat(ctx, layer.ffn_gate_inp, llama.impl.c.ggml_concat(ctx, latent, feats, 0));
-                    logits = llama.impl.c.ggml_add(ctx, logits, layer.ffn_gate_inp_b);
+                    const latent = llama.impl.llama_c.ggml_mul_mat(ctx, layer.ffn_latent_down, cur);
+                    var logits = llama.impl.llama_c.ggml_mul_mat(ctx, layer.ffn_gate_inp, llama.impl.llama_c.ggml_concat(ctx, latent, feats, 0));
+                    logits = llama.impl.llama_c.ggml_add(ctx, logits, layer.ffn_gate_inp_b);
 
                     // The balance bias picks the experts; the weights come from the unbiased logits.
-                    const selected = llama.impl.c.ggml_argsort_top_k(ctx, llama.impl.c.ggml_add(ctx, logits, layer.ffn_exp_probs_b), @intCast(n_used));
+                    const selected = llama.impl.llama_c.ggml_argsort_top_k(ctx, llama.impl.llama_c.ggml_add(ctx, logits, layer.ffn_exp_probs_b), @intCast(n_used));
 
                     const moe_out = b.buildMoeFfn(latent, .{
                         .gate_inp = null,
@@ -430,28 +430,28 @@ const Graph = struct {
                         .selected_experts_in = selected,
                     }, il_p);
                     const shexp = b.buildFfn(latent, layer.ffn_up_shexp, null, null, layer.ffn_gate_shexp, null, null, layer.ffn_down_shexp, null, null, null, .silu, .par, il_p);
-                    cur = llama.impl.c.ggml_mul_mat(ctx, layer.ffn_latent_up, llama.impl.c.ggml_add(ctx, moe_out, shexp));
+                    cur = llama.impl.llama_c.ggml_mul_mat(ctx, layer.ffn_latent_up, llama.impl.llama_c.ggml_add(ctx, moe_out, shexp));
                     b.cb(cur, "ffn_out", il);
 
                     // Routing summary: the chosen experts' identity vectors blended by their weights.
-                    const logits3 = llama.impl.c.ggml_reshape_3d(ctx, logits, 1, n_exp, n_tokens);
-                    const weights = llama.impl.c.ggml_soft_max(ctx, llama.impl.c.ggml_reshape_2d(ctx, llama.impl.c.ggml_get_rows(ctx, logits3, selected), n_used, n_tokens));
-                    var rows = llama.impl.c.ggml_get_rows(ctx, layer.ffn_exp_embd, llama.impl.c.ggml_reshape_1d(ctx, llama.impl.c.ggml_cont(ctx, selected), n_used * n_tokens));
-                    rows = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_permute(ctx, llama.impl.c.ggml_reshape_3d(ctx, rows, n_r, n_used, n_tokens), 1, 0, 2, 3));
-                    summ = llama.impl.c.ggml_reshape_2d(ctx, llama.impl.c.ggml_mul_mat(ctx, rows, llama.impl.c.ggml_reshape_3d(ctx, weights, n_used, 1, n_tokens)), n_r, n_tokens);
+                    const logits3 = llama.impl.llama_c.ggml_reshape_3d(ctx, logits, 1, n_exp, n_tokens);
+                    const weights = llama.impl.llama_c.ggml_soft_max(ctx, llama.impl.llama_c.ggml_reshape_2d(ctx, llama.impl.llama_c.ggml_get_rows(ctx, logits3, selected), n_used, n_tokens));
+                    var rows = llama.impl.llama_c.ggml_get_rows(ctx, layer.ffn_exp_embd, llama.impl.llama_c.ggml_reshape_1d(ctx, llama.impl.llama_c.ggml_cont(ctx, selected), n_used * n_tokens));
+                    rows = llama.impl.llama_c.ggml_cont(ctx, llama.impl.llama_c.ggml_permute(ctx, llama.impl.llama_c.ggml_reshape_3d(ctx, rows, n_r, n_used, n_tokens), 1, 0, 2, 3));
+                    summ = llama.impl.llama_c.ggml_reshape_2d(ctx, llama.impl.llama_c.ggml_mul_mat(ctx, rows, llama.impl.llama_c.ggml_reshape_3d(ctx, weights, n_used, 1, n_tokens)), n_r, n_tokens);
 
                     if (writes) {
-                        const probs = llama.impl.c.ggml_soft_max(ctx, logits);
-                        ent = llama.impl.c.ggml_sum_rows(ctx, llama.impl.c.ggml_mul(ctx, probs, llama.impl.c.ggml_log(ctx, llama.impl.c.ggml_clamp(ctx, probs, 1.0e-9, 1.0))));
-                        ent = llama.impl.c.ggml_scale(ctx, ent, -1.0);
-                        conf = llama.impl.c.ggml_get_rows(ctx, llama.impl.c.ggml_reshape_3d(ctx, probs, 1, n_exp, n_tokens), llama.impl.c.ggml_reshape_2d(ctx, llama.impl.c.ggml_argmax(ctx, probs), 1, n_tokens));
-                        conf = llama.impl.c.ggml_reshape_2d(ctx, conf, 1, n_tokens);
+                        const probs = llama.impl.llama_c.ggml_soft_max(ctx, logits);
+                        ent = llama.impl.llama_c.ggml_sum_rows(ctx, llama.impl.llama_c.ggml_mul(ctx, probs, llama.impl.llama_c.ggml_log(ctx, llama.impl.llama_c.ggml_clamp(ctx, probs, 1.0e-9, 1.0))));
+                        ent = llama.impl.llama_c.ggml_scale(ctx, ent, -1.0);
+                        conf = llama.impl.llama_c.ggml_get_rows(ctx, llama.impl.llama_c.ggml_reshape_3d(ctx, probs, 1, n_exp, n_tokens), llama.impl.llama_c.ggml_reshape_2d(ctx, llama.impl.llama_c.ggml_argmax(ctx, probs), 1, n_tokens));
+                        conf = llama.impl.llama_c.ggml_reshape_2d(ctx, conf, 1, n_tokens);
                     }
                 }
                 x = self.hcWrite(mixed, layer.hc_ffn_write.?, cur, p);
                 b.cb(x, "streams", il);
 
-                history = if (history) |h| llama.impl.c.ggml_add(ctx, llama.impl.c.ggml_scale(ctx, h, 0.5), llama.impl.c.ggml_scale(ctx, summ, 0.5)) else llama.impl.c.ggml_scale(ctx, summ, 0.5);
+                history = if (history) |h| llama.impl.llama_c.ggml_add(ctx, llama.impl.llama_c.ggml_scale(ctx, h, 0.5), llama.impl.llama_c.ggml_scale(ctx, summ, 0.5)) else llama.impl.llama_c.ggml_scale(ctx, summ, 0.5);
 
                 if (is_attn) {
                     self.memWrite(x, summ, ent, conf, cont, n_entry);
@@ -463,20 +463,20 @@ const Graph = struct {
             // entry recording where the pass left the token.
             const retrieved = self.memRead(&x);
             const state = self.streamMean(x);
-            const diff = llama.impl.c.ggml_sub(ctx, state, prev_state);
+            const diff = llama.impl.llama_c.ggml_sub(ctx, state, prev_state);
             const feats = self.routeFeatures(state, retrieved, diff, history);
 
-            var h = llama.impl.c.ggml_mul_mat(ctx, model.cont_hidden_state, state);
-            h = llama.impl.c.ggml_add(ctx, h, llama.impl.c.ggml_mul_mat(ctx, model.cont_hidden_retr, retrieved));
-            h = llama.impl.c.ggml_add(ctx, h, llama.impl.c.ggml_mul_mat(ctx, model.cont_hidden_diff, diff));
-            h = llama.impl.c.ggml_add(ctx, h, llama.impl.c.ggml_mul_mat(ctx, model.cont_hidden_route, feats));
-            h = llama.impl.c.ggml_silu(ctx, llama.impl.c.ggml_add(ctx, h, model.cont_hidden_b));
+            var h = llama.impl.llama_c.ggml_mul_mat(ctx, model.cont_hidden_state, state);
+            h = llama.impl.llama_c.ggml_add(ctx, h, llama.impl.llama_c.ggml_mul_mat(ctx, model.cont_hidden_retr, retrieved));
+            h = llama.impl.llama_c.ggml_add(ctx, h, llama.impl.llama_c.ggml_mul_mat(ctx, model.cont_hidden_diff, diff));
+            h = llama.impl.llama_c.ggml_add(ctx, h, llama.impl.llama_c.ggml_mul_mat(ctx, model.cont_hidden_route, feats));
+            h = llama.impl.llama_c.ggml_silu(ctx, llama.impl.llama_c.ggml_add(ctx, h, model.cont_hidden_b));
 
-            var logit = llama.impl.c.ggml_add(ctx, llama.impl.c.ggml_mul_mat(ctx, model.cont_output, h), model.cont_output_b);
-            const scale = llama.impl.c.ggml_clamp(ctx, llama.impl.c.ggml_sqrt(ctx, llama.impl.c.ggml_mean(ctx, llama.impl.c.ggml_sqr(ctx, state))), 1.0e-6, std.math.inf(f32));
-            const innov = llama.impl.c.ggml_sqrt(ctx, llama.impl.c.ggml_mean(ctx, llama.impl.c.ggml_sqr(ctx, diff)));
-            logit = llama.impl.c.ggml_add(ctx, logit, llama.impl.c.ggml_scale_bias(ctx, llama.impl.c.ggml_tanh(ctx, llama.impl.c.ggml_div(ctx, innov, scale)), 1.0, -0.5));
-            cont = llama.impl.c.ggml_sigmoid(ctx, llama.impl.c.ggml_clamp(ctx, logit, -st.cont_limit, st.cont_limit));
+            var logit = llama.impl.llama_c.ggml_add(ctx, llama.impl.llama_c.ggml_mul_mat(ctx, model.cont_output, h), model.cont_output_b);
+            const scale = llama.impl.llama_c.ggml_clamp(ctx, llama.impl.llama_c.ggml_sqrt(ctx, llama.impl.llama_c.ggml_mean(ctx, llama.impl.llama_c.ggml_sqr(ctx, state))), 1.0e-6, std.math.inf(f32));
+            const innov = llama.impl.llama_c.ggml_sqrt(ctx, llama.impl.llama_c.ggml_mean(ctx, llama.impl.llama_c.ggml_sqr(ctx, diff)));
+            logit = llama.impl.llama_c.ggml_add(ctx, logit, llama.impl.llama_c.ggml_scale_bias(ctx, llama.impl.llama_c.ggml_tanh(ctx, llama.impl.llama_c.ggml_div(ctx, innov, scale)), 1.0, -0.5));
+            cont = llama.impl.llama_c.ggml_sigmoid(ctx, llama.impl.llama_c.ggml_clamp(ctx, logit, -st.cont_limit, st.cont_limit));
             b.cb(cont.?, "continuation", p);
 
             self.memWrite(x, summ, ent, conf, cont, n_entry);
@@ -485,7 +485,7 @@ const Graph = struct {
         }
 
         var cur = self.streamMean(x);
-        cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+        cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
 
         cur = b.buildNorm(cur, model.output_norm, null, .rms, -1);
         b.cb(cur, "result_norm", -1);

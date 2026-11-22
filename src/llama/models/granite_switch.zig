@@ -177,13 +177,13 @@ pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *
 /// set from the batch's tokens.
 const InpSwitch = struct {
     /// I32 `[n_tokens]`: the adapter-substituted token ids.
-    sub_tokens: ?*llama.impl.c.ggml_tensor = null,
+    sub_tokens: ?*llama.impl.llama_c.ggml_tensor = null,
     /// F32 `[n_tokens]`: the router's K signal, plus or minus the gain.
-    router_ksig: ?*llama.impl.c.ggml_tensor = null,
+    router_ksig: ?*llama.impl.llama_c.ggml_tensor = null,
     /// F32 `[n_tokens]`: the router's V value, the adapter slot or 0.
-    router_vval: ?*llama.impl.c.ggml_tensor = null,
+    router_vval: ?*llama.impl.llama_c.ggml_tensor = null,
     /// F32 `[n_tokens]`: the router's Q value, constantly 1.0.
-    router_q: ?*llama.impl.c.ggml_tensor = null,
+    router_q: ?*llama.impl.llama_c.ggml_tensor = null,
 
     smodel: *const llama.model.Model,
 
@@ -224,10 +224,10 @@ const InpSwitch = struct {
             sub[i] = gs.adapter_token_to_substitute.?.get(tok) orelse tok;
         }
 
-        llama.impl.c.ggml_backend_tensor_set(self.sub_tokens, sub.ptr, 0, n_tokens * llama.impl.c.ggml_element_size(self.sub_tokens));
-        llama.impl.c.ggml_backend_tensor_set(self.router_ksig, ksig.ptr, 0, n_tokens * llama.impl.c.ggml_element_size(self.router_ksig));
-        llama.impl.c.ggml_backend_tensor_set(self.router_vval, vval.ptr, 0, n_tokens * llama.impl.c.ggml_element_size(self.router_vval));
-        llama.impl.c.ggml_backend_tensor_set(self.router_q, q.ptr, 0, n_tokens * llama.impl.c.ggml_element_size(self.router_q));
+        llama.impl.llama_c.ggml_backend_tensor_set(self.sub_tokens, sub.ptr, 0, n_tokens * llama.impl.llama_c.ggml_element_size(self.sub_tokens));
+        llama.impl.llama_c.ggml_backend_tensor_set(self.router_ksig, ksig.ptr, 0, n_tokens * llama.impl.llama_c.ggml_element_size(self.router_ksig));
+        llama.impl.llama_c.ggml_backend_tensor_set(self.router_vval, vval.ptr, 0, n_tokens * llama.impl.llama_c.ggml_element_size(self.router_vval));
+        llama.impl.llama_c.ggml_backend_tensor_set(self.router_q, q.ptr, 0, n_tokens * llama.impl.llama_c.ggml_element_size(self.router_q));
     }
 };
 
@@ -242,36 +242,36 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
 /// the per-token switched LoRA delta `B_a*(A_a*x)`, the adapter chosen per
 /// token by `ids`. `cur` is `{n_in, n_tokens}` and `ids` `{n_tokens}`; the
 /// result is `{n_out, n_tokens}`.
-fn buildSwitchedLoraDelta(b: *const llama.graph.Builder, lora_a: *llama.impl.c.ggml_tensor, lora_b: *llama.impl.c.ggml_tensor, cur: *llama.impl.c.ggml_tensor, ids: *llama.impl.c.ggml_tensor) *llama.impl.c.ggml_tensor {
+fn buildSwitchedLoraDelta(b: *const llama.graph.Builder, lora_a: *llama.impl.llama_c.ggml_tensor, lora_b: *llama.impl.llama_c.ggml_tensor, cur: *llama.impl.llama_c.ggml_tensor, ids: *llama.impl.llama_c.ggml_tensor) *llama.impl.llama_c.ggml_tensor {
     const ctx = b.ctx0;
     const n_in = cur.ne[0];
     const n_tokens = cur.ne[1];
 
-    const x: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_3d(ctx, cur, n_in, 1, n_tokens);
-    const ids2: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_2d(ctx, ids, 1, n_tokens);
+    const x: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_reshape_3d(ctx, cur, n_in, 1, n_tokens);
+    const ids2: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_reshape_2d(ctx, ids, 1, n_tokens);
 
     // {max_rank, 1, n_tokens}
-    const a: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat_id(ctx, lora_a, x, ids2);
+    const a: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_mul_mat_id(ctx, lora_a, x, ids2);
     // {n_out, 1, n_tokens}
-    const d: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat_id(ctx, lora_b, a, ids2);
+    const d: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_mul_mat_id(ctx, lora_b, a, ids2);
 
-    return llama.impl.c.ggml_reshape_2d(ctx, d, d.ne[0], n_tokens);
+    return llama.impl.llama_c.ggml_reshape_2d(ctx, d, d.ne[0], n_tokens);
 }
 
 /// Ports `llama_model_granite_switch`'s `graph`'s `build_switched_lora_mm`
 /// (models/granite-switch.cpp:211 @b1b770d90): the base projection plus the
 /// switched delta.
-fn buildSwitchedLoraMm(b: *const llama.graph.Builder, w: *llama.impl.c.ggml_tensor, lora_a: *llama.impl.c.ggml_tensor, lora_b: *llama.impl.c.ggml_tensor, cur: *llama.impl.c.ggml_tensor, ids: *llama.impl.c.ggml_tensor) *llama.impl.c.ggml_tensor {
-    const base: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(b.ctx0, w, cur);
+fn buildSwitchedLoraMm(b: *const llama.graph.Builder, w: *llama.impl.llama_c.ggml_tensor, lora_a: *llama.impl.llama_c.ggml_tensor, lora_b: *llama.impl.llama_c.ggml_tensor, cur: *llama.impl.llama_c.ggml_tensor, ids: *llama.impl.llama_c.ggml_tensor) *llama.impl.llama_c.ggml_tensor {
+    const base: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_mul_mat(b.ctx0, w, cur);
     const delta = buildSwitchedLoraDelta(b, lora_a, lora_b, cur, ids);
-    return llama.impl.c.ggml_add(b.ctx0, base, delta);
+    return llama.impl.llama_c.ggml_add(b.ctx0, base, delta);
 }
 
 /// The router's lanes: a 1-D signal as `{1, 1, n_tokens}`, zero-padded to
 /// a head's width, so only dimension 0 carries it.
-fn routerLane(b: *const llama.graph.Builder, sig1d: *llama.impl.c.ggml_tensor, n_embd_head: i64) *llama.impl.c.ggml_tensor {
-    const t: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_3d(b.ctx0, sig1d, 1, 1, b.n_tokens);
-    return llama.impl.c.ggml_pad(b.ctx0, t, @intCast(n_embd_head - 1), 0, 0, 0);
+fn routerLane(b: *const llama.graph.Builder, sig1d: *llama.impl.llama_c.ggml_tensor, n_embd_head: i64) *llama.impl.llama_c.ggml_tensor {
+    const t: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_reshape_3d(b.ctx0, sig1d, 1, 1, b.n_tokens);
+    return llama.impl.llama_c.ggml_pad(b.ctx0, t, @intCast(n_embd_head - 1), 0, 0, 0);
 }
 
 /// Ports the constructor of `llama_model_granite_switch`'s `graph`
@@ -292,14 +292,14 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 
     const inp_switch = std.heap.c_allocator.create(InpSwitch) catch oom();
     inp_switch.* = .{ .smodel = model };
-    inp_switch.sub_tokens = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_I32, b.n_tokens);
-    inp_switch.router_ksig = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_F32, b.n_tokens);
-    inp_switch.router_vval = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_F32, b.n_tokens);
-    inp_switch.router_q = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_F32, b.n_tokens);
-    llama.impl.c.ggml_set_input(inp_switch.sub_tokens);
-    llama.impl.c.ggml_set_input(inp_switch.router_ksig);
-    llama.impl.c.ggml_set_input(inp_switch.router_vval);
-    llama.impl.c.ggml_set_input(inp_switch.router_q);
+    inp_switch.sub_tokens = llama.impl.llama_c.ggml_new_tensor_1d(ctx, llama.impl.llama_c.GGML_TYPE_I32, b.n_tokens);
+    inp_switch.router_ksig = llama.impl.llama_c.ggml_new_tensor_1d(ctx, llama.impl.llama_c.GGML_TYPE_F32, b.n_tokens);
+    inp_switch.router_vval = llama.impl.llama_c.ggml_new_tensor_1d(ctx, llama.impl.llama_c.GGML_TYPE_F32, b.n_tokens);
+    inp_switch.router_q = llama.impl.llama_c.ggml_new_tensor_1d(ctx, llama.impl.llama_c.GGML_TYPE_F32, b.n_tokens);
+    llama.impl.llama_c.ggml_set_input(inp_switch.sub_tokens);
+    llama.impl.llama_c.ggml_set_input(inp_switch.router_ksig);
+    llama.impl.llama_c.ggml_set_input(inp_switch.router_vval);
+    llama.impl.llama_c.ggml_set_input(inp_switch.router_q);
     const sub_tokens = inp_switch.sub_tokens.?;
     const router_ksig = inp_switch.router_ksig.?;
     const router_vval = inp_switch.router_vval.?;
@@ -308,13 +308,13 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 
     // The substituted ids are embedded directly; build_inp_embd would embed
     // the raw tokens.
-    var inpL: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_get_rows(ctx, model.tok_embd.?, sub_tokens);
+    var inpL: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_get_rows(ctx, model.tok_embd.?, sub_tokens);
     if (hp.f_embedding_scale != 0.0) {
-        inpL = llama.impl.c.ggml_scale(ctx, inpL, hp.f_embedding_scale);
+        inpL = llama.impl.llama_c.ggml_scale(ctx, inpL, hp.f_embedding_scale);
     }
     b.cb(inpL, "inp_embd", -1);
 
-    var inp_pos: ?*llama.impl.c.ggml_tensor = null;
+    var inp_pos: ?*llama.impl.llama_c.ggml_tensor = null;
     if (hp.hasRope(0)) {
         inp_pos = b.buildInpPos();
     }
@@ -334,11 +334,11 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 
     // Row 0 of router_out is the attended slot; clamped and rounded to an
     // I32 index.
-    var slot_f: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_view_2d(ctx, router_out, 1, b.n_tokens, router_out.nb[1], 0));
-    slot_f = llama.impl.c.ggml_reshape_1d(ctx, slot_f, b.n_tokens);
-    slot_f = llama.impl.c.ggml_clamp(ctx, slot_f, 0.0, @floatFromInt(gs.n_adapters));
-    slot_f = llama.impl.c.ggml_round(ctx, slot_f);
-    var adapter_ids: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cast(ctx, slot_f, llama.impl.c.GGML_TYPE_I32);
+    var slot_f: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_cont(ctx, llama.impl.llama_c.ggml_view_2d(ctx, router_out, 1, b.n_tokens, router_out.nb[1], 0));
+    slot_f = llama.impl.llama_c.ggml_reshape_1d(ctx, slot_f, b.n_tokens);
+    slot_f = llama.impl.llama_c.ggml_clamp(ctx, slot_f, 0.0, @floatFromInt(gs.n_adapters));
+    slot_f = llama.impl.llama_c.ggml_round(ctx, slot_f);
+    var adapter_ids: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_cast(ctx, slot_f, llama.impl.llama_c.GGML_TYPE_I32);
     b.cb(adapter_ids, "adapter_ids", -1);
 
     const inp_out_ids = b.buildInpOutIds();
@@ -355,13 +355,13 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         cur = buildAttentionLayer(b, cur, inp_pos, adapter_ids, inp_attn, model, n_embd_head, il);
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
             // adapter_ids stays aligned to the rows kept, through a 2-D
             // round trip for get_rows.
             const n_out = inp_out_ids.ne[0];
-            adapter_ids = llama.impl.c.ggml_get_rows(ctx, llama.impl.c.ggml_reshape_2d(ctx, adapter_ids, 1, adapter_ids.ne[0]), inp_out_ids);
-            adapter_ids = llama.impl.c.ggml_reshape_1d(ctx, adapter_ids, n_out);
+            adapter_ids = llama.impl.llama_c.ggml_get_rows(ctx, llama.impl.llama_c.ggml_reshape_2d(ctx, adapter_ids, 1, adapter_ids.ne[0]), inp_out_ids);
+            adapter_ids = llama.impl.llama_c.ggml_reshape_1d(ctx, adapter_ids, n_out);
         }
 
         cur = buildLayerFfn(b, cur, inpSA, adapter_ids, model, il);
@@ -377,7 +377,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 
     cur = b.buildLoraMm(model.output.?, cur, model.output_s);
 
-    cur = llama.impl.c.ggml_scale(ctx, cur, 1.0 / hp.f_logit_scale);
+    cur = llama.impl.llama_c.ggml_scale(ctx, cur, 1.0 / hp.f_logit_scale);
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;
 }
@@ -387,14 +387,14 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 /// part plus its switched delta, and the output projection switched too.
 fn buildAttentionLayer(
     b: *const llama.graph.Builder,
-    cur_: *llama.impl.c.ggml_tensor,
-    inp_pos: ?*llama.impl.c.ggml_tensor,
-    adapter_ids: *llama.impl.c.ggml_tensor,
+    cur_: *llama.impl.llama_c.ggml_tensor,
+    inp_pos: ?*llama.impl.llama_c.ggml_tensor,
+    adapter_ids: *llama.impl.llama_c.ggml_tensor,
     inp_attn: *llama.graph.InpAttnKv,
     model: *const llama.model.Model,
     n_embd_head: i64,
     il: c_int,
-) *llama.impl.c.ggml_tensor {
+) *llama.impl.llama_c.ggml_tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const layer = &model.layers[@intCast(il)];
@@ -404,26 +404,26 @@ fn buildAttentionLayer(
     const n_head: i64 = hp.nHead(@intCast(il));
     const n_head_kv: i64 = hp.nHeadKv(@intCast(il));
 
-    const qkv: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, layer.wqkv, cur);
+    const qkv: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_mul_mat(ctx, layer.wqkv, cur);
     b.cb(qkv, "wqkv", il);
 
     const n_embd_q = n_embd_head * n_head;
     const n_embd_kv = n_embd_head * n_head_kv;
-    const esz: i64 = @intCast(llama.impl.c.ggml_element_size(qkv));
+    const esz: i64 = @intCast(llama.impl.llama_c.ggml_element_size(qkv));
 
     // The fused QKV sliced into Q, K and V, made contiguous so the LoRA
     // deltas can be added.
-    var Qcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_view_2d(ctx, qkv, n_embd_q, qkv.ne[1], qkv.nb[1], 0));
-    var Kcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_view_2d(ctx, qkv, n_embd_kv, qkv.ne[1], qkv.nb[1], @intCast(n_embd_q * esz)));
-    var Vcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_view_2d(ctx, qkv, n_embd_kv, qkv.ne[1], qkv.nb[1], @intCast((n_embd_q + n_embd_kv) * esz)));
+    var Qcur: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_cont(ctx, llama.impl.llama_c.ggml_view_2d(ctx, qkv, n_embd_q, qkv.ne[1], qkv.nb[1], 0));
+    var Kcur: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_cont(ctx, llama.impl.llama_c.ggml_view_2d(ctx, qkv, n_embd_kv, qkv.ne[1], qkv.nb[1], @intCast(n_embd_q * esz)));
+    var Vcur: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_cont(ctx, llama.impl.llama_c.ggml_view_2d(ctx, qkv, n_embd_kv, qkv.ne[1], qkv.nb[1], @intCast((n_embd_q + n_embd_kv) * esz)));
 
-    Qcur = llama.impl.c.ggml_add(ctx, Qcur, buildSwitchedLoraDelta(b, sl.a_q.?, sl.b_q.?, cur, adapter_ids));
-    Kcur = llama.impl.c.ggml_add(ctx, Kcur, buildSwitchedLoraDelta(b, sl.a_k.?, sl.b_k.?, cur, adapter_ids));
-    Vcur = llama.impl.c.ggml_add(ctx, Vcur, buildSwitchedLoraDelta(b, sl.a_v.?, sl.b_v.?, cur, adapter_ids));
+    Qcur = llama.impl.llama_c.ggml_add(ctx, Qcur, buildSwitchedLoraDelta(b, sl.a_q.?, sl.b_q.?, cur, adapter_ids));
+    Kcur = llama.impl.llama_c.ggml_add(ctx, Kcur, buildSwitchedLoraDelta(b, sl.a_k.?, sl.b_k.?, cur, adapter_ids));
+    Vcur = llama.impl.llama_c.ggml_add(ctx, Vcur, buildSwitchedLoraDelta(b, sl.a_v.?, sl.b_v.?, cur, adapter_ids));
 
-    Qcur = llama.impl.c.ggml_reshape_3d(ctx, Qcur, n_embd_head, n_head, b.n_tokens);
-    Kcur = llama.impl.c.ggml_reshape_3d(ctx, Kcur, n_embd_head, n_head_kv, b.n_tokens);
-    Vcur = llama.impl.c.ggml_reshape_3d(ctx, Vcur, n_embd_head, n_head_kv, b.n_tokens);
+    Qcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Qcur, n_embd_head, n_head, b.n_tokens);
+    Kcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Kcur, n_embd_head, n_head_kv, b.n_tokens);
+    Vcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Vcur, n_embd_head, n_head_kv, b.n_tokens);
 
     // `build_rope` leaves a layer without RoPE as it is; the positions are
     // null only when layer 0 has none, as the C++'s `inp_pos` is.
@@ -448,7 +448,7 @@ fn buildAttentionLayer(
 /// Ports `llama_model_granite_switch`'s `graph`'s `build_layer_ffn`
 /// (models/granite-switch.cpp:383 @b1b770d90): Granite's scaled residuals
 /// around a SwiGLU whose three projections are all switched.
-fn buildLayerFfn(b: *const llama.graph.Builder, cur_: *llama.impl.c.ggml_tensor, inpSA: *llama.impl.c.ggml_tensor, adapter_ids: *llama.impl.c.ggml_tensor, model: *const llama.model.Model, il: c_int) *llama.impl.c.ggml_tensor {
+fn buildLayerFfn(b: *const llama.graph.Builder, cur_: *llama.impl.llama_c.ggml_tensor, inpSA: *llama.impl.llama_c.ggml_tensor, adapter_ids: *llama.impl.llama_c.ggml_tensor, model: *const llama.model.Model, il: c_int) *llama.impl.llama_c.ggml_tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const layer = &model.layers[@intCast(il)];
@@ -456,9 +456,9 @@ fn buildLayerFfn(b: *const llama.graph.Builder, cur_: *llama.impl.c.ggml_tensor,
     var cur = cur_;
 
     if (hp.f_residual_scale != 0.0) {
-        cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_residual_scale);
+        cur = llama.impl.llama_c.ggml_scale(ctx, cur, hp.f_residual_scale);
     }
-    const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+    const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
     b.cb(ffn_inp, "ffn_inp", il);
 
     cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -466,15 +466,15 @@ fn buildLayerFfn(b: *const llama.graph.Builder, cur_: *llama.impl.c.ggml_tensor,
 
     var g = buildSwitchedLoraMm(b, layer.ffn_gate.?, sl.a_gate.?, sl.b_gate.?, cur, adapter_ids);
     const u = buildSwitchedLoraMm(b, layer.ffn_up.?, sl.a_up.?, sl.b_up.?, cur, adapter_ids);
-    g = llama.impl.c.ggml_silu(ctx, g);
-    const gu: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul(ctx, g, u);
+    g = llama.impl.llama_c.ggml_silu(ctx, g);
+    const gu: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_mul(ctx, g, u);
     cur = buildSwitchedLoraMm(b, layer.ffn_down.?, sl.a_down.?, sl.b_down.?, gu, adapter_ids);
     b.cb(cur, "ffn_out", il);
 
     if (hp.f_residual_scale != 0.0) {
-        cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_residual_scale);
+        cur = llama.impl.llama_c.ggml_scale(ctx, cur, hp.f_residual_scale);
     }
-    cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+    cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
 
     cur = b.buildCvec(cur, il);
     b.cb(cur, "l_out", il);

@@ -23,14 +23,12 @@
 //! external dependency.
 
 const std = @import("std");
+const llama = @import("llama");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 const builtin = @import("builtin");
-const c = @import("tools_h");
 
-pub const Params = mod.params.Params;
-pub const Example = mod.params.Example;
-pub const ExampleSet = std.EnumSet(Example);
+pub const ExampleSet = std.EnumSet(mod.params.Example);
 
 // -----------------------------------------------------------------------------
 // Exceptions
@@ -101,7 +99,7 @@ pub fn stof(s: [:0]const u8) error{Throw}!f32 {
 }
 
 /// `std::string(s)` for a value the handler keeps.
-pub fn dupe(p: *Params, s: []const u8) ![:0]const u8 {
+pub fn dupe(p: *mod.params.Params, s: []const u8) ![:0]const u8 {
     return p.arena.dupeSentinel(u8, s, 0);
 }
 
@@ -112,11 +110,11 @@ pub fn dupe(p: *Params, s: []const u8) ![:0]const u8 {
 /// `handler_str_str`, `handler_int` and `handler_bool`
 /// (arg.h:34, 35, 36, 37, 38 @b1b770d90).
 pub const Handler = union(enum) {
-    void_: *const fn (*Params) anyerror!void,
-    string: *const fn (*Params, [:0]const u8) anyerror!void,
-    str_str: *const fn (*Params, [:0]const u8, [:0]const u8) anyerror!void,
-    int: *const fn (*Params, c_int) anyerror!void,
-    bool_: *const fn (*Params, bool) anyerror!void,
+    void_: *const fn (*mod.params.Params) anyerror!void,
+    string: *const fn (*mod.params.Params, [:0]const u8) anyerror!void,
+    str_str: *const fn (*mod.params.Params, [:0]const u8, [:0]const u8) anyerror!void,
+    int: *const fn (*mod.params.Params, c_int) anyerror!void,
+    bool_: *const fn (*mod.params.Params, bool) anyerror!void,
 };
 
 /// Ports `common_arg` (arg.h:22 @b1b770d90).
@@ -135,7 +133,7 @@ pub const Arg = struct {
     handler: Handler,
 
     /// Ports `set_examples` (arg.cpp:63 @b1b770d90), a member of `common_arg`.
-    pub fn setExamples(self: Arg, examples: []const Example) Arg {
+    pub fn setExamples(self: Arg, examples: []const mod.params.Example) Arg {
         var r = self;
         r.examples = ExampleSet.empty;
         for (examples) |e| r.examples.insert(e);
@@ -143,7 +141,7 @@ pub const Arg = struct {
     }
 
     /// Ports `set_excludes` (arg.cpp:68 @b1b770d90), a member of `common_arg`.
-    pub fn setExcludes(self: Arg, excludes: []const Example) Arg {
+    pub fn setExcludes(self: Arg, excludes: []const mod.params.Example) Arg {
         var r = self;
         r.excludes = ExampleSet.empty;
         for (excludes) |e| r.excludes.insert(e);
@@ -180,12 +178,12 @@ pub const Arg = struct {
     }
 
     /// Ports `in_example` (arg.cpp:94 @b1b770d90), a member of `common_arg`.
-    pub fn inExample(self: *const Arg, ex: Example) bool {
+    pub fn inExample(self: *const Arg, ex: mod.params.Example) bool {
         return self.examples.contains(ex);
     }
 
     /// Ports `is_exclude` (arg.cpp:98 @b1b770d90), a member of `common_arg`.
-    pub fn isExclude(self: *const Arg, ex: Example) bool {
+    pub fn isExclude(self: *const Arg, ex: mod.params.Example) bool {
         return self.excludes.contains(ex);
     }
 
@@ -348,8 +346,8 @@ fn parseBoolValue(value: []const u8) error{Throw}!bool {
 
 /// Ports `common_params_context` (arg.h:115 @b1b770d90).
 pub const Context = struct {
-    ex: Example,
-    params: *Params,
+    ex: mod.params.Example,
+    params: *mod.params.Params,
     options: std.ArrayList(Arg) = .empty,
     print_usage: ?*const fn (argv: []const [:0]const u8) void = null,
 
@@ -376,7 +374,7 @@ pub const Context = struct {
 
 /// Ports `common_params_parser_init` (arg.cpp:1365 @b1b770d90): the
 /// per-example defaults, then the table.
-pub fn parserInit(params: *Params, ex: Example, print_usage: ?*const fn ([]const [:0]const u8) void) !Context {
+pub fn parserInit(params: *mod.params.Params, ex: mod.params.Example, print_usage: ?*const fn ([]const [:0]const u8) void) !Context {
     // per-example default params
     switch (ex) {
         .completion => params.use_jinja = false, // disable jinja by default
@@ -454,7 +452,7 @@ pub fn postprocessCpuParams(cpuparams: *mod.params.CpuParams, role_model: ?*cons
         if (role_model) |r| {
             cpuparams.* = r.*;
         } else {
-            cpuparams.n_threads = @import("cpu.zig").numMath();
+            cpuparams.n_threads = mod.cpu.numMath();
         }
     }
 
@@ -628,7 +626,7 @@ fn parseEx(argv: []const [:0]const u8, ctx: *Context) !void {
         // note: reads only the first split - sharded drafts need an explicit --spec-type
         if (specTypesIsDefault(params) and params.speculative.draft.mparams.path.len != 0) {
             const z = try a.dupeSentinel(u8, params.speculative.draft.mparams.path, 0);
-            const types_gguf = try @import("speculative.zig").typesFromGguf(a, z);
+            const types_gguf = try mod.speculative.typesFromGguf(a, z);
             if (types_gguf.len != 0) {
                 params.speculative.types.clearRetainingCapacity();
                 try params.speculative.types.appendSlice(a, types_gguf);
@@ -652,7 +650,7 @@ fn parseEx(argv: []const [:0]const u8, ctx: *Context) !void {
     }
 
     if (params.kv_overrides.items.len != 0) {
-        try params.kv_overrides.append(a, std.mem.zeroes(c.llama_model_kv_override));
+        try params.kv_overrides.append(a, std.mem.zeroes(llama.impl.llama_c.llama_model_kv_override));
     }
 
     const mcp_enabled = params.mcp_servers_config.len != 0 or params.mcp_servers_json.len != 0;
@@ -662,7 +660,7 @@ fn parseEx(argv: []const [:0]const u8, ctx: *Context) !void {
     }
 
     // pad tensor_buft_overrides for llama_params_fit:
-    const ntbo = c.llama_max_tensor_buft_overrides();
+    const ntbo = llama.api.llama.llama_max_tensor_buft_overrides();
     while (params.tensor_buft_overrides.items.len < ntbo) {
         try params.tensor_buft_overrides.append(a, .{ .pattern = null, .buft = null });
     }
@@ -695,9 +693,9 @@ pub var verify_jinja_template: ?*const fn (a: std.mem.Allocator, tmpl: []const u
 /// `verify_jinja_template` answers.
 fn verifyChatTemplate(a: std.mem.Allocator, tmpl: []const u8, use_jinja: bool) !bool {
     if (use_jinja) return if (verify_jinja_template) |f| f(a, tmpl) else true;
-    const chat = [_]c.llama_chat_message{.{ .role = "user", .content = "test" }};
+    const chat = [_]llama.impl.llama_c.llama_chat_message{.{ .role = "user", .content = "test" }};
     const t = try a.dupeSentinel(u8, tmpl, 0);
-    const res = c.llama_chat_apply_template(t.ptr, &chat, 1, true, null, 0);
+    const res = llama.api.llama.llama_chat_apply_template(t.ptr, &chat, 1, true, null, 0);
     return res >= 0;
 }
 
@@ -816,7 +814,7 @@ fn printUsage(ctx: *Context) !void {
 ///
 /// Return: false for an invalid argument, having printed why. `--help`
 /// prints and exits 0; any other failure prints and exits 1, as the C does.
-pub fn parse(argv: []const [:0]const u8, params: *Params, ex: Example, print_usage: ?*const fn ([]const [:0]const u8) void) !bool {
+pub fn parse(argv: []const [:0]const u8, params: *mod.params.Params, ex: mod.params.Example, print_usage: ?*const fn ([]const [:0]const u8) void) !bool {
     var ctx = try parserInit(params, ex, print_usage);
     const params_org = params.*; // the example can modify the default params
 
@@ -847,7 +845,7 @@ pub fn parse(argv: []const [:0]const u8, params: *Params, ex: Example, print_usa
 /// Ports `string_parse_kv_override` (common/common.cpp:675 @b1b770d90).
 ///
 /// Return: false, having logged why, for a malformed override.
-pub fn parseKvOverride(data: [:0]const u8, overrides: *std.ArrayList(c.llama_model_kv_override), allocator: std.mem.Allocator) !bool {
+pub fn parseKvOverride(data: [:0]const u8, overrides: *std.ArrayList(llama.impl.llama_c.llama_model_kv_override), allocator: std.mem.Allocator) !bool {
     const func = "string_parse_kv_override";
     const sep_idx = std.mem.indexOfScalar(u8, data, '=') orelse {
         mod.log.comErr(func, "%s: malformed KV override '%s'\n", .{ func, data.ptr });
@@ -857,18 +855,18 @@ pub fn parseKvOverride(data: [:0]const u8, overrides: *std.ArrayList(c.llama_mod
         mod.log.comErr(func, "%s: malformed KV override '%s'\n", .{ func, data.ptr });
         return false;
     }
-    var kvo: c.llama_model_kv_override = std.mem.zeroes(c.llama_model_kv_override);
+    var kvo: llama.impl.llama_c.llama_model_kv_override = std.mem.zeroes(llama.impl.llama_c.llama_model_kv_override);
     @memcpy(kvo.key[0..sep_idx], data[0..sep_idx]);
     kvo.key[sep_idx] = 0;
     const sep = data[sep_idx + 1 ..];
     if (std.mem.startsWith(u8, sep, "int:")) {
-        kvo.tag = c.LLAMA_KV_OVERRIDE_TYPE_INT;
+        kvo.tag = llama.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_INT;
         kvo.unnamed_0.val_i64 = stdlib.num.atol(std.mem.sliceTo(sep[4..], 0));
     } else if (std.mem.startsWith(u8, sep, "float:")) {
-        kvo.tag = c.LLAMA_KV_OVERRIDE_TYPE_FLOAT;
+        kvo.tag = llama.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_FLOAT;
         kvo.unnamed_0.val_f64 = stdlib.num.atof(std.mem.sliceTo(sep[6..], 0));
     } else if (std.mem.startsWith(u8, sep, "bool:")) {
-        kvo.tag = c.LLAMA_KV_OVERRIDE_TYPE_BOOL;
+        kvo.tag = llama.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_BOOL;
         const v = sep[5..];
         if (std.mem.eql(u8, v, "true")) {
             kvo.unnamed_0.val_bool = true;
@@ -879,7 +877,7 @@ pub fn parseKvOverride(data: [:0]const u8, overrides: *std.ArrayList(c.llama_mod
             return false;
         }
     } else if (std.mem.startsWith(u8, sep, "str:")) {
-        kvo.tag = c.LLAMA_KV_OVERRIDE_TYPE_STR;
+        kvo.tag = llama.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_STR;
         const v = sep[4..];
         if (v.len > 127) {
             mod.log.comErr(func, "%s: malformed KV override '%s', value cannot exceed 127 chars\n", .{ func, data.ptr });

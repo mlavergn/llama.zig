@@ -41,7 +41,7 @@ const stdlib = @import("stdlib");
 ///
 /// The two differ only in the element type and which `ggml_vec_set_*` they
 /// call. The `f16` constant is narrowed once, before the loop, as the C does.
-fn fillTyped(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+fn fillTyped(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const value = ggml.impl.getOpParamsF32(dst, 0);
     const cval: T = if (T == f32) value else ggml.cpu.convert.cpuFp32ToFp16(value);
 
@@ -69,12 +69,12 @@ fn fillTyped(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: 
 }
 
 /// Ports `ggml_compute_forward_fill` (ops.cpp:2222 @b1b770d90).
-pub export fn ggml_compute_forward_fill(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_fill(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => fillTyped(f32, params, dst),
-        ggml.impl.c.GGML_TYPE_F16 => fillTyped(ggml.impl.c.ggml_fp16_t, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => fillTyped(f32, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => fillTyped(ggml.impl.ggml_c.ggml_fp16_t, params, dst),
         else => ggml.impl.abort("unsupported type for ggml_compute_forward_fill"),
     }
 }
@@ -87,19 +87,19 @@ pub export fn ggml_compute_forward_fill(params: *const ggml.cpu.defs.ComputePara
 /// The C picks one of four lambdas into a function pointer before the loop;
 /// here the switch is on the row/column comparison itself, which is the same
 /// predicate per element.
-fn triF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+fn triF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     const ttype = ggml.impl.getOpParamsI32(dst, 0);
 
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
 
     const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
     const ir0, const ir1 = ggml.cpu.ops.common.getThreadRange(params, src0);
 
     switch (ttype) {
-        ggml.impl.c.GGML_TRI_TYPE_LOWER, ggml.impl.c.GGML_TRI_TYPE_LOWER_DIAG, ggml.impl.c.GGML_TRI_TYPE_UPPER, ggml.impl.c.GGML_TRI_TYPE_UPPER_DIAG => {},
+        ggml.impl.ggml_c.GGML_TRI_TYPE_LOWER, ggml.impl.ggml_c.GGML_TRI_TYPE_LOWER_DIAG, ggml.impl.ggml_c.GGML_TRI_TYPE_UPPER, ggml.impl.ggml_c.GGML_TRI_TYPE_UPPER_DIAG => {},
         else => ggml.impl.abort("invalid tri type"),
     }
 
@@ -119,9 +119,9 @@ fn triF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_ten
         var j0: i64 = 0;
         while (j0 < l.ne0) : (j0 += 1) {
             const keep = switch (ttype) {
-                ggml.impl.c.GGML_TRI_TYPE_LOWER => j0 < j01,
-                ggml.impl.c.GGML_TRI_TYPE_LOWER_DIAG => j0 <= j01,
-                ggml.impl.c.GGML_TRI_TYPE_UPPER => j0 > j01,
+                ggml.impl.ggml_c.GGML_TRI_TYPE_LOWER => j0 < j01,
+                ggml.impl.ggml_c.GGML_TRI_TYPE_LOWER_DIAG => j0 <= j01,
+                ggml.impl.ggml_c.GGML_TRI_TYPE_UPPER => j0 > j01,
                 else => j0 >= j01,
             };
             const k: usize = @intCast(j0);
@@ -131,11 +131,11 @@ fn triF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_ten
 }
 
 /// Ports `ggml_compute_forward_tri` (ops.cpp:2278 @b1b770d90).
-pub export fn ggml_compute_forward_tri(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_tri(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => triF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => triF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -163,8 +163,8 @@ fn CmpArgsort(comptime ascending: bool) type {
 ///
 /// `std::sort` becomes a stable sort; see the file header for why that is the
 /// right answer to an unstable sort's ties.
-fn argsortF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+fn argsortF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
@@ -173,7 +173,7 @@ fn argsortF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const nr: i64 = @intCast(ggml.impl.c.ggml_nrows(src0));
+    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src0));
 
     const order = ggml.impl.getOpParamsI32(dst, 0);
 
@@ -189,11 +189,11 @@ fn argsortF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml
         for (0..n) |j| dst_data[j] = @intCast(j);
 
         switch (order) {
-            ggml.impl.c.GGML_SORT_ORDER_ASC => {
+            ggml.impl.ggml_c.GGML_SORT_ORDER_ASC => {
                 const Cmp = CmpArgsort(true);
                 std.mem.sort(i32, dst_data[0..n], Cmp{ .data = src_data }, Cmp.lessThan);
             },
-            ggml.impl.c.GGML_SORT_ORDER_DESC => {
+            ggml.impl.ggml_c.GGML_SORT_ORDER_DESC => {
                 const Cmp = CmpArgsort(false);
                 std.mem.sort(i32, dst_data[0..n], Cmp{ .data = src_data }, Cmp.lessThan);
             },
@@ -203,11 +203,11 @@ fn argsortF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml
 }
 
 /// Ports `ggml_compute_forward_argsort` (ops.cpp:8643 @b1b770d90).
-pub export fn ggml_compute_forward_argsort(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_argsort(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => argsortF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => argsortF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -225,8 +225,8 @@ pub export fn ggml_compute_forward_argsort(params: *const ggml.cpu.defs.ComputeP
 ///
 /// The final swap of the first two is the C's, there to make a caller that
 /// relies on the order fail loudly.
-fn topKF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+fn topKF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
@@ -235,7 +235,7 @@ fn topKF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_te
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const nr: i64 = @intCast(ggml.impl.c.ggml_nrows(src0));
+    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src0));
 
     const top_k: usize = @intCast(l.ne0);
     const n: usize = @intCast(l.ne00);
@@ -268,11 +268,11 @@ fn topKF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_te
 }
 
 /// Ports `ggml_compute_forward_top_k` (ops.cpp:8709 @b1b770d90).
-pub export fn ggml_compute_forward_top_k(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_top_k(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => topKF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => topKF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -290,12 +290,12 @@ pub export fn ggml_compute_forward_top_k(params: *const ggml.cpu.defs.ComputePar
 /// `GGML_F32_VEC_FMA(u, v, -1)`, a fused `u + v * -1` — and `v * -1` is exact,
 /// so it is bit-for-bit `u - v`. Both phases are therefore the same
 /// arithmetic, and the split is kept only so the loop reads like the C.
-fn fwhtImpl(comptime S: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+fn fwhtImpl(comptime S: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    ggml.impl.assert(src1.type == (if (S == f32) ggml.impl.c.GGML_TYPE_F32 else ggml.impl.c.GGML_TYPE_F16), "src1->type == (std::is_same_v<src_t, float> ? GGML_TYPE_F32 : GGML_TYPE_F16)");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src1.type == (if (S == f32) ggml.impl.ggml_c.GGML_TYPE_F32 else ggml.impl.ggml_c.GGML_TYPE_F16), "src1->type == (std::is_same_v<src_t, float> ? GGML_TYPE_F32 : GGML_TYPE_F16)");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
 
     const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
@@ -356,12 +356,12 @@ inline fn butterfly(row: [*]f32, n: usize, len: usize) void {
 }
 
 /// Ports `ggml_compute_forward_fwht` (ops.cpp:12297 @b1b770d90).
-pub export fn ggml_compute_forward_fwht(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+pub fn ggml_compute_forward_fwht(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
     switch (src1.type) {
-        ggml.impl.c.GGML_TYPE_F32 => fwhtImpl(f32, params, dst),
-        ggml.impl.c.GGML_TYPE_F16 => fwhtImpl(ggml.impl.c.ggml_fp16_t, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => fwhtImpl(f32, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => fwhtImpl(ggml.impl.ggml_c.ggml_fp16_t, params, dst),
         else => ggml.impl.abort("fatal error - fwht supports F32 and F16 input"),
     }
 }
@@ -374,26 +374,26 @@ pub export fn ggml_compute_forward_fwht(params: *const ggml.cpu.defs.ComputePara
 /// each optional: without `score` every pick is live, without `blocks` a pick
 /// is a cell, and `mask` broadcasts over the rows of `top_k`. A pick or cell
 /// out of range is skipped, not an error.
-pub export fn ggml_compute_forward_top_k_mask(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const mask = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const top_k = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const score: ?*const ggml.impl.c.ggml_tensor = dst.src[2];
-    const blocks: ?*const ggml.impl.c.ggml_tensor = dst.src[3];
-    const extra: ?*const ggml.impl.c.ggml_tensor = dst.src[4];
+pub fn ggml_compute_forward_top_k_mask(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const mask = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const top_k = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const score: ?*const ggml.impl.ggml_c.ggml_tensor = dst.src[2];
+    const blocks: ?*const ggml.impl.ggml_c.ggml_tensor = dst.src[3];
+    const extra: ?*const ggml.impl.ggml_c.ggml_tensor = dst.src[4];
 
     ggml.impl.assert(dst.type == mask.type, "dst->type == mask->type");
-    ggml.impl.assert(dst.nb[0] == ggml.impl.c.ggml_type_size(dst.type), "dst->nb[0] == ggml_type_size(dst->type)");
+    ggml.impl.assert(dst.nb[0] == ggml.impl.ggml_c.ggml_type_size(dst.type), "dst->nb[0] == ggml_type_size(dst->type)");
 
     const n_kv = mask.ne[0];
     const ne1 = dst.ne[1];
     const ne2 = dst.ne[2];
-    const n_rows: i64 = @intCast(ggml.impl.c.ggml_nrows(dst));
+    const n_rows: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(dst));
     const n_top = top_k.ne[0];
     const n_blk: i64 = if (blocks) |bl| bl.ne[0] else 1;
     const n_pick: i64 = if (blocks) |bl| bl.ne[1] else if (score) |sc| sc.ne[0] else n_kv;
     const n_extra: i64 = if (extra) |ex| ex.ne[0] else 0;
 
-    const ts = ggml.impl.c.ggml_type_size(dst.type);
+    const ts = ggml.impl.ggml_c.ggml_type_size(dst.type);
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
@@ -427,9 +427,9 @@ pub export fn ggml_compute_forward_top_k_mask(params: *const ggml.cpu.defs.Compu
             ggml.cpu.ops.common.byteOff(@rem(j2, mask.ne[2]), mask.nb[2]) + ggml.cpu.ops.common.byteOff(@rem(j3, mask.ne[3]), mask.nb[3]);
         const dst_row = dst_data + ggml.cpu.ops.common.byteOff(j1, dst.nb[1]) + ggml.cpu.ops.common.byteOff(j2, dst.nb[2]) + ggml.cpu.ops.common.byteOff(j3, dst.nb[3]);
 
-        if (dst.type == ggml.impl.c.GGML_TYPE_F16) {
+        if (dst.type == ggml.impl.ggml_c.GGML_TYPE_F16) {
             const ninf = ggml.cpu.convert.cpuFp32ToFp16(-std.math.inf(f32));
-            const row: [*]align(1) ggml.impl.c.ggml_fp16_t = @ptrCast(dst_row);
+            const row: [*]align(1) ggml.impl.ggml_c.ggml_fp16_t = @ptrCast(dst_row);
             @memset(row[0..@intCast(n_kv)], ninf);
         } else {
             const row: [*]align(1) f32 = @ptrCast(dst_row);

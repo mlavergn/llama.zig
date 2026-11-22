@@ -11,10 +11,12 @@
 //! Usage: server_task_port <records> <transcript> <text-model> <mmproj> <vocab>...
 
 const std = @import("std");
+const mtmd = @import("mtmd");
+const llama = @import("llama");
 const json = @import("json");
-const chat = @import("common_chat");
-const tools = @import("tools_common");
-const sd = @import("server_data");
+const common_chat = @import("common_chat");
+const tools_common = @import("tools_common");
+const server_data = @import("server_data");
 
 comptime {
     // libllama and libmtmd, compiled in: their exports are what `c.llama_*`
@@ -22,18 +24,6 @@ comptime {
     _ = @import("llama").lib;
     _ = @import("mtmd").lib;
 }
-
-const c = tools.c;
-const log = tools.log;
-const Value = json.Value;
-const common = sd.common;
-const tokens = sd.tokens;
-const oaicompat = sd.oaicompat;
-const task = sd.task;
-const result = sd.result;
-const schema = sd.schema;
-const ServerTokens = tokens.ServerTokens;
-const Token = common.Token;
 
 var gpa_state: std.heap.DebugAllocator(.{ .thread_safe = false, .stack_trace_frames = 10 }) = .init;
 const gpa = gpa_state.allocator();
@@ -65,9 +55,9 @@ fn str(label: []const u8, s: []const u8) !void {
 /// The C++ driver's `guarded`: a throw is printed as its class and text.
 fn guarded(r: anyerror!void) !void {
     r catch |e| switch (e) {
-        error.JsonError => try str("json_error", try oneLine(common.what(e))),
-        error.InvalidArgument => try str("invalid_argument", try oneLine(common.what(e))),
-        error.RuntimeError => try str("runtime_error", try oneLine(common.what(e))),
+        error.JsonError => try str("json_error", try oneLine(common_chat.exception.what(e))),
+        error.InvalidArgument => try str("invalid_argument", try oneLine(common_chat.exception.what(e))),
+        error.RuntimeError => try str("runtime_error", try oneLine(common_chat.exception.what(e))),
         else => return e,
     };
 }
@@ -90,7 +80,7 @@ fn fnv(p: []const u8) u64 {
     return h;
 }
 
-fn toksStr(t: []const Token) ![]u8 {
+fn toksStr(t: []const llama.impl.llama_c.llama_token) ![]u8 {
     var s: std.ArrayList(u8) = .empty;
     try s.append(ra(), '[');
     for (t, 0..) |x, i| {
@@ -101,11 +91,11 @@ fn toksStr(t: []const Token) ![]u8 {
     return s.items;
 }
 
-fn dumpV(v: *const Value) ![]u8 {
+fn dumpV(v: *const json.Value) ![]u8 {
     return json.dump(ra(), v, -1);
 }
 
-fn dumpOwned(v: Value) ![]u8 {
+fn dumpOwned(v: json.Value) ![]u8 {
     var x = v;
     defer x.deinit(gpa);
     return json.dump(ra(), &x, -1);
@@ -118,41 +108,41 @@ fn unhex(hex: []const u8) ![]u8 {
 }
 
 // the loaded models
-var vocab_models: std.ArrayList(*c.llama_model) = .empty;
-var text_model: ?*c.llama_model = null;
-var text_ctx: ?*c.llama_context = null;
-var mctx: ?*c.mtmd_context = null;
-var params_base: tools.params.Params = undefined;
+var vocab_models: std.ArrayList(*llama.impl.llama_c.llama_model) = .empty;
+var text_model: ?*llama.impl.llama_c.llama_model = null;
+var text_ctx: ?*llama.impl.llama_c.llama_context = null;
+var mctx: ?*mtmd.mtmd.Context = null;
+var params_base: tools_common.params.Params = undefined;
 var base_arena: std.heap.ArenaAllocator = undefined;
-var init_opt: c.mtmd_helper_init_opt = undefined;
+var init_opt: mtmd.helper.InitOpt = undefined;
 
-fn vocabAt(j: *const Value) !?*const c.llama_vocab {
+fn vocabAt(j: *const json.Value) !?*const llama.impl.llama_c.llama_vocab {
     const i = try j.value("v", usize, 0);
     if (i >= vocab_models.items.len) return error.JsonError;
-    return c.llama_model_get_vocab(vocab_models.items[i]);
+    return llama.api.model.llama_model_get_vocab(vocab_models.items[i]);
 }
 
-fn eogBias(vocab: ?*const c.llama_vocab) ![]c.llama_logit_bias {
-    var res: std.ArrayList(c.llama_logit_bias) = .empty;
-    const n = c.llama_vocab_n_tokens(vocab);
+fn eogBias(vocab: ?*const llama.impl.llama_c.llama_vocab) ![]llama.impl.llama_c.llama_logit_bias {
+    var res: std.ArrayList(llama.impl.llama_c.llama_logit_bias) = .empty;
+    const n = llama.api.vocab.llama_vocab_n_tokens(vocab);
     var i: c_int = 0;
     while (i < n) : (i += 1) {
-        if (c.llama_vocab_is_eog(vocab, i)) {
+        if (llama.api.vocab.llama_vocab_is_eog(vocab, i)) {
             try res.append(ra(), .{ .token = i, .bias = -std.math.inf(f32) });
         }
     }
     return res.items;
 }
 
-fn paramsExtra(p: *const task.TaskParams) !Value {
+fn paramsExtra(p: *const server_data.task.TaskParams) !json.Value {
     const a = ra();
-    var lists = common.Obj.init(a);
+    var lists = server_data.common.Obj.init(a);
     try lists.put("reasoning_budget_start", p.sampling.reasoning_budget_start.items);
-    var ends = Value.emptyArray();
-    for (p.sampling.reasoning_budget_end.items) |e| try ends.pushBack(a, try common.from(a, e.items));
+    var ends = json.Value.emptyArray();
+    for (p.sampling.reasoning_budget_end.items) |e| try ends.pushBack(a, try server_data.common.from(a, e.items));
     try lists.put("reasoning_budget_end", ends);
     try lists.put("reasoning_budget_forced", p.sampling.reasoning_budget_forced.items);
-    var o = common.Obj.init(a);
+    var o = server_data.common.Obj.init(a);
     try o.put("cache_prompt", p.cache_prompt);
     try o.put("include_usage", p.include_usage);
     try o.put("return_tokens", p.return_tokens);
@@ -176,18 +166,18 @@ fn paramsExtra(p: *const task.TaskParams) !Value {
     return o.done();
 }
 
-fn evalParams(a: std.mem.Allocator, j: *const Value) !task.TaskParams {
+fn evalParams(a: std.mem.Allocator, j: *const json.Value) !server_data.task.TaskParams {
     const vocab = try vocabAt(j);
     const eog = try eogBias(vocab);
-    return schema.evalLlamaCmplSchema(a, vocab, &params_base, if (try j.value("eog", bool, true)) eog else &.{}, try j.at("data"));
+    return server_data.schema.evalLlamaCmplSchema(a, vocab, &params_base, if (try j.value("eog", bool, true)) eog else &.{}, try j.at("data"));
 }
 
 // ---------------------------------------------------------------------------
 // results
 
-var states: std.AutoHashMapUnmanaged(i64, *task.TaskResultState) = .empty;
+var states: std.AutoHashMapUnmanaged(i64, *server_data.task.TaskResultState) = .empty;
 
-fn fillStats(s: *common.SlotStats, j: *const Value) !void {
+fn fillStats(s: *server_data.common.SlotStats, j: *const json.Value) !void {
     s.n_prompt_cached = try j.value("cached", u64, 0);
     s.n_prompt_processed = try j.value("processed", u64, 0);
     s.n_gen = try j.value("gen", u64, 0);
@@ -198,24 +188,24 @@ fn fillStats(s: *common.SlotStats, j: *const Value) !void {
     s.t_gen_last = try j.value("t_gen", i64, 0);
 }
 
-fn member(a: std.mem.Allocator, j: *const Value, key: []const u8, def: Value) !Value {
+fn member(a: std.mem.Allocator, j: *const json.Value, key: []const u8, def: json.Value) !json.Value {
     return if (j.contains(key)) (try j.at(key)).clone(a) else def;
 }
 
-fn probsOf(a: std.mem.Allocator, j: *const Value) ![]task.CompletionTokenOutput {
-    var res: std.ArrayList(task.CompletionTokenOutput) = .empty;
+fn probsOf(a: std.mem.Allocator, j: *const json.Value) ![]server_data.task.CompletionTokenOutput {
+    var res: std.ArrayList(server_data.task.CompletionTokenOutput) = .empty;
     var it = @constCast(j).items();
     while (it.next()) |e| {
         const p = e.value;
-        var o: task.CompletionTokenOutput = .{};
-        o.tok = try p.value("tok", Token, 0);
+        var o: server_data.task.CompletionTokenOutput = .{};
+        o.tok = try p.value("tok", llama.impl.llama_c.llama_token, 0);
         o.prob = try p.value("prob", f32, 0.0);
         o.text_to_send = try a.dupe(u8, try p.value("text", []const u8, ""));
-        var ps: std.ArrayList(task.CompletionTokenOutput.ProbInfo) = .empty;
-        var qv = try member(a, p, "probs", Value.emptyArray());
+        var ps: std.ArrayList(server_data.task.CompletionTokenOutput.ProbInfo) = .empty;
+        var qv = try member(a, p, "probs", json.Value.emptyArray());
         var qit = qv.items();
         while (qit.next()) |q| {
-            try ps.append(a, .{ .tok = try q.value.value("tok", Token, 0), .txt = try a.dupe(u8, try q.value.value("txt", []const u8, "")), .prob = try q.value.value("prob", f32, 0.0) });
+            try ps.append(a, .{ .tok = try q.value.value("tok", llama.impl.llama_c.llama_token, 0), .txt = try a.dupe(u8, try q.value.value("txt", []const u8, "")), .prob = try q.value.value("prob", f32, 0.0) });
         }
         o.probs = ps.items;
         try res.append(a, o);
@@ -223,18 +213,18 @@ fn probsOf(a: std.mem.Allocator, j: *const Value) ![]task.CompletionTokenOutput 
     return res.items;
 }
 
-fn tokensOf(a: std.mem.Allocator, j: *const Value, key: []const u8) ![]const Token {
-    return if (j.contains(key)) (try j.at(key)).getSlice(a, Token) else &.{};
+fn tokensOf(a: std.mem.Allocator, j: *const json.Value, key: []const u8) ![]const llama.impl.llama_c.llama_token {
+    return if (j.contains(key)) (try j.at(key)).getSlice(a, llama.impl.llama_c.llama_token) else &.{};
 }
 
-fn stringsOf(a: std.mem.Allocator, j: *const Value, key: []const u8) ![]const []const u8 {
+fn stringsOf(a: std.mem.Allocator, j: *const json.Value, key: []const u8) ![]const []const u8 {
     if (!j.contains(key)) return &.{};
     const xs = try (try j.at(key)).getSlice(a, []const u8);
     for (xs) |*x| x.* = try a.dupe(u8, x.*);
     return xs;
 }
 
-fn bucket(b: *common.Metrics.Bucket, f: *const Value, k: []const u8) !void {
+fn bucket(b: *server_data.common.Metrics.Bucket, f: *const json.Value, k: []const u8) !void {
     if (!f.contains(k)) return;
     const bj = try f.at(k);
     b.count = try (try bj.atIndex(0)).get(u64);
@@ -244,48 +234,48 @@ fn bucket(b: *common.Metrics.Bucket, f: *const Value, k: []const u8) !void {
 
 /// A result's generated text: plain, or tokenized over the record's
 /// vocabulary (`common_chat_input_tokenize`) when it says "tokenize".
-fn contentOf(a: std.mem.Allocator, j: *const Value, f: *const Value) !chat.input.Input {
+fn contentOf(a: std.mem.Allocator, j: *const json.Value, f: *const json.Value) !common_chat.input.Input {
     const text = try f.value("content", []const u8, "");
     if (try f.value("tokenize", bool, false)) {
-        const in = try chat.input.tokenize(a, (try vocabAt(j)).?, text);
+        const in = try common_chat.input.tokenize(a, (try vocabAt(j)).?, text);
         var toks: std.ArrayList(u8) = .empty;
         try toks.appendSlice(ra(), "ctoks ");
         for (in.tokens.items) |t| try toks.print(ra(), "{d} ", .{t});
         try line(toks.items);
         return in;
     }
-    return chat.input.Input.fromText(a, text);
+    return common_chat.input.Input.fromText(a, text);
 }
 
 /// What a chat session holds, and what it applies to a task's sampling,
 /// as `session_json` writes it.
-fn sessionJson(s: *const chat.session.Session) !Value {
+fn sessionJson(s: *const common_chat.session.Session) !json.Value {
     const a = ra();
-    var parts = Value.emptyArray();
+    var parts = json.Value.emptyArray();
     for (s.prompt().parts.items) |p| {
-        var pair = Value.emptyArray();
-        try pair.pushBack(a, try Value.initString(a, p.text));
+        var pair = json.Value.emptyArray();
+        try pair.pushBack(a, try json.Value.initString(a, p.text));
         try pair.pushBack(a, .{ .boolean = p.is_input });
         try parts.pushBack(a, pair);
     }
-    var sp: tools.params.Sampling = .{};
+    var sp: tools_common.params.Sampling = .{};
     try s.applySampling(a, &sp);
-    var triggers = Value.emptyArray();
+    var triggers = json.Value.emptyArray();
     for (sp.grammar_triggers.items) |t| {
-        var tr = Value.emptyArray();
-        try tr.pushBack(a, try Value.from(a, @as(c_int, @backingInt(t.type))));
-        try tr.pushBack(a, try Value.initString(a, t.value));
-        try tr.pushBack(a, try Value.from(a, t.token));
+        var tr = json.Value.emptyArray();
+        try tr.pushBack(a, try json.Value.from(a, @as(c_int, @backingInt(t.type))));
+        try tr.pushBack(a, try json.Value.initString(a, t.value));
+        try tr.pushBack(a, try json.Value.from(a, t.token));
         try triggers.pushBack(a, tr);
     }
-    var msg = Value.emptyArray();
-    try msg.pushBack(a, try Value.initString(a, s.msg().role));
-    try msg.pushBack(a, try Value.initString(a, s.msg().content));
-    try msg.pushBack(a, try Value.initString(a, s.msg().reasoning_content));
-    var g = Value.emptyArray();
-    try g.pushBack(a, try Value.from(a, @as(c_int, @backingInt(sp.grammar_type))));
-    try g.pushBack(a, try Value.initString(a, sp.grammar));
-    var o = common.Obj.init(a);
+    var msg = json.Value.emptyArray();
+    try msg.pushBack(a, try json.Value.initString(a, s.msg().role));
+    try msg.pushBack(a, try json.Value.initString(a, s.msg().content));
+    try msg.pushBack(a, try json.Value.initString(a, s.msg().reasoning_content));
+    var g = json.Value.emptyArray();
+    try g.pushBack(a, try json.Value.from(a, @as(c_int, @backingInt(sp.grammar_type))));
+    try g.pushBack(a, try json.Value.initString(a, sp.grammar));
+    var o = server_data.common.Obj.init(a);
     try o.put("has_template", s.hasTemplate());
     try o.put("format", s.format().name());
     try o.put("parts", parts);
@@ -304,15 +294,15 @@ fn sessionJson(s: *const chat.session.Session) !Value {
     return o.done();
 }
 
-fn runResult(j: *const Value) !void {
+fn runResult(j: *const json.Value) !void {
     const kind = try (try j.at("kind")).get([]const u8);
-    var fv = try member(ra(), j, "f", Value.emptyObject());
+    var fv = try member(ra(), j, "f", json.Value.emptyObject());
     const f = &fv;
-    var holder: ?*result.Result = null;
+    var holder: ?*server_data.result.Result = null;
     defer if (holder) |x| x.destroy(gpa);
-    var r: *result.Result = undefined;
+    var r: *server_data.result.Result = undefined;
     if (std.mem.eql(u8, kind, "final")) {
-        r = try result.Result.create(gpa, .cmpl_final);
+        r = try server_data.result.Result.create(gpa, .cmpl_final);
         holder = r;
         const a = r.alloc();
         const x = &r.kind.cmpl_final;
@@ -333,13 +323,13 @@ fn runResult(j: *const Value) !void {
         x.post_sampling_probs = try f.value("post_sampling_probs", bool, false);
         if (f.contains("probs")) x.probs_output = try probsOf(a, try f.at("probs"));
         x.response_fields = try stringsOf(a, f, "response_fields");
-        x.generation_params = if (j.contains("gp")) try evalParams(a, try j.at("gp")) else try task.TaskParams.init(a);
+        x.generation_params = if (j.contains("gp")) try evalParams(a, try j.at("gp")) else try server_data.task.TaskParams.init(a);
         x.verbose = try f.value("verbose", bool, false);
         x.res_type = @fromBackingInt(@intCast(try f.value("res_type", c_int, 0)));
         x.oaicompat_model = try a.dupe(u8, try f.value("model", []const u8, ""));
         x.oaicompat_cmpl_id = try a.dupe(u8, try f.value("cmpl_id", []const u8, ""));
     } else if (std.mem.eql(u8, kind, "partial")) {
-        r = try result.Result.create(gpa, .cmpl_partial);
+        r = try server_data.result.Result.create(gpa, .cmpl_partial);
         holder = r;
         const a = r.alloc();
         const x = &r.kind.cmpl_partial;
@@ -368,7 +358,7 @@ fn runResult(j: *const Value) !void {
         x.oaicompat_model = try a.dupe(u8, try f.value("model", []const u8, ""));
         x.oaicompat_cmpl_id = try a.dupe(u8, try f.value("cmpl_id", []const u8, ""));
     } else if (std.mem.eql(u8, kind, "embd")) {
-        r = try result.Result.create(gpa, .embd);
+        r = try server_data.result.Result.create(gpa, .embd);
         holder = r;
         const a = r.alloc();
         const x = &r.kind.embd;
@@ -381,28 +371,28 @@ fn runResult(j: *const Value) !void {
         x.n_tokens = try f.value("n_tokens", i32, 0);
         x.res_type = @fromBackingInt(@intCast(try f.value("res_type", c_int, 0)));
     } else if (std.mem.eql(u8, kind, "realtime")) {
-        r = try result.Result.create(gpa, .realtime);
+        r = try server_data.result.Result.create(gpa, .realtime);
         holder = r;
         const a = r.alloc();
-        r.kind.realtime.content = try chat.input.Input.fromText(a, try f.value("text", []const u8, ""));
+        r.kind.realtime.content = try common_chat.input.Input.fromText(a, try f.value("text", []const u8, ""));
         r.kind.realtime.audio = if (f.contains("audio")) try (try f.at("audio")).getSlice(a, f32) else &.{};
         r.kind.realtime.response_done = try f.value("response_done", bool, false);
         r.kind.realtime.cancelled = try f.value("cancelled", bool, false);
         r.kind.realtime.n_decoded = try f.value("n_decoded", i32, 0);
     } else if (std.mem.eql(u8, kind, "tts")) {
-        r = try result.Result.create(gpa, .tts);
+        r = try server_data.result.Result.create(gpa, .tts);
         holder = r;
         const a = r.alloc();
         r.kind.tts.audio = try a.dupe(u8, try f.value("audio", []const u8, ""));
         r.kind.tts.sample_rate = try f.value("sample_rate", i32, 0);
         r.kind.tts.final = try f.value("final", bool, false);
     } else if (std.mem.eql(u8, kind, "rerank")) {
-        r = try result.Result.create(gpa, .rerank);
+        r = try server_data.result.Result.create(gpa, .rerank);
         holder = r;
         if (f.contains("score")) r.kind.rerank.score = try f.value("score", f32, 0.0);
         r.kind.rerank.n_tokens = try f.value("n_tokens", i32, 0);
     } else if (std.mem.eql(u8, kind, "error")) {
-        r = try result.Result.create(gpa, .err);
+        r = try server_data.result.Result.create(gpa, .err);
         holder = r;
         const a = r.alloc();
         r.kind.err.err_type = @fromBackingInt(@intCast(try f.value("type", c_int, 2)));
@@ -410,7 +400,7 @@ fn runResult(j: *const Value) !void {
         r.kind.err.n_prompt_tokens = try f.value("n_prompt_tokens", i32, 0);
         r.kind.err.n_ctx = try f.value("n_ctx", i32, 0);
     } else if (std.mem.eql(u8, kind, "metrics")) {
-        r = try result.Result.create(gpa, .metrics);
+        r = try server_data.result.Result.create(gpa, .metrics);
         holder = r;
         const a = r.alloc();
         const x = &r.kind.metrics;
@@ -434,11 +424,11 @@ fn runResult(j: *const Value) !void {
         }
         try str("metrics", try r.toMetrics(ra()));
     } else if (std.mem.eql(u8, kind, "slots")) {
-        r = try result.Result.create(gpa, .slots);
+        r = try server_data.result.Result.create(gpa, .slots);
         holder = r;
-        r.kind.slots.slots_data = try member(r.alloc(), f, "data", Value.emptyArray());
+        r.kind.slots.slots_data = try member(r.alloc(), f, "data", json.Value.emptyArray());
     } else if (std.mem.eql(u8, kind, "save")) {
-        r = try result.Result.create(gpa, .slot_save_load);
+        r = try server_data.result.Result.create(gpa, .slot_save_load);
         holder = r;
         const x = &r.kind.slot_save_load;
         x.filename = try r.alloc().dupe(u8, try f.value("filename", []const u8, ""));
@@ -447,19 +437,19 @@ fn runResult(j: *const Value) !void {
         x.n_bytes = try f.value("n_bytes", usize, 0);
         x.t_ms = try f.value("t_ms", f64, 0.0);
     } else if (std.mem.eql(u8, kind, "erase")) {
-        r = try result.Result.create(gpa, .slot_erase);
+        r = try server_data.result.Result.create(gpa, .slot_erase);
         holder = r;
         r.kind.slot_erase.n_erased = try f.value("n_erased", usize, 0);
     } else if (std.mem.eql(u8, kind, "control")) {
-        r = try result.Result.create(gpa, .control);
+        r = try server_data.result.Result.create(gpa, .control);
         holder = r;
         r.kind.control.success = try f.value("success", bool, false);
         r.kind.control.message = try r.alloc().dupe(u8, try f.value("message", []const u8, ""));
     } else if (std.mem.eql(u8, kind, "get_lora")) {
-        r = try result.Result.create(gpa, .get_lora);
+        r = try server_data.result.Result.create(gpa, .get_lora);
         holder = r;
         const a = r.alloc();
-        var ls: std.ArrayList(result.GetLora.Lora) = .empty;
+        var ls: std.ArrayList(server_data.result.GetLora.Lora) = .empty;
         if (f.contains("loras")) {
             var it = (try f.at("loras")).items();
             while (it.next()) |e| {
@@ -479,10 +469,10 @@ fn runResult(j: *const Value) !void {
         }
         r.kind.get_lora.loras = ls.items;
     } else if (std.mem.eql(u8, kind, "apply_lora")) {
-        r = try result.Result.create(gpa, .apply_lora);
+        r = try server_data.result.Result.create(gpa, .apply_lora);
         holder = r;
     } else if (std.mem.eql(u8, kind, "router")) {
-        r = try result.Result.create(gpa, .router);
+        r = try server_data.result.Result.create(gpa, .router);
         holder = r;
         r.kind.router.data = try member(r.alloc(), f, "data", .null);
         const copy = try r.clone(gpa);
@@ -501,8 +491,8 @@ fn runResult(j: *const Value) !void {
         // continuation's prefill, and may throw) is missing: std::map::at
         // throws, once inside the reference's update guard and once outside
         const s = states.get(st) orelse {
-            try guarded(common.throw(error.RuntimeError, "map::at:  key not found", .{}));
-            return common.throw(error.RuntimeError, "map::at:  key not found", .{});
+            try guarded(common_chat.exception.throw(error.RuntimeError, "map::at:  key not found", .{}));
+            return common_chat.exception.throw(error.RuntimeError, "map::at:  key not found", .{});
         };
         try guarded(r.update(s));
         try str("state.content", s.chat_msg.content);
@@ -511,33 +501,33 @@ fn runResult(j: *const Value) !void {
     try guarded(showResultJson(r));
 }
 
-fn showResultJson(r: *result.Result) !void {
+fn showResultJson(r: *server_data.result.Result) !void {
     var v = try r.toJson(gpa);
     defer v.deinit(gpa);
     try str("json", try dumpV(&v));
-    try str("sse_oai", try common.formatOaiSse(ra(), &v));
-    try str("sse_anthropic", try common.formatAnthropicSse(ra(), &v));
+    try str("sse_oai", try server_data.common.formatOaiSse(ra(), &v));
+    try str("sse_anthropic", try server_data.common.formatAnthropicSse(ra(), &v));
     try guarded(sseResp(&v));
 }
 
-fn sseResp(v: *const Value) !void {
-    try str("sse_resp", try common.formatOaiRespSse(ra(), v));
+fn sseResp(v: *const json.Value) !void {
+    try str("sse_resp", try server_data.common.formatOaiRespSse(ra(), v));
 }
 
 // ---------------------------------------------------------------------------
 // server_tokens
 
-fn showTokens(label: []const u8, t: *const ServerTokens) !void {
+fn showTokens(label: []const u8, t: *const server_data.tokens.ServerTokens) !void {
     const s = try t.str(gpa);
     defer gpa.free(s);
     try str(label, s);
 }
 
-fn delimTok(vocab: ?*const c.llama_vocab, a: std.mem.Allocator, text: []const u8) anyerror!std.ArrayList(i32) {
-    return .fromOwnedSlice(try common.tokenize(a, vocab, text, false, true));
+fn delimTok(vocab: ?*const llama.impl.llama_c.llama_vocab, a: std.mem.Allocator, text: []const u8) anyerror!std.ArrayList(i32) {
+    return .fromOwnedSlice(try server_data.common.tokenize(a, vocab, text, false, true));
 }
 
-fn tokensOp(a: *ServerTokens, op: *Value) !void {
+fn tokensOp(a: *server_data.tokens.ServerTokens, op: *json.Value) !void {
     const o = try (try op.atIndex(0)).get([]const u8);
     if (std.mem.eql(u8, o, "pos_next")) {
         // the arguments are clamped to the size: past it is GGML_ASSERT
@@ -560,7 +550,7 @@ fn tokensOp(a: *ServerTokens, op: *Value) !void {
         // only tokens of the text model's vocabulary: libllama throws out_of_range past it
         const tt = try a.getTextTokens(ra());
         var ok = true;
-        for (tt) |t| ok = ok and t >= 0 and t < c.llama_vocab_n_tokens(c.llama_model_get_vocab(text_model));
+        for (tt) |t| ok = ok and t >= 0 and t < llama.api.vocab.llama_vocab_n_tokens(llama.api.model.llama_model_get_vocab(text_model));
         if (!ok) return line("detok skipped");
         const s = try a.detokenize(gpa, text_ctx, try (try op.atIndex(1)).get(bool));
         defer gpa.free(s);
@@ -569,21 +559,21 @@ fn tokensOp(a: *ServerTokens, op: *Value) !void {
         const s = try a.serialize(gpa);
         defer gpa.free(s);
         try linef("serialized {d} {d}", .{ s.len, fnv(s) });
-        const packed_toks = try ra().alloc(Token, s.len / 4);
+        const packed_toks = try ra().alloc(llama.impl.llama_c.llama_token, s.len / 4);
         @memcpy(std.mem.sliceAsBytes(packed_toks), s);
         try guarded(restored("restored", packed_toks, true));
         try guarded(restored("restored_nomtmd", packed_toks, false));
         if (op.size() > 1) {
             // a corrupted copy: truncated to n tokens, one token overwritten
-            var bad = try ra().dupe(Token, packed_toks);
+            var bad = try ra().dupe(llama.impl.llama_c.llama_token, packed_toks);
             const n = try (try op.atIndex(1)).get(usize);
             if (n < bad.len) bad = bad[0..n] else if (n > bad.len) {
-                const grown = try ra().alloc(Token, n);
+                const grown = try ra().alloc(llama.impl.llama_c.llama_token, n);
                 @memset(grown, 0);
                 @memcpy(grown[0..bad.len], bad);
                 bad = grown;
             }
-            if (op.size() > 3 and try (try op.atIndex(2)).get(usize) < bad.len) bad[try (try op.atIndex(2)).get(usize)] = try (try op.atIndex(3)).get(Token);
+            if (op.size() > 3 and try (try op.atIndex(2)).get(usize) < bad.len) bad[try (try op.atIndex(2)).get(usize)] = try (try op.atIndex(3)).get(llama.impl.llama_c.llama_token);
             try guarded(restored("restored_bad", bad, a.has_mtmd));
         }
     } else if (std.mem.eql(u8, o, "clone")) {
@@ -591,8 +581,8 @@ fn tokensOp(a: *ServerTokens, op: *Value) !void {
         defer b.deinit();
         try showTokens("clone", &b);
     } else if (std.mem.eql(u8, o, "prefix")) {
-        const other = try (try op.atIndex(1)).getSlice(ra(), Token);
-        var b = try ServerTokens.fromTokens(gpa, other, a.has_mtmd);
+        const other = try (try op.atIndex(1)).getSlice(ra(), llama.impl.llama_c.llama_token);
+        var b = try server_data.tokens.ServerTokens.fromTokens(gpa, other, a.has_mtmd);
         defer b.deinit();
         try linef("prefix {d}", .{try a.getCommonPrefix(&b)});
     } else if (std.mem.eql(u8, o, "prefix_self")) {
@@ -605,19 +595,19 @@ fn tokensOp(a: *ServerTokens, op: *Value) !void {
         var b = try a.clone();
         defer b.deinit();
         try b.keepFirst(@min(try (try op.atIndex(1)).get(usize), b.size()));
-        try b.pushBackToken(try (try op.atIndex(2)).get(Token));
+        try b.pushBackToken(try (try op.atIndex(2)).get(llama.impl.llama_c.llama_token));
         try linef("prefix_edit {d} {d}", .{ try a.getCommonPrefix(&b), try b.getCommonPrefix(a) });
     } else if (std.mem.eql(u8, o, "next_media")) {
         const res = a.findNextMediaChunk(try (try op.atIndex(1)).get(usize));
         try linef("next_media {d} {d}", .{ @intFromBool(res != null), if (res) |m| m.idx else 0 });
     } else if (std.mem.eql(u8, o, "spans")) {
-        var d: chat.MsgDelimiters = .{};
+        var d: common_chat.MsgDelimiters = .{};
         defer d.deinit(gpa);
         var it = (try op.atIndex(1)).items();
         while (it.next()) |e| {
-            try d.add(gpa, chat.Role.fromString(try (try e.value.atIndex(0)).get([]const u8)), try (try e.value.atIndex(1)).get([]const u8));
+            try d.add(gpa, common_chat.Role.fromString(try (try e.value.atIndex(0)).get([]const u8)), try (try e.value.atIndex(1)).get([]const u8));
         }
-        try d.tokenize(gpa, c.llama_model_get_vocab(text_model), delimTok);
+        try d.tokenize(gpa, llama.api.model.llama_model_get_vocab(text_model), delimTok);
         var spans = try a.findMessageSpans(gpa, &d);
         defer spans.deinit(gpa);
         var s: std.ArrayList(u8) = .empty;
@@ -634,35 +624,35 @@ fn tokensOp(a: *ServerTokens, op: *Value) !void {
     } else if (std.mem.eql(u8, o, "push_token")) {
         var b = try a.clone();
         defer b.deinit();
-        try b.pushBackToken(try (try op.atIndex(1)).get(Token));
+        try b.pushBackToken(try (try op.atIndex(1)).get(llama.impl.llama_c.llama_token));
         try showTokens("pushed_token", &b);
     } else if (std.mem.eql(u8, o, "set_token")) {
         var b = try a.clone();
         defer b.deinit();
         if (b.size() > 0 and !b.has_mtmd) {
-            b.setToken(@min(try (try op.atIndex(1)).get(c_int), @as(c_int, @intCast(b.size())) - 1), try (try op.atIndex(2)).get(Token));
+            b.setToken(@min(try (try op.atIndex(1)).get(c_int), @as(c_int, @intCast(b.size())) - 1), try (try op.atIndex(2)).get(llama.impl.llama_c.llama_token));
         }
         try showTokens("set", &b);
     } else if (std.mem.eql(u8, o, "find_chunk")) {
         const ch = try a.findChunk(try (try op.atIndex(1)).get(usize));
-        try linef("find_chunk {d}", .{c.mtmd_input_chunk_get_n_tokens(ch)});
+        try linef("find_chunk {d}", .{mtmd.mtmd.mtmd_input_chunk_get_n_tokens(ch)});
     } else if (std.mem.eql(u8, o, "insert")) {
         var b = try a.clone();
         defer b.deinit();
-        try b.insert(try (try op.atIndex(1)).getSlice(ra(), Token));
+        try b.insert(try (try op.atIndex(1)).getSlice(ra(), llama.impl.llama_c.llama_token));
         try showTokens("inserted", &b);
     } else {
         return error.BadOp;
     }
 }
 
-fn restored(label: []const u8, packed_toks: []const Token, has_mtmd: bool) !void {
-    var t = try ServerTokens.deserialize(gpa, packed_toks, has_mtmd);
+fn restored(label: []const u8, packed_toks: []const llama.impl.llama_c.llama_token, has_mtmd: bool) !void {
+    var t = try server_data.tokens.ServerTokens.deserialize(gpa, packed_toks, has_mtmd);
     defer t.deinit();
     try showTokens(label, &t);
 }
 
-fn tokensOps(a: *ServerTokens, ops: *Value) !void {
+fn tokensOps(a: *server_data.tokens.ServerTokens, ops: *json.Value) !void {
     var it = ops.items();
     while (it.next()) |op| {
         try guarded(tokensOp(a, op.value));
@@ -671,7 +661,7 @@ fn tokensOps(a: *ServerTokens, ops: *Value) !void {
 
 // ---------------------------------------------------------------------------
 
-fn runOp(op: []const u8, j: *Value) !void {
+fn runOp(op: []const u8, j: *json.Value) !void {
     if (std.mem.eql(u8, op, "B")) {
         const b = base_arena.allocator();
         if (j.contains("n_parallel")) params_base.n_parallel = try (try j.at("n_parallel")).get(i32);
@@ -690,7 +680,7 @@ fn runOp(op: []const u8, j: *Value) !void {
         if (j.contains("seed")) params_base.sampling.seed = try (try j.at("seed")).get(u32);
         if (j.contains("temp")) params_base.sampling.temp = try (try j.at("temp")).get(f32);
         if (j.contains("dry_base")) params_base.sampling.dry_base = try (try j.at("dry_base")).get(f32);
-        if (j.contains("samplers")) params_base.sampling.samplers = try schema.samplerTypesFromChars(b, try (try j.at("samplers")).get([]const u8));
+        if (j.contains("samplers")) params_base.sampling.samplers = try server_data.schema.samplerTypesFromChars(b, try (try j.at("samplers")).get([]const u8));
         if (j.contains("spec_types")) {
             params_base.speculative.types = .empty;
             var it = (try j.at("spec_types")).items();
@@ -733,7 +723,7 @@ fn runOp(op: []const u8, j: *Value) !void {
         var it = j.items();
         while (it.next()) |h| {
             const s = try unhex(try h.value.get([]const u8));
-            try res.print(ra(), "{d}{s} ", .{ common.validateUtf8(s), if (common.isValidUtf8(s)) "v" else "x" });
+            try res.print(ra(), "{d}{s} ", .{ server_data.common.validateUtf8(s), if (server_data.common.isValidUtf8(s)) "v" else "x" });
         }
         try line(try std.mem.concat(ra(), u8, &.{ "utf8 ", res.items }));
     } else if (std.mem.eql(u8, op, "E")) {
@@ -770,13 +760,13 @@ fn runOp(op: []const u8, j: *Value) !void {
         try guarded(sse(j, 1));
         try guarded(sse(j, 2));
     } else if (std.mem.eql(u8, op, "RND")) {
-        const r = try common.randomString(ra());
+        const r = try server_data.common.randomString(ra());
         var ok = r.len == 32;
         for (r) |ch| ok = ok and std.ascii.isAlphanumeric(ch);
-        const cid = try common.genChatcmplid(ra());
-        const r2 = try common.randomString(ra());
-        try linef("random {d} {s} {d} {d} {d}", .{ @intFromBool(ok), cid[0..9], cid.len, (try common.genToolCallId(ra())).len, @intFromBool(!std.mem.eql(u8, r, r2)) });
-        try str("marker", common.getMediaMarker());
+        const cid = try server_data.common.genChatcmplid(ra());
+        const r2 = try server_data.common.randomString(ra());
+        try linef("random {d} {s} {d} {d} {d}", .{ @intFromBool(ok), cid[0..9], cid.len, (try server_data.common.genToolCallId(ra())).len, @intFromBool(!std.mem.eql(u8, r, r2)) });
+        try str("marker", server_data.common.getMediaMarker());
     } else if (std.mem.eql(u8, op, "TK")) {
         try opTK(j);
     } else if (std.mem.eql(u8, op, "D")) {
@@ -793,41 +783,41 @@ fn runOp(op: []const u8, j: *Value) !void {
     }
 }
 
-fn opP(j: *Value) !void {
+fn opP(j: *json.Value) !void {
     const p = try evalParams(ra(), j);
     try guarded(toJsonLine(&p, "params", false));
     try guarded(toJsonLine(&p, "metrics", true));
     try str("extra", try dumpV(&(try paramsExtra(&p))));
 }
 
-fn toJsonLine(p: *const task.TaskParams, label: []const u8, only_metrics: bool) !void {
+fn toJsonLine(p: *const server_data.task.TaskParams, label: []const u8, only_metrics: bool) !void {
     try str(label, try dumpOwned(try p.toJson(gpa, only_metrics)));
 }
 
-fn opO(j: *Value) !void {
-    try str("oaicmpl", try dumpOwned(try oaicompat.oaicompatCompletionParamsParse(gpa, j)));
+fn opO(j: *json.Value) !void {
+    try str("oaicmpl", try dumpOwned(try server_data.oaicompat.oaicompatCompletionParamsParse(gpa, j)));
 }
 
 /// `make_tmpls`: a template file's text, or a name or source given inline,
 /// over the record's vocabulary.
-fn makeTmpls(j: *const Value) !*oaicompat.Templates {
+fn makeTmpls(j: *const json.Value) !*common_chat.templates.Templates {
     const a = ra();
     const src = if (j.contains("tmpl_file"))
         try std.Io.Dir.cwd().readFileAlloc(g_io, try (try j.at("tmpl_file")).get([]const u8), a, .unlimited)
     else
         try j.value("tmpl", []const u8, "");
-    var info = try chat.templates.modelInfo(a, @ptrCast(vocab_models.items[try j.value("v", usize, 0)]));
-    const tmpls = try a.create(oaicompat.Templates);
-    tmpls.* = try chat.templates.init(a, &info, src, "", "");
+    var info = try common_chat.templates.modelInfo(a, @ptrCast(vocab_models.items[try j.value("v", usize, 0)]));
+    const tmpls = try a.create(common_chat.templates.Templates);
+    tmpls.* = try common_chat.templates.init(a, &info, src, "", "");
     return tmpls;
 }
 
 /// `make_chat_opt`.
-fn makeChatOpt(j: *const Value) !oaicompat.ServerChatParams {
+fn makeChatOpt(j: *const json.Value) !server_data.oaicompat.ServerChatParams {
     const a = ra();
     const o = try j.at("opt");
-    var opt: oaicompat.ServerChatParams = .{
-        .use_jinja = try o.value("jinja", bool, false),
+    var opt: server_data.oaicompat.ServerChatParams = .{
+        .use_jinja = try o.value("zigjinja", bool, false),
         .prefill_assistant = try o.value("prefill_assistant", bool, true),
         .reasoning_format = @fromBackingInt(@intCast(try o.value("reasoning_format", c_int, 0))),
         .tmpls = undefined,
@@ -851,7 +841,7 @@ fn makeChatOpt(j: *const Value) !oaicompat.ServerChatParams {
     return opt;
 }
 
-fn opC(j: *Value) !void {
+fn opC(j: *json.Value) !void {
     var opt = try makeChatOpt(j);
     _ = &opt;
     var body = try (try j.at("body")).clone(gpa);
@@ -861,7 +851,7 @@ fn opC(j: *Value) !void {
         for (files.items) |f| gpa.free(f);
         files.deinit(gpa);
     }
-    var session = try chat.session.Session.initEmpty(gpa);
+    var session = try common_chat.session.Session.initEmpty(gpa);
     defer session.deinit();
     try guarded(chatParse(j, &body, &opt, &files, &session));
     try str("session", try dumpV(&(try sessionJson(&session))));
@@ -873,42 +863,42 @@ fn opC(j: *Value) !void {
 
 /// A chat request converted, its parameters evaluated, and a result state
 /// made from them, as `CS` does in the reference.
-fn opCS(j: *Value) !void {
+fn opCS(j: *json.Value) !void {
     const a = ra();
     const opt = try makeChatOpt(j);
     var body = try (try j.at("body")).clone(a);
     var files: std.ArrayList([]u8) = .empty;
-    var session = try chat.session.Session.initEmpty(gpa);
+    var session = try common_chat.session.Session.initEmpty(gpa);
     defer session.deinit();
-    const parsed = try oaicompat.oaicompatChatParamsParse(a, try vocabAt(j), &body, &opt, &files, &session);
+    const parsed = try server_data.oaicompat.oaicompatChatParamsParse(a, try vocabAt(j), &body, &opt, &files, &session);
     try str("chat", try dumpV(&parsed));
     try str("session", try dumpV(&(try sessionJson(&session))));
-    var pj = Value.emptyObject();
-    try pj.set(a, "v", try Value.from(a, try j.value("v", c_int, 0)));
+    var pj = json.Value.emptyObject();
+    try pj.set(a, "v", try json.Value.from(a, try j.value("v", c_int, 0)));
     try pj.set(a, "data", parsed);
-    var t = task.Task.initType(.completion);
+    var t = server_data.task.Task.initType(.completion);
     defer t.deinit(gpa);
     const ta = try t.arenaAlloc(gpa);
     t.params = try evalParams(ta, &pj);
     t.tokens.deinit();
-    t.tokens = try ServerTokens.fromTokens(gpa, try common.tokenize(ta, try vocabAt(j), try (try parsed.at("prompt")).get([]const u8), true, true), false);
+    t.tokens = try server_data.tokens.ServerTokens.fromTokens(gpa, try server_data.common.tokenize(ta, try vocabAt(j), try (try parsed.at("prompt")).get([]const u8), true, true), false);
     try t.applyChatSession(gpa, &session);
     try str("extra", try dumpV(&(try paramsExtra(&t.params))));
     try str("params", try dumpOwned(try t.params.toJson(gpa, false)));
     try newStateQuiet(&session, try (try j.at("id")).get(i64));
 }
 
-fn opRTOOLS(j: *Value) !void {
-    try str("conv", try dumpV(&(try sd.convert.responsesTools(ra(), try j.at("tools")))));
+fn opRTOOLS(j: *json.Value) !void {
+    try str("conv", try dumpV(&(try server_data.convert.responsesTools(ra(), try j.at("tools")))));
 }
 
 /// `TS`: a `/tts` request through `eval_tts_schema`.
-fn opTS(j: *Value) !void {
-    var t = sd.task.Task.initType(.tts);
-    t.tts_inp = sd.task.TtsInp.init();
+fn opTS(j: *json.Value) !void {
+    var t = server_data.task.Task.initType(.tts);
+    t.tts_inp = server_data.task.TtsInp.init();
     defer t.deinit(gpa);
-    try schema.evalTtsSchema(ra(), &params_base, &t, j);
-    var o = common.Obj.init(ra());
+    try server_data.schema.evalTtsSchema(ra(), &params_base, &t, j);
+    var o = server_data.common.Obj.init(ra());
     try o.put("top_k", t.tts_inp.data.top_k);
     try o.put("top_p", t.tts_inp.data.top_p);
     try o.put("seed", t.tts_inp.data.seed);
@@ -922,28 +912,28 @@ fn opTS(j: *Value) !void {
 }
 
 /// `convert_speech_to_tts`, the OpenAI speech API's body as /tts's.
-fn opSP(j: *Value) !void {
-    try str("conv", try dumpV(&(try sd.convert.speechToTts(ra(), j))));
+fn opSP(j: *json.Value) !void {
+    try str("conv", try dumpV(&(try server_data.convert.speechToTts(ra(), j))));
 }
 
 /// `pcm_f32_to_s16` over the samples' bits (`f`, hex of each f32).
-fn opPCM(j: *Value) !void {
+fn opPCM(j: *json.Value) !void {
     var samples: std.ArrayList(f32) = .empty;
     var it = (try j.at("f")).items();
     while (it.next()) |h| {
         const bits = try std.fmt.parseInt(u32, try h.value.get([]const u8), 16);
         try samples.append(ra(), @bitCast(bits));
     }
-    const bytes = try common.pcmF32ToS16(ra(), samples.items);
+    const bytes = try server_data.common.pcmF32ToS16(ra(), samples.items);
     try str("pcm16", try hexOf(bytes));
 }
 
 /// `server_addr_is_public` over each address of `a`.
-fn opAP(j: *Value) !void {
+fn opAP(j: *json.Value) !void {
     var res: std.ArrayList(u8) = .empty;
     var it = (try j.at("a")).items();
     while (it.next()) |h| {
-        try res.append(ra(), if (sd.oaicompat.serverAddrIsPublic(try h.value.get([]const u8))) '1' else '0');
+        try res.append(ra(), if (server_data.oaicompat.serverAddrIsPublic(try h.value.get([]const u8))) '1' else '0');
     }
     try str("public", res.items);
 }
@@ -958,15 +948,15 @@ fn hexOf(bytes: []const u8) ![]const u8 {
     return hex;
 }
 
-fn opRC(j: *Value) !void {
-    try str("conv", try dumpV(&(try sd.convert.responsesToChatcmpl(ra(), j))));
+fn opRC(j: *json.Value) !void {
+    try str("conv", try dumpV(&(try server_data.convert.responsesToChatcmpl(ra(), j))));
 }
 
-fn opAC(j: *Value) !void {
-    try str("conv", try dumpV(&(try sd.convert.anthropicToOai(ra(), j))));
+fn opAC(j: *json.Value) !void {
+    try str("conv", try dumpV(&(try server_data.convert.anthropicToOai(ra(), j))));
 }
 
-fn opTC(j: *Value) !void {
+fn opTC(j: *json.Value) !void {
     const a = ra();
     const tmpls = try makeTmpls(j);
     var file: ?[]const u8 = null;
@@ -981,17 +971,17 @@ fn opTC(j: *Value) !void {
     }
 }
 
-fn opTCConv(j: *Value, tmpls: *const oaicompat.Templates, file: ?[]const u8, files: *std.ArrayList([]u8)) !void {
-    try str("conv", try dumpV(&(try sd.convert.transcriptionsToChatcmpl(ra(), try j.at("body"), tmpls, file, files))));
+fn opTCConv(j: *json.Value, tmpls: *const common_chat.templates.Templates, file: ?[]const u8, files: *std.ArrayList([]u8)) !void {
+    try str("conv", try dumpV(&(try server_data.convert.transcriptionsToChatcmpl(ra(), try j.at("body"), tmpls, file, files))));
 }
 
-fn chatParse(j: *const Value, body: *Value, opt: *const oaicompat.ServerChatParams, files: *std.ArrayList([]u8), session: *chat.session.Session) !void {
-    try str("chat", try dumpOwned(try oaicompat.oaicompatChatParamsParse(gpa, try vocabAt(j), body, opt, files, session)));
+fn chatParse(j: *const json.Value, body: *json.Value, opt: *const server_data.oaicompat.ServerChatParams, files: *std.ArrayList([]u8), session: *common_chat.session.Session) !void {
+    try str("chat", try dumpOwned(try server_data.oaicompat.oaicompatChatParamsParse(gpa, try vocabAt(j), body, opt, files, session)));
 }
 
-fn opT(j: *Value) !void {
+fn opT(j: *json.Value) !void {
     const vocab = try vocabAt(j);
-    var res = try tokens.tokenizeInputPrompts(gpa, vocab, if (try j.value("mtmd", bool, false)) mctx else null, try j.at("prompt"), try j.value("add_special", bool, true), try j.value("parse_special", bool, true), init_opt);
+    var res = try server_data.tokens.tokenizeInputPrompts(gpa, vocab, if (try j.value("mtmd", bool, false)) mctx else null, try j.at("prompt"), try j.value("add_special", bool, true), try j.value("parse_special", bool, true), init_opt);
     defer {
         for (res.items) |*t| t.deinit();
         res.deinit(gpa);
@@ -1003,52 +993,52 @@ fn opT(j: *Value) !void {
     }
 }
 
-fn opMixed(j: *Value) !void {
-    const t = try tokens.tokenizeMixed(gpa, try vocabAt(j), try j.at("prompt"), try j.value("add_special", bool, true), try j.value("parse_special", bool, true));
+fn opMixed(j: *json.Value) !void {
+    const t = try server_data.tokens.tokenizeMixed(gpa, try vocabAt(j), try j.at("prompt"), try j.value("add_special", bool, true), try j.value("parse_special", bool, true));
     defer gpa.free(t);
     try line(try std.mem.concat(ra(), u8, &.{ "mixed ", try toksStr(t) }));
 }
 
-fn opM(j: *Value) !void {
+fn opM(j: *json.Value) !void {
     var files: std.ArrayList([]const u8) = .empty;
     if (j.contains("files")) {
         var it = (try j.at("files")).items();
         while (it.next()) |f| try files.append(ra(), try unhex(try f.value.get([]const u8)));
     }
-    var t = try tokens.processMtmdPrompt(gpa, mctx, try (try j.at("prompt")).get([]const u8), files.items, init_opt, try j.value("ph", bool, false));
+    var t = try server_data.tokens.processMtmdPrompt(gpa, mctx, try (try j.at("prompt")).get([]const u8), files.items, init_opt, try j.value("ph", bool, false));
     defer t.deinit();
     try showTokens("mtmd", &t);
     if (j.contains("ops")) try tokensOps(&t, try j.at("ops"));
 }
 
-fn opST(j: *Value) !void {
-    var t = try ServerTokens.fromTokens(gpa, try (try j.at("tokens")).getSlice(ra(), Token), false);
+fn opST(j: *json.Value) !void {
+    var t = try server_data.tokens.ServerTokens.fromTokens(gpa, try (try j.at("tokens")).getSlice(ra(), llama.impl.llama_c.llama_token), false);
     defer t.deinit();
     try showTokens("st", &t);
     if (j.contains("ops")) try tokensOps(&t, try j.at("ops"));
 }
 
-fn opE(j: *Value) !void {
-    const t: common.ErrorType = @fromBackingInt(@intCast(try (try j.at("type")).get(c_int)));
-    try str("error", try dumpOwned(try common.formatErrorResponse(gpa, try j.value("msg", []const u8, ""), t)));
+fn opE(j: *json.Value) !void {
+    const t: server_data.common.ErrorType = @fromBackingInt(@intCast(try (try j.at("type")).get(c_int)));
+    try str("error", try dumpOwned(try server_data.common.formatErrorResponse(gpa, try j.value("msg", []const u8, ""), t)));
 }
 
-fn opGT(j: *Value) !void {
-    const t = try common.GrammarTrigger.fromJson(ra(), j);
+fn opGT(j: *json.Value) !void {
+    const t = try server_data.common.GrammarTrigger.fromJson(ra(), j);
     try str("trigger", try dumpOwned(try t.toJson(gpa)));
 }
 
-fn opS(j: *Value) !void {
+fn opS(j: *json.Value) !void {
     // a state over the default (untemplated) session: plain content
     try guarded(newState(try (try j.at("id")).get(i64)));
 }
 
 /// `newState` from a request's session, without the ids line, as `CS`
 /// writes it.
-fn newStateQuiet(session: *const chat.session.Session, id: i64) !void {
-    const s = try gpa.create(task.TaskResultState);
+fn newStateQuiet(session: *const common_chat.session.Session, id: i64) !void {
+    const s = try gpa.create(server_data.task.TaskResultState);
     errdefer gpa.destroy(s);
-    s.* = try task.TaskResultState.init(gpa, session);
+    s.* = try server_data.task.TaskResultState.init(gpa, session);
     if (try states.fetchPut(gpa, id, s)) |old| {
         old.value.deinit(gpa);
         gpa.destroy(old.value);
@@ -1058,9 +1048,9 @@ fn newStateQuiet(session: *const chat.session.Session, id: i64) !void {
 }
 
 fn newState(id: i64) !void {
-    const s = try gpa.create(task.TaskResultState);
+    const s = try gpa.create(server_data.task.TaskResultState);
     errdefer gpa.destroy(s);
-    s.* = try task.TaskResultState.init(gpa, null);
+    s.* = try server_data.task.TaskResultState.init(gpa, null);
     if (try states.fetchPut(gpa, id, s)) |old| {
         old.value.deinit(gpa);
         gpa.destroy(old.value);
@@ -1070,54 +1060,54 @@ fn newState(id: i64) !void {
     try linef("state.ids {d} {d} {d}", .{ s.oai_resp_id.len, s.oai_resp_reasoning_id.len, s.oai_resp_message_id.len });
 }
 
-fn opF(j: *Value) !void {
+fn opF(j: *json.Value) !void {
     var emb = try (try j.at("emb")).clone(ra());
-    try str("embd", try dumpOwned(try oaicompat.formatEmbeddingsResponseOaicompat(gpa, try j.at("req"), try j.value("model", []const u8, ""), &emb, try j.value("b64", bool, false))));
+    try str("embd", try dumpOwned(try server_data.oaicompat.formatEmbeddingsResponseOaicompat(gpa, try j.at("req"), try j.value("model", []const u8, ""), &emb, try j.value("b64", bool, false))));
 }
 
-fn opK(j: *Value) !void {
+fn opK(j: *json.Value) !void {
     const texts = try stringsOf(ra(), j, "texts");
-    try str("rerank", try dumpOwned(try oaicompat.formatResponseRerank(gpa, try j.at("req"), try j.value("model", []const u8, ""), try j.at("ranks"), try j.value("tei", bool, false), @constCast(texts), try j.value("top_n", c_int, 0))));
+    try str("rerank", try dumpOwned(try server_data.oaicompat.formatResponseRerank(gpa, try j.at("req"), try j.value("model", []const u8, ""), try j.at("ranks"), try j.value("tei", bool, false), @constCast(texts), try j.value("top_n", c_int, 0))));
 }
 
-fn opI(j: *Value) !void {
-    const prompt = if (j.contains("prompt")) try (try j.at("prompt")).getSlice(ra(), Token) else &[_]Token{};
-    const toks = try tokens.formatPromptInfill(gpa, try vocabAt(j), try j.at("prefix"), try j.at("suffix"), try j.at("extra"), try j.value("n_batch", c_int, 512), try j.value("n_predict", c_int, -1), try j.value("n_ctx", c_int, 4096), try j.value("spm", bool, false), prompt);
+fn opI(j: *json.Value) !void {
+    const prompt = if (j.contains("prompt")) try (try j.at("prompt")).getSlice(ra(), llama.impl.llama_c.llama_token) else &[_]llama.impl.llama_c.llama_token{};
+    const toks = try server_data.tokens.formatPromptInfill(gpa, try vocabAt(j), try j.at("prefix"), try j.at("suffix"), try j.at("extra"), try j.value("n_batch", c_int, 512), try j.value("n_predict", c_int, -1), try j.value("n_ctx", c_int, 4096), try j.value("spm", bool, false), prompt);
     defer gpa.free(toks);
     try line(try std.mem.concat(ra(), u8, &.{ "infill ", try toksStr(toks) }));
 }
 
-fn opQ(j: *Value) !void {
+fn opQ(j: *json.Value) !void {
     const m = vocab_models.items[try j.value("v", usize, 0)];
     var qf: std.ArrayList([]u8) = .empty;
     var df: std.ArrayList([]u8) = .empty;
-    for (0..try j.value("n_qf", usize, 0)) |_| try oaicompat.handleMedia(ra(), &qf, try (try j.at("media")).get([]const u8), "", false);
-    for (0..try j.value("n_df", usize, 0)) |_| try oaicompat.handleMedia(ra(), &df, try (try j.at("media")).get([]const u8), "", false);
+    for (0..try j.value("n_qf", usize, 0)) |_| try server_data.oaicompat.handleMedia(ra(), &qf, try (try j.at("media")).get([]const u8), "", false);
+    for (0..try j.value("n_df", usize, 0)) |_| try server_data.oaicompat.handleMedia(ra(), &df, try (try j.at("media")).get([]const u8), "", false);
     const qs = try ra().alloc([]const u8, qf.items.len);
     for (qf.items, 0..) |f, i| qs[i] = f;
     const ds = try ra().alloc([]const u8, df.items.len);
     for (df.items, 0..) |f, i| ds[i] = f;
-    var t = try tokens.formatPromptRerank(gpa, m, try vocabAt(j), if (try j.value("mtmd", bool, false)) mctx else null, try (try j.at("query")).get([]const u8), try (try j.at("doc")).get([]const u8), qs, ds, init_opt);
+    var t = try server_data.tokens.formatPromptRerank(gpa, m, try vocabAt(j), if (try j.value("mtmd", bool, false)) mctx else null, try (try j.at("query")).get([]const u8), try (try j.at("doc")).get([]const u8), qs, ds, init_opt);
     defer t.deinit();
     try showTokens("rerank_prompt", &t);
 }
 
-fn opRT(j: *Value) !void {
-    try str("rerank_template", try tokens.formatRerankTemplate(ra(), try (try j.at("tmpl")).get([]const u8), try (try j.at("query")).get([]const u8), try (try j.at("doc")).get([]const u8)));
+fn opRT(j: *json.Value) !void {
+    try str("rerank_template", try server_data.tokens.formatRerankTemplate(ra(), try (try j.at("tmpl")).get([]const u8), try (try j.at("query")).get([]const u8), try (try j.at("doc")).get([]const u8)));
 }
 
-fn opG(j: *Value) !void {
-    const vocab = c.llama_model_get_vocab(text_model);
-    const toks = try common.tokenize(ra(), vocab, try (try j.at("prompt")).get([]const u8), true, true);
-    c.llama_memory_clear(c.llama_get_memory(text_ctx), true);
-    var batch = tools.common.Batch.init(gpa, text_ctx);
+fn opG(j: *json.Value) !void {
+    const vocab = llama.api.model.llama_model_get_vocab(text_model);
+    const toks = try server_data.common.tokenize(ra(), vocab, try (try j.at("prompt")).get([]const u8), true, true);
+    llama.api.context.llama_memory_clear(llama.api.context.llama_get_memory(text_ctx), true);
+    var batch = tools_common.common.Batch.init(gpa, text_ctx);
     defer batch.deinit();
     for (toks, 0..) |t, i| _ = batch.add(t, @intCast(i), 0, true);
-    if (c.llama_process(text_ctx, c.LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) return common.throw(error.RuntimeError, "decode failed", .{});
+    if (llama.api.context.llama_process(text_ctx, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) return common_chat.exception.throw(error.RuntimeError, "decode failed", .{});
     var it = (try j.at("n_top")).items();
     while (it.next()) |nt| {
         const idx = try j.value("idx", c_int, -1);
-        const cur = try common.getTokenProbabilities(gpa, text_ctx, idx, try nt.value.get(usize));
+        const cur = try server_data.common.getTokenProbabilities(gpa, text_ctx, idx, try nt.value.get(usize));
         defer gpa.free(cur);
         var s: std.ArrayList(u8) = .empty;
         try s.print(ra(), "probs n={d}", .{cur.len});
@@ -1134,22 +1124,22 @@ fn opG(j: *Value) !void {
     }
     // the prompt's own tokens: the fixture vocabulary throws out_of_range on some others
     for (toks) |t| try fmtTok(t);
-    try fmtTok(c.LLAMA_TOKEN_NULL);
-    const s = try common.tokensToStrCtx(gpa, text_ctx, toks);
+    try fmtTok(llama.impl.llama_c.LLAMA_TOKEN_NULL);
+    const s = try server_data.common.tokensToStrCtx(gpa, text_ctx, toks);
     defer gpa.free(s);
     try str("tokens_to_str", s);
 }
 
-fn fmtTok(t: Token) !void {
-    const s = try common.tokensToOutputFormattedString(gpa, text_ctx, t);
+fn fmtTok(t: llama.impl.llama_c.llama_token) !void {
+    const s = try server_data.common.tokensToOutputFormattedString(gpa, text_ctx, t);
     defer gpa.free(s);
     try str("fmt", s);
 }
 
-fn opPC(j: *Value) !void {
-    var cache = task.PromptCache.init(gpa, try j.value("limit_mib", i32, 0), try j.value("limit_tokens", usize, 0));
+fn opPC(j: *json.Value) !void {
+    var cache = server_data.task.PromptCache.init(gpa, try j.value("limit_mib", i32, 0), try j.value("limit_tokens", usize, 0));
     defer cache.deinit();
-    var cur: task.ServerPrompt = .{ .tokens = .{ .gpa = gpa } };
+    var cur: server_data.task.ServerPrompt = .{ .tokens = .{ .gpa = gpa } };
     defer cur.deinit();
     var it = (try j.at("ops")).items();
     while (it.next()) |o| {
@@ -1157,17 +1147,17 @@ fn opPC(j: *Value) !void {
     }
 }
 
-fn pcOp(cache: *task.PromptCache, cur: *task.ServerPrompt, o: *Value) !void {
+fn pcOp(cache: *server_data.task.PromptCache, cur: *server_data.task.ServerPrompt, o: *json.Value) !void {
     const k = try (try o.atIndex(0)).get([]const u8);
     if (std.mem.eql(u8, k, "alloc")) {
-        var p: task.ServerPrompt = .{ .tokens = try ServerTokens.fromTokens(gpa, try (try o.atIndex(1)).getSlice(ra(), Token), false) };
+        var p: server_data.task.ServerPrompt = .{ .tokens = try server_data.tokens.ServerTokens.fromTokens(gpa, try (try o.atIndex(1)).getSlice(ra(), llama.impl.llama_c.llama_token), false) };
         defer p.deinit();
         if (o.size() > 4) {
             var sit = (try o.atIndex(4)).items();
             while (sit.next()) |sz| {
                 const data = try gpa.alloc(u8, try sz.value.get(usize));
                 @memset(data, 0);
-                const ck = task.CheckpointRef.create(gpa) catch |e| {
+                const ck = server_data.task.CheckpointRef.create(gpa) catch |e| {
                     gpa.free(data);
                     return e;
                 };
@@ -1185,10 +1175,10 @@ fn pcOp(cache: *task.PromptCache, cur: *task.ServerPrompt, o: *Value) !void {
         try line("update");
     } else if (std.mem.eql(u8, k, "cur")) {
         cur.deinit();
-        cur.* = .{ .tokens = try ServerTokens.fromTokens(gpa, try (try o.atIndex(1)).getSlice(ra(), Token), false) };
+        cur.* = .{ .tokens = try server_data.tokens.ServerTokens.fromTokens(gpa, try (try o.atIndex(1)).getSlice(ra(), llama.impl.llama_c.llama_token), false) };
         try line("cur");
     } else if (std.mem.eql(u8, k, "load")) {
-        var nt = try ServerTokens.fromTokens(gpa, try (try o.atIndex(1)).getSlice(ra(), Token), false);
+        var nt = try server_data.tokens.ServerTokens.fromTokens(gpa, try (try o.atIndex(1)).getSlice(ra(), llama.impl.llama_c.llama_token), false);
         defer nt.deinit();
         const ok = try cache.load(cur, &nt, text_ctx, null, 0);
         const tt = try cur.tokens.getTextTokens(ra());
@@ -1206,8 +1196,8 @@ fn alwaysStop(_: *anyopaque) bool {
     return true;
 }
 
-fn opPipe(j: *Value) !void {
-    var p = common.Pipe(c_int).init(gpa);
+fn opPipe(j: *json.Value) !void {
+    var p = server_data.common.Pipe(c_int).init(gpa);
     defer p.deinit();
     p.max_size = try j.value("max_size", usize, 0);
     var s: std.ArrayList(u8) = .empty;
@@ -1234,8 +1224,8 @@ fn opPipe(j: *Value) !void {
     try line(s.items);
 }
 
-fn opL(j: *Value) !void {
-    const m = try common.parseLoraRequest(ra(), try j.at("req"));
+fn opL(j: *json.Value) !void {
+    const m = try server_data.common.parseLoraRequest(ra(), try j.at("req"));
     var s: std.ArrayList(u8) = .empty;
     try s.appendSlice(ra(), "lora");
     for (m.entries.items) |e| {
@@ -1245,37 +1235,37 @@ fn opL(j: *Value) !void {
     try line(s.items);
 }
 
-fn opLoraEq(j: *Value) !void {
-    var la: std.ArrayList(common.LoraInfo) = .empty;
-    var lb: std.ArrayList(common.LoraInfo) = .empty;
+fn opLoraEq(j: *json.Value) !void {
+    var la: std.ArrayList(tools_common.params.LoraInfo) = .empty;
+    var lb: std.ArrayList(tools_common.params.LoraInfo) = .empty;
     var it = (try j.at("a")).items();
     while (it.next()) |sc| try la.append(ra(), .{ .path = "", .scale = try sc.value.get(f32) });
     var it2 = (try j.at("b")).items();
     while (it2.next()) |sc| try lb.append(ra(), .{ .path = "", .scale = try sc.value.get(f32) });
     var s: std.ArrayList(u8) = .empty;
-    try s.print(ra(), "lora_eq {d} ids", .{@intFromBool(common.areLoraEqual(la.items, lb.items))});
-    for (try common.loraGetEnabledIds(ra(), la.items)) |id| try s.print(ra(), " {d}", .{id});
+    try s.print(ra(), "lora_eq {d} ids", .{@intFromBool(server_data.common.areLoraEqual(la.items, lb.items))});
+    for (try server_data.common.loraGetEnabledIds(ra(), la.items)) |id| try s.print(ra(), " {d}", .{id});
     try line(s.items);
 }
 
-fn opJ(j: *Value) !void {
+fn opJ(j: *json.Value) !void {
     const js = try j.at("js");
     const paths = try (try j.at("paths")).getSlice(ra(), []const u8);
-    try str("nested", try dumpOwned(try common.jsonGetNestedValues(gpa, paths, js)));
-    try linef("is {d}{d}{d}", .{ @intFromBool(common.jsonIsArrayOfNumbers(js)), @intFromBool(common.jsonIsArrayOfMixedNumbersStrings(js)), @intFromBool(common.jsonIsArrayAndContainsNumbers(js)) });
+    try str("nested", try dumpOwned(try server_data.common.jsonGetNestedValues(gpa, paths, js)));
+    try linef("is {d}{d}{d}", .{ @intFromBool(server_data.common.jsonIsArrayOfNumbers(js)), @intFromBool(server_data.common.jsonIsArrayOfMixedNumbersStrings(js)), @intFromBool(server_data.common.jsonIsArrayAndContainsNumbers(js)) });
 }
 
-fn sse(j: *Value, which: u8) !void {
+fn sse(j: *json.Value, which: u8) !void {
     switch (which) {
-        0 => try str("sse_oai", try common.formatOaiSse(ra(), j)),
-        1 => try str("sse_anthropic", try common.formatAnthropicSse(ra(), j)),
-        else => try str("sse_resp", try common.formatOaiRespSse(ra(), j)),
+        0 => try str("sse_oai", try server_data.common.formatOaiSse(ra(), j)),
+        1 => try str("sse_anthropic", try server_data.common.formatAnthropicSse(ra(), j)),
+        else => try str("sse_resp", try server_data.common.formatOaiRespSse(ra(), j)),
     }
 }
 
-fn opTK(j: *Value) !void {
-    var t = task.Task.initType(@fromBackingInt(@intCast(try j.value("type", c_int, 0))));
-    t.params.sampling.seed = try j.value("seed", u32, c.LLAMA_DEFAULT_SEED);
+fn opTK(j: *json.Value) !void {
+    var t = server_data.task.Task.initType(@fromBackingInt(@intCast(try j.value("type", c_int, 0))));
+    t.params.sampling.seed = try j.value("seed", u32, llama.impl.llama_c.LLAMA_DEFAULT_SEED);
     t.id = 10;
     const n = try j.value("children", c_int, 0);
     var i: c_int = 0;
@@ -1284,8 +1274,8 @@ fn opTK(j: *Value) !void {
     try s.print(ra(), "task embd{d} logits{d} sampling{d}", .{ @intFromBool(t.needEmbd()), @intFromBool(t.needLogits()), @intFromBool(t.needSampling()) });
     try s.print(ra(), " parent{d}", .{@intFromBool(t.isParent())});
     for (t.child_tasks.items) |ch| try s.print(ra(), " {d}:{d}:{d}:{s}", .{ ch.id, ch.id_parent, ch.params.sampling.seed, if (ch.isChild()) "c" else "-" });
-    const v = [_]task.Task{t};
-    var ids = try task.Task.getListId(gpa, &v);
+    const v = [_]server_data.task.Task{t};
+    var ids = try server_data.task.Task.getListId(gpa, &v);
     defer ids.deinit();
     try s.print(ra(), " ids {d}", .{ids.count()});
     t.deinit(gpa);
@@ -1299,51 +1289,51 @@ pub fn main(init: std.process.Init) !u8 {
         std.debug.print("usage: server_task_port <records> <transcript> <text-model> <mmproj> <vocab>...\n", .{});
         return 2;
     }
-    log.verbosity_thold = log.level_debug;
-    c.llama_log_set(silent, null);
-    c.mtmd_helper_log_set(silent, null);
-    chat.msg.log_sink = chatLog;
-    chat.log.sink = chatLogAll;
-    c.llama_backend_init();
+    tools_common.log.verbosity_thold = tools_common.log.level_debug;
+    llama.api.impl.llama_log_set(silent, null);
+    mtmd.helper.mtmd_helper_log_set(silent, null);
+    common_chat.msg.log_sink = chatLog;
+    common_chat.log.sink = chatLogAll;
+    llama.api.llama.llama_backend_init();
 
     base_arena = .init(gpa);
-    params_base = try tools.params.Params.init(base_arena.allocator());
+    params_base = try tools_common.params.Params.init(base_arena.allocator());
     params_base.n_parallel = 4;
-    init_opt = c.mtmd_helper_init_opt_default();
+    init_opt = mtmd.helper.mtmd_helper_init_opt_default();
 
     for (argv[5..]) |p| {
-        var mp = c.llama_model_default_params();
+        var mp = llama.api.model.llama_model_default_params();
         // a decision model's labels and classes are read past where a vocab-only load stops
         mp.vocab_only = !std.mem.endsWith(u8, p, "-full.gguf");
         mp.n_gpu_layers = 0;
-        const m = c.llama_model_load_from_file(p.ptr, mp) orelse {
+        const m = llama.api.llama.llama_model_load_from_file(p.ptr, mp) orelse {
             std.debug.print("cannot load {s}\n", .{p});
             return 2;
         };
         try vocab_models.append(gpa, m);
     }
     {
-        var mp = c.llama_model_default_params();
+        var mp = llama.api.model.llama_model_default_params();
         mp.n_gpu_layers = 0;
-        text_model = c.llama_model_load_from_file(argv[3].ptr, mp) orelse {
+        text_model = llama.api.llama.llama_model_load_from_file(argv[3].ptr, mp) orelse {
             std.debug.print("cannot load {s}\n", .{argv[3]});
             return 2;
         };
-        var cp = c.llama_context_default_params();
+        var cp = llama.api.context.llama_context_default_params();
         cp.n_ctx = 512;
         cp.n_batch = 512;
         cp.n_ubatch = 512;
         cp.n_threads = 1;
         cp.n_threads_batch = 1;
-        text_ctx = c.llama_init_from_model(text_model, cp);
-        var mpar = c.mtmd_context_params_default();
+        text_ctx = llama.api.context.llama_init_from_model(text_model, cp);
+        var mpar = mtmd.mtmd.mtmd_context_params_default();
         mpar.use_gpu = false;
         mpar.print_timings = false;
         mpar.n_threads = 1;
         mpar.warmup = false;
-        mpar.media_marker = common.getMediaMarker().ptr;
+        mpar.media_marker = server_data.common.getMediaMarker().ptr;
         const no_mmproj = std.mem.eql(u8, argv[4], "-");
-        mctx = if (no_mmproj) null else c.mtmd_init_from_file(argv[4].ptr, text_model, mpar);
+        mctx = if (no_mmproj) null else mtmd.mtmd.mtmd_init_from_file(argv[4].ptr, text_model, mpar);
         if (text_ctx == null or (mctx == null and !no_mmproj)) {
             std.debug.print("cannot make the contexts\n", .{});
             return 2;
@@ -1363,7 +1353,7 @@ pub fn main(init: std.process.Init) !u8 {
         const op = if (sp) |i| ln[0..i] else ln;
         const payload = if (sp) |i| ln[i + 1 ..] else "";
         const opz = try ra().dupeSentinel(u8, op, 0);
-        log.wrn("@@ %d %s\n", .{ @as(c_int, @intCast(n)), opz.ptr });
+        tools_common.log.wrn("@@ %d %s\n", .{ @as(c_int, @intCast(n)), opz.ptr });
         try linef("@@ {d} {s}", .{ n, op });
         if (json.parse(ra(), payload)) |parsed| {
             var j = parsed;
@@ -1384,10 +1374,10 @@ pub fn main(init: std.process.Init) !u8 {
         gpa.destroy(e.value_ptr.*);
     }
     states.deinit(gpa);
-    if (mctx) |m| c.mtmd_free(m);
-    c.llama_free(text_ctx);
-    c.llama_model_free(text_model);
-    for (vocab_models.items) |m| c.llama_model_free(m);
+    if (mctx) |m| mtmd.mtmd.mtmd_free(m);
+    llama.api.context.llama_free(text_ctx);
+    llama.api.model.llama_model_free(text_model);
+    for (vocab_models.items) |m| llama.api.model.llama_model_free(m);
     vocab_models.deinit(gpa);
     base_arena.deinit();
     if (gpa_state.deinit() == .leak) {
@@ -1397,32 +1387,32 @@ pub fn main(init: std.process.Init) !u8 {
     return 0;
 }
 
-fn silent(_: c.ggml_log_level, _: [*c]const u8, _: ?*anyopaque) callconv(.c) void {}
+fn silent(_: llama.impl.llama_c.ggml_log_level, _: [*c]const u8, _: ?*anyopaque) callconv(.c) void {}
 
-fn chatLogAll(level: chat.log.Level, text: []const u8) void {
-    const z = common.dupZ(text);
-    defer common.freeZ(z);
+fn chatLogAll(level: common_chat.log.Level, text: []const u8) void {
+    const z = server_data.common.dupZ(text);
+    defer server_data.common.freeZ(z);
     switch (level) {
-        .debug => log.dbg("%s", .{z}),
-        .info => log.inf("%s", .{z}),
-        .warn => log.wrn("%s", .{z}),
-        .err => log.err("%s", .{z}),
+        .debug => tools_common.log.dbg("%s", .{z}),
+        .info => tools_common.log.inf("%s", .{z}),
+        .warn => tools_common.log.wrn("%s", .{z}),
+        .err => tools_common.log.err("%s", .{z}),
     }
 }
 
-fn chatLog(level: chat.msg.Level, text: []const u8) void {
-    const z = common.dupZ(text);
-    defer common.freeZ(z);
+fn chatLog(level: common_chat.msg.Level, text: []const u8) void {
+    const z = server_data.common.dupZ(text);
+    defer server_data.common.freeZ(z);
     switch (level) {
-        .warn => log.wrn("%s", .{z}),
-        .err => log.err("%s", .{z}),
+        .warn => tools_common.log.wrn("%s", .{z}),
+        .err => tools_common.log.err("%s", .{z}),
     }
 }
 
 // ---------------------------------------------------------------------------
 // the typed decision API
 
-fn showDecisionTask(t: *const task.Task) !void {
+fn showDecisionTask(t: *const server_data.task.Task) !void {
     const d = &t.decision;
     try linef("task {d} labels{s} markers{s} column{d} pointer{d} first{d} order{s} n_scores{d} embd{d} logits{d} no_batching{d} pooled{d}", .{
         t.id,                        try toksStr(d.labels.items), try toksStr(d.markers.items), d.column,                   d.pointer,
@@ -1433,13 +1423,13 @@ fn showDecisionTask(t: *const task.Task) !void {
 }
 
 /// `D`: a /v1/systemone request through a decision model's context.
-fn opD(j: *Value) !void {
+fn opD(j: *json.Value) !void {
     const a = ra();
-    const decision = sd.decision;
+    const decision = server_data.decision;
     const i = try j.value("v", usize, 0);
     if (i >= vocab_models.items.len) return error.JsonError;
     const model = vocab_models.items[i];
-    try linef("decision_type {d}", .{@backingInt(tools.common.getDecisionType(model))});
+    try linef("decision_type {d}", .{@backingInt(tools_common.common.getDecisionType(model))});
     var dc: decision.DecisionContext = .{};
     defer dc.deinit();
     try dc.init(gpa, model);
@@ -1463,7 +1453,7 @@ fn opD(j: *Value) !void {
     // the model is vocab-only: a request with files would tokenize them through mtmd
     if (files.items.len != 0) return;
 
-    var tasks: std.ArrayList(task.Task) = .empty;
+    var tasks: std.ArrayList(server_data.task.Task) = .empty;
     defer {
         for (tasks.items) |*t| t.deinit(gpa);
         tasks.deinit(gpa);
@@ -1471,7 +1461,7 @@ fn opD(j: *Value) !void {
     var id: c_int = 100;
     const no_files: []const []const u8 = &.{};
     if (dc.isJoint()) {
-        var t = task.Task.initType(.decision);
+        var t = server_data.task.Task.initType(.decision);
         errdefer t.deinit(gpa);
         t.id = id;
         id += 1;
@@ -1481,7 +1471,7 @@ fn opD(j: *Value) !void {
     } else {
         for (questions) |*q| {
             for (0..dc.nVariants(q)) |v| {
-                var t = task.Task.initType(.decision);
+                var t = server_data.task.Task.initType(.decision);
                 errdefer t.deinit(gpa);
                 t.id = id;
                 id += 1;
@@ -1551,13 +1541,13 @@ fn opD(j: *Value) !void {
     }
 }
 
-fn answerLine(dc: *const sd.decision.DecisionContext, q: *const sd.decision.Question, scores: []const []const f32) !void {
+fn answerLine(dc: *const server_data.decision.DecisionContext, q: *const server_data.decision.Question, scores: []const []const f32) !void {
     try str("answer", try dumpV(&(try dc.formatAnswer(ra(), q, scores))));
 }
 
 /// `DR`: `server_task_result_decision::to_json`.
-fn opDR(j: *Value) !void {
-    const r = try result.Result.create(gpa, .decision);
+fn opDR(j: *json.Value) !void {
+    const r = try server_data.result.Result.create(gpa, .decision);
     defer r.destroy(gpa);
     r.index = try j.value("index", usize, 0);
     r.kind.decision.n_tokens = try j.value("n_tokens", i32, 0);
@@ -1566,23 +1556,23 @@ fn opDR(j: *Value) !void {
 }
 
 /// `MA`: the architecture object of GET /models.
-fn opMA(j: *Value) !void {
-    const ty: tools.common.DecisionType = @fromBackingInt(@intCast(try j.value("type", c_int, 0)));
-    const out_mod = common.serverModelOutputModalities(ty, try j.value("chat", bool, true), try j.value("tts", bool, false));
-    var v = try common.serverModelArchitectureJson(ra(), try j.value("image", bool, false), try j.value("audio", bool, false), try j.value("video", bool, false), out_mod);
+fn opMA(j: *json.Value) !void {
+    const ty: tools_common.common.DecisionType = @fromBackingInt(@intCast(try j.value("type", c_int, 0)));
+    const out_mod = server_data.common.serverModelOutputModalities(ty, try j.value("chat", bool, true), try j.value("tts", bool, false));
+    var v = try server_data.common.serverModelArchitectureJson(ra(), try j.value("image", bool, false), try j.value("audio", bool, false), try j.value("video", bool, false), out_mod);
     try str("arch", try dumpV(&v));
 }
 
 /// `OE`: an /embeddings content array, and the same input as a subprompt.
-fn opOE(j: *Value) !void {
+fn opOE(j: *json.Value) !void {
     const opt = try makeChatOpt(j);
-    var t = try oaicompat.tokenizeOaiContentArray(gpa, try vocabAt(j), if (try j.value("mtmd", bool, false)) mctx else null, &opt, try j.at("content"), try j.value("add_special", bool, true), try j.value("parse_special", bool, true), init_opt);
+    var t = try server_data.oaicompat.tokenizeOaiContentArray(gpa, try vocabAt(j), if (try j.value("mtmd", bool, false)) mctx else null, &opt, try j.at("content"), try j.value("add_special", bool, true), try j.value("parse_special", bool, true), init_opt);
     defer t.deinit();
     try showTokens("oe", &t);
 }
 
-fn opOESub(j: *Value) !void {
-    var t = try tokens.tokenizeInputSubprompt(gpa, try vocabAt(j), if (try j.value("mtmd", bool, false)) mctx else null, try j.at("content"), try j.value("add_special", bool, true), try j.value("parse_special", bool, true), init_opt);
+fn opOESub(j: *json.Value) !void {
+    var t = try server_data.tokens.tokenizeInputSubprompt(gpa, try vocabAt(j), if (try j.value("mtmd", bool, false)) mctx else null, try j.at("content"), try j.value("add_special", bool, true), try j.value("parse_special", bool, true), init_opt);
     defer t.deinit();
     try showTokens("sub", &t);
 }

@@ -26,12 +26,12 @@
 //! C++'s copy and destructor.
 
 const std = @import("std");
+const common_chat = @import("common_chat");
+const mod = @import("module.zig");
 const llama = @import("llama");
 const stdlib = @import("stdlib");
-const tc = @import("tools_common");
+const tools_common = @import("tools_common");
 const peg = @import("peg");
-
-const Allocator = std.mem.Allocator;
 
 /// Ports `COMMON_PRESET_DEFAULT_NAME` (preset.h:15 @b1b770d90).
 pub const default_name = "default";
@@ -62,7 +62,7 @@ fn upperInPlace(s: []u8) void {
 
 /// Ports `canonical_tag` (preset.cpp:20 @b1b770d90): a quant tag in upper
 /// case, the part after the last `-` or `.` when that part is a tag.
-fn canonicalTag(a: Allocator, tag: []const u8) Error![]u8 {
+fn canonicalTag(a: std.mem.Allocator, tag: []const u8) Error![]u8 {
     var re = llama.regex.Regex.compileWith("[-.]([A-Z0-9_]+)$", .{ .icase = true }) catch |err| switch (err) {
         error.Range, error.Collate, error.Ctype, error.Escape, error.Backref, error.Brack, error.Paren, error.Brace, error.BadBrace, error.BadRepeat, error.Complexity, error.Parse => unreachable,
     };
@@ -82,21 +82,21 @@ fn canonicalTag(a: Allocator, tag: []const u8) Error![]u8 {
 /// Ports `operator`< (arg.h:91 @b1b770d90), a member of `common_arg`:
 /// `strcmp` of the first spellings. An option with no spellings is never
 /// less.
-fn argLess(x: *const tc.arg.Arg, y: *const tc.arg.Arg) bool {
+fn argLess(x: *const tools_common.arg.Arg, y: *const tools_common.arg.Arg) bool {
     if (x.args.len == 0 or y.args.len == 0) return false;
     return std.mem.order(u8, x.args[0], y.args[0]) == .lt;
 }
 
 /// Ports `operator`== (arg.h:97 @b1b770d90), a member of `common_arg`,
 /// which `std::map` reaches as neither being less.
-fn argEql(x: *const tc.arg.Arg, y: *const tc.arg.Arg) bool {
+fn argEql(x: *const tools_common.arg.Arg, y: *const tools_common.arg.Arg) bool {
     return !argLess(x, y) and !argLess(y, x);
 }
 
 /// Ports `get_env` (arg.cpp:210 @b1b770d90), a member of `common_arg`: the
 /// variable and, for an option with a negative spelling, its
 /// `LLAMA_ARG_NO_` twin. `string_replace_all` replaces every occurrence.
-fn getEnvs(a: Allocator, opt: *const tc.arg.Arg) Error![]const []const u8 {
+fn getEnvs(a: std.mem.Allocator, opt: *const tools_common.arg.Arg) Error![]const []const u8 {
     const env = opt.env orelse return &.{};
     if (opt.args_neg.len == 0) {
         const out = try a.alloc([]const u8, 1);
@@ -114,7 +114,7 @@ fn getEnvs(a: Allocator, opt: *const tc.arg.Arg) Error![]const []const u8 {
 
 /// One entry of `common_preset::options`.
 pub const Option = struct {
-    opt: tc.arg.Arg,
+    opt: tools_common.arg.Arg,
     value: []const u8,
 };
 
@@ -125,7 +125,7 @@ pub const Preset = struct {
     options: std.ArrayList(Option) = .empty,
 
     /// The C++ destructor: the name, the values and the list.
-    pub fn deinit(self: *Preset, gpa: Allocator) void {
+    pub fn deinit(self: *Preset, gpa: std.mem.Allocator) void {
         gpa.free(self.name);
         for (self.options.items) |o| gpa.free(o.value);
         self.options.deinit(gpa);
@@ -135,7 +135,7 @@ pub const Preset = struct {
     /// The C++ copy constructor.
     ///
     /// Return: a preset owning copies of every string; `deinit` frees it.
-    pub fn clone(self: *const Preset, gpa: Allocator) Error!Preset {
+    pub fn clone(self: *const Preset, gpa: std.mem.Allocator) Error!Preset {
         var out: Preset = .{ .name = try gpa.dupe(u8, self.name) };
         errdefer out.deinit(gpa);
         try out.options.ensureTotalCapacity(gpa, self.options.items.len);
@@ -144,7 +144,7 @@ pub const Preset = struct {
     }
 
     /// `name = s`, copied.
-    pub fn setName(self: *Preset, gpa: Allocator, s: []const u8) Error!void {
+    pub fn setName(self: *Preset, gpa: std.mem.Allocator, s: []const u8) Error!void {
         const n = try gpa.dupe(u8, s);
         gpa.free(self.name);
         self.name = n;
@@ -153,7 +153,7 @@ pub const Preset = struct {
     /// `options[opt] = value`, `value` copied: replaces an equivalent key's
     /// value (the key itself stays, as `std::map` keeps the first one), or
     /// inserts in order.
-    pub fn put(self: *Preset, gpa: Allocator, opt: *const tc.arg.Arg, value: []const u8) Error!void {
+    pub fn put(self: *Preset, gpa: std.mem.Allocator, opt: *const tools_common.arg.Arg, value: []const u8) Error!void {
         const v = try gpa.dupe(u8, value);
         errdefer gpa.free(v);
         var lo: usize = 0;
@@ -171,7 +171,7 @@ pub const Preset = struct {
     }
 
     /// `options.find(opt)`.
-    pub fn find(self: *const Preset, opt: *const tc.arg.Arg) ?*Option {
+    pub fn find(self: *const Preset, opt: *const tools_common.arg.Arg) ?*Option {
         for (self.options.items) |*o| if (argEql(&o.opt, opt)) return o;
         return null;
     }
@@ -184,7 +184,7 @@ pub const Preset = struct {
     /// - `bin_path`: the program, first when not empty.
     ///
     /// Return: the arguments, or a throw for an option with two values.
-    pub fn toArgs(self: *const Preset, a: Allocator, bin_path: []const u8) Error!std.ArrayList([]const u8) {
+    pub fn toArgs(self: *const Preset, a: std.mem.Allocator, bin_path: []const u8) Error!std.ArrayList([]const u8) {
         var args: std.ArrayList([]const u8) = .empty;
 
         if (bin_path.len != 0) try args.append(a, bin_path);
@@ -202,7 +202,7 @@ pub const Preset = struct {
             // handle value(s)
             if (opt.value_hint == null and opt.value_hint_2 == null) {
                 // flag option, no value
-                if (tc.arg.isFalsey(value)) {
+                if (tools_common.arg.isFalsey(value)) {
                     // use negative arg if available
                     if (opt.args_neg.len != 0) {
                         args.items[args.items.len - 1] = opt.args_neg[opt.args_neg.len - 1];
@@ -218,7 +218,7 @@ pub const Preset = struct {
                 try args.append(a, value);
             }
             if (opt.value_hint != null and opt.value_hint_2 != null) {
-                return tc.arg.throw("common_preset::to_args(): option '%s' has two values, which is not supported yet", .{opt.args[opt.args.len - 1].ptr});
+                return tools_common.arg.throw("common_preset::to_args(): option '%s' has two values, which is not supported yet", .{opt.args[opt.args.len - 1].ptr});
             }
         }
 
@@ -229,7 +229,7 @@ pub const Preset = struct {
     /// `common_preset`.
     ///
     /// Return: the INI text, owned by `a`.
-    pub fn toIni(self: *const Preset, a: Allocator) Error![]u8 {
+    pub fn toIni(self: *const Preset, a: std.mem.Allocator) Error![]u8 {
         var ss: std.ArrayList(u8) = .empty;
 
         try ss.print(a, "[{s}]\n", .{self.name});
@@ -247,7 +247,7 @@ pub const Preset = struct {
 
     /// Ports `set_option` (preset.cpp:96 @b1b770d90), a member of
     /// `common_preset`: the option whose variable is `env` takes `value`.
-    pub fn setOption(self: *Preset, gpa: Allocator, ctx: *const Context, env: []const u8, value: []const u8) Error!void {
+    pub fn setOption(self: *Preset, gpa: std.mem.Allocator, ctx: *const Context, env: []const u8, value: []const u8) Error!void {
         // try if option exists, update it
         for (self.options.items) |*o| {
             if (o.opt.env) |e| if (std.mem.eql(u8, env, e)) {
@@ -261,14 +261,14 @@ pub const Preset = struct {
         const opt = ctx.key_to_opt.getPtr(env) orelse {
             const z = try gpa.dupeSentinel(u8, env, 0);
             defer gpa.free(z);
-            return tc.arg.throw("%s: option with env '%s' not found in ctx_params", .{ @as([*:0]const u8, "set_option"), z.ptr });
+            return tools_common.arg.throw("%s: option with env '%s' not found in ctx_params", .{ @as([*:0]const u8, "set_option"), z.ptr });
         };
         try self.put(gpa, opt, value);
     }
 
     /// Ports `unset_option` (preset.cpp:114 @b1b770d90), a member of
     /// `common_preset`: the first option whose variable is `env` goes.
-    pub fn unsetOption(self: *Preset, gpa: Allocator, env: []const u8) void {
+    pub fn unsetOption(self: *Preset, gpa: std.mem.Allocator, env: []const u8) void {
         for (self.options.items, 0..) |o, i| {
             if (o.opt.env) |e| if (std.mem.eql(u8, env, e)) {
                 gpa.free(o.value);
@@ -291,7 +291,7 @@ pub const Preset = struct {
 
     /// Ports `merge` (preset.cpp:136 @b1b770d90), a member of
     /// `common_preset`: `other`'s options overwrite.
-    pub fn merge(self: *Preset, gpa: Allocator, other: *const Preset) Error!void {
+    pub fn merge(self: *Preset, gpa: std.mem.Allocator, other: *const Preset) Error!void {
         for (other.options.items) |*o| {
             try self.put(gpa, &o.opt, o.value); // overwrite existing options
         }
@@ -300,7 +300,7 @@ pub const Preset = struct {
     /// Ports `apply_to_params` (preset.cpp:142 @b1b770d90), a member of
     /// `common_preset`: each option's handler on `params`, or only those
     /// whose variable is in `handled_keys` when it is not empty.
-    pub fn applyToParams(self: *const Preset, params: *tc.params.Params, handled_keys: []const []const u8) anyerror!void {
+    pub fn applyToParams(self: *const Preset, params: *tools_common.params.Params, handled_keys: []const []const u8) anyerror!void {
         for (self.options.items) |*o| {
             const opt = &o.opt;
             if (handled_keys.len != 0) {
@@ -315,10 +315,10 @@ pub const Preset = struct {
             // apply each option to params
             switch (opt.handler) {
                 .string => |h| try h(params, val),
-                .int => |h| try h(params, try tc.arg.stoi(val)),
-                .bool_ => |h| try h(params, tc.arg.isTruthy(val)),
+                .int => |h| try h(params, try tools_common.arg.stoi(val)),
+                .bool_ => |h| try h(params, tools_common.arg.isTruthy(val)),
                 // not supported yet
-                .str_str => return tc.arg.throw("%s: option with two values is not supported yet", .{@as([*:0]const u8, "apply_to_params")}),
+                .str_str => return tools_common.arg.throw("%s: option with two values is not supported yet", .{@as([*:0]const u8, "apply_to_params")}),
                 .void_ => |h| try h(params),
             }
         }
@@ -330,7 +330,7 @@ pub const Preset = struct {
 pub const Presets = struct {
     entries: std.ArrayList(Preset) = .empty,
 
-    pub fn deinit(self: *Presets, gpa: Allocator) void {
+    pub fn deinit(self: *Presets, gpa: std.mem.Allocator) void {
         for (self.entries.items) |*p| p.deinit(gpa);
         self.entries.deinit(gpa);
         self.* = .{};
@@ -355,7 +355,7 @@ pub const Presets = struct {
 
     /// `out[name] = preset`: takes `preset`, whose name is the key,
     /// replacing (and freeing) an existing entry.
-    pub fn putOwned(self: *Presets, gpa: Allocator, preset: Preset) Error!void {
+    pub fn putOwned(self: *Presets, gpa: std.mem.Allocator, preset: Preset) Error!void {
         const i = self.lowerBound(preset.name);
         if (i < self.entries.items.len and std.mem.eql(u8, self.entries.items[i].name, preset.name)) {
             self.entries.items[i].deinit(gpa);
@@ -370,7 +370,7 @@ pub const Presets = struct {
     }
 
     /// The C++ copy.
-    pub fn clone(self: *const Presets, gpa: Allocator) Error!Presets {
+    pub fn clone(self: *const Presets, gpa: std.mem.Allocator) Error!Presets {
         var out: Presets = .{};
         errdefer out.deinit(gpa);
         for (self.entries.items) |*p| try out.entries.append(gpa, try p.clone(gpa));
@@ -387,7 +387,7 @@ const IniSection = struct {
     name: []const u8,
     kv: std.ArrayList(struct { key: []const u8, value: []const u8 }) = .empty,
 
-    fn set(self: *IniSection, a: Allocator, key: []const u8, value: []const u8) Allocator.Error!void {
+    fn set(self: *IniSection, a: std.mem.Allocator, key: []const u8, value: []const u8) std.mem.Allocator.Error!void {
         var lo: usize = 0;
         var hi = self.kv.items.len;
         while (lo < hi) {
@@ -406,7 +406,7 @@ const Ini = struct {
     sections: std.ArrayList(IniSection) = .empty,
 
     /// `parsed[name]`, created empty when missing.
-    fn section(self: *Ini, a: Allocator, name: []const u8) Allocator.Error!*IniSection {
+    fn section(self: *Ini, a: std.mem.Allocator, name: []const u8) std.mem.Allocator.Error!*IniSection {
         var lo: usize = 0;
         var hi = self.sections.items.len;
         while (lo < hi) {
@@ -464,7 +464,7 @@ fn buildIni(_: void, p: *peg.Builder) peg.Error!peg.ParserId {
 
 /// What the AST visitor in `parse_ini_from_file` keeps between nodes.
 const IniVisitor = struct {
-    a: Allocator,
+    a: std.mem.Allocator,
     parsed: *Ini,
     current_section: []const u8 = default_name,
     current_key: []const u8 = "",
@@ -488,7 +488,7 @@ const IniVisitor = struct {
 /// Ports `parse_ini_from_file` (preset.cpp:170 @b1b770d90): sections in
 /// name order, each its keys in key order. A section named twice keeps
 /// only what follows its last header.
-fn parseIniFromFile(a: Allocator, path: []const u8) Error!Ini {
+fn parseIniFromFile(a: std.mem.Allocator, path: []const u8) Error!Ini {
     var parsed: Ini = .{};
 
     if (!stdlib.fs.exists(path)) {
@@ -517,13 +517,13 @@ fn parseIniFromFile(a: Allocator, path: []const u8) Error!Ini {
 
 fn pegThrow(e: peg.Error) Error {
     if (e == error.OutOfMemory) return error.OutOfMemory;
-    return tc.arg.throwStr(peg.what(e));
+    return tools_common.arg.throwStr(peg.what(e));
 }
 
 /// `throw std::runtime_error(prefix + s)`.
-pub fn throwConcat(a: Allocator, prefix: []const u8, s: []const u8) Error {
+pub fn throwConcat(a: std.mem.Allocator, prefix: []const u8, s: []const u8) Error {
     const msg = try std.mem.concat(a, u8, &.{ prefix, s });
-    return tc.arg.throwStr(msg);
+    return tools_common.arg.throwStr(msg);
 }
 
 // -----------------------------------------------------------------------------
@@ -544,7 +544,7 @@ const DirEntry = struct {
 /// entries.
 ///
 /// Return: the entries; strings owned by `a`.
-fn directoryEntries(a: Allocator, dir_path: []const u8) Error![]DirEntry {
+fn directoryEntries(a: std.mem.Allocator, dir_path: []const u8) Error![]DirEntry {
     var out: std.ArrayList(DirEntry) = .empty;
     var dir = switch (stdlib.fs.Dir.open(dir_path)) {
         .ok => |d| d,
@@ -571,13 +571,13 @@ fn directoryEntries(a: Allocator, dir_path: []const u8) Error![]DirEntry {
 
 /// Ports `common_preset_context` (preset.h:54 @b1b770d90).
 pub const Context = struct {
-    gpa: Allocator,
+    gpa: std.mem.Allocator,
     /// Backs the parser context's tables, the options' help text and
     /// `key_to_opt`; lives as long as the context.
     arena: *std.heap.ArenaAllocator,
-    default_params: *tc.params.Params, // unused for now
-    ctx_params: tc.arg.Context,
-    key_to_opt: std.StringHashMapUnmanaged(tc.arg.Arg) = .empty,
+    default_params: *tools_common.params.Params, // unused for now
+    ctx_params: tools_common.arg.Context,
+    key_to_opt: std.StringHashMapUnmanaged(tools_common.arg.Arg) = .empty,
 
     filter_allowed_keys: bool = false,
     allowed_keys: []const []const u8 = &.{},
@@ -595,7 +595,7 @@ pub const Context = struct {
     ///
     /// Return: the context, heap-allocated so its parser context's pointer
     /// to `default_params` stays valid; `deinit` frees it.
-    pub fn create(gpa: Allocator, ex: tc.params.Example) Error!*Context {
+    pub fn create(gpa: std.mem.Allocator, ex: tools_common.params.Example) Error!*Context {
         const arena = try gpa.create(std.heap.ArenaAllocator);
         arena.* = .init(gpa);
         errdefer {
@@ -603,14 +603,14 @@ pub const Context = struct {
             gpa.destroy(arena);
         }
         const a = arena.allocator();
-        const dp = try a.create(tc.params.Params);
-        dp.* = tc.params.Params.init(a) catch return error.OutOfMemory;
+        const dp = try a.create(tools_common.params.Params);
+        dp.* = tools_common.params.Params.init(a) catch return error.OutOfMemory;
         const self = try a.create(Context);
         self.* = .{
             .gpa = gpa,
             .arena = arena,
             .default_params = dp,
-            .ctx_params = tc.arg.parserInit(dp, ex, null) catch |e| return mapErr(e),
+            .ctx_params = tools_common.arg.parserInit(dp, ex, null) catch |e| return mapErr(e),
         };
         try addPresetOptions(&self.ctx_params);
         try getMapKeyOpt(a, &self.ctx_params, &self.key_to_opt);
@@ -653,7 +653,7 @@ pub const Context = struct {
             }
             try preset.setName(gpa, section_name);
             const name_z = try sa.dupeSentinel(u8, preset.name, 0);
-            tc.log.dbg("loading preset: %s\n", .{name_z.ptr});
+            tools_common.log.dbg("loading preset: %s\n", .{name_z.ptr});
             for (section.kv.items) |kv| {
                 const key = kv.key;
                 const value = kv.value;
@@ -664,13 +664,13 @@ pub const Context = struct {
 
                 const key_z = try sa.dupeSentinel(u8, key, 0);
                 const value_z = try sa.dupeSentinel(u8, value, 0);
-                tc.log.dbg("option: %s = %s\n", .{ key_z.ptr, value_z.ptr });
+                tools_common.log.dbg("option: %s = %s\n", .{ key_z.ptr, value_z.ptr });
                 if (self.filter_allowed_keys) {
                     var allowed = false;
                     for (self.allowed_keys) |k| {
                         if (std.mem.eql(u8, k, key)) allowed = true;
                     }
-                    if (!allowed) return tc.arg.throw("option '%s' is not allowed in remote presets", .{key_z.ptr});
+                    if (!allowed) return tools_common.arg.throw("option '%s' is not allowed in remote presets", .{key_z.ptr});
                 }
                 if (self.key_to_opt.getPtr(key)) |opt| {
                     if (isBoolArg(opt)) {
@@ -679,12 +679,12 @@ pub const Context = struct {
                         try preset.put(gpa, opt, value);
                     }
                     const stored = try sa.dupeSentinel(u8, preset.find(opt).?.value, 0);
-                    tc.log.dbg("accepted option: %s = %s\n", .{ key_z.ptr, stored.ptr });
+                    tools_common.log.dbg("accepted option: %s = %s\n", .{ key_z.ptr, stored.ptr });
                 } else if (self.ignore_unknown_keys) {
                     const path_z = try sa.dupeSentinel(u8, path, 0);
-                    tc.log.wrn("ignoring option '%s' from %s: not supported by this program\n", .{ key_z.ptr, path_z.ptr });
+                    tools_common.log.wrn("ignoring option '%s' from %s: not supported by this program\n", .{ key_z.ptr, path_z.ptr });
                 } else {
-                    return tc.arg.throw("option '%s' not recognized in preset '%s'", .{ key_z.ptr, name_z.ptr });
+                    return tools_common.arg.throw("option '%s' not recognized in preset '%s'", .{ key_z.ptr, name_z.ptr });
                 }
             }
 
@@ -714,10 +714,10 @@ pub const Context = struct {
 
         var scratch = std.heap.ArenaAllocator.init(gpa);
         defer scratch.deinit();
-        const cached_models = @import("download.zig").listCachedModels(scratch.allocator()) catch |e| switch (e) {
+        const cached_models = mod.download.listCachedModels(scratch.allocator()) catch |e| switch (e) {
             error.OutOfMemory => return error.OutOfMemory,
             // a runtime_error from the cache lookup, carried on as one
-            else => return tc.arg.throwStr(@import("common.zig").what(e)),
+            else => return tools_common.arg.throwStr(common_chat.exception.what(e)),
         };
         for (cached_models) |model| {
             var preset: Preset = .{};
@@ -742,7 +742,7 @@ pub const Context = struct {
 
         if (!stdlib.fs.exists(models_dir) or !stdlib.fs.isDirectory(models_dir)) {
             const z = try sa.dupeSentinel(u8, models_dir, 0);
-            return tc.arg.throw("error: '%s' does not exist or is not a directory\n", .{z.ptr});
+            return tools_common.arg.throw("error: '%s' does not exist or is not a directory\n", .{z.ptr});
         }
 
         var models: std.ArrayList(LocalModel) = .empty;
@@ -845,7 +845,7 @@ fn mapErr(e: anyerror) Error {
 /// (arg.cpp:199 @b1b770d90): every option by each of its variables and each
 /// spelling without its dashes; a later option takes a key an earlier one
 /// had.
-fn getMapKeyOpt(a: Allocator, ctx_params: *const tc.arg.Context, mapping: *std.StringHashMapUnmanaged(tc.arg.Arg)) Error!void {
+fn getMapKeyOpt(a: std.mem.Allocator, ctx_params: *const tools_common.arg.Context, mapping: *std.StringHashMapUnmanaged(tools_common.arg.Arg)) Error!void {
     for (ctx_params.options.items) |*opt| {
         for (try getEnvs(a, opt)) |env| {
             try mapping.put(a, env, opt.*);
@@ -857,17 +857,17 @@ fn getMapKeyOpt(a: Allocator, ctx_params: *const tc.arg.Context, mapping: *std.S
 }
 
 /// Ports `is_bool_arg` (preset.cpp:264 @b1b770d90).
-fn isBoolArg(opt: *const tc.arg.Arg) bool {
+fn isBoolArg(opt: *const tools_common.arg.Arg) bool {
     return opt.args_neg.len != 0;
 }
 
 /// Ports `parse_bool_arg` (preset.cpp:268 @b1b770d90): a negative spelling
 /// reverses the value.
-fn parseBoolArg(opt: *const tc.arg.Arg, key: []const u8, value: []const u8) []const u8 {
+fn parseBoolArg(opt: *const tools_common.arg.Arg, key: []const u8, value: []const u8) []const u8 {
     // if this is a negated arg, we need to reverse the value
     for (opt.args_neg) |neg_arg| {
         if (std.mem.eql(u8, rmLeadingDashes(neg_arg), key)) {
-            return if (tc.arg.isTruthy(value)) "false" else "true";
+            return if (tools_common.arg.isTruthy(value)) "false" else "true";
         }
     }
     // otherwise, not negated
@@ -902,7 +902,7 @@ fn isDraftFile(fname: []const u8) bool {
 /// The `scan_subdir` (preset.cpp:394 @b1b770d90) lambda of
 /// `load_from_models_dir`: a sub-directory's model, its first shard if it
 /// is split, and its sidecars.
-fn scanSubdir(a: Allocator, models: *std.ArrayList(LocalModel), subdir_path: []const u8, name: []const u8) Error!void {
+fn scanSubdir(a: std.mem.Allocator, models: *std.ArrayList(LocalModel), subdir_path: []const u8, name: []const u8) Error!void {
     var model_file: []const u8 = "";
     var first_shard_file: []const u8 = "";
     var mmproj_file: []const u8 = "";
@@ -944,28 +944,28 @@ fn scanSubdir(a: Allocator, models: *std.ArrayList(LocalModel), subdir_path: []c
 
 /// Ports `common_params_add_preset_options` (arg.cpp:4818 @b1b770d90): the
 /// options only a preset can set.
-pub fn addPresetOptions(ctx: *tc.arg.Context) Error!void {
+pub fn addPresetOptions(ctx: *tools_common.arg.Context) Error!void {
     const a = ctx.params.arena;
     const Unused = struct {
-        fn str(_: *tc.params.Params, _: [:0]const u8) anyerror!void {}
-        fn int(_: *tc.params.Params, _: c_int) anyerror!void {}
+        fn str(_: *tools_common.params.Params, _: [:0]const u8) anyerror!void {}
+        fn int(_: *tools_common.params.Params, _: c_int) anyerror!void {}
     };
     // arguments below won't be treated as CLI args, only preset options
-    try ctx.options.append(a, (tc.arg.Arg{
+    try ctx.options.append(a, (tools_common.arg.Arg{
         .args = &.{"load-on-startup"},
         .value_hint = "NAME",
         .help = "in server router mode, autoload this model on startup",
         .handler = .{ .string = Unused.str },
     }).setEnv(env_load_on_startup).setPresetOnly());
 
-    try ctx.options.append(a, (tc.arg.Arg{
+    try ctx.options.append(a, (tools_common.arg.Arg{
         .args = &.{"stop-timeout"},
         .value_hint = "SECONDS",
         .help = "in server router mode, force-kill model instance after this many seconds of graceful shutdown",
         .handler = .{ .int = Unused.int },
     }).setEnv(env_stop_timeout).setPresetOnly());
 
-    try ctx.options.append(a, (tc.arg.Arg{
+    try ctx.options.append(a, (tools_common.arg.Arg{
         .args = &.{"dedup-cache-models"},
         .value_hint = "0|1",
         .help = "in server router mode, hide a cached model from the model list when this preset resolves to the same model file",
@@ -981,13 +981,13 @@ pub fn addPresetOptions(ctx: *tc.arg.Context) Error!void {
 /// - `gpa`: owns the values `out_map` keeps.
 /// - `a`: backs the parser context, which the options borrow from and so
 ///   must outlive `out_map`.
-fn paramsToMap(gpa: Allocator, a: Allocator, argv: []const [:0]const u8, ex: tc.params.Example, out_map: *Preset) Error!void {
-    const dummy_params = try a.create(tc.params.Params);
-    dummy_params.* = tc.params.Params.init(a) catch return error.OutOfMemory;
-    const ctx_arg = try a.create(tc.arg.Context);
-    ctx_arg.* = tc.arg.parserInit(dummy_params, ex, null) catch |e| return mapErr(e);
+fn paramsToMap(gpa: std.mem.Allocator, a: std.mem.Allocator, argv: []const [:0]const u8, ex: tools_common.params.Example, out_map: *Preset) Error!void {
+    const dummy_params = try a.create(tools_common.params.Params);
+    dummy_params.* = tools_common.params.Params.init(a) catch return error.OutOfMemory;
+    const ctx_arg = try a.create(tools_common.arg.Context);
+    ctx_arg.* = tools_common.arg.parserInit(dummy_params, ex, null) catch |e| return mapErr(e);
 
-    var arg_to_options: std.StringHashMapUnmanaged(*tc.arg.Arg) = .empty;
+    var arg_to_options: std.StringHashMapUnmanaged(*tools_common.arg.Arg) = .empty;
     for (ctx_arg.options.items) |*opt| {
         for (opt.args) |s| try arg_to_options.put(a, s, opt);
         for (opt.args_neg) |s| try arg_to_options.put(a, s, opt);
@@ -1007,14 +1007,14 @@ fn paramsToMap(gpa: Allocator, a: Allocator, argv: []const [:0]const u8, ex: tc.
         }
         const s: [:0]const u8 = arg_buf;
         const opt = arg_to_options.get(s) orelse {
-            return tc.arg.throw("error: invalid argument: %s", .{s.ptr});
+            return tools_common.arg.throw("error: invalid argument: %s", .{s.ptr});
         };
         const gop = try seen_args.getOrPut(a, s);
         if (gop.found_existing) {
             const skip = std.mem.eql(u8, s, "--spec-type");
 
             if (!skip) {
-                tc.log.wrn("DEPRECATED: argument '%s' specified multiple times, use comma-separated values instead (only last value will be used)\n", .{s.ptr});
+                tools_common.log.wrn("DEPRECATED: argument '%s' specified multiple times, use comma-separated values instead (only last value will be used)\n", .{s.ptr});
             }
         }
         var val: []const u8 = "";
@@ -1028,13 +1028,13 @@ fn paramsToMap(gpa: Allocator, a: Allocator, argv: []const [:0]const u8, ex: tc.
         }
         if (opt.value_hint != null) {
             // arg with single value
-            if (i + 1 >= argv.len) return tc.arg.throwStr("expected value for argument");
+            if (i + 1 >= argv.len) return tools_common.arg.throwStr("expected value for argument");
             i += 1;
             val = argv[i];
         }
         if (opt.value_hint_2 != null) {
             // TODO: support arg with 2 values
-            return tc.arg.throwStr("error: argument with 2 values is not yet supported\n");
+            return tools_common.arg.throwStr("error: argument with 2 values is not yet supported\n");
         }
         try out_map.put(gpa, opt, val);
     }

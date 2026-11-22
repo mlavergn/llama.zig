@@ -21,7 +21,7 @@ const builtin = @import("builtin");
 /// Return: the CPU count, 0 when it cannot be read.
 pub fn hardwareConcurrency() u32 {
     if (comptime builtin.os.tag == .windows) return @intCast(std.Thread.getCpuCount() catch 0);
-    const rc = mod.libc.sysconf(sc_nprocessors_onln);
+    const rc = std.c.sysconf(sc_nprocessors_onln);
     return if (rc < 0) 0 else @intCast(rc);
 }
 

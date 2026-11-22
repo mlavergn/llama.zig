@@ -82,31 +82,31 @@ pub const PerfLogger = struct {
 
     /// Ports `vk_perf_logger`'s `get_node_fusion_name` (ggml-vulkan.cpp:17056 @b1b770d90):
     /// the label a node's timing is filed under, with its flops.
-    fn nodeFusionName(w: *std.Io.Writer, node: *const ggml.impl.c.ggml_tensor, fusion_name: ?[*:0]const u8, n_flops: *u64) void {
+    fn nodeFusionName(w: *std.Io.Writer, node: *const ggml.impl.ggml_c.ggml_tensor, fusion_name: ?[*:0]const u8, n_flops: *u64) void {
         n_flops.* = ggml.vulkan.graph.getNodeFlops(node);
         if (fusion_name) |f| w.print("{s} ", .{std.mem.span(f)}) catch {};
-        const op_name = std.mem.span(ggml.impl.c.ggml_op_name(node.op));
-        if (node.op == ggml.impl.c.GGML_OP_UNARY) {
-            w.writeAll(std.mem.span(ggml.impl.c.ggml_unary_op_name(ggml.impl.c.ggml_get_unary_op(node)))) catch {};
+        const op_name = std.mem.span(ggml.impl.ggml_c.ggml_op_name(node.op));
+        if (node.op == ggml.impl.ggml_c.GGML_OP_UNARY) {
+            w.writeAll(std.mem.span(ggml.impl.ggml_c.ggml_unary_op_name(ggml.impl.ggml_c.ggml_get_unary_op(node)))) catch {};
             return;
         }
-        if (node.op == ggml.impl.c.GGML_OP_MUL_MAT or node.op == ggml.impl.c.GGML_OP_MUL_MAT_ID) {
+        if (node.op == ggml.impl.ggml_c.GGML_OP_MUL_MAT or node.op == ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID) {
             const mm: u64 = @bitCast(node.ne[0]);
             const n: u64 = @bitCast(node.ne[1]);
             const k: u64 = @bitCast(node.src[1].*.ne[0]);
             const batch: u64 = @bitCast(node.ne[2] *% node.ne[3]);
             w.writeAll(op_name) catch {};
-            if ((node.op == ggml.impl.c.GGML_OP_MUL_MAT and n <= ggml.vulkan.device.mul_mat_vec_max_cols) or
-                (node.op == ggml.impl.c.GGML_OP_MUL_MAT_ID and node.src[2].*.ne[1] == 1))
+            if ((node.op == ggml.impl.ggml_c.GGML_OP_MUL_MAT and n <= ggml.vulkan.device.mul_mat_vec_max_cols) or
+                (node.op == ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID and node.src[2].*.ne[1] == 1))
             {
                 w.writeAll("_VEC") catch {};
             }
-            w.print(" {s} m={d} n={d} k={d}", .{ std.mem.span(ggml.impl.c.ggml_type_name(node.src[0].*.type)), mm, n, k }) catch {};
-            if (node.op == ggml.impl.c.GGML_OP_MUL_MAT_ID) w.print(" n_expert={d}", .{node.src[0].*.ne[2]}) catch {};
+            w.print(" {s} m={d} n={d} k={d}", .{ std.mem.span(ggml.impl.ggml_c.ggml_type_name(node.src[0].*.type)), mm, n, k }) catch {};
+            if (node.op == ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID) w.print(" n_expert={d}", .{node.src[0].*.ne[2]}) catch {};
             if (batch > 1) w.print(" batch={d}", .{batch}) catch {};
             return;
         }
-        if (node.op == ggml.impl.c.GGML_OP_CONV_2D or node.op == ggml.impl.c.GGML_OP_CONV_TRANSPOSE_2D) {
+        if (node.op == ggml.impl.ggml_c.GGML_OP_CONV_2D or node.op == ggml.impl.ggml_c.GGML_OP_CONV_TRANSPOSE_2D) {
             const knl = node.src[0].*;
             const cout: u64 = @bitCast(node.ne[2]);
             const size_K: u64 = @bitCast(node.src[1].*.ne[2] *% knl.ne[0] *% knl.ne[1]);
@@ -114,15 +114,15 @@ pub const PerfLogger = struct {
             w.print("{s} M=Cout={d}, K=Cin*KW*KH={d}, N=N*OW*OH={d}", .{ op_name, cout, size_K, size_N }) catch {};
             return;
         }
-        if (node.op == ggml.impl.c.GGML_OP_RMS_NORM) {
+        if (node.op == ggml.impl.ggml_c.GGML_OP_RMS_NORM) {
             w.print("{s}({d},{d},{d},{d})", .{ op_name, node.ne[0], node.ne[1], node.ne[2], node.ne[3] }) catch {};
             return;
         }
-        if (node.op == ggml.impl.c.GGML_OP_FLASH_ATTN_EXT) {
+        if (node.op == ggml.impl.ggml_c.GGML_OP_FLASH_ATTN_EXT) {
             const q = node.src[0].*;
             const k = node.src[1].*;
             const v = node.src[2].*;
-            const mk: ?*const ggml.impl.c.ggml_tensor = node.src[3];
+            const mk: ?*const ggml.impl.ggml_c.ggml_tensor = node.src[3];
             const me = if (mk) |t| t.ne else [4]i64{ 0, 0, 0, 0 };
             w.print("{s} dst({d},{d},{d},{d}),  q({d},{d},{d},{d}),  k({d},{d},{d},{d}),  v({d},{d},{d},{d}),  m({d},{d},{d},{d})", .{
                 op_name, node.ne[0], node.ne[1], node.ne[2], node.ne[3],
@@ -133,7 +133,7 @@ pub const PerfLogger = struct {
             }) catch {};
             return;
         }
-        if (node.op == ggml.impl.c.GGML_OP_TOP_K) {
+        if (node.op == ggml.impl.ggml_c.GGML_OP_TOP_K) {
             const s = node.src[0].*;
             w.print("{s} K={d} ({d},{d},{d},{d})", .{ op_name, node.ne[0], s.ne[0], s.ne[1], s.ne[2], s.ne[3] }) catch {};
             return;
@@ -152,7 +152,7 @@ pub const PerfLogger = struct {
 
     /// Ports `vk_perf_logger`'s `log_timing` (ggml-vulkan-types.h:1253 @b1b770d90)
     /// for a fused run of nodes; one node is the first overload.
-    pub fn logTiming(self: *PerfLogger, nodes: []const *ggml.impl.c.ggml_tensor, names: []const ?[*:0]const u8, time: u64) void {
+    pub fn logTiming(self: *PerfLogger, nodes: []const *ggml.impl.ggml_c.ggml_tensor, names: []const ?[*:0]const u8, time: u64) void {
         var buf: [4096]u8 = undefined;
         var w: std.Io.Writer = .fixed(&buf);
         var total_flops: u64 = 0;

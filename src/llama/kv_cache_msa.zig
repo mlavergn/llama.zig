@@ -53,8 +53,8 @@ pub const KvCacheMsa = struct {
     pub fn create(
         model: *const mod.model.Model,
         no_alloc: bool,
-        type_k: mod.impl.c.enum_ggml_type,
-        type_v: mod.impl.c.enum_ggml_type,
+        type_k: mod.impl.llama_c.enum_ggml_type,
+        type_v: mod.impl.llama_c.enum_ggml_type,
         v_trans: bool,
         offload: bool,
         unified: bool,
@@ -508,9 +508,9 @@ pub const MsaContext = struct {
     /// (llama-kv-cache-msa.cpp:275 @b1b770d90): each cell's position divided
     /// by `div`, per stream. The value for an empty or another sequence's
     /// cell is 0; consumers mask those.
-    pub fn setInputCellPos(self: *const MsaContext, dst: *mod.impl.c.ggml_tensor, ubatch: *const mod.batch.Ubatch, div: i32) void {
-        mod.impl.assert(mod.impl.c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache-msa.cpp", 276, "ggml_backend_buffer_is_host(dst->buffer)");
-        mod.impl.assert(dst.type == mod.impl.c.GGML_TYPE_I32, "llama-kv-cache-msa.cpp", 277, "dst->type == GGML_TYPE_I32");
+    pub fn setInputCellPos(self: *const MsaContext, dst: *mod.impl.llama_c.ggml_tensor, ubatch: *const mod.batch.Ubatch, div: i32) void {
+        mod.impl.assert(mod.impl.llama_c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache-msa.cpp", 276, "ggml_backend_buffer_is_host(dst->buffer)");
+        mod.impl.assert(dst.type == mod.impl.llama_c.GGML_TYPE_I32, "llama-kv-cache-msa.cpp", 277, "dst->type == GGML_TYPE_I32");
         mod.impl.assert(div > 0, "llama-kv-cache-msa.cpp", 278, "div > 0");
 
         const n_tokens: i64 = ubatch.n_tokens;
@@ -546,9 +546,9 @@ pub const MsaContext = struct {
     /// (llama-kv-cache-msa.cpp:304 @b1b770d90): each position's cell, per
     /// stream. A position without a cell maps to cell 0, which consumers
     /// must mask; it assumes one sequence per stream.
-    pub fn setInputPosSlot(self: *const MsaContext, dst: *mod.impl.c.ggml_tensor, ubatch: *const mod.batch.Ubatch) void {
-        mod.impl.assert(mod.impl.c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache-msa.cpp", 305, "ggml_backend_buffer_is_host(dst->buffer)");
-        mod.impl.assert(dst.type == mod.impl.c.GGML_TYPE_I32 or dst.type == mod.impl.c.GGML_TYPE_F32, "llama-kv-cache-msa.cpp", 306, "dst->type == GGML_TYPE_I32 || dst->type == GGML_TYPE_F32");
+    pub fn setInputPosSlot(self: *const MsaContext, dst: *mod.impl.llama_c.ggml_tensor, ubatch: *const mod.batch.Ubatch) void {
+        mod.impl.assert(mod.impl.llama_c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache-msa.cpp", 305, "ggml_backend_buffer_is_host(dst->buffer)");
+        mod.impl.assert(dst.type == mod.impl.llama_c.GGML_TYPE_I32 or dst.type == mod.impl.llama_c.GGML_TYPE_F32, "llama-kv-cache-msa.cpp", 306, "dst->type == GGML_TYPE_I32 || dst->type == GGML_TYPE_F32");
 
         const n_tokens: i64 = ubatch.n_tokens;
         const n_pos: i64 = dst.ne[0];
@@ -580,7 +580,7 @@ pub const MsaContext = struct {
             }
 
             const off: usize = @intCast(s * n_pos);
-            if (dst.type == mod.impl.c.GGML_TYPE_I32) {
+            if (dst.type == mod.impl.llama_c.GGML_TYPE_I32) {
                 const data: [*]i32 = @ptrCast(@alignCast(dst.data));
                 @memcpy(data[off .. off + map.len], map);
             } else {
@@ -593,9 +593,9 @@ pub const MsaContext = struct {
     /// Ports `llama_kv_cache_msa_context`'s `set_input_pos_mask`
     /// (llama-kv-cache-msa.cpp:348 @b1b770d90): 0 where a token sees a
     /// position, -inf elsewhere -- causal, and windowed when the cache is.
-    pub fn setInputPosMask(self: *const MsaContext, dst: *mod.impl.c.ggml_tensor, ubatch: *const mod.batch.Ubatch) void {
-        mod.impl.assert(mod.impl.c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache-msa.cpp", 349, "ggml_backend_buffer_is_host(dst->buffer)");
-        mod.impl.assert(dst.type == mod.impl.c.GGML_TYPE_F32, "llama-kv-cache-msa.cpp", 350, "dst->type == GGML_TYPE_F32");
+    pub fn setInputPosMask(self: *const MsaContext, dst: *mod.impl.llama_c.ggml_tensor, ubatch: *const mod.batch.Ubatch) void {
+        mod.impl.assert(mod.impl.llama_c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache-msa.cpp", 349, "ggml_backend_buffer_is_host(dst->buffer)");
+        mod.impl.assert(dst.type == mod.impl.llama_c.GGML_TYPE_F32, "llama-kv-cache-msa.cpp", 350, "dst->type == GGML_TYPE_F32");
 
         const n_tokens: i64 = ubatch.n_tokens;
         const n_pos: i64 = dst.ne[0];

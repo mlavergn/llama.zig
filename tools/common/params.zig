@@ -18,7 +18,7 @@
 //! parses once, runs, and exits.
 
 const std = @import("std");
-const c = @import("tools_h");
+const llama = @import("llama");
 
 /// Ports `llama_example` (common/common.h:89 @b1b770d90).
 pub const Example = enum(c_int) {
@@ -229,9 +229,9 @@ pub const StringMap = struct {
 /// Ports `common_cpu_params` (common/common.h:73 @b1b770d90).
 pub const CpuParams = struct {
     n_threads: i32 = -1,
-    cpumask: [c.GGML_MAX_N_THREADS]bool = @splat(false), // CPU affinity mask.
+    cpumask: [llama.impl.llama_c.GGML_MAX_N_THREADS]bool = @splat(false), // CPU affinity mask.
     mask_valid: bool = false, // Default: any CPU
-    priority: c.ggml_sched_priority = c.GGML_SCHED_PRIO_NORMAL,
+    priority: llama.impl.llama_c.ggml_sched_priority = llama.impl.llama_c.GGML_SCHED_PRIO_NORMAL,
     strict_cpu: bool = false, // Use strict CPU placement
     poll: u32 = 50, // Polling (busywait) level (0 - no polling, 100 - mostly polling)
 };
@@ -242,7 +242,7 @@ pub const LoraInfo = struct {
     scale: f32,
     task_name: []const u8 = "",
     prompt_prefix: []const u8 = "",
-    ptr: ?*c.llama_adapter_lora = null,
+    ptr: ?*llama.impl.llama_c.llama_adapter_lora = null,
 };
 
 /// Ports `common_control_vector_load_info` (common/common.h:1252 @b1b770d90).
@@ -258,14 +258,14 @@ pub const GrammarTriggerType = enum(c_int) { token, word, pattern, pattern_full,
 pub const GrammarTrigger = struct {
     type: GrammarTriggerType,
     value: []const u8 = "",
-    token: c.llama_token = c.LLAMA_TOKEN_NULL,
+    token: llama.impl.llama_c.llama_token = llama.impl.llama_c.LLAMA_TOKEN_NULL,
 };
 
 /// Ports `common_params_sampling` (common/common.h:229 @b1b770d90): the
 /// members an option sets, and those the server fills in per request and
 /// `common_sampler_init` reads.
 pub const Sampling = struct {
-    seed: u32 = c.LLAMA_DEFAULT_SEED, // the seed used to initialize llama_sampler
+    seed: u32 = llama.impl.llama_c.LLAMA_DEFAULT_SEED, // the seed used to initialize llama_sampler
     n_prev: i32 = 64, // number of previous tokens to remember
     n_probs: i32 = 0, // if greater than 0, output the probabilities of top n_probs tokens.
     min_keep: i32 = 0, // 0 = disabled, otherwise samplers should return at least min_keep tokens
@@ -302,9 +302,9 @@ pub const Sampling = struct {
     grammar: []const u8 = "",
     grammar_lazy: bool = false,
     grammar_triggers: std.ArrayList(GrammarTrigger) = .empty, // optional triggers (for lazy grammars)
-    preserved_tokens: std.ArrayList(c.llama_token) = .empty, // a `std::set`: kept sorted, unique
-    logit_bias: std.ArrayList(c.llama_logit_bias) = .empty, // logit biases to apply
-    logit_bias_eog: std.ArrayList(c.llama_logit_bias) = .empty, // pre-calculated logit biases for EOG tokens
+    preserved_tokens: std.ArrayList(llama.impl.llama_c.llama_token) = .empty, // a `std::set`: kept sorted, unique
+    logit_bias: std.ArrayList(llama.impl.llama_c.llama_logit_bias) = .empty, // logit biases to apply
+    logit_bias_eog: std.ArrayList(llama.impl.llama_c.llama_logit_bias) = .empty, // pre-calculated logit biases for EOG tokens
 
     // The assistant generation prompt already prefilled into the prompt.
     // Fed to the grammar sampler (to advance past pre-existing tokens) and used
@@ -315,9 +315,9 @@ pub const Sampling = struct {
     // reasoning budget sampler parameters
     // these are populated by the server/CLI based on chat template params
     reasoning_budget_tokens: i32 = -1, // -1 = disabled, >= 0 = token budget
-    reasoning_budget_start: std.ArrayList(c.llama_token) = .empty, // start tag token sequence
-    reasoning_budget_end: std.ArrayList(std.ArrayList(c.llama_token)) = .empty, // end tag token sequences; the first tag is used as the forcing sequence
-    reasoning_budget_forced: std.ArrayList(c.llama_token) = .empty, // forced sequence (message + first end tag)
+    reasoning_budget_start: std.ArrayList(llama.impl.llama_c.llama_token) = .empty, // start tag token sequence
+    reasoning_budget_end: std.ArrayList(std.ArrayList(llama.impl.llama_c.llama_token)) = .empty, // end tag token sequences; the first tag is used as the forcing sequence
+    reasoning_budget_forced: std.ArrayList(llama.impl.llama_c.llama_token) = .empty, // forced sequence (message + first end tag)
     reasoning_budget_message: []const u8 = "", // message injected before end tag when budget exhausted
     reasoning_control: bool = false, // create the budget sampler on demand so reasoning can be ended at runtime
 
@@ -384,22 +384,22 @@ pub const SpeculativeDraft = struct {
 
     mparams: Model = .{},
 
-    ctx_tgt: ?*c.llama_context = null,
-    ctx_dft: ?*c.llama_context = null,
+    ctx_tgt: ?*llama.impl.llama_c.llama_context = null,
+    ctx_dft: ?*llama.impl.llama_c.llama_context = null,
 
     n_gpu_layers: i32 = -1, // number of layers to store in VRAM for the draft model (-1 - use default)
 
     n_ubatch: i32 = 0, // physical batch size of the draft context (0 - use the target's n_ubatch)
 
-    cache_type_k: c.ggml_type = c.GGML_TYPE_F16, // KV cache data type for the K
-    cache_type_v: c.ggml_type = c.GGML_TYPE_F16, // KV cache data type for the V
+    cache_type_k: llama.impl.llama_c.ggml_type = llama.impl.llama_c.GGML_TYPE_F16, // KV cache data type for the K
+    cache_type_v: llama.impl.llama_c.ggml_type = llama.impl.llama_c.GGML_TYPE_F16, // KV cache data type for the V
 
     cpuparams: CpuParams = .{},
     cpuparams_batch: CpuParams = .{},
 
-    devices: std.ArrayList(c.ggml_backend_dev_t) = .empty, // devices to use for offloading
+    devices: std.ArrayList(llama.impl.llama_c.ggml_backend_dev_t) = .empty, // devices to use for offloading
 
-    tensor_buft_overrides: std.ArrayList(c.llama_model_tensor_buft_override) = .empty,
+    tensor_buft_overrides: std.ArrayList(llama.impl.llama_c.llama_model_tensor_buft_override) = .empty,
 };
 
 /// Ports `common_params_speculative_ngram_mod` (common/common.h:373 @b1b770d90).
@@ -489,7 +489,7 @@ pub const Params = struct {
     yarn_beta_slow: f32 = -1.0, // YaRN high correction dim
     yarn_orig_ctx: i32 = 0, // YaRN original context length
 
-    devices: std.ArrayList(c.ggml_backend_dev_t) = .empty, // devices to use for offloading
+    devices: std.ArrayList(llama.impl.llama_c.ggml_backend_dev_t) = .empty, // devices to use for offloading
 
     n_gpu_layers: i32 = -1, // number of layers to store in VRAM, -1 is auto, <= -2 is all
     main_gpu: i32 = 0, // the GPU that is used for scratch and small tensors
@@ -499,23 +499,23 @@ pub const Params = struct {
     fit_params_min_ctx: i32 = 4096, // minimum context size to set when trying to reduce memory use
     fit_params_target: std.ArrayList(usize) = .empty, // margin per device, set by `init`
 
-    split_mode: c.llama_split_mode = c.LLAMA_SPLIT_MODE_LAYER, // how to split the model across GPUs
-    load_mode: c.llama_load_mode = c.LLAMA_LOAD_MODE_AUTO, // how to load the model
+    split_mode: llama.impl.llama_c.llama_split_mode = llama.impl.llama_c.LLAMA_SPLIT_MODE_LAYER, // how to split the model across GPUs
+    load_mode: llama.impl.llama_c.llama_load_mode = llama.impl.llama_c.LLAMA_LOAD_MODE_AUTO, // how to load the model
 
-    lazy_mode: c.llama_lazy_mode = c.LLAMA_LAZY_MODE_AUTO, // on-demand reading of tensors marked by the arch
+    lazy_mode: llama.impl.llama_c.llama_lazy_mode = llama.impl.llama_c.LLAMA_LAZY_MODE_AUTO, // on-demand reading of tensors marked by the arch
 
     cpuparams: CpuParams = .{},
     cpuparams_batch: CpuParams = .{},
 
-    cb_eval: c.ggml_backend_sched_eval_callback = null,
+    cb_eval: llama.impl.llama_c.ggml_backend_sched_eval_callback = null,
     cb_eval_user_data: ?*anyopaque = null,
 
-    numa: c.ggml_numa_strategy = c.GGML_NUMA_STRATEGY_DISABLED,
+    numa: llama.impl.llama_c.ggml_numa_strategy = llama.impl.llama_c.GGML_NUMA_STRATEGY_DISABLED,
 
-    rope_scaling_type: c.llama_rope_scaling_type = c.LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED,
-    pooling_type: c.enum_llama_pooling_type = c.LLAMA_POOLING_TYPE_UNSPECIFIED, // pooling type for embeddings
-    attention_type: c.llama_attention_type = c.LLAMA_ATTENTION_TYPE_UNSPECIFIED, // attention type for embeddings
-    flash_attn_type: c.llama_flash_attn_type = c.LLAMA_FLASH_ATTN_TYPE_AUTO, // whether to use Flash Attention
+    rope_scaling_type: llama.impl.llama_c.llama_rope_scaling_type = llama.impl.llama_c.LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED,
+    pooling_type: llama.impl.llama_c.enum_llama_pooling_type = llama.impl.llama_c.LLAMA_POOLING_TYPE_UNSPECIFIED, // pooling type for embeddings
+    attention_type: llama.impl.llama_c.llama_attention_type = llama.impl.llama_c.LLAMA_ATTENTION_TYPE_UNSPECIFIED, // attention type for embeddings
+    flash_attn_type: llama.impl.llama_c.llama_flash_attn_type = llama.impl.llama_c.LLAMA_FLASH_ATTN_TYPE_AUTO, // whether to use Flash Attention
 
     sampling: Sampling = .{},
     speculative: Speculative = .{},
@@ -534,8 +534,8 @@ pub const Params = struct {
 
     in_files: std.ArrayList([]const u8) = .empty, // all input files
     antiprompt: std.ArrayList([]const u8) = .empty, // strings upon which more user input is prompted (a.k.a. reverse prompts)
-    kv_overrides: std.ArrayList(c.llama_model_kv_override) = .empty,
-    tensor_buft_overrides: std.ArrayList(c.llama_model_tensor_buft_override) = .empty,
+    kv_overrides: std.ArrayList(llama.impl.llama_c.llama_model_kv_override) = .empty,
+    tensor_buft_overrides: std.ArrayList(llama.impl.llama_c.llama_model_tensor_buft_override) = .empty,
 
     lora_init_without_apply: bool = false, // only load lora to memory, but do not apply it to ctx
     lora_adapters: std.ArrayList(LoraInfo) = .empty, // lora adapter path with user defined scale
@@ -583,15 +583,15 @@ pub const Params = struct {
     no_host: bool = false, // bypass host buffer allowing extra buffers to be used
     load_mtp: bool = false, // load MTP/NextN layers
 
-    cache_type_k: c.ggml_type = c.GGML_TYPE_F16, // KV cache data type for the K
-    cache_type_v: c.ggml_type = c.GGML_TYPE_F16, // KV cache data type for the V
+    cache_type_k: llama.impl.llama_c.ggml_type = llama.impl.llama_c.GGML_TYPE_F16, // KV cache data type for the K
+    cache_type_v: llama.impl.llama_c.ggml_type = llama.impl.llama_c.GGML_TYPE_F16, // KV cache data type for the V
 
     moe_cache_size: usize = 0, // GPU cache size in bytes for the MoE experts kept in the CPU, split among the GPUs like the layers
     moe_cache_cpu_share: f32 = 0.0, // share of the MoE cache misses computed on the CPU instead of uploaded
 
     mmproj: Model = .{},
     mmproj_use_gpu: bool = true, // use GPU for multimodal model
-    mmproj_device: c.ggml_backend_dev_t = null, // GPU device to use for multimodal model
+    mmproj_device: llama.impl.llama_c.ggml_backend_dev_t = null, // GPU device to use for multimodal model
     image_min_tokens: c_int = -1,
     image_max_tokens: c_int = -1,
     mtmd_batch_max_tokens: c_int = 1024,
@@ -735,7 +735,7 @@ pub const Params = struct {
     out_file: []const u8 = "", // output filename for all example programs
     no_alloc: bool = false, // Don't allocate model buffers
 
-    load_progress_callback: c.llama_progress_callback = null,
+    load_progress_callback: llama.impl.llama_c.llama_progress_callback = null,
     load_progress_callback_user_data: ?*anyopaque = null,
 
     /// The C++ default member initialisers that are not constants: the
@@ -750,7 +750,7 @@ pub const Params = struct {
             .penalties, .dry,   .top_n_sigma, .top_k,       .typical_p,
             .top_p,     .min_p, .xtc,         .temperature,
         });
-        try p.fit_params_target.appendNTimes(arena, 1024 * 1024 * 1024, c.llama_max_devices());
+        try p.fit_params_target.appendNTimes(arena, 1024 * 1024 * 1024, llama.api.llama.llama_max_devices());
         try p.speculative.types.append(arena, .none);
         try p.hostnames.append(arena, "127.0.0.1");
         return p;

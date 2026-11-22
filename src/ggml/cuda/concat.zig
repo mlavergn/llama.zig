@@ -53,8 +53,8 @@ fn plane(comptime T: type, p: ?*const anyopaque, j3: i64, nb3: usize) usize {
 
 /// Ports `concat_cuda` (concat.cu:143 @b1b770d90) with its
 /// `launch_kernel` lambda.
-fn concatCuda(comptime T: type, src0: *const ggml.impl.c.ggml_tensor, src1: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor, dim: c_int, stream: ggml.cuda.common.cu.cudaStream_t) void {
-    if (dim != 3 and ggml.impl.c.ggml_is_contiguous_to_3(src0) and ggml.impl.c.ggml_is_contiguous_to_3(src1)) {
+fn concatCuda(comptime T: type, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor, dim: c_int, stream: ggml.cuda.common.cu.cudaStream_t) void {
+    if (dim != 3 and ggml.impl.ggml_c.ggml_is_contiguous_to_3(src0) and ggml.impl.ggml_c.ggml_is_contiguous_to_3(src1)) {
         var j3: i64 = 0;
         while (j3 < dst.ne[3]) : (j3 += 1) {
             concatContCuda(
@@ -62,24 +62,24 @@ fn concatCuda(comptime T: type, src0: *const ggml.impl.c.ggml_tensor, src1: *con
                 @ptrFromInt(plane(T, src0.data, j3, src0.nb[3])),
                 @ptrFromInt(plane(T, src1.data, j3, src1.nb[3])),
                 @ptrFromInt(plane(T, dst.data, j3, dst.nb[3])),
-                @bitCast(@as(u64, ggml.impl.c.ggml_row_size(src0.type, src0.ne[0]) / @sizeOf(T))),
+                @bitCast(@as(u64, ggml.impl.ggml_c.ggml_row_size(src0.type, src0.ne[0]) / @sizeOf(T))),
                 src0.ne[1],
                 src0.ne[2],
-                @bitCast(@as(u64, ggml.impl.c.ggml_row_size(dst.type, dst.ne[0]) / @sizeOf(T))),
+                @bitCast(@as(u64, ggml.impl.ggml_c.ggml_row_size(dst.type, dst.ne[0]) / @sizeOf(T))),
                 dst.ne[1],
                 dst.ne[2],
                 dim,
                 stream,
             );
         }
-    } else if (dim == 3 and ggml.impl.c.ggml_is_contiguous(src0) and ggml.impl.c.ggml_is_contiguous(src1)) {
-        const size0 = ggml.impl.c.ggml_nbytes(src0);
-        const size1 = ggml.impl.c.ggml_nbytes(src1);
+    } else if (dim == 3 and ggml.impl.ggml_c.ggml_is_contiguous(src0) and ggml.impl.ggml_c.ggml_is_contiguous(src1)) {
+        const size0 = ggml.impl.ggml_c.ggml_nbytes(src0);
+        const size1 = ggml.impl.ggml_c.ggml_nbytes(src1);
 
         ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(dst.data, src0.data, size0, ggml.cuda.common.cu.cudaMemcpyDeviceToDevice, stream), "cudaMemcpyAsync((char *) dst->data,         src0->data, size0, cudaMemcpyDeviceToDevice, stream)", @src());
         ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(@ptrFromInt(@intFromPtr(dst.data) + size0), src1.data, size1, ggml.cuda.common.cu.cudaMemcpyDeviceToDevice, stream), "cudaMemcpyAsync((char *) dst->data + size0, src1->data, size1, cudaMemcpyDeviceToDevice, stream)", @src());
     } else {
-        ggml.impl.assert(!ggml.impl.c.ggml_is_quantized(src0.type), "!ggml_is_quantized(src0->type)");
+        ggml.impl.assert(!ggml.impl.ggml_c.ggml_is_quantized(src0.type), "!ggml_is_quantized(src0->type)");
 
         const p: ggml.cuda.kernels.LaunchParams = .{
             .grid = .{ .x = dimOf(dst.ne[1]), .y = dimOf(dst.ne[2]), .z = dimOf(dst.ne[3]) },
@@ -100,15 +100,15 @@ fn concatCuda(comptime T: type, src0: *const ggml.impl.c.ggml_tensor, src1: *con
         const t = comptime ggml.cuda.kernels.typeName(T);
         switch (dim) {
             inline 0...3 => |d| ggml.cuda.kernels.launch(ggml.cuda.kernels.get("concat", comptime ggml.cuda.kernels.tmpl("concat_non_cont", &.{ t, ggml.cuda.kernels.int(d) })), p, args),
-            else => ggml.impl.c.ggml_abort(@src().file.ptr, @intCast(@src().line), "Invalid dim: %d", dim),
+            else => ggml.impl.ggml_c.ggml_abort(@src().file.ptr, @intCast(@src().line), "Invalid dim: %d", dim),
         }
     }
 }
 
 /// Ports `ggml_cuda_op_concat` (concat.cu:196 @b1b770d90).
-pub fn opConcat(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+pub fn opConcat(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
     const stream = ctx.stream();
 
@@ -117,29 +117,29 @@ pub fn opConcat(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) v
     ggml.impl.assert(src0.type == src1.type, "src0->type == src1->type");
     ggml.impl.assert(dst.type == src0.type, "dst->type  == src0->type");
 
-    if (ggml.impl.c.ggml_is_quantized(src0.type)) {
+    if (ggml.impl.ggml_c.ggml_is_quantized(src0.type)) {
         if (dim == 3) {
-            ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
-            ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(src1), "ggml_is_contiguous(src1)");
+            ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
+            ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src1), "ggml_is_contiguous(src1)");
         } else {
-            ggml.impl.assert(ggml.impl.c.ggml_is_contiguous_to_3(src0), "ggml_is_contiguous_to_3(src0)");
-            ggml.impl.assert(ggml.impl.c.ggml_is_contiguous_to_3(src1), "ggml_is_contiguous_to_3(src1)");
+            ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_to_3(src0), "ggml_is_contiguous_to_3(src0)");
+            ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_to_3(src1), "ggml_is_contiguous_to_3(src1)");
         }
-        ggml.impl.assert(@rem(src0.ne[0], ggml.impl.c.ggml_blck_size(src0.type)) == 0, "src0->ne[0] % ggml_blck_size(src0->type) == 0");
-        ggml.impl.assert(@rem(src1.ne[0], ggml.impl.c.ggml_blck_size(src1.type)) == 0, "src1->ne[0] % ggml_blck_size(src1->type) == 0");
+        ggml.impl.assert(@rem(src0.ne[0], ggml.impl.ggml_c.ggml_blck_size(src0.type)) == 0, "src0->ne[0] % ggml_blck_size(src0->type) == 0");
+        ggml.impl.assert(@rem(src1.ne[0], ggml.impl.ggml_c.ggml_blck_size(src1.type)) == 0, "src1->ne[0] % ggml_blck_size(src1->type) == 0");
 
         // if first 3 dimensions are contiguous and ne[0] is multiple of the
         // block size we can concat both tensors as byte tensors
         concatCuda(u8, src0, src1, dst, dim, stream);
     } else {
-        ggml.impl.assert(ggml.impl.c.ggml_blck_size(src0.type) == 1, "ggml_blck_size(src0->type) == 1");
+        ggml.impl.assert(ggml.impl.ggml_c.ggml_blck_size(src0.type) == 1, "ggml_blck_size(src0->type) == 1");
 
-        switch (ggml.impl.c.ggml_type_size(src0.type)) {
+        switch (ggml.impl.ggml_c.ggml_type_size(src0.type)) {
             1 => concatCuda(u8, src0, src1, dst, dim, stream),
             2 => concatCuda(u16, src0, src1, dst, dim, stream),
             4 => concatCuda(u32, src0, src1, dst, dim, stream),
             8 => concatCuda(u64, src0, src1, dst, dim, stream),
-            else => ggml.impl.c.ggml_abort(@src().file.ptr, @intCast(@src().line), "Unsupported type size: %zu", ggml.impl.c.ggml_type_size(src0.type)),
+            else => ggml.impl.ggml_c.ggml_abort(@src().file.ptr, @intCast(@src().line), "Unsupported type size: %zu", ggml.impl.ggml_c.ggml_type_size(src0.type)),
         }
     }
 }

@@ -25,13 +25,13 @@ fn span(p: [*c]const u8) [:0]const u8 {
 }
 
 /// Ports `llama_model_quantize_default_params` (llama-quant.cpp:1468 @b1b770d90).
-pub fn llama_model_quantize_default_params() callconv(.c) llama.impl.c.llama_model_quantize_params {
+pub fn llama_model_quantize_default_params() callconv(.c) llama.impl.llama_c.llama_model_quantize_params {
     return llama.quant.defaultParams();
 }
 
 /// Ports `llama_model_quantize` (llama-quant.cpp:1490 @b1b770d90): every
 /// exception is caught, logged and reported as 1.
-pub fn llama_model_quantize(fname_inp: [*c]const u8, fname_out: [*c]const u8, params: [*c]const llama.impl.c.llama_model_quantize_params) callconv(.c) u32 {
+pub fn llama_model_quantize(fname_inp: [*c]const u8, fname_out: [*c]const u8, params: [*c]const llama.impl.llama_c.llama_model_quantize_params) callconv(.c) u32 {
     var exc: llama.impl.Exception = .{};
     llama.quant.quantize(span(fname_inp), span(fname_out), params, &exc) catch {
         llama.impl.logError("%s: failed to quantize: %s\n", .{ "llama_model_quantize", exc.whatZ() });
@@ -42,7 +42,7 @@ pub fn llama_model_quantize(fname_inp: [*c]const u8, fname_out: [*c]const u8, pa
 
 /// Ports `llama_model_save_to_file` (src/llama.cpp:492 @b1b770d90). Nothing
 /// catches what the saver throws, so it terminates.
-pub fn llama_model_save_to_file(model: ?*const llama.impl.c.struct_llama_model, path_model: [*c]const u8) callconv(.c) void {
+pub fn llama_model_save_to_file(model: ?*const llama.impl.llama_c.struct_llama_model, path_model: [*c]const u8) callconv(.c) void {
     var ms = llama.model_saver.Saver.init(llama.api.context.modelOf(model));
     defer ms.deinit();
     var exc: llama.impl.Exception = .{};

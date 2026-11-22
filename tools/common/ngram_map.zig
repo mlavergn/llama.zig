@@ -23,8 +23,8 @@
 //! The hash is `uint32_t`, wrapping.
 
 const std = @import("std");
+const llama = @import("llama");
 const mod = @import("module.zig");
-const c = @import("tools_h");
 
 /// Ports `LCG_FACTOR` (ngram-map.cpp:11 @b1b770d90): the multiplier, near
 /// `(sqrt(5) - 1) / 2 * 2^32`. `unsigned long` in the C++; only its low 32
@@ -33,7 +33,7 @@ const lcg_factor: u32 = 2654435761;
 
 /// Ports `common_ngram_map_hash` (ngram-map.cpp:14 @b1b770d90): the LCG hash
 /// of `len` tokens at `start`.
-fn mapHash(tokens: []const c.llama_token, start: usize, len: usize) u32 {
+fn mapHash(tokens: []const llama.impl.llama_c.llama_token, start: usize, len: usize) u32 {
     var hash: u32 = 0;
     for (0..len) |i| {
         hash = hash *% lcg_factor +% @as(u32, @bitCast(tokens[start + i]));
@@ -45,7 +45,7 @@ fn mapHash(tokens: []const c.llama_token, start: usize, len: usize) u32 {
 /// tokens at `start` as `[v0, v1, ...]`.
 ///
 /// Return: the text, NUL-terminated, the allocator's.
-fn tokensToStr(allocator: std.mem.Allocator, inp: []const c.llama_token, start: usize, length: usize) error{OutOfMemory}![:0]u8 {
+fn tokensToStr(allocator: std.mem.Allocator, inp: []const llama.impl.llama_c.llama_token, start: usize, length: usize) error{OutOfMemory}![:0]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
     try out.append(allocator, '[');
@@ -78,7 +78,7 @@ pub const SimpleConfig = struct {
 /// - `sampled`: the token just sampled, not yet in `tokens`.
 ///
 /// Return: the draft, empty if there is no match; the caller frees it.
-pub fn simpleDraft(allocator: std.mem.Allocator, config: SimpleConfig, tokens: []const c.llama_token, sampled: c.llama_token) error{OutOfMemory}!std.ArrayList(c.llama_token) {
+pub fn simpleDraft(allocator: std.mem.Allocator, config: SimpleConfig, tokens: []const llama.impl.llama_c.llama_token, sampled: llama.impl.llama_c.llama_token) error{OutOfMemory}!std.ArrayList(llama.impl.llama_c.llama_token) {
     // Simple implementation of self-speculative decoding without a draft model.
     //
     const cur_len = tokens.len;
@@ -88,7 +88,7 @@ pub fn simpleDraft(allocator: std.mem.Allocator, config: SimpleConfig, tokens: [
 
     // vector for tokens we want to verify.
     // return empty vector if there is no match.
-    var draft_tokens: std.ArrayList(c.llama_token) = .empty;
+    var draft_tokens: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
     errdefer draft_tokens.deinit(allocator);
 
     // We need at least n_draft_min + n_draft_max + 1 tokens.
@@ -97,7 +97,7 @@ pub fn simpleDraft(allocator: std.mem.Allocator, config: SimpleConfig, tokens: [
     }
 
     // pattern search
-    var pattern: std.ArrayList(c.llama_token) = .empty;
+    var pattern: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
     defer pattern.deinit(allocator);
     try pattern.ensureTotalCapacity(allocator, n_draft_min);
     var j = cur_len - n_draft_min + 1;
@@ -249,7 +249,7 @@ pub const Map = struct {
     }
 };
 
-fn matchAt(inp: []const c.llama_token, at: usize, key_tokens: []const c.llama_token) bool {
+fn matchAt(inp: []const llama.impl.llama_c.llama_token, at: usize, key_tokens: []const llama.impl.llama_c.llama_token) bool {
     for (key_tokens, 0..) |kt, k| {
         if (inp[at + k] != kt) return false;
     }
@@ -263,7 +263,7 @@ fn matchAt(inp: []const c.llama_token, at: usize, key_tokens: []const c.llama_to
 /// Parameters:
 /// - `map`: the map.
 /// - `tokens`: the history the generation starts from.
-pub fn begin(map: *Map, tokens: []const c.llama_token) void {
+pub fn begin(map: *Map, tokens: []const llama.impl.llama_c.llama_token) void {
     const func: [*:0]const u8 = "common_ngram_map_begin";
     const size_begin = tokens.len;
 
@@ -370,7 +370,7 @@ pub fn begin(map: *Map, tokens: []const c.llama_token) void {
 /// - `inp`: the tokens generated so far.
 /// - `sampled`: the token just sampled.
 /// - `draft_out`: empty on entry; the draft is appended, with `map.allocator`.
-pub fn draft(map: *Map, inp: []const c.llama_token, sampled: c.llama_token, draft_out: *std.ArrayList(c.llama_token)) error{OutOfMemory}!void {
+pub fn draft(map: *Map, inp: []const llama.impl.llama_c.llama_token, sampled: llama.impl.llama_c.llama_token, draft_out: *std.ArrayList(llama.impl.llama_c.llama_token)) error{OutOfMemory}!void {
     const func: [*:0]const u8 = "common_ngram_map_draft";
     // reset last key and value.
     map.last_draft_created = false;
@@ -385,17 +385,17 @@ pub fn draft(map: *Map, inp: []const c.llama_token, sampled: c.llama_token, draf
     }
     if (cur_len >= @as(usize, std.math.maxInt(u32))) {
         // key_map uses uint32_t instead of size_t.
-        _ = c.ggml_abort("ngram-map.cpp", 237, "%s: cur_len exceeds UINT32_MAX: %zu", func, cur_len);
+        _ = llama.impl.llama_c.ggml_abort("ngram-map.cpp", 237, "%s: cur_len exceeds UINT32_MAX: %zu", func, cur_len);
     }
 
     if (map.idx_last_check > cur_len) {
         // Should not happen because of common_ngram_map_begin().
-        _ = c.ggml_abort("ngram-map.cpp", 242, "%s: map.idx_last_check > cur_len: %zu > %zu", func, map.idx_last_check, cur_len);
+        _ = llama.impl.llama_c.ggml_abort("ngram-map.cpp", 242, "%s: map.idx_last_check > cur_len: %zu > %zu", func, map.idx_last_check, cur_len);
     }
     map.idx_last_check = cur_len;
 
     // search pattern, the key n-gram
-    var key_tokens: std.ArrayList(c.llama_token) = .empty;
+    var key_tokens: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
     defer key_tokens.deinit(map.allocator);
     try key_tokens.ensureTotalCapacity(map.allocator, n);
     var jj = cur_len -% n +% 1;
@@ -407,7 +407,7 @@ pub fn draft(map: *Map, inp: []const c.llama_token, sampled: c.llama_token, draf
     // search for the key in the map
     var match_pos: usize = 0;
     if (map.size_last_begin > cur_len) {
-        _ = c.ggml_abort("ngram-map.cpp", 257, "%s: map.size_last_begin > cur_len: %zu > %zu", func, map.size_last_begin, cur_len);
+        _ = llama.impl.llama_c.ggml_abort("ngram-map.cpp", 257, "%s: map.size_last_begin > cur_len: %zu > %zu", func, map.size_last_begin, cur_len);
     }
     const nm1: usize = @as(usize, n) + m + 1;
     if (map.key_map.len != 0) {
@@ -675,17 +675,17 @@ test {
 }
 
 test "the map hash wraps in 32 bits" {
-    const toks = [_]c.llama_token{ -1, 3 };
+    const toks = [_]llama.impl.llama_c.llama_token{ -1, 3 };
     const want: u32 = (@as(u32, 0) *% lcg_factor +% 0xffffffff) *% lcg_factor +% 3;
     try std.testing.expectEqual(want, mapHash(&toks, 0, 2));
 }
 
 test "simple draft copies what followed the last n-gram" {
     const a = std.testing.allocator;
-    const toks = [_]c.llama_token{ 9, 1, 2, 3, 4, 5, 6, 7, 1 };
+    const toks = [_]llama.impl.llama_c.llama_token{ 9, 1, 2, 3, 4, 5, 6, 7, 1 };
     var d = try simpleDraft(a, .{ .size_ngram = 2, .size_mgram = 3 }, &toks, 2);
     defer d.deinit(a);
-    try std.testing.expectEqualSlices(c.llama_token, &.{ 3, 4, 5 }, d.items);
+    try std.testing.expectEqualSlices(llama.impl.llama_c.llama_token, &.{ 3, 4, 5 }, d.items);
     const str = try tokensToStr(a, &toks, 1, 3);
     defer a.free(str);
     try std.testing.expectEqualStrings("[1, 2, 3]", str);
@@ -695,12 +695,12 @@ test "the keyed map drafts, records acceptance, and forgets on shrink" {
     const a = std.testing.allocator;
     var map = try Map.init(a, 2, 2, true, 1);
     defer map.deinit();
-    const toks = [_]c.llama_token{ 0, 1, 2, 3, 4, 8, 9, 1 };
+    const toks = [_]llama.impl.llama_c.llama_token{ 0, 1, 2, 3, 4, 8, 9, 1 };
     begin(&map, toks[0..0]);
-    var d: std.ArrayList(c.llama_token) = .empty;
+    var d: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
     defer d.deinit(a);
     try draft(&map, &toks, 2, &d);
-    try std.testing.expectEqualSlices(c.llama_token, &.{ 3, 4 }, d.items);
+    try std.testing.expectEqualSlices(llama.impl.llama_c.llama_token, &.{ 3, 4 }, d.items);
     try std.testing.expect(map.last_draft_created);
     accept(&map, 1);
     try std.testing.expectEqual(@as(i16, 1), map.keys.items[0].values[0].n_accepted);

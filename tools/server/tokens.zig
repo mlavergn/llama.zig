@@ -26,13 +26,13 @@
 //! three statics.
 
 const std = @import("std");
+const mtmd = @import("mtmd");
+const llama = @import("llama");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 const json = @import("json");
-const chat = @import("common_chat");
-const tools = @import("tools_common");
-
-const Allocator = std.mem.Allocator;
+const common_chat = @import("common_chat");
+const tools_common = @import("tools_common");
 
 /// `raw_buffer` (server-common.h:42 @b1b770d90): a file's bytes.
 pub const RawBuffer = []u8;
@@ -41,7 +41,7 @@ pub const RawBuffer = []u8;
 /// token list, and the chunk.
 pub const Media = struct {
     idx: usize,
-    chunk: *tools.c.mtmd_input_chunk,
+    chunk: *mtmd.mtmd.InputChunk,
 };
 
 /// Ports `server_tokens` (server-common.h:167 @b1b770d90): the input tokens,
@@ -51,7 +51,7 @@ pub const Media = struct {
 pub const ServerTokens = struct {
     /// The C allocator by default, so a default-constructed one (as
     /// `server_task()` holds) owns nothing it cannot free.
-    gpa: Allocator = std.heap.c_allocator,
+    gpa: std.mem.Allocator = std.heap.c_allocator,
     has_mtmd: bool = false,
 
     // map a **start** index in tokens to the image chunk
@@ -61,40 +61,40 @@ pub const ServerTokens = struct {
     // list of tokens
     //   if the token is LLAMA_TOKEN_NULL, it indicates that this position is occupied by media chunk
     //   otherwise, it is a normal text token
-    tokens: std.ArrayList(mod.common.Token) = .empty,
+    tokens: std.ArrayList(llama.impl.llama_c.llama_token) = .empty,
 
     /// `server_tokens()`.
-    pub fn init(gpa: Allocator) ServerTokens {
+    pub fn init(gpa: std.mem.Allocator) ServerTokens {
         return .{ .gpa = gpa };
     }
 
     /// The destructor: frees the list and every chunk.
     pub fn deinit(self: *ServerTokens) void {
-        for (self.map_idx_to_media.items) |m| tools.c.mtmd_input_chunk_free(m.chunk);
+        for (self.map_idx_to_media.items) |m| mtmd.mtmd.mtmd_input_chunk_free(m.chunk);
         self.map_idx_to_media.deinit(self.gpa);
         self.tokens.deinit(self.gpa);
     }
 
     /// Ports the constructor from `mtmd`'s `input_chunks` (server-common.cpp:521 @b1b770d90).
-    pub fn fromChunks(gpa: Allocator, mtmd_chunks: ?*const tools.c.mtmd_input_chunks, has_mtmd: bool) mod.common.Error!ServerTokens {
+    pub fn fromChunks(gpa: std.mem.Allocator, mtmd_chunks: ?*const mtmd.mtmd.InputChunks, has_mtmd: bool) common_chat.exception.Error!ServerTokens {
         var self: ServerTokens = .{ .gpa = gpa, .has_mtmd = has_mtmd };
         errdefer self.deinit();
-        const n = tools.c.mtmd_input_chunks_size(mtmd_chunks);
+        const n = mtmd.mtmd.mtmd_input_chunks_size(mtmd_chunks.?);
         for (0..n) |i| {
-            try self.pushBackChunk(tools.c.mtmd_input_chunks_get(mtmd_chunks, i));
+            try self.pushBackChunk(mtmd.mtmd.mtmd_input_chunks_get(mtmd_chunks.?, i));
         }
         return self;
     }
 
     /// Ports the constructor from `llama_tokens` (server-common.cpp:527 @b1b770d90).
-    pub fn fromTokens(gpa: Allocator, tokens: []const mod.common.Token, has_mtmd: bool) mod.common.Error!ServerTokens {
+    pub fn fromTokens(gpa: std.mem.Allocator, tokens: []const llama.impl.llama_c.llama_token, has_mtmd: bool) common_chat.exception.Error!ServerTokens {
         var self: ServerTokens = .{ .gpa = gpa, .has_mtmd = has_mtmd };
         try self.tokens.appendSlice(gpa, tokens);
         return self;
     }
 
     /// Ports `server_tokens`'s `operator` `[]` (server-common.h:204 @b1b770d90), the const one.
-    pub fn at(self: *const ServerTokens, index: usize) mod.common.Token {
+    pub fn at(self: *const ServerTokens, index: usize) llama.impl.llama_c.llama_token {
         return self.tokens.items[index];
     }
 
@@ -110,7 +110,7 @@ pub const ServerTokens = struct {
 
     /// `clear` (server-common.h:254 @b1b770d90).
     pub fn clear(self: *ServerTokens) void {
-        for (self.map_idx_to_media.items) |m| tools.c.mtmd_input_chunk_free(m.chunk);
+        for (self.map_idx_to_media.items) |m| mtmd.mtmd.mtmd_input_chunk_free(m.chunk);
         self.map_idx_to_media.clearRetainingCapacity();
         self.tokens.clearRetainingCapacity();
     }
@@ -125,26 +125,26 @@ pub const ServerTokens = struct {
 
     /// `map_idx_to_media[idx] = std::move(chunk)`: inserted where it sorts,
     /// or replacing (and freeing) the chunk already there.
-    fn mediaPut(self: *ServerTokens, idx: usize, chunk: *tools.c.mtmd_input_chunk) mod.common.Error!void {
+    fn mediaPut(self: *ServerTokens, idx: usize, chunk: *mtmd.mtmd.InputChunk) common_chat.exception.Error!void {
         var i: usize = 0;
         while (i < self.map_idx_to_media.items.len) : (i += 1) {
             const m = &self.map_idx_to_media.items[i];
             if (m.idx == idx) {
-                tools.c.mtmd_input_chunk_free(m.chunk);
+                mtmd.mtmd.mtmd_input_chunk_free(m.chunk);
                 m.chunk = chunk;
                 return;
             }
             if (m.idx > idx) break;
         }
         self.map_idx_to_media.insert(self.gpa, i, .{ .idx = idx, .chunk = chunk }) catch |e| {
-            tools.c.mtmd_input_chunk_free(chunk);
+            mtmd.mtmd.mtmd_input_chunk_free(chunk);
             return e;
         };
     }
 
     /// Ports `pos_next` (server-common.cpp:530 @b1b770d90): the next position
     /// after `n_tokens` tokens, or after all of them when `n_tokens < 0`.
-    pub fn posNext(self: *const ServerTokens, n_tokens: i64) tools.c.llama_pos {
+    pub fn posNext(self: *const ServerTokens, n_tokens: i64) llama.impl.llama_c.llama_pos {
         if (!self.has_mtmd) {
             if (n_tokens < 0) {
                 return @truncate(@as(i64, @intCast(self.tokens.items.len)));
@@ -157,22 +157,22 @@ pub const ServerTokens = struct {
             var res: i64 = @intCast(self.tokens.items.len);
             for (self.map_idx_to_media.items) |m| {
                 // `int32_t - size_t`: unsigned, then back to `llama_pos`
-                res +%= @as(i64, tools.c.mtmd_input_chunk_get_n_pos(m.chunk)) -% @as(i64, @intCast(tools.c.mtmd_input_chunk_get_n_tokens(m.chunk)));
+                res +%= @as(i64, mtmd.mtmd.mtmd_input_chunk_get_n_pos(m.chunk)) -% @as(i64, @intCast(mtmd.mtmd.mtmd_input_chunk_get_n_tokens(m.chunk)));
             }
 
             return @truncate(res);
         }
 
         var idx: i64 = 0;
-        var pos: tools.c.llama_pos = 0;
+        var pos: llama.impl.llama_c.llama_pos = 0;
 
-        tools.ggml.ggmlAssert(n_tokens <= @as(i64, @intCast(self.tokens.items.len)), "server-common.cpp", 553, "n_tokens <= (int64_t)tokens.size()");
+        tools_common.ggml.ggmlAssert(n_tokens <= @as(i64, @intCast(self.tokens.items.len)), "server-common.cpp", 553, "n_tokens <= (int64_t)tokens.size()");
 
         while (idx < n_tokens) {
             if (self.mediaFind(@intCast(idx))) |mi| {
                 const chunk = self.map_idx_to_media.items[mi].chunk;
-                const n_pos = tools.c.mtmd_input_chunk_get_n_pos(chunk);
-                const n_tok = tools.c.mtmd_input_chunk_get_n_tokens(chunk);
+                const n_pos = mtmd.mtmd.mtmd_input_chunk_get_n_pos(chunk);
+                const n_tok = mtmd.mtmd.mtmd_input_chunk_get_n_tokens(chunk);
 
                 pos +%= n_pos;
                 idx += @intCast(n_tok);
@@ -187,20 +187,20 @@ pub const ServerTokens = struct {
 
     /// Ports `size_up_to_pos` (server-common.cpp:573 @b1b770d90): the number
     /// of tokens with a position below `max_pos`.
-    pub fn sizeUpToPos(self: *const ServerTokens, max_pos: tools.c.llama_pos) usize {
+    pub fn sizeUpToPos(self: *const ServerTokens, max_pos: llama.impl.llama_c.llama_pos) usize {
         if (!self.has_mtmd) {
             const mp: usize = @bitCast(@as(isize, max_pos));
             return @min(mp, self.tokens.items.len);
         }
 
         var idx: usize = 0;
-        var pos: tools.c.llama_pos = 0;
+        var pos: llama.impl.llama_c.llama_pos = 0;
 
         while (idx < self.tokens.items.len) {
             if (self.mediaFind(idx)) |mi| {
                 const chunk = self.map_idx_to_media.items[mi].chunk;
-                const n_pos = tools.c.mtmd_input_chunk_get_n_pos(chunk);
-                const n_tok = tools.c.mtmd_input_chunk_get_n_tokens(chunk);
+                const n_pos = mtmd.mtmd.mtmd_input_chunk_get_n_pos(chunk);
+                const n_tok = mtmd.mtmd.mtmd_input_chunk_get_n_tokens(chunk);
 
                 pos +%= n_pos;
                 idx += n_tok;
@@ -220,7 +220,7 @@ pub const ServerTokens = struct {
     /// Ports `str` (server-common.cpp:603 @b1b770d90), for debugging.
     ///
     /// Return: owned by `a`.
-    pub fn str(self: *const ServerTokens, a: Allocator) mod.common.Error![]u8 {
+    pub fn str(self: *const ServerTokens, a: std.mem.Allocator) common_chat.exception.Error![]u8 {
         var oss: std.ArrayList(u8) = .empty;
         errdefer oss.deinit(a);
         try oss.appendSlice(a, "tokens: ");
@@ -243,11 +243,11 @@ pub const ServerTokens = struct {
     /// Ports `find_chunk` (server-common.cpp:623 @b1b770d90).
     ///
     /// Return: the chunk starting at `idx`, borrowed.
-    pub fn findChunk(self: *const ServerTokens, idx: usize) mod.common.Error!*tools.c.mtmd_input_chunk {
+    pub fn findChunk(self: *const ServerTokens, idx: usize) common_chat.exception.Error!*mtmd.mtmd.InputChunk {
         if (self.mediaFind(idx)) |mi| {
             return self.map_idx_to_media.items[mi].chunk;
         }
-        return mod.common.throw(error.RuntimeError, "Chunk not found", .{});
+        return common_chat.exception.throw(error.RuntimeError, "Chunk not found", .{});
     }
 
     /// Ports `find_next_media_chunk` (server-common.cpp:631 @b1b770d90): the
@@ -260,47 +260,47 @@ pub const ServerTokens = struct {
     }
 
     /// Ports the `push_back` overload taking a token (server-common.cpp:639 @b1b770d90).
-    pub fn pushBackToken(self: *ServerTokens, tok: mod.common.Token) mod.common.Error!void {
+    pub fn pushBackToken(self: *ServerTokens, tok: llama.impl.llama_c.llama_token) common_chat.exception.Error!void {
         if (tok == mod.common.token_null) {
-            return mod.common.throw(error.RuntimeError, "Invalid token", .{});
+            return common_chat.exception.throw(error.RuntimeError, "Invalid token", .{});
         }
         try self.tokens.append(self.gpa, tok);
     }
 
     /// Ports the `push_back` overload taking a chunk (server-common.cpp:646 @b1b770d90):
     /// a media chunk is copied, a text chunk's tokens appended.
-    pub fn pushBackChunk(self: *ServerTokens, chunk: ?*const tools.c.mtmd_input_chunk) mod.common.Error!void {
-        const ty = tools.c.mtmd_input_chunk_get_type(chunk);
-        if (ty == tools.c.MTMD_INPUT_CHUNK_TYPE_IMAGE or ty == tools.c.MTMD_INPUT_CHUNK_TYPE_AUDIO) {
-            tools.ggml.ggmlAssert(self.has_mtmd, "server-common.cpp", 649, "has_mtmd");
-            const n_tokens = tools.c.mtmd_input_chunk_get_n_tokens(chunk);
+    pub fn pushBackChunk(self: *ServerTokens, chunk: ?*const mtmd.mtmd.InputChunk) common_chat.exception.Error!void {
+        const ty = mtmd.mtmd.mtmd_input_chunk_get_type(chunk.?);
+        if (ty == mtmd.mtmd.ChunkType.image or ty == mtmd.mtmd.ChunkType.audio) {
+            tools_common.ggml.ggmlAssert(self.has_mtmd, "server-common.cpp", 649, "has_mtmd");
+            const n_tokens = mtmd.mtmd.mtmd_input_chunk_get_n_tokens(chunk.?);
             const start_idx = self.tokens.items.len;
             try self.tokens.appendNTimes(self.gpa, mod.common.token_null, n_tokens);
-            const new_chunk = tools.c.mtmd_input_chunk_copy(chunk) orelse unreachable;
+            const new_chunk = mtmd.mtmd.mtmd_input_chunk_copy(chunk.?);
             try self.mediaPut(start_idx, new_chunk);
-        } else if (ty == tools.c.MTMD_INPUT_CHUNK_TYPE_TEXT) {
+        } else if (ty == mtmd.mtmd.ChunkType.text) {
             var n_tokens: usize = 0;
-            const text_tokens = tools.c.mtmd_input_chunk_get_tokens_text(chunk, &n_tokens);
+            const text_tokens = mtmd.mtmd.mtmd_input_chunk_get_tokens_text(chunk.?, &n_tokens);
             for (0..n_tokens) |i| {
-                try self.pushBackToken(text_tokens[i]);
+                try self.pushBackToken(text_tokens.?[i]);
             }
         } else {
-            _ = tools.c.ggml_abort("server-common.cpp", 664, "Invalid chunk type");
+            _ = llama.impl.llama_c.ggml_abort("server-common.cpp", 664, "Invalid chunk type");
         }
     }
 
     /// Ports `push_back_placeholder` (server-common.cpp:668 @b1b770d90): as
     /// `pushBackChunk`, with a media chunk stored as a placeholder.
-    pub fn pushBackPlaceholder(self: *ServerTokens, chunk: ?*const tools.c.mtmd_input_chunk) mod.common.Error!void {
-        const ty = tools.c.mtmd_input_chunk_get_type(chunk);
-        if (ty == tools.c.MTMD_INPUT_CHUNK_TYPE_IMAGE or ty == tools.c.MTMD_INPUT_CHUNK_TYPE_AUDIO) {
-            tools.ggml.ggmlAssert(self.has_mtmd, "server-common.cpp", 671, "has_mtmd");
-            const new_chunk = tools.c.mtmd_input_chunk_get_placeholder(chunk);
-            tools.ggml.ggmlAssert(new_chunk != null, "server-common.cpp", 673, "new_chunk != nullptr && \"failed to create placeholder chunk\"");
-            const n_tokens = tools.c.mtmd_input_chunk_get_n_tokens(chunk);
+    pub fn pushBackPlaceholder(self: *ServerTokens, chunk: ?*const mtmd.mtmd.InputChunk) common_chat.exception.Error!void {
+        const ty = mtmd.mtmd.mtmd_input_chunk_get_type(chunk.?);
+        if (ty == mtmd.mtmd.ChunkType.image or ty == mtmd.mtmd.ChunkType.audio) {
+            tools_common.ggml.ggmlAssert(self.has_mtmd, "server-common.cpp", 671, "has_mtmd");
+            const new_chunk = mtmd.mtmd.mtmd_input_chunk_get_placeholder(chunk.?);
+            tools_common.ggml.ggmlAssert(new_chunk != null, "server-common.cpp", 673, "new_chunk != nullptr && \"failed to create placeholder chunk\"");
+            const n_tokens = mtmd.mtmd.mtmd_input_chunk_get_n_tokens(chunk.?);
             const start_idx = self.tokens.items.len;
             self.tokens.appendNTimes(self.gpa, mod.common.token_null, n_tokens) catch |e| {
-                tools.c.mtmd_input_chunk_free(new_chunk);
+                mtmd.mtmd.mtmd_input_chunk_free(new_chunk);
                 return e;
             };
             try self.mediaPut(start_idx, new_chunk.?);
@@ -314,7 +314,7 @@ pub const ServerTokens = struct {
     /// holds `LLAMA_TOKEN_NULL`, which the token `push_back` refuses, so
     /// with media this throws `Invalid token` before reaching the chunk loop
     /// -- whose iterator, as upstream writes it, never advances.
-    pub fn pushBackTokens(self: *ServerTokens, other: *const ServerTokens) mod.common.Error!void {
+    pub fn pushBackTokens(self: *ServerTokens, other: *const ServerTokens) common_chat.exception.Error!void {
         const start_idx = self.size();
         for (0..other.size()) |i| {
             try self.pushBackToken(other.at(i));
@@ -322,13 +322,13 @@ pub const ServerTokens = struct {
         if (other.has_mtmd) {
             // Assert if we are copying MTMD chunks to a server_tokens that does not have mtmd.
             // We could also just check, but this will prevent silently dropping MTMD data.
-            tools.ggml.ggmlAssert(self.has_mtmd, "server-common.cpp", 693, "has_mtmd");
+            tools_common.ggml.ggmlAssert(self.has_mtmd, "server-common.cpp", 693, "has_mtmd");
             const items = other.map_idx_to_media.items;
             // the C++ loop's iterator is never incremented
             const it: usize = 0;
             while (it < items.len) {
                 const chunk = items[it].chunk;
-                const new_chunk = tools.c.mtmd_input_chunk_copy(chunk) orelse unreachable;
+                const new_chunk = mtmd.mtmd.mtmd_input_chunk_copy(chunk);
                 try self.mediaPut(start_idx + items[it].idx, new_chunk);
             }
         }
@@ -336,23 +336,23 @@ pub const ServerTokens = struct {
 
     /// Ports `insert` (server-common.cpp:702 @b1b770d90): for compatibility
     /// with context shift and prompt truncation.
-    pub fn insert(self: *ServerTokens, inp_tokens: []const mod.common.Token) mod.common.Error!void {
+    pub fn insert(self: *ServerTokens, inp_tokens: []const llama.impl.llama_c.llama_token) common_chat.exception.Error!void {
         try self.tokens.appendSlice(self.gpa, inp_tokens);
     }
 
     /// Ports `get_tokens` (server-common.cpp:706 @b1b770d90).
     ///
     /// Return: borrowed until the next change.
-    pub fn getTokens(self: *const ServerTokens) []const mod.common.Token {
-        tools.ggml.ggmlAssert(!self.has_mtmd, "server-common.cpp", 707, "!has_mtmd");
+    pub fn getTokens(self: *const ServerTokens) []const llama.impl.llama_c.llama_token {
+        tools_common.ggml.ggmlAssert(!self.has_mtmd, "server-common.cpp", 707, "!has_mtmd");
         return self.tokens.items;
     }
 
     /// Ports `get_text_tokens` (server-common.cpp:778 @b1b770d90).
     ///
     /// Return: owned by `a`.
-    pub fn getTextTokens(self: *const ServerTokens, a: Allocator) mod.common.Error![]mod.common.Token {
-        var res: std.ArrayList(mod.common.Token) = .empty;
+    pub fn getTextTokens(self: *const ServerTokens, a: std.mem.Allocator) common_chat.exception.Error![]llama.impl.llama_c.llama_token {
+        var res: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
         errdefer res.deinit(a);
         try res.ensureTotalCapacity(a, self.tokens.items.len);
         for (self.tokens.items) |t| {
@@ -364,15 +364,15 @@ pub const ServerTokens = struct {
     }
 
     /// Ports `set_token` (server-common.cpp:789 @b1b770d90).
-    pub fn setToken(self: *ServerTokens, pos: tools.c.llama_pos, id: mod.common.Token) void {
-        tools.ggml.ggmlAssert(!self.has_mtmd, "server-common.cpp", 790, "!has_mtmd"); // only allow this if mtmd is disabled
+    pub fn setToken(self: *ServerTokens, pos: llama.impl.llama_c.llama_pos, id: llama.impl.llama_c.llama_token) void {
+        tools_common.ggml.ggmlAssert(!self.has_mtmd, "server-common.cpp", 790, "!has_mtmd"); // only allow this if mtmd is disabled
         self.tokens.items[@intCast(pos)] = id;
     }
 
     /// Ports `keep_first` (server-common.cpp:794 @b1b770d90): truncates to
     /// `n` tokens, refusing to cut through a media chunk.
-    pub fn keepFirst(self: *ServerTokens, n: usize) mod.common.Error!void {
-        tools.ggml.ggmlAssert(n <= self.tokens.items.len, "server-common.cpp", 795, "n <= tokens.size()");
+    pub fn keepFirst(self: *ServerTokens, n: usize) common_chat.exception.Error!void {
+        tools_common.ggml.ggmlAssert(n <= self.tokens.items.len, "server-common.cpp", 795, "n <= tokens.size()");
         if (self.has_mtmd) {
             if (n == self.tokens.items.len) {
                 return; // nothing to do
@@ -391,7 +391,7 @@ pub const ServerTokens = struct {
             while (i < self.map_idx_to_media.items.len) {
                 const m = self.map_idx_to_media.items[i];
                 if (m.idx >= n) {
-                    tools.c.mtmd_input_chunk_free(m.chunk);
+                    mtmd.mtmd.mtmd_input_chunk_free(m.chunk);
                     _ = self.map_idx_to_media.orderedRemove(i);
                 } else {
                     i += 1;
@@ -405,16 +405,16 @@ pub const ServerTokens = struct {
     /// text.
     ///
     /// Return: owned by `a`.
-    pub fn detokenize(self: *const ServerTokens, a: Allocator, ctx: ?*const tools.c.llama_context, special: bool) mod.common.Error![]u8 {
+    pub fn detokenize(self: *const ServerTokens, a: std.mem.Allocator, ctx: ?*const llama.impl.llama_c.llama_context, special: bool) common_chat.exception.Error![]u8 {
         const text_tokens = try self.getTextTokens(a);
         defer a.free(text_tokens);
-        const model = tools.c.llama_get_model(ctx);
-        return mod.common.detokenize(a, tools.c.llama_model_get_vocab(model), text_tokens, special);
+        const model = llama.api.context.llama_get_model(ctx);
+        return mod.common.detokenize(a, llama.api.model.llama_model_get_vocab(model), text_tokens, special);
     }
 
     /// Ports `get_common_prefix` (server-common.cpp:838 @b1b770d90): equal
     /// media chunks (same id, same length) count as equal tokens.
-    pub fn getCommonPrefix(self: *const ServerTokens, b: *const ServerTokens) mod.common.Error!usize {
+    pub fn getCommonPrefix(self: *const ServerTokens, b: *const ServerTokens) common_chat.exception.Error!usize {
         const max_idx = @min(self.tokens.items.len, b.tokens.items.len);
 
         if (!self.has_mtmd) {
@@ -438,14 +438,14 @@ pub const ServerTokens = struct {
                 const a_chunk = try self.findChunk(i);
                 const b_chunk = try b.findChunk(i);
 
-                const id_ai = std.mem.span(@as([*:0]const u8, @ptrCast(tools.c.mtmd_input_chunk_get_id(a_chunk))));
-                const id_bi = std.mem.span(@as([*:0]const u8, @ptrCast(tools.c.mtmd_input_chunk_get_id(b_chunk))));
+                const id_ai = std.mem.span(@as([*:0]const u8, @ptrCast(mtmd.mtmd.mtmd_input_chunk_get_id(a_chunk))));
+                const id_bi = std.mem.span(@as([*:0]const u8, @ptrCast(mtmd.mtmd.mtmd_input_chunk_get_id(b_chunk))));
 
-                const n_tok_a = tools.c.mtmd_input_chunk_get_n_tokens(a_chunk);
-                const n_tok_b = tools.c.mtmd_input_chunk_get_n_tokens(b_chunk);
+                const n_tok_a = mtmd.mtmd.mtmd_input_chunk_get_n_tokens(a_chunk);
+                const n_tok_b = mtmd.mtmd.mtmd_input_chunk_get_n_tokens(b_chunk);
 
                 if (std.mem.eql(u8, id_ai, id_bi) and n_tok_a == n_tok_b) {
-                    tools.ggml.ggmlAssert(n_tok_a > 0, "server-common.cpp", 870, "n_tok_a > 0 && \"Invalid media chunk\""); // should never happen
+                    tools_common.ggml.ggmlAssert(n_tok_a > 0, "server-common.cpp", 870, "n_tok_a > 0 && \"Invalid media chunk\""); // should never happen
                     i += n_tok_a - 1; // will be +1 by the for loop
                     continue;
                 }
@@ -467,11 +467,11 @@ pub const ServerTokens = struct {
     /// tokens split into message spans, skipping over media chunks.
     ///
     /// Return: owned by `a`.
-    pub fn findMessageSpans(self: *const ServerTokens, a: Allocator, delims: *const chat.MsgDelimiters) mod.common.Error!chat.MsgSpans {
+    pub fn findMessageSpans(self: *const ServerTokens, a: std.mem.Allocator, delims: *const common_chat.MsgDelimiters) common_chat.exception.Error!common_chat.MsgSpans {
         const skips = try a.alloc([2]usize, self.map_idx_to_media.items.len);
         defer a.free(skips);
         for (self.map_idx_to_media.items, 0..) |m, i| {
-            skips[i] = .{ m.idx, tools.c.mtmd_input_chunk_get_n_tokens(m.chunk) };
+            skips[i] = .{ m.idx, mtmd.mtmd.mtmd_input_chunk_get_n_tokens(m.chunk) };
         }
         return delims.split(a, self.tokens.items, skips) catch |e| switch (e) {
             error.OutOfMemory => error.OutOfMemory,
@@ -480,10 +480,10 @@ pub const ServerTokens = struct {
 
     /// Ports `validate` (server-common.cpp:896 @b1b770d90): every text token in
     /// the vocabulary, every media position covered by exactly one chunk.
-    pub fn validate(self: *const ServerTokens, ctx: ?*const tools.c.llama_context) bool {
-        const model = tools.c.llama_get_model(ctx);
-        const vocab = tools.c.llama_model_get_vocab(model);
-        const n_vocab = tools.c.llama_vocab_n_tokens(vocab);
+    pub fn validate(self: *const ServerTokens, ctx: ?*const llama.impl.llama_c.llama_context) bool {
+        const model = llama.api.context.llama_get_model(ctx);
+        const vocab = llama.api.model.llama_model_get_vocab(model);
+        const n_vocab = llama.api.vocab.llama_vocab_n_tokens(vocab);
         var n_media: usize = 0;
 
         var i: usize = 0;
@@ -491,11 +491,11 @@ pub const ServerTokens = struct {
             const t = self.tokens.items[i];
             if (t == mod.common.token_null) {
                 const chunk = self.findChunk(i) catch return false;
-                if (tools.c.mtmd_input_chunk_get_type(chunk) == tools.c.MTMD_INPUT_CHUNK_TYPE_TEXT) {
+                if (mtmd.mtmd.mtmd_input_chunk_get_type(chunk) == mtmd.mtmd.ChunkType.text) {
                     return false;
                 }
-                const n_tokens = tools.c.mtmd_input_chunk_get_n_tokens(chunk);
-                const n_pos = tools.c.mtmd_input_chunk_get_n_pos(chunk);
+                const n_tokens = mtmd.mtmd.mtmd_input_chunk_get_n_tokens(chunk);
+                const n_pos = mtmd.mtmd.mtmd_input_chunk_get_n_pos(chunk);
                 if (n_tokens == 0 or n_pos <= 0 or n_tokens > self.tokens.items.len - i) {
                     return false;
                 }
@@ -515,12 +515,12 @@ pub const ServerTokens = struct {
 
     /// Ports `clone` (server-common.cpp:932 @b1b770d90): a deep copy, chunks
     /// included.
-    pub fn clone(self: *const ServerTokens) mod.common.Error!ServerTokens {
+    pub fn clone(self: *const ServerTokens) common_chat.exception.Error!ServerTokens {
         var res: ServerTokens = .{ .gpa = self.gpa, .has_mtmd = self.has_mtmd };
         errdefer res.deinit();
         try res.tokens.appendSlice(self.gpa, self.tokens.items);
         for (self.map_idx_to_media.items) |m| {
-            try res.mediaPut(m.idx, tools.c.mtmd_input_chunk_copy(m.chunk) orelse unreachable);
+            try res.mediaPut(m.idx, mtmd.mtmd.mtmd_input_chunk_copy(m.chunk));
         }
         return res;
     }
@@ -532,28 +532,28 @@ pub const ServerTokens = struct {
     const state_version: u32 = 1;
 
     /// Ports `server_tokens_state_u32` (server-common.cpp:429 @b1b770d90).
-    fn stateU32(value: usize) mod.common.Error!u32 {
+    fn stateU32(value: usize) common_chat.exception.Error!u32 {
         if (value > std.math.maxInt(u32)) {
-            return mod.common.throw(error.RuntimeError, "Server tokens state is too large", .{});
+            return common_chat.exception.throw(error.RuntimeError, "Server tokens state is too large", .{});
         }
         return @intCast(value);
     }
 
     /// Ports `server_tokens_state_writer` (server-common.cpp:436 @b1b770d90).
     const Writer = struct {
-        a: Allocator,
+        a: std.mem.Allocator,
         data: std.ArrayList(u8) = .empty,
 
-        fn writeU32(self: *Writer, v: u32) mod.common.Error!void {
+        fn writeU32(self: *Writer, v: u32) common_chat.exception.Error!void {
             try self.data.appendSlice(self.a, std.mem.asBytes(&v));
         }
 
-        fn writeI32(self: *Writer, v: i32) mod.common.Error!void {
+        fn writeI32(self: *Writer, v: i32) common_chat.exception.Error!void {
             try self.data.appendSlice(self.a, std.mem.asBytes(&v));
         }
 
         /// The `std::vector<T>` `write`: a `u32` count, then the elements' bytes.
-        fn writeVector(self: *Writer, bytes: []const u8, n: usize) mod.common.Error!void {
+        fn writeVector(self: *Writer, bytes: []const u8, n: usize) common_chat.exception.Error!void {
             try self.writeU32(try stateU32(n));
             if (n == 0) {
                 return;
@@ -562,24 +562,24 @@ pub const ServerTokens = struct {
         }
 
         /// Ports `write_media_chunk` (server-common.cpp:456 @b1b770d90).
-        fn writeMediaChunk(self: *Writer, chunk: *const tools.c.mtmd_input_chunk) mod.common.Error!void {
+        fn writeMediaChunk(self: *Writer, chunk: *const mtmd.mtmd.InputChunk) common_chat.exception.Error!void {
             var chunk_size: usize = 0;
-            if (tools.c.mtmd_input_chunk_save(chunk, null, 0, &chunk_size) != 0 or chunk_size == 0) {
-                return mod.common.throw(error.RuntimeError, "Cannot serialize media chunk in server tokens", .{});
+            if (mtmd.mtmd.mtmd_input_chunk_save(chunk, null, 0, &chunk_size) != 0 or chunk_size == 0) {
+                return common_chat.exception.throw(error.RuntimeError, "Cannot serialize media chunk in server tokens", .{});
             }
             const chunk_data = try self.a.alloc(u8, try stateU32(chunk_size));
             defer self.a.free(chunk_data);
             @memset(chunk_data, 0);
-            if (tools.c.mtmd_input_chunk_save(chunk, chunk_data.ptr, chunk_data.len, null) != 0) {
-                return mod.common.throw(error.RuntimeError, "Cannot serialize media chunk in server tokens", .{});
+            if (mtmd.mtmd.mtmd_input_chunk_save(chunk, chunk_data.ptr, chunk_data.len, null) != 0) {
+                return common_chat.exception.throw(error.RuntimeError, "Cannot serialize media chunk in server tokens", .{});
             }
             try self.writeVector(chunk_data, chunk_data.len);
         }
 
         /// Ports `take` (server-common.cpp:468 @b1b770d90): padded with zeros
         /// to a whole number of tokens.
-        fn take(self: *Writer) mod.common.Error![]u8 {
-            const n = (self.data.items.len + @sizeOf(mod.common.Token) - 1) / @sizeOf(mod.common.Token) * @sizeOf(mod.common.Token);
+        fn take(self: *Writer) common_chat.exception.Error![]u8 {
+            const n = (self.data.items.len + @sizeOf(llama.impl.llama_c.llama_token) - 1) / @sizeOf(llama.impl.llama_c.llama_token) * @sizeOf(llama.impl.llama_c.llama_token);
             try self.data.appendNTimes(self.a, 0, n - self.data.items.len);
             return self.data.toOwnedSlice(self.a);
         }
@@ -591,9 +591,9 @@ pub const ServerTokens = struct {
         pos: usize = 0,
 
         /// Ports `read` (server-common.cpp:482 @b1b770d90).
-        fn read(self: *Reader, comptime T: type) mod.common.Error!T {
+        fn read(self: *Reader, comptime T: type) common_chat.exception.Error!T {
             if (self.data.len - self.pos < @sizeOf(T)) {
-                return mod.common.throw(error.RuntimeError, "Unexpected end of server tokens state", .{});
+                return common_chat.exception.throw(error.RuntimeError, "Unexpected end of server tokens state", .{});
             }
             const v = std.mem.bytesToValue(T, self.data[self.pos..][0..@sizeOf(T)]);
             self.pos += @sizeOf(T);
@@ -603,11 +603,11 @@ pub const ServerTokens = struct {
         /// Ports `read_vector` (server-common.cpp:494 @b1b770d90).
         ///
         /// Return: the elements' bytes, borrowed from the state.
-        fn readVector(self: *Reader, comptime T: type) mod.common.Error![]const u8 {
+        fn readVector(self: *Reader, comptime T: type) common_chat.exception.Error![]const u8 {
             const n_values = try self.read(u32);
             // reject before resizing, so that a small corrupted payload cannot request a huge allocation
             if (n_values > self.remaining() / @sizeOf(T)) {
-                return mod.common.throw(error.RuntimeError, "Unexpected end of server tokens state", .{});
+                return common_chat.exception.throw(error.RuntimeError, "Unexpected end of server tokens state", .{});
             }
             const bytes = self.data[self.pos..][0 .. @as(usize, n_values) * @sizeOf(T)];
             self.pos += bytes.len;
@@ -625,7 +625,7 @@ pub const ServerTokens = struct {
     /// saved bytes, padded to a whole number of tokens.
     ///
     /// Return: owned by `a`.
-    pub fn serialize(self: *const ServerTokens, a: Allocator) mod.common.Error![]u8 {
+    pub fn serialize(self: *const ServerTokens, a: std.mem.Allocator) common_chat.exception.Error![]u8 {
         var writer: Writer = .{ .a = a };
         errdefer writer.data.deinit(a);
         try writer.writeI32(mod.common.token_null);
@@ -649,48 +649,48 @@ pub const ServerTokens = struct {
     /// Ports `deserialize` (server-common.cpp:733 @b1b770d90): a list that
     /// does not start with the marker is a plain token list, as older
     /// versions wrote.
-    pub fn deserialize(gpa: Allocator, packed_tokens: []const mod.common.Token, has_mtmd: bool) mod.common.Error!ServerTokens {
+    pub fn deserialize(gpa: std.mem.Allocator, packed_tokens: []const llama.impl.llama_c.llama_token, has_mtmd: bool) common_chat.exception.Error!ServerTokens {
         if (packed_tokens.len == 0 or packed_tokens[0] != mod.common.token_null) {
             // plain token list, as written by older versions
             return fromTokens(gpa, packed_tokens, has_mtmd);
         }
 
         var reader: Reader = .{ .data = std.mem.sliceAsBytes(packed_tokens) };
-        _ = try reader.read(mod.common.Token); // format marker
+        _ = try reader.read(llama.impl.llama_c.llama_token); // format marker
         if (try reader.read(u32) != state_version) {
-            return mod.common.throw(error.RuntimeError, "Unsupported server tokens state version", .{});
+            return common_chat.exception.throw(error.RuntimeError, "Unsupported server tokens state version", .{});
         }
 
-        const tokens_bytes = try reader.readVector(mod.common.Token);
+        const tokens_bytes = try reader.readVector(llama.impl.llama_c.llama_token);
 
         // the media start indices, followed by the media chunks in the same order
         const media_bytes = try reader.readVector(u32);
         if (media_bytes.len != 0 and !has_mtmd) {
-            return mod.common.throw(error.RuntimeError, "Cannot restore media tokens without an mmproj", .{});
+            return common_chat.exception.throw(error.RuntimeError, "Cannot restore media tokens without an mmproj", .{});
         }
 
         var result: ServerTokens = .{ .gpa = gpa, .has_mtmd = has_mtmd };
         errdefer result.deinit();
-        const n_tokens = tokens_bytes.len / @sizeOf(mod.common.Token);
+        const n_tokens = tokens_bytes.len / @sizeOf(llama.impl.llama_c.llama_token);
         try result.tokens.ensureTotalCapacity(gpa, n_tokens);
         for (0..n_tokens) |i| {
-            result.tokens.appendAssumeCapacity(std.mem.bytesToValue(mod.common.Token, tokens_bytes[i * 4 ..][0..4]));
+            result.tokens.appendAssumeCapacity(std.mem.bytesToValue(llama.impl.llama_c.llama_token, tokens_bytes[i * 4 ..][0..4]));
         }
 
         for (0..media_bytes.len / 4) |k| {
             const start_idx: usize = std.mem.bytesToValue(u32, media_bytes[k * 4 ..][0..4]);
             const chunk_data = try reader.readVector(u8);
             if (chunk_data.len == 0) {
-                return mod.common.throw(error.RuntimeError, "Cannot load media chunk from server tokens state", .{});
+                return common_chat.exception.throw(error.RuntimeError, "Cannot load media chunk from server tokens state", .{});
             }
 
-            const chunk = tools.c.mtmd_input_chunk_load(chunk_data.ptr, chunk_data.len) orelse
-                return mod.common.throw(error.RuntimeError, "Cannot load media chunk from server tokens state", .{});
+            const chunk = mtmd.mtmd.mtmd_input_chunk_load(chunk_data.ptr, chunk_data.len) orelse
+                return common_chat.exception.throw(error.RuntimeError, "Cannot load media chunk from server tokens state", .{});
             try result.mediaPut(start_idx, chunk);
         }
 
-        if (reader.remaining() >= @sizeOf(mod.common.Token)) {
-            return mod.common.throw(error.RuntimeError, "Trailing data in server tokens state", .{});
+        if (reader.remaining() >= @sizeOf(llama.impl.llama_c.llama_token)) {
+            return common_chat.exception.throw(error.RuntimeError, "Trailing data in server tokens state", .{});
         }
 
         return result;
@@ -705,10 +705,10 @@ pub const ServerTokens = struct {
 /// string, gets the special tokens.
 ///
 /// Return: owned by `a`.
-pub fn tokenizeMixed(a: Allocator, vocab: ?*const tools.c.llama_vocab, json_prompt: *const json.Value, add_special: bool, parse_special: bool) mod.common.Error![]mod.common.Token {
+pub fn tokenizeMixed(a: std.mem.Allocator, vocab: ?*const llama.impl.llama_c.llama_vocab, json_prompt: *const json.Value, add_special: bool, parse_special: bool) common_chat.exception.Error![]llama.impl.llama_c.llama_token {
     // If `add_bos` is true, we only add BOS, when json_prompt is a string,
     // or the first element of the json_prompt array is a string.
-    var prompt_tokens: std.ArrayList(mod.common.Token) = .empty;
+    var prompt_tokens: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
     errdefer prompt_tokens.deinit(a);
 
     if (json_prompt.isArray()) {
@@ -717,7 +717,7 @@ pub fn tokenizeMixed(a: Allocator, vocab: ?*const tools.c.llama_vocab, json_prom
             if (p.isString()) {
                 const s = try p.get([]const u8);
 
-                var toks: []mod.common.Token = undefined;
+                var toks: []llama.impl.llama_c.llama_token = undefined;
                 if (first) {
                     toks = try mod.common.tokenize(a, vocab, s, add_special, parse_special);
                     first = false;
@@ -732,7 +732,7 @@ pub fn tokenizeMixed(a: Allocator, vocab: ?*const tools.c.llama_vocab, json_prom
                     first = false;
                 }
 
-                try prompt_tokens.append(a, try p.get(mod.common.Token));
+                try prompt_tokens.append(a, try p.get(llama.impl.llama_c.llama_token));
             }
         }
     } else {
@@ -764,7 +764,7 @@ fn findChar(ch: u8) u8 {
 
 /// Ports `_base64_value` (base64.hpp:344 @b1b770d90). `alphabet`: the one
 /// detected so far.
-fn base64HppValue(alphabet: *u8, ch: u8) mod.common.Error!u8 {
+fn base64HppValue(alphabet: *u8, ch: u8) common_chat.exception.Error!u8 {
     if (ch >= 'A' and ch <= 'Z') return ch - 'A';
     if (ch >= 'a' and ch <= 'z') return ch - 'a' + 26;
     if (ch >= '0' and ch <= '9') return ch - '0' + 52;
@@ -787,7 +787,7 @@ fn base64HppValue(alphabet: *u8, ch: u8) mod.common.Error!u8 {
             return if (ch == '-') 62 else 63;
         }
     }
-    return mod.common.throw(error.RuntimeError, "invalid base64 character.", .{});
+    return common_chat.exception.throw(error.RuntimeError, "invalid base64 character.", .{});
 }
 
 /// Ports `decode` (base64.hpp:200 @b1b770d90), `base64::decode(str)` with
@@ -795,7 +795,7 @@ fn base64HppValue(alphabet: *u8, ch: u8) mod.common.Error!u8 {
 /// stops at a bad character where this throws.
 ///
 /// Return: owned by `a`; `error.RuntimeError` on a bad character.
-pub fn base64HppDecode(a: Allocator, str: []const u8) mod.common.Error![]u8 {
+pub fn base64HppDecode(a: std.mem.Allocator, str: []const u8) common_chat.exception.Error![]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(a);
     var alphabet: u8 = 0;
@@ -825,7 +825,7 @@ pub fn base64HppDecode(a: Allocator, str: []const u8) mod.common.Error![]u8 {
     // check padding
     while (i < str.len) : (i += 1) {
         if (str[i] != '=') {
-            return mod.common.throw(error.RuntimeError, "invalid base64 character.", .{});
+            return common_chat.exception.throw(error.RuntimeError, "invalid base64 character.", .{});
         }
     }
     return out.toOwnedSlice(a);
@@ -835,7 +835,7 @@ pub fn base64HppDecode(a: Allocator, str: []const u8) mod.common.Error![]u8 {
 /// first `=` or the first byte outside the alphabet.
 ///
 /// Return: owned by `a`.
-pub fn base64Decode(a: Allocator, encoded_string: []const u8) mod.common.Error![]u8 {
+pub fn base64Decode(a: std.mem.Allocator, encoded_string: []const u8) common_chat.exception.Error![]u8 {
     var i: usize = 0;
     var in_: usize = 0;
 
@@ -885,54 +885,54 @@ pub fn base64Decode(a: Allocator, encoded_string: []const u8) mod.common.Error![
 /// and its files through `mtmd_tokenize`. With `is_placeholder` the media
 /// chunks only count tokens; they cannot be decoded.
 pub fn processMtmdPrompt(
-    gpa: Allocator,
-    mctx: ?*tools.c.mtmd_context,
+    gpa: std.mem.Allocator,
+    mctx: ?*mtmd.mtmd.Context,
     prompt: []const u8,
     files: []const []const u8,
-    init_opt: tools.c.mtmd_helper_init_opt,
+    init_opt: mtmd.helper.InitOpt,
     is_placeholder: bool,
-) mod.common.Error!ServerTokens {
+) common_chat.exception.Error!ServerTokens {
     // these will be freed upon going out of scope
-    var bitmaps: std.ArrayList(?*const tools.c.mtmd_bitmap) = .empty;
+    var bitmaps: std.ArrayList(*const mtmd.mtmd.Bitmap) = .empty;
     defer {
-        for (bitmaps.items) |b| tools.c.mtmd_bitmap_free(@constCast(b));
+        for (bitmaps.items) |b| mtmd.mtmd.mtmd_bitmap_free(@constCast(b));
         bitmaps.deinit(gpa);
     }
-    var videos: std.ArrayList(*tools.c.mtmd_helper_video) = .empty;
+    var videos: std.ArrayList(*anyopaque) = .empty;
     defer {
-        for (videos.items) |v| tools.c.mtmd_helper_video_free(v);
+        for (videos.items) |v| mtmd.helper.mtmd_helper_video_free(v);
         videos.deinit(gpa);
     }
     for (files) |file| {
-        const out = tools.c.mtmd_helper_bitmap_init_from_buf(mctx, file.ptr, file.len, is_placeholder, init_opt);
+        const out = mtmd.helper.mtmd_helper_bitmap_init_from_buf(mctx.?, file.ptr, file.len, is_placeholder, init_opt);
         if (out.bitmap == null) {
-            return mod.common.throw(error.RuntimeError, "Failed to load image or audio file", .{});
+            return common_chat.exception.throw(error.RuntimeError, "Failed to load image or audio file", .{});
         }
-        bitmaps.append(gpa, out.bitmap) catch |e| {
-            tools.c.mtmd_bitmap_free(out.bitmap);
-            if (out.video_ctx) |v| tools.c.mtmd_helper_video_free(v);
+        bitmaps.append(gpa, out.bitmap.?) catch |e| {
+            mtmd.mtmd.mtmd_bitmap_free(out.bitmap);
+            if (out.video_ctx) |v| mtmd.helper.mtmd_helper_video_free(v);
             return e;
         };
         if (out.video_ctx) |v| {
             videos.append(gpa, v) catch |e| {
-                tools.c.mtmd_helper_video_free(v);
+                mtmd.helper.mtmd_helper_video_free(v);
                 return e;
             };
         }
     }
     // process prompt
     // multimodal
-    const inp_txt: tools.c.mtmd_input_text = .{
+    const inp_txt: mtmd.mtmd.InputText = .{
         .text = prompt.ptr,
         .text_len = prompt.len,
         .add_special = true,
         .parse_special = true,
     };
-    const chunks = tools.c.mtmd_input_chunks_init();
-    defer tools.c.mtmd_input_chunks_free(chunks);
-    const tokenized = tools.c.mtmd_tokenize(mctx, chunks, &inp_txt, bitmaps.items.ptr, bitmaps.items.len);
+    const chunks = mtmd.mtmd.mtmd_input_chunks_init();
+    defer mtmd.mtmd.mtmd_input_chunks_free(chunks);
+    const tokenized = mtmd.mtmd.mtmd_tokenize(mctx.?, chunks, &inp_txt, bitmaps.items.ptr, bitmaps.items.len);
     if (tokenized != 0) {
-        return mod.common.throw(error.RuntimeError, "Failed to tokenize prompt", .{});
+        return common_chat.exception.throw(error.RuntimeError, "Failed to tokenize prompt", .{});
     }
     return ServerTokens.fromChunks(gpa, chunks, true);
 }
@@ -941,14 +941,14 @@ pub fn processMtmdPrompt(
 /// prompt -- a string, a list of tokens, strings and tokens mixed, or an
 /// object with `prompt_string` and optionally `multimodal_data`.
 pub fn tokenizeInputSubprompt(
-    gpa: Allocator,
-    vocab: ?*const tools.c.llama_vocab,
-    mctx: ?*tools.c.mtmd_context,
+    gpa: std.mem.Allocator,
+    vocab: ?*const llama.impl.llama_c.llama_vocab,
+    mctx: ?*mtmd.mtmd.Context,
     json_prompt: *const json.Value,
     add_special: bool,
     parse_special: bool,
-    init_opt: tools.c.mtmd_helper_init_opt,
-) mod.common.Error!ServerTokens {
+    init_opt: mtmd.helper.InitOpt,
+) common_chat.exception.Error!ServerTokens {
     const json_string_prompt_key = "prompt_string";
     const json_mtmd_data_key = "multimodal_data";
     const has_mtmd = mctx != null;
@@ -959,14 +959,14 @@ pub fn tokenizeInputSubprompt(
         return ServerTokens.fromTokens(gpa, tmp, false);
     } else if (mod.common.jsonIsArrayOfNumbers(json_prompt)) {
         // array of tokens
-        const tmp = try json_prompt.getSlice(gpa, mod.common.Token);
+        const tmp = try json_prompt.getSlice(gpa, llama.impl.llama_c.llama_token);
         defer gpa.free(tmp);
         return ServerTokens.fromTokens(gpa, tmp, false);
     } else if (json_prompt.contains(json_string_prompt_key)) {
         // JSON object with prompt key.
         if (json_prompt.contains(json_mtmd_data_key)) {
             if (!has_mtmd)
-                return mod.common.throw(error.RuntimeError, "Multimodal data provided, but model does not support multimodal requests.", .{});
+                return common_chat.exception.throw(error.RuntimeError, "Multimodal data provided, but model does not support multimodal requests.", .{});
 
             // JSON object with prompt and multimodal key.
             var files: std.ArrayList([]const u8) = .empty;
@@ -992,7 +992,7 @@ pub fn tokenizeInputSubprompt(
             return ServerTokens.fromTokens(gpa, tmp, false);
         }
     } else {
-        return mod.common.throw(error.InvalidArgument, "\"prompt\" elements must be a string, a list of tokens, a JSON object containing a prompt string, or a list of mixed strings & tokens.", .{});
+        return common_chat.exception.throw(error.InvalidArgument, "\"prompt\" elements must be a string, a list of tokens, a JSON object containing a prompt string, or a list of mixed strings & tokens.", .{});
     }
 }
 
@@ -1002,14 +1002,14 @@ pub fn tokenizeInputSubprompt(
 ///
 /// Return: owned by `gpa`; `deinit` each.
 pub fn tokenizeInputPrompts(
-    gpa: Allocator,
-    vocab: ?*const tools.c.llama_vocab,
-    mctx: ?*tools.c.mtmd_context,
+    gpa: std.mem.Allocator,
+    vocab: ?*const llama.impl.llama_c.llama_vocab,
+    mctx: ?*mtmd.mtmd.Context,
     json_prompt: *const json.Value,
     add_special: bool,
     parse_special: bool,
-    init_opt: tools.c.mtmd_helper_init_opt,
-) mod.common.Error!std.ArrayList(ServerTokens) {
+    init_opt: mtmd.helper.InitOpt,
+) common_chat.exception.Error!std.ArrayList(ServerTokens) {
     var result: std.ArrayList(ServerTokens) = .empty;
     errdefer {
         for (result.items) |*t| t.deinit();
@@ -1028,7 +1028,7 @@ pub fn tokenizeInputPrompts(
         };
     }
     if (result.items.len == 0) {
-        return mod.common.throw(error.InvalidArgument, "\"prompt\" must not be empty", .{});
+        return common_chat.exception.throw(error.InvalidArgument, "\"prompt\" must not be empty", .{});
     }
     return result;
 }
@@ -1040,11 +1040,11 @@ pub fn tokenizeInputPrompts(
 /// with the first call's vocabulary.
 const InfillStatics = struct {
     mutex: stdlib.sync.Mutex = .{},
-    k_fim_repo: ?[]mod.common.Token = null,
-    k_chunk_prefix_tokens: ?[]mod.common.Token = null,
-    k_fim_file: ?[]mod.common.Token = null,
+    k_fim_repo: ?[]llama.impl.llama_c.llama_token = null,
+    k_chunk_prefix_tokens: ?[]llama.impl.llama_c.llama_token = null,
+    k_fim_file: ?[]llama.impl.llama_c.llama_token = null,
 
-    fn get(self: *InfillStatics, slot: *?[]mod.common.Token, vocab: ?*const tools.c.llama_vocab, text: []const u8) mod.common.Error![]const mod.common.Token {
+    fn get(self: *InfillStatics, slot: *?[]llama.impl.llama_c.llama_token, vocab: ?*const llama.impl.llama_c.llama_vocab, text: []const u8) common_chat.exception.Error![]const llama.impl.llama_c.llama_token {
         self.mutex.lock();
         defer self.mutex.unlock();
         if (slot.* == null) slot.* = try mod.common.tokenize(std.heap.c_allocator, vocab, text, false, false);
@@ -1059,8 +1059,8 @@ var infill_statics: InfillStatics = .{};
 ///
 /// Return: owned by `a`.
 pub fn formatPromptInfill(
-    a: Allocator,
-    vocab: ?*const tools.c.llama_vocab,
+    a: std.mem.Allocator,
+    vocab: ?*const llama.impl.llama_c.llama_vocab,
     input_prefix: *const json.Value,
     input_suffix: *const json.Value,
     input_extra: *json.Value,
@@ -1068,8 +1068,8 @@ pub fn formatPromptInfill(
     n_predict: c_int,
     n_ctx: c_int,
     spm_infill: bool,
-    tokens_prompt: []const mod.common.Token,
-) mod.common.Error![]mod.common.Token {
+    tokens_prompt: []const llama.impl.llama_c.llama_token,
+) common_chat.exception.Error![]llama.impl.llama_c.llama_token {
     // TODO: optimize this block by reducing memory allocations and movement
 
     // use FIM repo-level pattern:
@@ -1084,20 +1084,20 @@ pub fn formatPromptInfill(
     // [FIM_SEP]filename
     // [FIM_PRE]prefix[FIM_SUF]suffix[FIM_MID]prompt
     //
-    var extra_tokens: std.ArrayList(mod.common.Token) = .empty;
+    var extra_tokens: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
     defer extra_tokens.deinit(a);
     try extra_tokens.ensureTotalCapacity(a, @intCast(n_ctx));
 
-    var tokens_prefix: std.ArrayList(mod.common.Token) = .fromOwnedSlice(try tokenizeMixed(a, vocab, input_prefix, false, false));
+    var tokens_prefix: std.ArrayList(llama.impl.llama_c.llama_token) = .fromOwnedSlice(try tokenizeMixed(a, vocab, input_prefix, false, false));
     defer tokens_prefix.deinit(a);
-    var tokens_suffix: std.ArrayList(mod.common.Token) = .fromOwnedSlice(try tokenizeMixed(a, vocab, input_suffix, false, false));
+    var tokens_suffix: std.ArrayList(llama.impl.llama_c.llama_token) = .fromOwnedSlice(try tokenizeMixed(a, vocab, input_suffix, false, false));
     defer tokens_suffix.deinit(a);
 
-    if (tools.c.llama_vocab_fim_rep(vocab) != mod.common.token_null) {
+    if (llama.api.vocab.llama_vocab_fim_rep(vocab) != mod.common.token_null) {
         // TODO: make project name an input
         const k_fim_repo = try infill_statics.get(&infill_statics.k_fim_repo, vocab, "myproject\n");
 
-        try extra_tokens.append(a, tools.c.llama_vocab_fim_rep(vocab));
+        try extra_tokens.append(a, llama.api.vocab.llama_vocab_fim_rep(vocab));
         try extra_tokens.appendSlice(a, k_fim_repo);
     }
     var it = input_extra.items();
@@ -1107,13 +1107,13 @@ pub fn formatPromptInfill(
         const text = mod.common.jsonValue(chunk, "text", []const u8, "");
         const filename = mod.common.jsonValue(chunk, "filename", []const u8, "tmp");
 
-        if (tools.c.llama_vocab_fim_sep(vocab) != mod.common.token_null) {
+        if (llama.api.vocab.llama_vocab_fim_sep(vocab) != mod.common.token_null) {
             const name = try std.mem.concat(a, u8, &.{ filename, "\n" });
             defer a.free(name);
             const k_fim_file = try mod.common.tokenize(a, vocab, name, false, false);
             defer a.free(k_fim_file);
 
-            try extra_tokens.append(a, tools.c.llama_vocab_fim_sep(vocab));
+            try extra_tokens.append(a, llama.api.vocab.llama_vocab_fim_sep(vocab));
             try extra_tokens.appendSlice(a, k_fim_file);
         } else {
             // chunk separator in binary form to avoid confusing the AI
@@ -1128,11 +1128,11 @@ pub fn formatPromptInfill(
         try extra_tokens.appendSlice(a, chunk_tokens);
     }
 
-    if (tools.c.llama_vocab_fim_sep(vocab) != mod.common.token_null) {
+    if (llama.api.vocab.llama_vocab_fim_sep(vocab) != mod.common.token_null) {
         // TODO: current filename
         const k_fim_file = try infill_statics.get(&infill_statics.k_fim_file, vocab, "filename\n");
 
-        try extra_tokens.append(a, tools.c.llama_vocab_fim_sep(vocab));
+        try extra_tokens.append(a, llama.api.vocab.llama_vocab_fim_sep(vocab));
         try extra_tokens.appendSlice(a, k_fim_file);
     }
 
@@ -1151,18 +1151,18 @@ pub fn formatPromptInfill(
     tokens_prefix.replaceRangeAssumeCapacity(0, drop, &.{});
     try tokens_suffix.resize(a, @intCast(n_suffix_take));
 
-    try tokens_prefix.insert(a, 0, tools.c.llama_vocab_fim_pre(vocab));
+    try tokens_prefix.insert(a, 0, llama.api.vocab.llama_vocab_fim_pre(vocab));
     try tokens_prefix.appendSlice(a, tokens_prompt);
-    try tokens_suffix.insert(a, 0, tools.c.llama_vocab_fim_suf(vocab));
+    try tokens_suffix.insert(a, 0, llama.api.vocab.llama_vocab_fim_suf(vocab));
 
     const inp_src = if (spm_infill) tokens_suffix.items else tokens_prefix.items;
     const end_src = if (spm_infill) tokens_prefix.items else tokens_suffix.items;
-    var embd_inp: std.ArrayList(mod.common.Token) = .empty;
+    var embd_inp: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
     errdefer embd_inp.deinit(a);
     try embd_inp.appendSlice(a, inp_src);
 
-    if (tools.c.llama_vocab_get_add_bos(vocab)) {
-        try embd_inp.insert(a, 0, tools.c.llama_vocab_bos(vocab));
+    if (llama.api.vocab.llama_vocab_get_add_bos(vocab)) {
+        try embd_inp.insert(a, 0, llama.api.vocab.llama_vocab_bos(vocab));
     }
 
     mod.common.srv(.dbg, "format_prompt_infill", "extra: n_ctx = %d, n_extra_take = %d, n_extra = %d\n", .{ n_ctx, n_extra_take, @as(c_int, @intCast(extra_tokens.items.len)) });
@@ -1171,7 +1171,7 @@ pub fn formatPromptInfill(
     try embd_inp.insertSlice(a, 0, extra_tokens.items[extra_tokens.items.len - @as(usize, @intCast(n_extra_take)) ..]);
 
     try embd_inp.appendSlice(a, end_src);
-    try embd_inp.append(a, tools.c.llama_vocab_fim_mid(vocab));
+    try embd_inp.append(a, llama.api.vocab.llama_vocab_fim_mid(vocab));
 
     return embd_inp.toOwnedSlice(a);
 }
@@ -1181,7 +1181,7 @@ pub fn formatPromptInfill(
 /// stays text.
 ///
 /// Return: owned by `a`.
-pub fn formatRerankTemplate(a: Allocator, tmpl: []const u8, query: []const u8, doc: []const u8) mod.common.Error![]u8 {
+pub fn formatRerankTemplate(a: std.mem.Allocator, tmpl: []const u8, query: []const u8, doc: []const u8) common_chat.exception.Error![]u8 {
     var prompt: std.ArrayList(u8) = .empty;
     errdefer prompt.deinit(a);
     try prompt.ensureTotalCapacity(a, tmpl.len);
@@ -1207,25 +1207,25 @@ pub fn formatRerankTemplate(a: Allocator, tmpl: []const u8, query: []const u8, d
 /// decoded media for multimodal inputs: the prompt then has one media
 /// marker per file, and goes through `process_mtmd_prompt`.
 pub fn formatPromptRerank(
-    gpa: Allocator,
-    model: ?*const tools.c.llama_model,
-    vocab: ?*const tools.c.llama_vocab,
-    mctx: ?*tools.c.mtmd_context,
+    gpa: std.mem.Allocator,
+    model: ?*const llama.impl.llama_c.llama_model,
+    vocab: ?*const llama.impl.llama_c.llama_vocab,
+    mctx: ?*mtmd.mtmd.Context,
     query: []const u8,
     doc: []const u8,
     query_files: []const []const u8,
     doc_files: []const []const u8,
-    init_opt: tools.c.mtmd_helper_init_opt,
-) mod.common.Error!ServerTokens {
+    init_opt: mtmd.helper.InitOpt,
+) common_chat.exception.Error!ServerTokens {
     // media must be spliced through the mtmd pipeline
     if ((query_files.len != 0 or doc_files.len != 0) and mctx == null) {
-        return mod.common.throw(error.InvalidArgument, "multimodal rerank input requires --mmproj", .{});
+        return common_chat.exception.throw(error.InvalidArgument, "multimodal rerank input requires --mmproj", .{});
     }
 
     var result = ServerTokens.init(gpa);
     errdefer result.deinit();
 
-    const rerank_prompt: ?[*:0]const u8 = tools.c.llama_model_chat_template(model, "rerank");
+    const rerank_prompt: ?[*:0]const u8 = llama.api.model.llama_model_chat_template(model, "rerank");
 
     if (rerank_prompt) |rp| {
         // multimodal: append one media marker per image (arrays already flattened by caller)
@@ -1259,7 +1259,7 @@ pub fn formatPromptRerank(
         }
     } else {
         if (query_files.len != 0 or doc_files.len != 0) {
-            return mod.common.throw(error.InvalidArgument, "multimodal rerank input requires a model with a rerank chat template", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "multimodal rerank input requires a model with a rerank chat template", .{});
         }
 
         // Get EOS token - use SEP token as fallback if EOS is not available
@@ -1271,23 +1271,23 @@ pub fn formatPromptRerank(
         defer query_tokens.deinit();
         var doc_tokens = try tokenizeInputSubprompt(gpa, vocab, mctx, &dv, false, false, init_opt);
         defer doc_tokens.deinit();
-        var eos_token = tools.c.llama_vocab_eos(vocab);
+        var eos_token = llama.api.vocab.llama_vocab_eos(vocab);
         if (eos_token == mod.common.token_null) {
-            eos_token = tools.c.llama_vocab_sep(vocab);
+            eos_token = llama.api.vocab.llama_vocab_sep(vocab);
         }
 
-        if (tools.c.llama_vocab_get_add_bos(vocab)) {
-            try result.pushBackToken(tools.c.llama_vocab_bos(vocab));
+        if (llama.api.vocab.llama_vocab_get_add_bos(vocab)) {
+            try result.pushBackToken(llama.api.vocab.llama_vocab_bos(vocab));
         }
         try result.pushBackTokens(&query_tokens);
-        if (tools.c.llama_vocab_get_add_eos(vocab)) {
+        if (llama.api.vocab.llama_vocab_get_add_eos(vocab)) {
             try result.pushBackToken(eos_token);
         }
-        if (tools.c.llama_vocab_get_add_sep(vocab)) {
-            try result.pushBackToken(tools.c.llama_vocab_sep(vocab));
+        if (llama.api.vocab.llama_vocab_get_add_sep(vocab)) {
+            try result.pushBackToken(llama.api.vocab.llama_vocab_sep(vocab));
         }
         try result.pushBackTokens(&doc_tokens);
-        if (tools.c.llama_vocab_get_add_eos(vocab)) {
+        if (llama.api.vocab.llama_vocab_get_add_eos(vocab)) {
             try result.pushBackToken(eos_token);
         }
     }
@@ -1319,10 +1319,10 @@ test "a plain token list round-trips through the state format" {
     const bytes = try t.serialize(a);
     defer a.free(bytes);
     try std.testing.expectEqual(@as(usize, 0), bytes.len % 4);
-    const toks = std.mem.bytesAsSlice(mod.common.Token, bytes);
-    const copy = try a.dupe(mod.common.Token, @alignCast(toks));
+    const toks = std.mem.bytesAsSlice(llama.impl.llama_c.llama_token, bytes);
+    const copy = try a.dupe(llama.impl.llama_c.llama_token, @alignCast(toks));
     defer a.free(copy);
     var back = try ServerTokens.deserialize(a, copy, false);
     defer back.deinit();
-    try std.testing.expectEqualSlices(mod.common.Token, t.tokens.items, back.tokens.items);
+    try std.testing.expectEqualSlices(llama.impl.llama_c.llama_token, t.tokens.items, back.tokens.items);
 }

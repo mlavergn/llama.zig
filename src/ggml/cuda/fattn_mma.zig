@@ -176,7 +176,7 @@ fn kernel(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols1
 /// raises the limit under `!GGML_USE_MUSA` implicitly, being inside the
 /// `!GGML_USE_MUSA` block (HIP compiles it too); MUSA is not
 /// defined here.
-pub fn mmaF16Case(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols1: comptime_int, comptime ncols2: comptime_int, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+pub fn mmaF16Case(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols1: comptime_int, comptime ncols2: comptime_int, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const KQV = dst;
     const id = ggml.cuda.common.getDevice();
     const cc = ggml.cuda.common.info().devices[@intCast(id)].cc;

@@ -35,13 +35,6 @@
 const std = @import("std");
 const harness_root = @import("harness_root");
 
-const c = harness_root.impl.c;
-const V = harness_root.vocab;
-const Vocab = V.Vocab;
-const Token = V.Token;
-
-const gpa = std.heap.c_allocator;
-
 var checks: usize = 0;
 var failures: usize = 0;
 var case_failures: usize = 0;
@@ -57,9 +50,9 @@ fn fail(comptime fmt: []const u8, args: anytype) void {
 
 var log_target: ?*std.ArrayList(u8) = null;
 
-fn logCb(_: c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
+fn logCb(_: harness_root.impl.c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
     const t = log_target orelse return;
-    t.appendSlice(gpa, std.mem.span(@as([*:0]const u8, @ptrCast(text)))) catch unreachable;
+    t.appendSlice(std.heap.c_allocator, std.mem.span(@as([*:0]const u8, @ptrCast(text)))) catch unreachable;
 }
 
 /// The vocabulary's own log: its `load:` lines, then its `print_info`
@@ -83,8 +76,8 @@ fn vocabLog(log: []const u8, out: *std.ArrayList(u8)) void {
             break :blk false;
         };
         if (take) {
-            out.appendSlice(gpa, line) catch unreachable;
-            out.append(gpa, '\n') catch unreachable;
+            out.appendSlice(std.heap.c_allocator, line) catch unreachable;
+            out.append(std.heap.c_allocator, '\n') catch unreachable;
         }
     }
 }
@@ -95,26 +88,26 @@ fn vocabLog(log: []const u8, out: *std.ArrayList(u8)) void {
 const Case = struct {
     name: []const u8,
     path: [:0]const u8,
-    overrides: []const c.llama_model_kv_override = &.{},
+    overrides: []const harness_root.impl.c.llama_model_kv_override = &.{},
 };
 
-fn kvBool(key: []const u8, v: bool) c.llama_model_kv_override {
-    var o = std.mem.zeroes(c.llama_model_kv_override);
-    o.tag = c.LLAMA_KV_OVERRIDE_TYPE_BOOL;
+fn kvBool(key: []const u8, v: bool) harness_root.impl.c.llama_model_kv_override {
+    var o = std.mem.zeroes(harness_root.impl.c.llama_model_kv_override);
+    o.tag = harness_root.impl.c.LLAMA_KV_OVERRIDE_TYPE_BOOL;
     @memcpy(o.key[0..key.len], key);
     o.unnamed_0.val_bool = v;
     return o;
 }
 
-fn kvInt(key: []const u8, v: i64) c.llama_model_kv_override {
-    var o = std.mem.zeroes(c.llama_model_kv_override);
-    o.tag = c.LLAMA_KV_OVERRIDE_TYPE_INT;
+fn kvInt(key: []const u8, v: i64) harness_root.impl.c.llama_model_kv_override {
+    var o = std.mem.zeroes(harness_root.impl.c.llama_model_kv_override);
+    o.tag = harness_root.impl.c.LLAMA_KV_OVERRIDE_TYPE_INT;
     @memcpy(o.key[0..key.len], key);
     o.unnamed_0.val_i64 = v;
     return o;
 }
 
-const kv_end = std.mem.zeroes(c.llama_model_kv_override);
+const kv_end = std.mem.zeroes(harness_root.impl.c.llama_model_kv_override);
 
 /// Every text a token list should be tokenized from: upstream's test
 /// strings, random text, and both with special-token texts spliced in.
@@ -260,11 +253,11 @@ fn randomText(r: std.Random, buf: *std.ArrayList(u8), specials: []const []const 
     const n = r.uintLessThan(usize, 24);
     for (0..n) |_| {
         if (specials.len != 0 and r.uintLessThan(u8, 6) == 0) {
-            if (r.boolean()) buf.append(gpa, ' ') catch unreachable;
-            buf.appendSlice(gpa, specials[r.uintLessThan(usize, specials.len)]) catch unreachable;
-            if (r.boolean()) buf.append(gpa, ' ') catch unreachable;
+            if (r.boolean()) buf.append(std.heap.c_allocator, ' ') catch unreachable;
+            buf.appendSlice(std.heap.c_allocator, specials[r.uintLessThan(usize, specials.len)]) catch unreachable;
+            if (r.boolean()) buf.append(std.heap.c_allocator, ' ') catch unreachable;
         } else {
-            buf.appendSlice(gpa, pool[r.uintLessThan(usize, pool.len)]) catch unreachable;
+            buf.appendSlice(std.heap.c_allocator, pool[r.uintLessThan(usize, pool.len)]) catch unreachable;
         }
     }
     return buf.items;
@@ -276,38 +269,38 @@ fn randomText(r: std.Random, buf: *std.ArrayList(u8), specials: []const []const 
 fn compareCase(cs: Case, upstream: []const []const u8, r: std.Random) void {
     case_failures = 0;
     var ref_log: std.ArrayList(u8) = .empty;
-    defer ref_log.deinit(gpa);
+    defer ref_log.deinit(std.heap.c_allocator);
     var port_log: std.ArrayList(u8) = .empty;
-    defer port_log.deinit(gpa);
+    defer port_log.deinit(std.heap.c_allocator);
 
     // The overrides as both sides take them: the C++ list ends with an
     // empty key.
-    var ovr: std.ArrayList(c.llama_model_kv_override) = .empty;
-    defer ovr.deinit(gpa);
-    ovr.appendSlice(gpa, cs.overrides) catch unreachable;
-    ovr.append(gpa, kv_end) catch unreachable;
+    var ovr: std.ArrayList(harness_root.impl.c.llama_model_kv_override) = .empty;
+    defer ovr.deinit(std.heap.c_allocator);
+    ovr.appendSlice(std.heap.c_allocator, cs.overrides) catch unreachable;
+    ovr.append(std.heap.c_allocator, kv_end) catch unreachable;
 
     // Reference.
     log_target = &ref_log;
-    var mp = c.llama_model_default_params();
+    var mp = harness_root.impl.c.llama_model_default_params();
     mp.vocab_only = true;
     if (cs.overrides.len != 0) mp.kv_overrides = ovr.items.ptr;
-    const model = c.llama_model_load_from_file(cs.path.ptr, mp);
-    defer if (model) |m| c.llama_model_free(m);
+    const model = harness_root.impl.c.llama_model_load_from_file(cs.path.ptr, mp);
+    defer if (model) |m| harness_root.impl.c.llama_model_free(m);
 
     // Port.
     log_target = &port_log;
-    const gctx = c.gguf_init_from_file(cs.path.ptr, .{ .no_alloc = true, .ctx = null }) orelse {
+    const gctx = harness_root.impl.c.gguf_init_from_file(cs.path.ptr, .{ .no_alloc = true, .ctx = null }) orelse {
         log_target = null;
         fail("{s}: gguf_init_from_file failed", .{cs.name});
         return;
     };
-    defer c.gguf_free(gctx);
-    const arch_k = c.gguf_find_key(gctx, "general.architecture");
-    const arch_name = if (arch_k >= 0) harness_root.gguf_meta.cString(c.gguf_get_val_str(gctx, arch_k)) else "";
+    defer harness_root.impl.c.gguf_free(gctx);
+    const arch_k = harness_root.impl.c.gguf_find_key(gctx, "general.architecture");
+    const arch_name = if (arch_k >= 0) harness_root.gguf_meta.cString(harness_root.impl.c.gguf_get_val_str(gctx, arch_k)) else "";
     var meta = harness_root.gguf_meta.Meta.init(gctx, harness_root.arch.archFromString(arch_name), if (cs.overrides.len != 0) ovr.items.ptr else null);
     defer meta.deinit();
-    var vocab = Vocab.init() catch unreachable;
+    var vocab = harness_root.vocab.Vocab.init() catch unreachable;
     defer vocab.deinit();
     var exc: harness_root.impl.Exception = .{};
     var loaded = if (vocab.load(&meta, &exc)) |_| true else |_| false;
@@ -329,8 +322,8 @@ fn compareCase(cs: Case, upstream: []const []const u8, r: std.Random) void {
             return;
         }
         var want: std.ArrayList(u8) = .empty;
-        defer want.deinit(gpa);
-        want.print(gpa, "{s}{s}\n", .{ if (info_failed) "error loading model: " else "llama_model_load: error loading model: error loading model vocabulary: ", exc.what() }) catch unreachable;
+        defer want.deinit(std.heap.c_allocator);
+        want.print(std.heap.c_allocator, "{s}{s}\n", .{ if (info_failed) "error loading model: " else "llama_model_load: error loading model: error loading model vocabulary: ", exc.what() }) catch unreachable;
         if (std.mem.find(u8, ref_log.items, want.items) == null) {
             fail("{s}: error differs: port \"{f}\"", .{ cs.name, std.zig.fmtString(exc.what()) });
         }
@@ -343,9 +336,9 @@ fn compareCase(cs: Case, upstream: []const []const u8, r: std.Random) void {
 
     {
         var a: std.ArrayList(u8) = .empty;
-        defer a.deinit(gpa);
+        defer a.deinit(std.heap.c_allocator);
         var b: std.ArrayList(u8) = .empty;
-        defer b.deinit(gpa);
+        defer b.deinit(std.heap.c_allocator);
         vocabLog(ref_log.items, &a);
         vocabLog(port_log.items, &b);
         checks += 1;
@@ -365,41 +358,41 @@ fn compareCase(cs: Case, upstream: []const []const u8, r: std.Random) void {
         }
     }
 
-    const rv = c.llama_model_get_vocab(model).?;
+    const rv = harness_root.impl.c.llama_model_get_vocab(model).?;
     compareScalars(cs, rv, &vocab);
-    if (vocab.type == V.vocab.type_none) return;
+    if (vocab.type == harness_root.vocab.vocab.type_none) return;
     comparePieces(cs, rv, &vocab);
 
     // Special-token texts to splice into random text.
     var specials: std.ArrayList([]const u8) = .empty;
-    defer specials.deinit(gpa);
+    defer specials.deinit(std.heap.c_allocator);
     for (vocab.cache_special_tokens.items) |id| {
         if (specials.items.len >= 40) break;
-        specials.append(gpa, vocab.text(id)) catch unreachable;
+        specials.append(std.heap.c_allocator, vocab.text(id)) catch unreachable;
     }
 
     var rbuf: std.ArrayList(u8) = .empty;
-    defer rbuf.deinit(gpa);
+    defer rbuf.deinit(std.heap.c_allocator);
     var texts: std.ArrayList([]const u8) = .empty;
     defer {
-        for (texts.items[upstream.len..]) |t| gpa.free(t);
-        texts.deinit(gpa);
+        for (texts.items[upstream.len..]) |t| std.heap.c_allocator.free(t);
+        texts.deinit(std.heap.c_allocator);
     }
-    texts.appendSlice(gpa, upstream) catch unreachable;
-    for (0..400) |_| texts.append(gpa, gpa.dupe(u8, randomText(r, &rbuf, specials.items)) catch unreachable) catch unreachable;
+    texts.appendSlice(std.heap.c_allocator, upstream) catch unreachable;
+    for (0..400) |_| texts.append(std.heap.c_allocator, std.heap.c_allocator.dupe(u8, randomText(r, &rbuf, specials.items)) catch unreachable) catch unreachable;
     // Chains over four letters, where the many-overlap case's tokens meet
     // at every position.
     for (0..60) |_| {
         rbuf.clearRetainingCapacity();
-        for (0..r.uintLessThan(usize, 40) + 4) |_| rbuf.append(gpa, "klmn"[r.uintLessThan(usize, 4)]) catch unreachable;
-        texts.append(gpa, gpa.dupe(u8, rbuf.items) catch unreachable) catch unreachable;
+        for (0..r.uintLessThan(usize, 40) + 4) |_| rbuf.append(std.heap.c_allocator, "klmn"[r.uintLessThan(usize, 4)]) catch unreachable;
+        texts.append(std.heap.c_allocator, std.heap.c_allocator.dupe(u8, rbuf.items) catch unreachable) catch unreachable;
     }
 
     if (std.mem.eql(u8, vocab.tokenizer_model.items, "hybriddna")) {
         for (0..600) |_| {
             rbuf.clearRetainingCapacity();
-            for (0..r.uintLessThan(usize, 24) + 1) |_| rbuf.appendSlice(gpa, dna_pieces[r.uintLessThan(usize, dna_pieces.len)]) catch unreachable;
-            texts.append(gpa, gpa.dupe(u8, rbuf.items) catch unreachable) catch unreachable;
+            for (0..r.uintLessThan(usize, 24) + 1) |_| rbuf.appendSlice(std.heap.c_allocator, dna_pieces[r.uintLessThan(usize, dna_pieces.len)]) catch unreachable;
+            texts.append(std.heap.c_allocator, std.heap.c_allocator.dupe(u8, rbuf.items) catch unreachable) catch unreachable;
         }
     }
 
@@ -407,7 +400,7 @@ fn compareCase(cs: Case, upstream: []const []const u8, r: std.Random) void {
 
     // Random id sequences through detokenize.
     const n_tokens: i32 = @intCast(vocab.nTokens());
-    var ids: [24]Token = undefined;
+    var ids: [24]harness_root.vocab.Token = undefined;
     for (0..300) |_| {
         const n = r.uintLessThan(usize, ids.len + 1);
         for (ids[0..n]) |*id| id.* = if (r.uintLessThan(u8, 4) == 0 and vocab.cache_special_tokens.items.len != 0)
@@ -418,27 +411,27 @@ fn compareCase(cs: Case, upstream: []const []const u8, r: std.Random) void {
     }
 }
 
-fn compareScalars(cs: Case, rv: *const c.llama_vocab, v: *const Vocab) void {
+fn compareScalars(cs: Case, rv: *const harness_root.impl.c.llama_vocab, v: *const harness_root.vocab.Vocab) void {
     const Pair = struct { name: []const u8, ref: i64, port: i64 };
     const pairs = [_]Pair{
-        .{ .name = "n_tokens", .ref = c.llama_vocab_n_tokens(rv), .port = v.nTokens() },
-        .{ .name = "type", .ref = c.llama_vocab_type(rv), .port = v.type },
-        .{ .name = "bos", .ref = c.llama_vocab_bos(rv), .port = v.special_bos_id },
-        .{ .name = "eos", .ref = c.llama_vocab_eos(rv), .port = v.special_eos_id },
-        .{ .name = "eot", .ref = c.llama_vocab_eot(rv), .port = v.special_eot_id },
-        .{ .name = "sep", .ref = c.llama_vocab_sep(rv), .port = v.special_sep_id },
-        .{ .name = "nl", .ref = c.llama_vocab_nl(rv), .port = v.linefeed_id },
-        .{ .name = "pad", .ref = c.llama_vocab_pad(rv), .port = v.special_pad_id },
-        .{ .name = "mask", .ref = c.llama_vocab_mask(rv), .port = v.special_mask_id },
-        .{ .name = "fim_pre", .ref = c.llama_vocab_fim_pre(rv), .port = v.special_fim_pre_id },
-        .{ .name = "fim_suf", .ref = c.llama_vocab_fim_suf(rv), .port = v.special_fim_suf_id },
-        .{ .name = "fim_mid", .ref = c.llama_vocab_fim_mid(rv), .port = v.special_fim_mid_id },
-        .{ .name = "fim_pad", .ref = c.llama_vocab_fim_pad(rv), .port = v.special_fim_pad_id },
-        .{ .name = "fim_rep", .ref = c.llama_vocab_fim_rep(rv), .port = v.special_fim_rep_id },
-        .{ .name = "fim_sep", .ref = c.llama_vocab_fim_sep(rv), .port = v.special_fim_sep_id },
-        .{ .name = "add_bos", .ref = @intFromBool(c.llama_vocab_get_add_bos(rv)), .port = @intFromBool(v.add_bos) },
-        .{ .name = "add_eos", .ref = @intFromBool(c.llama_vocab_get_add_eos(rv)), .port = @intFromBool(v.add_eos) },
-        .{ .name = "add_sep", .ref = @intFromBool(c.llama_vocab_get_add_sep(rv)), .port = @intFromBool(v.add_sep) },
+        .{ .name = "n_tokens", .ref = harness_root.impl.c.llama_vocab_n_tokens(rv), .port = v.nTokens() },
+        .{ .name = "type", .ref = harness_root.impl.c.llama_vocab_type(rv), .port = v.type },
+        .{ .name = "bos", .ref = harness_root.impl.c.llama_vocab_bos(rv), .port = v.special_bos_id },
+        .{ .name = "eos", .ref = harness_root.impl.c.llama_vocab_eos(rv), .port = v.special_eos_id },
+        .{ .name = "eot", .ref = harness_root.impl.c.llama_vocab_eot(rv), .port = v.special_eot_id },
+        .{ .name = "sep", .ref = harness_root.impl.c.llama_vocab_sep(rv), .port = v.special_sep_id },
+        .{ .name = "nl", .ref = harness_root.impl.c.llama_vocab_nl(rv), .port = v.linefeed_id },
+        .{ .name = "pad", .ref = harness_root.impl.c.llama_vocab_pad(rv), .port = v.special_pad_id },
+        .{ .name = "mask", .ref = harness_root.impl.c.llama_vocab_mask(rv), .port = v.special_mask_id },
+        .{ .name = "fim_pre", .ref = harness_root.impl.c.llama_vocab_fim_pre(rv), .port = v.special_fim_pre_id },
+        .{ .name = "fim_suf", .ref = harness_root.impl.c.llama_vocab_fim_suf(rv), .port = v.special_fim_suf_id },
+        .{ .name = "fim_mid", .ref = harness_root.impl.c.llama_vocab_fim_mid(rv), .port = v.special_fim_mid_id },
+        .{ .name = "fim_pad", .ref = harness_root.impl.c.llama_vocab_fim_pad(rv), .port = v.special_fim_pad_id },
+        .{ .name = "fim_rep", .ref = harness_root.impl.c.llama_vocab_fim_rep(rv), .port = v.special_fim_rep_id },
+        .{ .name = "fim_sep", .ref = harness_root.impl.c.llama_vocab_fim_sep(rv), .port = v.special_fim_sep_id },
+        .{ .name = "add_bos", .ref = @intFromBool(harness_root.impl.c.llama_vocab_get_add_bos(rv)), .port = @intFromBool(v.add_bos) },
+        .{ .name = "add_eos", .ref = @intFromBool(harness_root.impl.c.llama_vocab_get_add_eos(rv)), .port = @intFromBool(v.add_eos) },
+        .{ .name = "add_sep", .ref = @intFromBool(harness_root.impl.c.llama_vocab_get_add_sep(rv)), .port = @intFromBool(v.add_sep) },
     };
     for (pairs) |p| {
         checks += 1;
@@ -446,34 +439,34 @@ fn compareScalars(cs: Case, rv: *const c.llama_vocab, v: *const Vocab) void {
     }
 
     var n_sup: i32 = 0;
-    const sup = c.llama_vocab_get_suppress_tokens(rv, &n_sup);
+    const sup = harness_root.impl.c.llama_vocab_get_suppress_tokens(rv, &n_sup);
     checks += 1;
-    if (n_sup != v.suppress_tokens.items.len or (n_sup > 0 and !std.mem.eql(Token, sup[0..@intCast(n_sup)], v.suppress_tokens.items))) {
+    if (n_sup != v.suppress_tokens.items.len or (n_sup > 0 and !std.mem.eql(harness_root.vocab.Token, sup[0..@intCast(n_sup)], v.suppress_tokens.items))) {
         fail("{s}: suppress tokens differ", .{cs.name});
     }
 
-    if (v.type == V.vocab.type_none) return;
+    if (v.type == harness_root.vocab.vocab.type_none) return;
     const n: i32 = @intCast(v.nTokens());
     var id: i32 = 0;
     while (id < n) : (id += 1) {
         checks += 1;
-        const rt = std.mem.span(c.llama_vocab_get_text(rv, id));
+        const rt = std.mem.span(harness_root.impl.c.llama_vocab_get_text(rv, id));
         const d = v.id_to_token.items[@intCast(id)];
-        const rs: u32 = @bitCast(c.llama_vocab_get_score(rv, id));
-        const ra = c.llama_vocab_get_attr(rv, id);
+        const rs: u32 = @bitCast(harness_root.impl.c.llama_vocab_get_score(rv, id));
+        const ra = harness_root.impl.c.llama_vocab_get_attr(rv, id);
         if (!std.mem.eql(u8, rt, v.text(id)) or rs != @as(u32, @bitCast(d.score)) or ra != d.attr or
-            c.llama_vocab_is_eog(rv, id) != v.isEog(id) or c.llama_vocab_is_control(rv, id) != v.isControl(id))
+            harness_root.impl.c.llama_vocab_is_eog(rv, id) != v.isEog(id) or harness_root.impl.c.llama_vocab_is_control(rv, id) != v.isControl(id))
         {
             fail("{s}: token {d} differs: text \"{f}\"/\"{f}\" attr {d}/{d} eog {}/{}", .{
-                cs.name, id, std.zig.fmtString(rt), std.zig.fmtString(v.text(id)), ra, d.attr, c.llama_vocab_is_eog(rv, id), v.isEog(id),
+                cs.name, id, std.zig.fmtString(rt), std.zig.fmtString(v.text(id)), ra, d.attr, harness_root.impl.c.llama_vocab_is_eog(rv, id), v.isEog(id),
             });
         }
     }
     checks += 2;
-    if (c.llama_vocab_is_eog(rv, c.LLAMA_TOKEN_NULL) != v.isEog(c.LLAMA_TOKEN_NULL)) fail("{s}: is_eog(NULL)", .{cs.name});
+    if (harness_root.impl.c.llama_vocab_is_eog(rv, harness_root.impl.c.LLAMA_TOKEN_NULL) != v.isEog(harness_root.impl.c.LLAMA_TOKEN_NULL)) fail("{s}: is_eog(NULL)", .{cs.name});
 }
 
-fn comparePieces(cs: Case, rv: *const c.llama_vocab, v: *const Vocab) void {
+fn comparePieces(cs: Case, rv: *const harness_root.impl.c.llama_vocab, v: *const harness_root.vocab.Vocab) void {
     const n: i32 = @intCast(v.nTokens());
     var rb: [512]u8 = undefined;
     var zb: [512]u8 = undefined;
@@ -484,7 +477,7 @@ fn comparePieces(cs: Case, rv: *const c.llama_vocab, v: *const Vocab) void {
             for ([_]i32{ 0, 1, 3 }) |lstrip| {
                 for ([_]usize{ rb.len, 1, 0 }) |len| {
                     checks += 1;
-                    const rn = c.llama_token_to_piece(rv, id, &rb, @intCast(len), lstrip, special);
+                    const rn = harness_root.impl.c.llama_token_to_piece(rv, id, &rb, @intCast(len), lstrip, special);
                     const zn = v.tokenToPiece(id, zb[0..len], lstrip, special, &exc) catch exc.terminate("vocab_diff", 0);
                     if (rn != zn or (rn > 0 and !std.mem.eql(u8, rb[0..@intCast(rn)], zb[0..@intCast(zn)]))) {
                         fail("{s}: piece {d} special={} lstrip={d} len={d}: ref {d} port {d}", .{ cs.name, id, special, lstrip, len, rn, zn });
@@ -495,23 +488,23 @@ fn comparePieces(cs: Case, rv: *const c.llama_vocab, v: *const Vocab) void {
     }
 }
 
-fn compareText(cs: Case, rv: *const c.llama_vocab, v: *const Vocab, t: []const u8) void {
-    var rt: [4096]Token = undefined;
-    var zt: [4096]Token = undefined;
+fn compareText(cs: Case, rv: *const harness_root.impl.c.llama_vocab, v: *const harness_root.vocab.Vocab, t: []const u8) void {
+    var rt: [4096]harness_root.vocab.Token = undefined;
+    var zt: [4096]harness_root.vocab.Token = undefined;
     var exc: harness_root.impl.Exception = .{};
     for ([_]bool{ false, true }) |add_special| {
         for ([_]bool{ false, true }) |parse_special| {
             checks += 1;
-            const rn = c.llama_tokenize(rv, t.ptr, @intCast(t.len), &rt, rt.len, add_special, parse_special);
+            const rn = harness_root.impl.c.llama_tokenize(rv, t.ptr, @intCast(t.len), &rt, rt.len, add_special, parse_special);
             const zn = v.tokenizeInto(t, &zt, add_special, parse_special, &exc) catch exc.terminate("vocab_diff", 0);
-            if (rn != zn or (rn > 0 and !std.mem.eql(Token, rt[0..@intCast(rn)], zt[0..@intCast(zn)]))) {
+            if (rn != zn or (rn > 0 and !std.mem.eql(harness_root.vocab.Token, rt[0..@intCast(rn)], zt[0..@intCast(zn)]))) {
                 fail("{s}: tokenize \"{f}\" add={} parse={}: ref {d} port {d}", .{ cs.name, std.zig.fmtString(t), add_special, parse_special, rn, zn });
                 continue;
             }
             if (rn > 1) {
                 // Too small a buffer reports the size needed.
                 checks += 1;
-                const rs = c.llama_tokenize(rv, t.ptr, @intCast(t.len), &rt, 1, add_special, parse_special);
+                const rs = harness_root.impl.c.llama_tokenize(rv, t.ptr, @intCast(t.len), &rt, 1, add_special, parse_special);
                 const zs = v.tokenizeInto(t, zt[0..1], add_special, parse_special, &exc) catch exc.terminate("vocab_diff", 0);
                 if (rs != zs) fail("{s}: short tokenize \"{f}\": ref {d} port {d}", .{ cs.name, std.zig.fmtString(t), rs, zs });
             }
@@ -520,7 +513,7 @@ fn compareText(cs: Case, rv: *const c.llama_vocab, v: *const Vocab, t: []const u
     }
 }
 
-fn compareDetokenize(cs: Case, rv: *const c.llama_vocab, v: *const Vocab, ids: []const Token) void {
+fn compareDetokenize(cs: Case, rv: *const harness_root.impl.c.llama_vocab, v: *const harness_root.vocab.Vocab, ids: []const harness_root.vocab.Token) void {
     var rb: [16384]u8 = undefined;
     var zb: [16384]u8 = undefined;
     var exc: harness_root.impl.Exception = .{};
@@ -528,7 +521,7 @@ fn compareDetokenize(cs: Case, rv: *const c.llama_vocab, v: *const Vocab, ids: [
         for ([_]bool{ false, true }) |unparse_special| {
             for ([_]usize{ rb.len, 3 }) |len| {
                 checks += 1;
-                const rn = c.llama_detokenize(rv, ids.ptr, @intCast(ids.len), &rb, @intCast(len), remove_special, unparse_special);
+                const rn = harness_root.impl.c.llama_detokenize(rv, ids.ptr, @intCast(ids.len), &rb, @intCast(len), remove_special, unparse_special);
                 const zn = v.detokenize(ids, zb[0..len], remove_special, unparse_special, &exc) catch exc.terminate("vocab_diff", 0);
                 if (rn != zn or (rn > 0 and !std.mem.eql(u8, rb[0..@intCast(rn)], zb[0..@intCast(zn)]))) {
                     fail("{s}: detokenize {d} ids remove={} unparse={} len={d}: ref {d} port {d}", .{ cs.name, ids.len, remove_special, unparse_special, len, rn, zn });
@@ -541,90 +534,90 @@ fn compareDetokenize(cs: Case, rv: *const c.llama_vocab, v: *const Vocab, ids: [
 // -----------------------------------------------------------------------------
 // Synthetic files
 
-fn setStrs(ctx: *c.gguf_context, key: [:0]const u8, strs: []const []const u8) void {
+fn setStrs(ctx: *harness_root.impl.c.gguf_context, key: [:0]const u8, strs: []const []const u8) void {
     var ptrs: std.ArrayList([*c]const u8) = .empty;
-    defer ptrs.deinit(gpa);
+    defer ptrs.deinit(std.heap.c_allocator);
     var owned: std.ArrayList([:0]u8) = .empty;
     defer {
-        for (owned.items) |o| gpa.free(o);
-        owned.deinit(gpa);
+        for (owned.items) |o| std.heap.c_allocator.free(o);
+        owned.deinit(std.heap.c_allocator);
     }
     for (strs) |s| {
-        const z = gpa.dupeSentinel(u8, s, 0) catch unreachable;
-        owned.append(gpa, z) catch unreachable;
-        ptrs.append(gpa, z.ptr) catch unreachable;
+        const z = std.heap.c_allocator.dupeSentinel(u8, s, 0) catch unreachable;
+        owned.append(std.heap.c_allocator, z) catch unreachable;
+        ptrs.append(std.heap.c_allocator, z.ptr) catch unreachable;
     }
-    c.gguf_set_arr_str(ctx, key.ptr, @ptrCast(ptrs.items.ptr), ptrs.items.len);
+    harness_root.impl.c.gguf_set_arr_str(ctx, key.ptr, @ptrCast(ptrs.items.ptr), ptrs.items.len);
 }
 
-fn setI32s(ctx: *c.gguf_context, key: [:0]const u8, v: []const i32) void {
-    c.gguf_set_arr_data(ctx, key.ptr, c.GGUF_TYPE_INT32, v.ptr, v.len);
+fn setI32s(ctx: *harness_root.impl.c.gguf_context, key: [:0]const u8, v: []const i32) void {
+    harness_root.impl.c.gguf_set_arr_data(ctx, key.ptr, harness_root.impl.c.GGUF_TYPE_INT32, v.ptr, v.len);
 }
 
-fn setF32s(ctx: *c.gguf_context, key: [:0]const u8, v: []const f32) void {
-    c.gguf_set_arr_data(ctx, key.ptr, c.GGUF_TYPE_FLOAT32, v.ptr, v.len);
+fn setF32s(ctx: *harness_root.impl.c.gguf_context, key: [:0]const u8, v: []const f32) void {
+    harness_root.impl.c.gguf_set_arr_data(ctx, key.ptr, harness_root.impl.c.GGUF_TYPE_FLOAT32, v.ptr, v.len);
 }
 
 /// A copy of `base` with `edit` applied, written to `dir/name.gguf`.
-fn derive(dir: []const u8, base: [:0]const u8, name: []const u8, comptime edit: fn (*c.gguf_context) void) [:0]const u8 {
-    const ctx = c.gguf_init_from_file(base.ptr, .{ .no_alloc = true, .ctx = null }).?;
-    defer c.gguf_free(ctx);
+fn derive(dir: []const u8, base: [:0]const u8, name: []const u8, comptime edit: fn (*harness_root.impl.c.gguf_context) void) [:0]const u8 {
+    const ctx = harness_root.impl.c.gguf_init_from_file(base.ptr, .{ .no_alloc = true, .ctx = null }).?;
+    defer harness_root.impl.c.gguf_free(ctx);
     edit(ctx);
-    const path = gpa.printSentinel("{s}/{s}.gguf", .{ dir, name }, 0) catch unreachable;
-    if (!c.gguf_write_to_file(ctx, path.ptr, true)) @panic("cannot write a synthetic file");
+    const path = std.heap.c_allocator.printSentinel("{s}/{s}.gguf", .{ dir, name }, 0) catch unreachable;
+    if (!harness_root.impl.c.gguf_write_to_file(ctx, path.ptr, true)) @panic("cannot write a synthetic file");
     return path;
 }
 
-fn findStrs(ctx: *c.gguf_context, key: [:0]const u8, out: *std.ArrayList([]const u8)) void {
-    const k = c.gguf_find_key(ctx, key.ptr);
-    const n = c.gguf_get_arr_n(ctx, k);
-    for (0..n) |i| out.append(gpa, gpa.dupe(u8, harness_root.gguf_meta.cString(c.gguf_get_arr_str(ctx, k, i))) catch unreachable) catch unreachable;
+fn findStrs(ctx: *harness_root.impl.c.gguf_context, key: [:0]const u8, out: *std.ArrayList([]const u8)) void {
+    const k = harness_root.impl.c.gguf_find_key(ctx, key.ptr);
+    const n = harness_root.impl.c.gguf_get_arr_n(ctx, k);
+    for (0..n) |i| out.append(std.heap.c_allocator, std.heap.c_allocator.dupe(u8, harness_root.gguf_meta.cString(harness_root.impl.c.gguf_get_arr_str(ctx, k, i))) catch unreachable) catch unreachable;
 }
 
 const edits = struct {
-    fn rwkv(ctx: *c.gguf_context) void {
+    fn rwkv(ctx: *harness_root.impl.c.gguf_context) void {
         var toks: std.ArrayList([]const u8) = .empty;
-        for (0..256) |b| toks.append(gpa, gpa.print("\\x{x:0>2}", .{b}) catch unreachable) catch unreachable;
-        for ([_][]const u8{ "the", " the", "hello", " world", "\\n\\n", "ab\\\\c", "\\t", "  ", "中文", "\\x41BC", "\\x\xc3\xa9", "\\x\xffz" }) |w| toks.append(gpa, w) catch unreachable;
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "rwkv");
-        _ = c.gguf_remove_key(ctx, "tokenizer.ggml.merges");
-        _ = c.gguf_remove_key(ctx, "tokenizer.ggml.token_type");
-        _ = c.gguf_remove_key(ctx, "tokenizer.ggml.pre");
+        for (0..256) |b| toks.append(std.heap.c_allocator, std.heap.c_allocator.print("\\x{x:0>2}", .{b}) catch unreachable) catch unreachable;
+        for ([_][]const u8{ "the", " the", "hello", " world", "\\n\\n", "ab\\\\c", "\\t", "  ", "中文", "\\x41BC", "\\x\xc3\xa9", "\\x\xffz" }) |w| toks.append(std.heap.c_allocator, w) catch unreachable;
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "rwkv");
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "tokenizer.ggml.merges");
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "tokenizer.ggml.token_type");
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "tokenizer.ggml.pre");
         setStrs(ctx, "tokenizer.ggml.tokens", toks.items);
     }
 
-    fn plamo2(ctx: *c.gguf_context) void {
+    fn plamo2(ctx: *harness_root.impl.c.gguf_context) void {
         var toks: std.ArrayList([]const u8) = .empty;
         var types: std.ArrayList(i32) = .empty;
         var scores: std.ArrayList(f32) = .empty;
         for ([_][]const u8{ "<|plamo:unk|>", "<|plamo:bos|>", "<|plamo:eos|>", "<|plamo:pad|>" }) |w| {
-            toks.append(gpa, w) catch unreachable;
-            types.append(gpa, c.LLAMA_TOKEN_TYPE_CONTROL) catch unreachable;
-            scores.append(gpa, 0) catch unreachable;
+            toks.append(std.heap.c_allocator, w) catch unreachable;
+            types.append(std.heap.c_allocator, harness_root.impl.c.LLAMA_TOKEN_TYPE_CONTROL) catch unreachable;
+            scores.append(std.heap.c_allocator, 0) catch unreachable;
         }
         for (0..256) |b| {
-            toks.append(gpa, gpa.print("<0x{X:0>2}>", .{b}) catch unreachable) catch unreachable;
-            types.append(gpa, c.LLAMA_TOKEN_TYPE_BYTE) catch unreachable;
-            scores.append(gpa, 0) catch unreachable;
+            toks.append(std.heap.c_allocator, std.heap.c_allocator.print("<0x{X:0>2}>", .{b}) catch unreachable) catch unreachable;
+            types.append(std.heap.c_allocator, harness_root.impl.c.LLAMA_TOKEN_TYPE_BYTE) catch unreachable;
+            scores.append(std.heap.c_allocator, 0) catch unreachable;
         }
         const words = [_][]const u8{ "the", "he", "e", "hello", "lo", "world", " the", " ", "日本", "本", "語", "日本語", "ab", "abc", "bc", "c", "Hello", "wor", "ld", "\u{FEFF}x" };
         // "pq" costs 20000.3 before rounding and "p" + "q" exactly 20000: a
         // tie once rounded, which the longer piece wins, and not before.
         for ([_][]const u8{ "pq", "p", "q" }, [_]f32{ -2.00003, -1.0, -1.0 }) |w, sc| {
-            toks.append(gpa, w) catch unreachable;
-            types.append(gpa, c.LLAMA_TOKEN_TYPE_NORMAL) catch unreachable;
-            scores.append(gpa, sc) catch unreachable;
+            toks.append(std.heap.c_allocator, w) catch unreachable;
+            types.append(std.heap.c_allocator, harness_root.impl.c.LLAMA_TOKEN_TYPE_NORMAL) catch unreachable;
+            scores.append(std.heap.c_allocator, sc) catch unreachable;
         }
         for (words, 0..) |w, i| {
-            toks.append(gpa, w) catch unreachable;
-            types.append(gpa, c.LLAMA_TOKEN_TYPE_NORMAL) catch unreachable;
-            scores.append(gpa, -@as(f32, @floatFromInt(i)) * 0.37 - 1.0) catch unreachable;
+            toks.append(std.heap.c_allocator, w) catch unreachable;
+            types.append(std.heap.c_allocator, harness_root.impl.c.LLAMA_TOKEN_TYPE_NORMAL) catch unreachable;
+            scores.append(std.heap.c_allocator, -@as(f32, @floatFromInt(i)) * 0.37 - 1.0) catch unreachable;
         }
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "plamo2");
-        _ = c.gguf_remove_key(ctx, "tokenizer.ggml.merges");
-        _ = c.gguf_remove_key(ctx, "tokenizer.ggml.pre");
-        _ = c.gguf_remove_key(ctx, "tokenizer.ggml.bos_token_id");
-        _ = c.gguf_remove_key(ctx, "tokenizer.ggml.eos_token_id");
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "plamo2");
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "tokenizer.ggml.merges");
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "tokenizer.ggml.pre");
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "tokenizer.ggml.bos_token_id");
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "tokenizer.ggml.eos_token_id");
         setStrs(ctx, "tokenizer.ggml.tokens", toks.items);
         setI32s(ctx, "tokenizer.ggml.token_type", types.items);
         setF32s(ctx, "tokenizer.ggml.scores", scores.items);
@@ -632,75 +625,75 @@ const edits = struct {
 
     /// Tokens appended with their types and scores, all three arrays kept
     /// the same length.
-    fn appendTyped(ctx: *c.gguf_context, words: []const []const u8, ty: i32, score: f32) void {
+    fn appendTyped(ctx: *harness_root.impl.c.gguf_context, words: []const []const u8, ty: i32, score: f32) void {
         var toks: std.ArrayList([]const u8) = .empty;
         findStrs(ctx, "tokenizer.ggml.tokens", &toks);
-        toks.appendSlice(gpa, words) catch unreachable;
+        toks.appendSlice(std.heap.c_allocator, words) catch unreachable;
         setStrs(ctx, "tokenizer.ggml.tokens", toks.items);
-        const tk = c.gguf_find_key(ctx, "tokenizer.ggml.token_type");
+        const tk = harness_root.impl.c.gguf_find_key(ctx, "tokenizer.ggml.token_type");
         var types: std.ArrayList(i32) = .empty;
-        const tp: [*]const i32 = @ptrCast(@alignCast(c.gguf_get_arr_data(ctx, tk)));
-        types.appendSlice(gpa, tp[0..c.gguf_get_arr_n(ctx, tk)]) catch unreachable;
-        types.appendNTimes(gpa, ty, words.len) catch unreachable;
+        const tp: [*]const i32 = @ptrCast(@alignCast(harness_root.impl.c.gguf_get_arr_data(ctx, tk)));
+        types.appendSlice(std.heap.c_allocator, tp[0..harness_root.impl.c.gguf_get_arr_n(ctx, tk)]) catch unreachable;
+        types.appendNTimes(std.heap.c_allocator, ty, words.len) catch unreachable;
         setI32s(ctx, "tokenizer.ggml.token_type", types.items);
-        const sk = c.gguf_find_key(ctx, "tokenizer.ggml.scores");
+        const sk = harness_root.impl.c.gguf_find_key(ctx, "tokenizer.ggml.scores");
         var scores: std.ArrayList(f32) = .empty;
-        const sp: [*]const f32 = @ptrCast(@alignCast(c.gguf_get_arr_data(ctx, sk)));
-        scores.appendSlice(gpa, sp[0..c.gguf_get_arr_n(ctx, sk)]) catch unreachable;
-        scores.appendNTimes(gpa, score, words.len) catch unreachable;
+        const sp: [*]const f32 = @ptrCast(@alignCast(harness_root.impl.c.gguf_get_arr_data(ctx, sk)));
+        scores.appendSlice(std.heap.c_allocator, sp[0..harness_root.impl.c.gguf_get_arr_n(ctx, sk)]) catch unreachable;
+        scores.appendNTimes(std.heap.c_allocator, score, words.len) catch unreachable;
         setF32s(ctx, "tokenizer.ggml.scores", scores.items);
     }
 
     /// The PLaMo-3 tokenizer: PLaMo-2's vocabulary with pieces that
     /// span what the pre-segmentation cuts -- so cutting or not changes the
     /// tokens -- and the PLaMo FIM and file-separator tokens.
-    fn plamo3(ctx: *c.gguf_context) void {
+    fn plamo3(ctx: *harness_root.impl.c.gguf_context) void {
         plamo2(ctx);
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "plamo3");
-        appendTyped(ctx, &.{ "<|plamo:fim_prefix|>", "<|plamo:fim_suffix|>", "<|plamo:fim_middle|>", "<|plamo:file_separator|>" }, c.LLAMA_TOKEN_TYPE_CONTROL, 0);
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "plamo3");
+        appendTyped(ctx, &.{ "<|plamo:fim_prefix|>", "<|plamo:fim_suffix|>", "<|plamo:fim_middle|>", "<|plamo:file_separator|>" }, harness_root.impl.c.LLAMA_TOKEN_TYPE_CONTROL, 0);
         appendTyped(ctx, &.{
             "aa",       "aaa",      "aaaa",      "aaaaa",     "  ",   "   ",      " a", "a ", "x<|",   "|>x", "<|plamo:x|>", "<|plamo:", "x|>", "|>",
             "\u{FEFF}", "\u{EE00}", "\u{EE00}a", "a\u{EE00}", "\n\n", "\n\n\n\n", "<|", ":",  "plamo", "x\n", "\nx",
-        }, c.LLAMA_TOKEN_TYPE_NORMAL, -1.5);
+        }, harness_root.impl.c.LLAMA_TOKEN_TYPE_NORMAL, -1.5);
     }
 
     /// The Unigram NFC option on a vocabulary with no charsmap, so
     /// nothing but NFC composes: precomposed pieces beside their parts.
-    fn ugmNfc(ctx: *c.gguf_context) void {
+    fn ugmNfc(ctx: *harness_root.impl.c.gguf_context) void {
         ugmScores(ctx);
-        appendTyped(ctx, &.{ "\u{00E9}", "e", "\u{0301}", "\u{00C5}", "A", "\u{030A}", "\u{AC00}", "\u{AC01}", "\u{1100}", "\u{1161}", "\u{11A8}", "\u{1EAD}", "\u{0323}", "\u{0302}", "\u{0308}" }, c.LLAMA_TOKEN_TYPE_NORMAL, -2.0);
-        c.gguf_set_val_bool(ctx, "tokenizer.ggml.normalizer.nfc", true);
+        appendTyped(ctx, &.{ "\u{00E9}", "e", "\u{0301}", "\u{00C5}", "A", "\u{030A}", "\u{AC00}", "\u{AC01}", "\u{1100}", "\u{1161}", "\u{11A8}", "\u{1EAD}", "\u{0323}", "\u{0302}", "\u{0308}" }, harness_root.impl.c.LLAMA_TOKEN_TYPE_NORMAL, -2.0);
+        harness_root.impl.c.gguf_set_val_bool(ctx, "tokenizer.ggml.normalizer.nfc", true);
     }
 
     /// ... and on a real Unigram vocabulary with its charsmap.
-    fn ugmNfcCharsmap(ctx: *c.gguf_context) void {
-        c.gguf_set_val_bool(ctx, "tokenizer.ggml.normalizer.nfc", true);
+    fn ugmNfcCharsmap(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_bool(ctx, "tokenizer.ggml.normalizer.nfc", true);
     }
 
     /// The K2 Horizon pre-tokenizer on the GPT-2 vocabulary, with its
     /// end-of-turn token.
-    fn preK2Horizon(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "k2-horizon");
+    fn preK2Horizon(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "k2-horizon");
         appendNormal(ctx, &.{"<|ifm|im_end|>"});
     }
 
-    fn appendTokens(ctx: *c.gguf_context, extra: []const []const u8) void {
+    fn appendTokens(ctx: *harness_root.impl.c.gguf_context, extra: []const []const u8) void {
         var toks: std.ArrayList([]const u8) = .empty;
         findStrs(ctx, "tokenizer.ggml.tokens", &toks);
-        for (extra) |e| toks.append(gpa, e) catch unreachable;
+        for (extra) |e| toks.append(std.heap.c_allocator, e) catch unreachable;
         setStrs(ctx, "tokenizer.ggml.tokens", toks.items);
-        _ = c.gguf_remove_key(ctx, "tokenizer.ggml.token_type");
-        _ = c.gguf_remove_key(ctx, "tokenizer.ggml.scores");
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "tokenizer.ggml.token_type");
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "tokenizer.ggml.scores");
     }
 
-    fn hybriddna(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "hybriddna");
+    fn hybriddna(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "hybriddna");
         appendTokens(ctx, &.{ "<dna>", "</dna>", "<oov>", "AAAAAA\xee\x80\x80", "ACGTAC\xee\x80\x80", "GTAAAA\xee\x80\x80", "CCCCCC\xee\x80\x80" });
     }
 
     /// The model name alone: no DNA pieces, so it falls back to plain BPE.
-    fn hybriddnaBare(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "hybriddna");
+    fn hybriddnaBare(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "hybriddna");
     }
 
     /// Every 6-mer, as a real tail="pad_a" vocabulary has.
@@ -709,14 +702,14 @@ const edits = struct {
             var w: [9]u8 = undefined;
             for (w[0..6], 0..) |*ch, i| ch.* = "ACGT"[(v >> @intCast(2 * i)) & 3];
             w[6..9].* = "\xee\x80\x80".*;
-            toks.append(gpa, gpa.dupe(u8, &w) catch unreachable) catch unreachable;
+            toks.append(std.heap.c_allocator, std.heap.c_allocator.dupe(u8, &w) catch unreachable) catch unreachable;
         }
     }
 
-    fn hybriddnaFull(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "hybriddna");
+    fn hybriddnaFull(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "hybriddna");
         var toks: std.ArrayList([]const u8) = .empty;
-        toks.appendSlice(gpa, &.{ "<dna>", "</dna>", "<oov>" }) catch unreachable;
+        toks.appendSlice(std.heap.c_allocator, &.{ "<dna>", "</dna>", "<oov>" }) catch unreachable;
         dnaKmers(&toks);
         appendTokens(ctx, toks.items);
     }
@@ -724,60 +717,60 @@ const edits = struct {
     /// ... and tail="pad_n": every shorter k-mer padded with N, the k-mer of
     /// N alone, which has no base to strip back to, and a token past the
     /// k-mers ending in N whose text is not DNA.
-    fn hybriddnaPadN(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "hybriddna");
+    fn hybriddnaPadN(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "hybriddna");
         var toks: std.ArrayList([]const u8) = .empty;
-        toks.appendSlice(gpa, &.{ "<dna>", "</dna>", "<oov>" }) catch unreachable;
+        toks.appendSlice(std.heap.c_allocator, &.{ "<dna>", "</dna>", "<oov>" }) catch unreachable;
         dnaKmers(&toks);
         for (1..6) |len| {
             for (0..@as(usize, 1) << @intCast(2 * len)) |v| {
                 var w: [9]u8 = @splat('N');
                 for (w[0..len], 0..) |*ch, i| ch.* = "ACGT"[(v >> @intCast(2 * i)) & 3];
                 w[6..9].* = "\xee\x80\x80".*;
-                toks.append(gpa, gpa.dupe(u8, &w) catch unreachable) catch unreachable;
+                toks.append(std.heap.c_allocator, std.heap.c_allocator.dupe(u8, &w) catch unreachable) catch unreachable;
             }
         }
-        toks.appendSlice(gpa, &.{ "NNNNNN\xee\x80\x80", "xNNN\xee\x80\x80", "\xee\x80\x80" }) catch unreachable;
+        toks.appendSlice(std.heap.c_allocator, &.{ "NNNNNN\xee\x80\x80", "xNNN\xee\x80\x80", "\xee\x80\x80" }) catch unreachable;
         appendTokens(ctx, toks.items);
     }
 
-    fn hybriddnaAuto(ctx: *c.gguf_context) void {
+    fn hybriddnaAuto(ctx: *harness_root.impl.c.gguf_context) void {
         hybriddnaFull(ctx);
-        c.gguf_set_val_bool(ctx, "tokenizer.ggml.dna_auto_tags", true);
+        harness_root.impl.c.gguf_set_val_bool(ctx, "tokenizer.ggml.dna_auto_tags", true);
     }
 
-    fn hybriddnaPadNAuto(ctx: *c.gguf_context) void {
+    fn hybriddnaPadNAuto(ctx: *harness_root.impl.c.gguf_context) void {
         hybriddnaPadN(ctx);
-        c.gguf_set_val_bool(ctx, "tokenizer.ggml.dna_auto_tags", true);
+        harness_root.impl.c.gguf_set_val_bool(ctx, "tokenizer.ggml.dna_auto_tags", true);
     }
 
-    fn hybriddnaAutoOff(ctx: *c.gguf_context) void {
+    fn hybriddnaAutoOff(ctx: *harness_root.impl.c.gguf_context) void {
         hybriddnaFull(ctx);
-        c.gguf_set_val_bool(ctx, "tokenizer.ggml.dna_auto_tags", false);
+        harness_root.impl.c.gguf_set_val_bool(ctx, "tokenizer.ggml.dna_auto_tags", false);
     }
 
-    fn dnaAutoWrongType(ctx: *c.gguf_context) void {
+    fn dnaAutoWrongType(ctx: *harness_root.impl.c.gguf_context) void {
         hybriddna(ctx);
-        c.gguf_set_val_u32(ctx, "tokenizer.ggml.dna_auto_tags", 1);
+        harness_root.impl.c.gguf_set_val_u32(ctx, "tokenizer.ggml.dna_auto_tags", 1);
     }
 
     /// One pre-tokenizer's name on the GPT-2 vocabulary: its flags --
     /// `clean_spaces`, which only detokenizing shows, `add_bos`,
     /// `ignore_merges` -- and its split patterns.
-    fn pre(comptime name: [:0]const u8) fn (*c.gguf_context) void {
+    fn pre(comptime name: [:0]const u8) fn (*harness_root.impl.c.gguf_context) void {
         return struct {
-            fn f(ctx: *c.gguf_context) void {
-                c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", name);
+            fn f(ctx: *harness_root.impl.c.gguf_context) void {
+                harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", name);
             }
         }.f;
     }
 
     /// ... and with whole-word tokens no merge reaches, which only
     /// `ignore_merges` emits.
-    fn preWhole(comptime name: [:0]const u8) fn (*c.gguf_context) void {
+    fn preWhole(comptime name: [:0]const u8) fn (*harness_root.impl.c.gguf_context) void {
         return struct {
-            fn f(ctx: *c.gguf_context) void {
-                c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", name);
+            fn f(ctx: *harness_root.impl.c.gguf_context) void {
+                harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", name);
                 appendNormal(ctx, &.{ "zqzq", "\u{120}zqzq" });
             }
         }.f;
@@ -785,146 +778,146 @@ const edits = struct {
 
     /// Flint's turn tokens end generation, and only under its own
     /// pre-tokenizer.
-    fn preFlintTurns(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "flint");
+    fn preFlintTurns(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "flint");
         appendNormal(ctx, &.{ "<|user|>", "<|observation|>" });
     }
 
-    fn flintTurnsOtherPre(ctx: *c.gguf_context) void {
+    fn flintTurnsOtherPre(ctx: *harness_root.impl.c.gguf_context) void {
         appendNormal(ctx, &.{ "<|user|>", "<|observation|>" });
     }
 
     /// Domyn Small is Sarvam's SPM-style BPE, on a vocabulary whose
     /// tokens carry U+2581.
-    fn preDomyn(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "gpt2");
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "domyn-small");
+    fn preDomyn(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "gpt2");
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "domyn-small");
     }
 
     /// Soprano lowercases and folds whitespace, keeps raw UTF-8,
     /// emits UNK for what is not a token, and its EOS always ends generation.
     /// A real UNK, because a text with no vocabulary token puts its id in the
     /// output.
-    fn preSoprano(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "soprano");
-        c.gguf_set_val_u32(ctx, "tokenizer.ggml.unknown_token_id", 0);
+    fn preSoprano(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "soprano");
+        harness_root.impl.c.gguf_set_val_u32(ctx, "tokenizer.ggml.unknown_token_id", 0);
         appendNormal(ctx, &.{ " ", "i\xcc\x87", "\xcf\x83", "zq zq", "\xe2\x96\x81x" });
     }
 
     /// ... with an EOS out of range, so the id it inserts is the null token.
-    fn preSopranoNoEos(ctx: *c.gguf_context) void {
+    fn preSopranoNoEos(ctx: *harness_root.impl.c.gguf_context) void {
         tinyBpe(ctx);
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "soprano");
-        c.gguf_set_val_u32(ctx, "tokenizer.ggml.unknown_token_id", 0);
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "soprano");
+        harness_root.impl.c.gguf_set_val_u32(ctx, "tokenizer.ggml.unknown_token_id", 0);
     }
 
     /// The end-of-turn tokens: muse-spark's ...
-    fn eotMuse(ctx: *c.gguf_context) void {
+    fn eotMuse(ctx: *harness_root.impl.c.gguf_context) void {
         appendNormal(ctx, &.{"<|eot|>"});
     }
 
     /// ... and beam's tool-call marker, which makes `</s>` a normal token
     /// from outside the EOG list.
-    fn beamMarker(ctx: *c.gguf_context) void {
+    fn beamMarker(ctx: *harness_root.impl.c.gguf_context) void {
         appendNormal(ctx, &.{ "</s>", "<rfl:parameter name=\"" });
     }
 
-    fn sNoMarker(ctx: *c.gguf_context) void {
+    fn sNoMarker(ctx: *harness_root.impl.c.gguf_context) void {
         appendNormal(ctx, &.{"</s>"});
     }
 
     /// `tokenizer.ggml.clean_spaces`, which overrides whatever the
     /// pre-tokenizer set.
-    fn cleanOn(ctx: *c.gguf_context) void {
-        c.gguf_set_val_bool(ctx, "tokenizer.ggml.clean_spaces", true);
+    fn cleanOn(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_bool(ctx, "tokenizer.ggml.clean_spaces", true);
     }
 
-    fn cleanOff(ctx: *c.gguf_context) void {
-        c.gguf_set_val_bool(ctx, "tokenizer.ggml.clean_spaces", false);
+    fn cleanOff(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_bool(ctx, "tokenizer.ggml.clean_spaces", false);
     }
 
-    fn cleanOnPre(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "qwen2");
-        c.gguf_set_val_bool(ctx, "tokenizer.ggml.clean_spaces", true);
+    fn cleanOnPre(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "qwen2");
+        harness_root.impl.c.gguf_set_val_bool(ctx, "tokenizer.ggml.clean_spaces", true);
     }
 
-    fn cleanWrongType(ctx: *c.gguf_context) void {
-        c.gguf_set_val_u32(ctx, "tokenizer.ggml.clean_spaces", 1);
+    fn cleanWrongType(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_u32(ctx, "tokenizer.ggml.clean_spaces", 1);
     }
 
     /// The Metaspace prepend scheme.
-    fn scheme(comptime name: [:0]const u8) fn (*c.gguf_context) void {
+    fn scheme(comptime name: [:0]const u8) fn (*harness_root.impl.c.gguf_context) void {
         return struct {
-            fn f(ctx: *c.gguf_context) void {
-                c.gguf_set_val_str(ctx, "tokenizer.ggml.metaspace.prepend_scheme", name);
+            fn f(ctx: *harness_root.impl.c.gguf_context) void {
+                harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.metaspace.prepend_scheme", name);
             }
         }.f;
     }
 
     /// "first" where it matters: tokens carry U+2581 and a BOS is added, so
     /// a skipped BOS must not take the space off the first rendered piece.
-    fn schemeFirstBos(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.metaspace.prepend_scheme", "first");
-        c.gguf_set_val_bool(ctx, "tokenizer.ggml.add_bos_token", true);
+    fn schemeFirstBos(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.metaspace.prepend_scheme", "first");
+        harness_root.impl.c.gguf_set_val_bool(ctx, "tokenizer.ggml.add_bos_token", true);
     }
 
-    fn schemeFirstMmbert(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "gpt2");
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "mmbert");
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.metaspace.prepend_scheme", "first");
+    fn schemeFirstMmbert(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "gpt2");
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "mmbert");
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.metaspace.prepend_scheme", "first");
     }
 
-    fn schemeWrongType(ctx: *c.gguf_context) void {
-        c.gguf_set_val_u32(ctx, "tokenizer.ggml.metaspace.prepend_scheme", 1);
+    fn schemeWrongType(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_u32(ctx, "tokenizer.ggml.metaspace.prepend_scheme", 1);
     }
 
     /// Every text `eot` auto-detection takes, among tokens enough to fill
     /// `n`. Which one becomes EOT is the first in `token_to_id`'s order, and
     /// `reserve` sets that order: a power of two stays one, where
     /// growing only ever reached primes.
-    fn eotOrder(comptime n: usize) fn (*c.gguf_context) void {
+    fn eotOrder(comptime n: usize) fn (*harness_root.impl.c.gguf_context) void {
         return struct {
-            fn f(ctx: *c.gguf_context) void {
+            fn f(ctx: *harness_root.impl.c.gguf_context) void {
                 var toks: std.ArrayList([]const u8) = .empty;
-                toks.appendSlice(gpa, &.{
+                toks.appendSlice(std.heap.c_allocator, &.{
                     "<|eot_id|>",     "<|im_end|>",   "<|end|>",      "<end_of_turn>", "<|endoftext|>",   "<|end_of_text|>", "<EOT>", "_<EOT>", "[EOT]", "<end_of_utterance>",
                     "<|fim_prefix|>", "<fim-prefix>", "<fim_prefix>", "<PRE>",         "<|code_prefix|>", "<|prefix|>",
                 }) catch unreachable;
-                while (toks.items.len < n) toks.append(gpa, gpa.print("tok{d}", .{toks.items.len}) catch unreachable) catch unreachable;
+                while (toks.items.len < n) toks.append(std.heap.c_allocator, std.heap.c_allocator.print("tok{d}", .{toks.items.len}) catch unreachable) catch unreachable;
                 setStrs(ctx, "tokenizer.ggml.tokens", toks.items);
-                _ = c.gguf_remove_key(ctx, "tokenizer.ggml.token_type");
-                _ = c.gguf_remove_key(ctx, "tokenizer.ggml.bos_token_id");
-                _ = c.gguf_remove_key(ctx, "tokenizer.ggml.eos_token_id");
-                _ = c.gguf_remove_key(ctx, "tokenizer.ggml.unknown_token_id");
+                _ = harness_root.impl.c.gguf_remove_key(ctx, "tokenizer.ggml.token_type");
+                _ = harness_root.impl.c.gguf_remove_key(ctx, "tokenizer.ggml.bos_token_id");
+                _ = harness_root.impl.c.gguf_remove_key(ctx, "tokenizer.ggml.eos_token_id");
+                _ = harness_root.impl.c.gguf_remove_key(ctx, "tokenizer.ggml.unknown_token_id");
             }
         }.f;
     }
 
     /// User-defined tokens of equal length that overlap in text, so which
     /// one the special-token cache tries first decides the result.
-    fn overlap(ctx: *c.gguf_context) void {
+    fn overlap(ctx: *harness_root.impl.c.gguf_context) void {
         const extra = [_][]const u8{ "xyzw", "zwab", "abxy", "wabq", "QQRR", "RRSS" };
         var toks: std.ArrayList([]const u8) = .empty;
         findStrs(ctx, "tokenizer.ggml.tokens", &toks);
-        const k = c.gguf_find_key(ctx, "tokenizer.ggml.token_type");
+        const k = harness_root.impl.c.gguf_find_key(ctx, "tokenizer.ggml.token_type");
         var types: std.ArrayList(i32) = .empty;
         if (k >= 0) {
-            const tt: [*]const i32 = @ptrCast(@alignCast(c.gguf_get_arr_data(ctx, k).?));
-            types.appendSlice(gpa, tt[0..toks.items.len]) catch unreachable;
+            const tt: [*]const i32 = @ptrCast(@alignCast(harness_root.impl.c.gguf_get_arr_data(ctx, k).?));
+            types.appendSlice(std.heap.c_allocator, tt[0..toks.items.len]) catch unreachable;
         } else {
-            types.appendNTimes(gpa, c.LLAMA_TOKEN_TYPE_NORMAL, toks.items.len) catch unreachable;
+            types.appendNTimes(std.heap.c_allocator, harness_root.impl.c.LLAMA_TOKEN_TYPE_NORMAL, toks.items.len) catch unreachable;
         }
         for (extra) |e| {
-            toks.append(gpa, e) catch unreachable;
-            types.append(gpa, c.LLAMA_TOKEN_TYPE_USER_DEFINED) catch unreachable;
+            toks.append(std.heap.c_allocator, e) catch unreachable;
+            types.append(std.heap.c_allocator, harness_root.impl.c.LLAMA_TOKEN_TYPE_USER_DEFINED) catch unreachable;
         }
         // The scores, where there are any, must still cover every token.
-        const sk = c.gguf_find_key(ctx, "tokenizer.ggml.scores");
+        const sk = harness_root.impl.c.gguf_find_key(ctx, "tokenizer.ggml.scores");
         if (sk >= 0) {
-            const sc: [*]const f32 = @ptrCast(@alignCast(c.gguf_get_arr_data(ctx, sk).?));
+            const sc: [*]const f32 = @ptrCast(@alignCast(harness_root.impl.c.gguf_get_arr_data(ctx, sk).?));
             var scores: std.ArrayList(f32) = .empty;
-            scores.appendSlice(gpa, sc[0 .. toks.items.len - extra.len]) catch unreachable;
-            scores.appendNTimes(gpa, 0, extra.len) catch unreachable;
+            scores.appendSlice(std.heap.c_allocator, sc[0 .. toks.items.len - extra.len]) catch unreachable;
+            scores.appendNTimes(std.heap.c_allocator, 0, extra.len) catch unreachable;
             setF32s(ctx, "tokenizer.ggml.scores", scores.items);
         }
         setStrs(ctx, "tokenizer.ggml.tokens", toks.items);
@@ -936,7 +929,7 @@ const edits = struct {
     /// libc++'s introsort to reorder them, where a short array takes its
     /// stable insertion sort -- and they overlap everywhere in a text over
     /// the same letters.
-    fn overlapMany(ctx: *c.gguf_context) void {
+    fn overlapMany(ctx: *harness_root.impl.c.gguf_context) void {
         var toks: std.ArrayList([]const u8) = .empty;
         findStrs(ctx, "tokenizer.ggml.tokens", &toks);
         const base = toks.items.len;
@@ -950,11 +943,11 @@ const edits = struct {
             n += 1;
             var w: [4]u8 = undefined;
             for (&w, 0..) |*ch, i| ch.* = "klmn"[(v >> @intCast(2 * i)) & 3];
-            toks.append(gpa, gpa.dupe(u8, &w) catch unreachable) catch unreachable;
+            toks.append(std.heap.c_allocator, std.heap.c_allocator.dupe(u8, &w) catch unreachable) catch unreachable;
         }
         var types: std.ArrayList(i32) = .empty;
-        types.appendNTimes(gpa, c.LLAMA_TOKEN_TYPE_NORMAL, base) catch unreachable;
-        types.appendNTimes(gpa, c.LLAMA_TOKEN_TYPE_USER_DEFINED, 64) catch unreachable;
+        types.appendNTimes(std.heap.c_allocator, harness_root.impl.c.LLAMA_TOKEN_TYPE_NORMAL, base) catch unreachable;
+        types.appendNTimes(std.heap.c_allocator, harness_root.impl.c.LLAMA_TOKEN_TYPE_USER_DEFINED, 64) catch unreachable;
         setStrs(ctx, "tokenizer.ggml.tokens", toks.items);
         setI32s(ctx, "tokenizer.ggml.token_type", types.items);
     }
@@ -962,28 +955,28 @@ const edits = struct {
     /// A BPE vocabulary with the `<mask>` lstrip jina's pre-tokenizer name
     /// sets, so a space before it is stripped -- where a lone space would
     /// otherwise become a token.
-    fn lstripBpe(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "jina-v2-de");
+    fn lstripBpe(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "jina-v2-de");
         var toks: std.ArrayList([]const u8) = .empty;
         findStrs(ctx, "tokenizer.ggml.tokens", &toks);
         var types: std.ArrayList(i32) = .empty;
-        types.appendNTimes(gpa, c.LLAMA_TOKEN_TYPE_NORMAL, toks.items.len) catch unreachable;
-        toks.append(gpa, "<mask>") catch unreachable;
-        types.append(gpa, c.LLAMA_TOKEN_TYPE_CONTROL) catch unreachable;
+        types.appendNTimes(std.heap.c_allocator, harness_root.impl.c.LLAMA_TOKEN_TYPE_NORMAL, toks.items.len) catch unreachable;
+        toks.append(std.heap.c_allocator, "<mask>") catch unreachable;
+        types.append(std.heap.c_allocator, harness_root.impl.c.LLAMA_TOKEN_TYPE_CONTROL) catch unreachable;
         setStrs(ctx, "tokenizer.ggml.tokens", toks.items);
         setI32s(ctx, "tokenizer.ggml.token_type", types.items);
     }
 
     /// A small T5 vocabulary whose scores make the unknown-token path
     /// compete: "a" + unknown "c" against the pair "ac".
-    fn ugmScores(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "t5");
-        _ = c.gguf_remove_key(ctx, "tokenizer.ggml.merges");
-        _ = c.gguf_remove_key(ctx, "tokenizer.ggml.pre");
-        _ = c.gguf_remove_key(ctx, "tokenizer.ggml.bos_token_id");
-        _ = c.gguf_remove_key(ctx, "tokenizer.ggml.eos_token_id");
+    fn ugmScores(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "t5");
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "tokenizer.ggml.merges");
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "tokenizer.ggml.pre");
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "tokenizer.ggml.bos_token_id");
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "tokenizer.ggml.eos_token_id");
         setStrs(ctx, "tokenizer.ggml.tokens", &.{ "<pad>", "</s>", "<unk>", "\xe2\x96\x81", "a", "ac", "z", "\xe2\x96\x81z", "x" });
-        setI32s(ctx, "tokenizer.ggml.token_type", &.{ c.LLAMA_TOKEN_TYPE_CONTROL, c.LLAMA_TOKEN_TYPE_CONTROL, c.LLAMA_TOKEN_TYPE_UNKNOWN, 1, 1, 1, 1, 1, 1 });
+        setI32s(ctx, "tokenizer.ggml.token_type", &.{ harness_root.impl.c.LLAMA_TOKEN_TYPE_CONTROL, harness_root.impl.c.LLAMA_TOKEN_TYPE_CONTROL, harness_root.impl.c.LLAMA_TOKEN_TYPE_UNKNOWN, 1, 1, 1, 1, 1, 1 });
         // min score -1 makes UNK -11; "a" at 9.5 then puts a + UNK at -1.5,
         // just below "ac" at -1, and a penalty of 9 would put it above.
         setF32s(ctx, "tokenizer.ggml.scores", &.{ 0, 0, 0, -0.5, 9.5, -1.0, -0.25, -0.75, -0.6 });
@@ -991,142 +984,142 @@ const edits = struct {
 
     /// A BPE vocabulary of exactly eleven tokens, so the default BOS and
     /// EOS id 11 is one past the end.
-    fn tinyBpe(ctx: *c.gguf_context) void {
+    fn tinyBpe(ctx: *harness_root.impl.c.gguf_context) void {
         setStrs(ctx, "tokenizer.ggml.tokens", &.{ "a", "b", "c", "d", "e", "f", "g", "h", "ab", "\xc4\x8a", "\xc4\xa0" });
         setStrs(ctx, "tokenizer.ggml.merges", &.{"a b"});
-        _ = c.gguf_remove_key(ctx, "tokenizer.ggml.token_type");
-        _ = c.gguf_remove_key(ctx, "tokenizer.ggml.bos_token_id");
-        _ = c.gguf_remove_key(ctx, "tokenizer.ggml.eos_token_id");
-        _ = c.gguf_remove_key(ctx, "tokenizer.ggml.unknown_token_id");
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "tokenizer.ggml.token_type");
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "tokenizer.ggml.bos_token_id");
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "tokenizer.ggml.eos_token_id");
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "tokenizer.ggml.unknown_token_id");
     }
 
-    fn whitespace(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "whitespace");
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "whitespace");
+    fn whitespace(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "whitespace");
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "whitespace");
     }
 
-    fn none(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "no_vocab");
-        c.gguf_set_val_u32(ctx, "gpt2.vocab_size", 77);
+    fn none(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "no_vocab");
+        harness_root.impl.c.gguf_set_val_u32(ctx, "gpt2.vocab_size", 77);
     }
 
-    fn spmFlags(ctx: *c.gguf_context) void {
-        c.gguf_set_val_bool(ctx, "tokenizer.ggml.add_bos_token", false);
-        c.gguf_set_val_bool(ctx, "tokenizer.ggml.add_eos_token", true);
-        c.gguf_set_val_bool(ctx, "tokenizer.ggml.add_space_prefix", false);
+    fn spmFlags(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_bool(ctx, "tokenizer.ggml.add_bos_token", false);
+        harness_root.impl.c.gguf_set_val_bool(ctx, "tokenizer.ggml.add_eos_token", true);
+        harness_root.impl.c.gguf_set_val_bool(ctx, "tokenizer.ggml.add_space_prefix", false);
     }
 
-    fn ugmFlags(ctx: *c.gguf_context) void {
-        c.gguf_set_val_bool(ctx, "tokenizer.ggml.remove_extra_whitespaces", true);
-        c.gguf_set_val_bool(ctx, "tokenizer.ggml.add_space_prefix", true);
-        c.gguf_set_val_bool(ctx, "tokenizer.ggml.add_bos_token", true);
+    fn ugmFlags(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_bool(ctx, "tokenizer.ggml.remove_extra_whitespaces", true);
+        harness_root.impl.c.gguf_set_val_bool(ctx, "tokenizer.ggml.add_space_prefix", true);
+        harness_root.impl.c.gguf_set_val_bool(ctx, "tokenizer.ggml.add_bos_token", true);
     }
 
-    fn badModel(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "no-such-tokenizer");
+    fn badModel(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "no-such-tokenizer");
     }
 
     /// The pre-tokenizers on the GPT-2 vocabulary: their names,
     /// `clean_spaces` and their split patterns.
-    fn preHyV4(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "hy_v4");
+    fn preHyV4(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "hy_v4");
     }
 
-    fn preSpark25(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "spark2_5");
+    fn preSpark25(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "spark2_5");
     }
 
     /// The pre-tokenizer: Qwen2's pattern without the English
     /// contraction group.
-    fn preUfakzeka(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "ufakzeka");
+    fn preUfakzeka(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "ufakzeka");
     }
 
     /// The `LLAMA_VOCAB_TYPE_TEST`: a rolling hash of five-byte
     /// chunks into the vocabulary, and each token's id in hex back out.
-    fn testType(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "test");
+    fn testType(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.model", "test");
     }
 
     /// The pre-tokenizers on the GPT-2 vocabulary: mmBERT's
     /// Metaspace split (escaped spaces, a word per escaped space) and its
     /// `<mask>` attribute, and GLM-5's ChatGLM-4 pattern with
     /// `ignore_merges`.
-    fn preMmbert(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "mmbert");
+    fn preMmbert(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "mmbert");
     }
 
-    fn preGlm5(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "glm5");
+    fn preGlm5(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "glm5");
         appendNormal(ctx, &.{ "zqzq", "\u{120}zqzq" });
     }
 
-    fn preGlm4(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "glm4");
+    fn preGlm4(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "glm4");
         appendNormal(ctx, &.{ "zqzq", "\u{120}zqzq" });
     }
 
     /// Whole-word tokens no merge reaches, which only `ignore_merges` emits.
-    fn appendNormal(ctx: *c.gguf_context, words: []const []const u8) void {
+    fn appendNormal(ctx: *harness_root.impl.c.gguf_context, words: []const []const u8) void {
         var toks: std.ArrayList([]const u8) = .empty;
         findStrs(ctx, "tokenizer.ggml.tokens", &toks);
-        toks.appendSlice(gpa, words) catch unreachable;
+        toks.appendSlice(std.heap.c_allocator, words) catch unreachable;
         setStrs(ctx, "tokenizer.ggml.tokens", toks.items);
-        const tk = c.gguf_find_key(ctx, "tokenizer.ggml.token_type");
+        const tk = harness_root.impl.c.gguf_find_key(ctx, "tokenizer.ggml.token_type");
         if (tk >= 0) {
             var types: std.ArrayList(i32) = .empty;
-            const tp: [*]const i32 = @ptrCast(@alignCast(c.gguf_get_arr_data(ctx, tk)));
-            types.appendSlice(gpa, tp[0..c.gguf_get_arr_n(ctx, tk)]) catch unreachable;
-            for (words) |_| types.append(gpa, c.LLAMA_TOKEN_TYPE_NORMAL) catch unreachable;
+            const tp: [*]const i32 = @ptrCast(@alignCast(harness_root.impl.c.gguf_get_arr_data(ctx, tk)));
+            types.appendSlice(std.heap.c_allocator, tp[0..harness_root.impl.c.gguf_get_arr_n(ctx, tk)]) catch unreachable;
+            for (words) |_| types.append(std.heap.c_allocator, harness_root.impl.c.LLAMA_TOKEN_TYPE_NORMAL) catch unreachable;
             setI32s(ctx, "tokenizer.ggml.token_type", types.items);
         }
     }
 
     /// The PLaMo-2 tokenize: BOS and EOS added as asked, and a
     /// `</s>` that is a normal token beside `<|plamo:eos|>`.
-    fn plamo2Special(ctx: *c.gguf_context) void {
+    fn plamo2Special(ctx: *harness_root.impl.c.gguf_context) void {
         plamo2(ctx);
         var toks: std.ArrayList([]const u8) = .empty;
         findStrs(ctx, "tokenizer.ggml.tokens", &toks);
-        toks.append(gpa, "</s>") catch unreachable;
+        toks.append(std.heap.c_allocator, "</s>") catch unreachable;
         setStrs(ctx, "tokenizer.ggml.tokens", toks.items);
-        const tk = c.gguf_find_key(ctx, "tokenizer.ggml.token_type");
+        const tk = harness_root.impl.c.gguf_find_key(ctx, "tokenizer.ggml.token_type");
         var types: std.ArrayList(i32) = .empty;
-        const tp: [*]const i32 = @ptrCast(@alignCast(c.gguf_get_arr_data(ctx, tk)));
-        types.appendSlice(gpa, tp[0..c.gguf_get_arr_n(ctx, tk)]) catch unreachable;
-        types.append(gpa, c.LLAMA_TOKEN_TYPE_CONTROL) catch unreachable;
+        const tp: [*]const i32 = @ptrCast(@alignCast(harness_root.impl.c.gguf_get_arr_data(ctx, tk)));
+        types.appendSlice(std.heap.c_allocator, tp[0..harness_root.impl.c.gguf_get_arr_n(ctx, tk)]) catch unreachable;
+        types.append(std.heap.c_allocator, harness_root.impl.c.LLAMA_TOKEN_TYPE_CONTROL) catch unreachable;
         setI32s(ctx, "tokenizer.ggml.token_type", types.items);
-        const sk = c.gguf_find_key(ctx, "tokenizer.ggml.scores");
+        const sk = harness_root.impl.c.gguf_find_key(ctx, "tokenizer.ggml.scores");
         var scores: std.ArrayList(f32) = .empty;
-        const sp: [*]const f32 = @ptrCast(@alignCast(c.gguf_get_arr_data(ctx, sk)));
-        scores.appendSlice(gpa, sp[0..c.gguf_get_arr_n(ctx, sk)]) catch unreachable;
-        scores.append(gpa, 0) catch unreachable;
+        const sp: [*]const f32 = @ptrCast(@alignCast(harness_root.impl.c.gguf_get_arr_data(ctx, sk)));
+        scores.appendSlice(std.heap.c_allocator, sp[0..harness_root.impl.c.gguf_get_arr_n(ctx, sk)]) catch unreachable;
+        scores.append(std.heap.c_allocator, 0) catch unreachable;
         setF32s(ctx, "tokenizer.ggml.scores", scores.items);
-        c.gguf_set_val_u32(ctx, "tokenizer.ggml.bos_token_id", 1);
-        c.gguf_set_val_u32(ctx, "tokenizer.ggml.eos_token_id", 2);
-        c.gguf_set_val_bool(ctx, "tokenizer.ggml.add_bos_token", true);
-        c.gguf_set_val_bool(ctx, "tokenizer.ggml.add_eos_token", true);
+        harness_root.impl.c.gguf_set_val_u32(ctx, "tokenizer.ggml.bos_token_id", 1);
+        harness_root.impl.c.gguf_set_val_u32(ctx, "tokenizer.ggml.eos_token_id", 2);
+        harness_root.impl.c.gguf_set_val_bool(ctx, "tokenizer.ggml.add_bos_token", true);
+        harness_root.impl.c.gguf_set_val_bool(ctx, "tokenizer.ggml.add_eos_token", true);
     }
 
-    fn badPre(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "no-such-pre");
+    fn badPre(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.ggml.pre", "no-such-pre");
     }
 
-    fn noMerges(ctx: *c.gguf_context) void {
-        _ = c.gguf_remove_key(ctx, "tokenizer.ggml.merges");
+    fn noMerges(ctx: *harness_root.impl.c.gguf_context) void {
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "tokenizer.ggml.merges");
     }
 
-    fn shortScores(ctx: *c.gguf_context) void {
+    fn shortScores(ctx: *harness_root.impl.c.gguf_context) void {
         setF32s(ctx, "tokenizer.ggml.scores", &.{ 1.0, 2.0 });
     }
 
-    fn wrongType(ctx: *c.gguf_context) void {
-        c.gguf_set_val_u32(ctx, "tokenizer.ggml.add_bos_token", 1);
+    fn wrongType(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_u32(ctx, "tokenizer.ggml.add_bos_token", 1);
     }
 
-    fn badSpecial(ctx: *c.gguf_context) void {
-        c.gguf_set_val_u32(ctx, "tokenizer.ggml.eos_token_id", 99999999);
-        c.gguf_set_val_u32(ctx, "tokenizer.ggml.eot_token_id", 5);
+    fn badSpecial(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_u32(ctx, "tokenizer.ggml.eos_token_id", 99999999);
+        harness_root.impl.c.gguf_set_val_u32(ctx, "tokenizer.ggml.eot_token_id", 5);
         setI32s(ctx, "tokenizer.ggml.suppress_tokens", &.{ 3, -1, 99999999, 7 });
     }
 };
@@ -1141,10 +1134,10 @@ pub fn main(init: std.process.Init) !void {
     }
     const dir = args[1];
 
-    c.llama_log_set(logCb, null);
+    harness_root.impl.c.llama_log_set(logCb, null);
 
     harness_root.api.impl.llama_log_set(logCb, null);
-    c.llama_backend_init();
+    harness_root.impl.c.llama_backend_init();
 
     var corpus: std.ArrayList([]const u8) = .empty;
     var seen: std.StringHashMapUnmanaged(void) = .empty;
@@ -1159,18 +1152,18 @@ pub fn main(init: std.process.Init) !void {
             while (true) {
                 const n = std.c.fread(&chunk, 1, chunk.len, f);
                 if (n == 0) break;
-                try buf.appendSlice(gpa, chunk[0..n]);
+                try buf.appendSlice(std.heap.c_allocator, chunk[0..n]);
             }
             _ = std.c.fclose(f);
             var it = std.mem.splitSequence(u8, buf.items, "\n__ggml_vocab_test__\n");
             while (it.next()) |s| {
-                if ((try seen.getOrPut(gpa, s)).found_existing) continue;
-                try corpus.append(gpa, s);
+                if ((try seen.getOrPut(std.heap.c_allocator, s)).found_existing) continue;
+                try corpus.append(std.heap.c_allocator, s);
             }
         } else {
             const base = std.Io.Dir.path.basename(a);
-            try cases.append(gpa, .{ .name = base, .path = a });
-            try by_name.put(gpa, base, a);
+            try cases.append(std.heap.c_allocator, .{ .name = base, .path = a });
+            try by_name.put(std.heap.c_allocator, base, a);
         }
     }
 
@@ -1180,9 +1173,9 @@ pub fn main(init: std.process.Init) !void {
     const ugm = by_name.get("ggml-vocab-nomic-bert-moe.gguf") orelse return error.MissingUgmVocab;
     const gemma4 = by_name.get("ggml-vocab-gemma-4.gguf") orelse return error.MissingGemma4Vocab;
     // words only `ignore_merges` (GLM-4/5) keeps whole
-    for ([_][]const u8{ "zqzq zqzq\nzqzq", "a zqzq, zqzqzq" }) |t| try corpus.append(gpa, t);
+    for ([_][]const u8{ "zqzq zqzq\nzqzq", "a zqzq, zqzqzq" }) |t| try corpus.append(std.heap.c_allocator, t);
     // a leading BOM, which PLaMo-2 drops and PLaMo-3 keeps
-    for ([_][]const u8{ "\u{FEFF}hello", "\u{FEFF}", "\u{FEFF}\u{FEFF}aaaa" }) |t| try corpus.append(gpa, t);
+    for ([_][]const u8{ "\u{FEFF}hello", "\u{FEFF}", "\u{FEFF}\u{FEFF}aaaa" }) |t| try corpus.append(std.heap.c_allocator, t);
     // PLaMo-3's marker body at its 64-code-point limit and one past it, and
     // newline runs, each between pieces that span the cut
     for ([_][]const u8{
@@ -1190,14 +1183,14 @@ pub fn main(init: std.process.Init) !void {
         "x<|plamo:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx|>x",
         "x\n\n\n\nx",
         "x\n\n\n\n\nx",
-    }) |t| try corpus.append(gpa, t);
-    for (dna_corpus) |t| try corpus.append(gpa, t);
+    }) |t| try corpus.append(std.heap.c_allocator, t);
+    for (dna_corpus) |t| try corpus.append(std.heap.c_allocator, t);
     // each ambiguity code, and a letter that is not one, joining two runs
     for ("RYSWKMBDHVNrysnvEFIJLOPQUXZ") |ch| {
-        try corpus.append(gpa, try gpa.print("ACGTACGT{c}ACGTACGT", .{ch}));
+        try corpus.append(std.heap.c_allocator, try std.heap.c_allocator.print("ACGTACGT{c}ACGTACGT", .{ch}));
     }
     // what `clean_spaces` rewrites, in a sentence
-    try corpus.append(gpa, "a , b . c ! d ? e 's f 'm g 're h 've i ' j 't k 'd l 'll");
+    try corpus.append(std.heap.c_allocator, "a , b . c ! d ? e 's f 'm g 're h 've i ' j 't k 'd l 'll");
     const synthetic = [_]Case{
         .{ .name = "synthetic-rwkv", .path = derive(dir, gpt2, "rwkv", edits.rwkv) },
         .{ .name = "synthetic-plamo2", .path = derive(dir, gpt2, "plamo2", edits.plamo2) },
@@ -1284,7 +1277,7 @@ pub fn main(init: std.process.Init) !void {
         .{ .name = "override-bool", .path = gpt2, .overrides = &.{ kvBool("tokenizer.ggml.add_bos_token", true), kvBool("tokenizer.ggml.add_eos_token", true) } },
         .{ .name = "override-mistyped", .path = spm, .overrides = &.{ kvInt("tokenizer.ggml.add_bos_token", 0), kvInt("tokenizer.ggml.eos_token_id", 5) } },
     };
-    try cases.appendSlice(gpa, &synthetic);
+    try cases.appendSlice(std.heap.c_allocator, &synthetic);
 
     var prng = std.Random.DefaultPrng.init(0x70c);
     for (cases.items) |cs| {

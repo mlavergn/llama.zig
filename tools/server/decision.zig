@@ -31,17 +31,14 @@
 //! `decision_confidence_entropy`'s sum (scalar, fused).
 
 const std = @import("std");
+const mtmd = @import("mtmd");
 const mod = @import("module.zig");
 const llama = @import("llama");
 const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const json = @import("json");
-const chat = @import("common_chat");
-const tc = @import("tools_common");
-
-const Allocator = std.mem.Allocator;
-
-pub const DecisionType = tc.common.DecisionType;
+const common_chat = @import("common_chat");
+const tools_common = @import("tools_common");
 
 /// `llama-ext.h`'s `llama_decision_order` (llama-ext.h:130 @b1b770d90),
 /// as the `int32_t` values `server_task::decision::order` holds.
@@ -79,8 +76,8 @@ const h2o_max_state_tokens: usize = 32000;
 const recursive_limit: usize = 128;
 
 /// What each of them throws at `recursive_limit`.
-fn tooDeep() mod.common.Error {
-    return mod.common.throw(error.InvalidArgument, "JSON is nested more than {d} levels deep", .{recursive_limit});
+fn tooDeep() common_chat.exception.Error {
+    return common_chat.exception.throw(error.InvalidArgument, "JSON is nested more than {d} levels deep", .{recursive_limit});
 }
 
 /// Ports `server_decision_option` (server-decision.h:21 @b1b770d90).
@@ -98,23 +95,23 @@ pub const Question = struct {
 };
 
 /// Ports `decision_meta_str` (server-decision.cpp:29 @b1b770d90).
-fn metaStr(a: Allocator, model: ?*const mod.common.c.llama_model, key: []const u8) mod.common.Error![]u8 {
+fn metaStr(a: std.mem.Allocator, model: ?*const llama.impl.llama_c.llama_model, key: []const u8) common_chat.exception.Error![]u8 {
     var buf: [256]u8 = undefined;
     const kz = try a.dupeSentinel(u8, key, 0);
     defer a.free(kz);
-    const n = mod.common.c.llama_model_meta_val_str(model, kz.ptr, &buf, buf.len);
+    const n = llama.api.model.llama_model_meta_val_str(model, kz.ptr, &buf, buf.len);
     if (n < 0) return a.dupe(u8, "");
     return a.dupe(u8, std.mem.sliceTo(&buf, 0));
 }
 
 /// Ports `server_decision_context` (server-decision.h:33 @b1b770d90).
 pub const DecisionContext = struct {
-    gpa: Allocator = std.heap.c_allocator,
+    gpa: std.mem.Allocator = std.heap.c_allocator,
 
-    type: DecisionType = .none,
+    type: tools_common.common.DecisionType = .none,
 
-    vocab: ?*const mod.common.c.llama_vocab = null,
-    tmpl: ?*chat.template.Template = null, // the "systemone" template
+    vocab: ?*const llama.impl.llama_c.llama_vocab = null,
+    tmpl: ?*common_chat.template.Template = null, // the "systemone" template
 
     temperatures: std.StringArrayHashMapUnmanaged(f32) = .empty, // "<type>" or "<type>.<n_options bucket>"
     score_bias: std.AutoArrayHashMapUnmanaged(usize, []f32) = .empty, // added to the scores of a score question, by number of levels
@@ -126,12 +123,12 @@ pub const DecisionContext = struct {
     canonical_legend: bool = false, // non-string score descriptions are returned as canonical JSON text
 
     // OPENJEV, LEV, NIMBLE, PPLX_DECIDER, VLLM_D3, H2O_LIGHTNING
-    labels: std.ArrayList(mod.common.Token) = .empty,
+    labels: std.ArrayList(llama.impl.llama_c.llama_token) = .empty,
     label_texts: std.ArrayList([]u8) = .empty, // only if the label of an option is given to the template
 
     // LAYA, KEV
-    token_marker: mod.common.Token = mod.common.token_null,
-    token_sep: mod.common.Token = mod.common.token_null,
+    token_marker: llama.impl.llama_c.llama_token = mod.common.token_null,
+    token_sep: llama.impl.llama_c.llama_token = mod.common.token_null,
     text_marker: []u8 = &.{},
     max_head_tokens: usize = 0, // question + options
     max_option_tokens: usize = 48,
@@ -162,12 +159,12 @@ pub const DecisionContext = struct {
 
     /// Ports `init` (server-decision.cpp:39 @b1b770d90): read the
     /// "<arch>.decision.*" metadata, type stays NONE if the model has none.
-    pub fn init(self: *DecisionContext, gpa: Allocator, model: ?*const mod.common.c.llama_model) mod.common.Error!void {
+    pub fn init(self: *DecisionContext, gpa: std.mem.Allocator, model: ?*const llama.impl.llama_c.llama_model) common_chat.exception.Error!void {
         self.deinit(); // the model can be reloaded
         self.gpa = gpa;
         errdefer self.deinit();
 
-        const model_type = tc.common.getDecisionType(model);
+        const model_type = tools_common.common.getDecisionType(model);
         if (model_type == .none) {
             return;
         }
@@ -179,35 +176,35 @@ pub const DecisionContext = struct {
         const prefix = try std.mem.concat(ar, u8, &.{ try metaStr(ar, model, "general.architecture"), ".decision." });
         const type_name = try metaStr(ar, model, try std.mem.concat(ar, u8, &.{ prefix, "type" }));
 
-        self.vocab = mod.common.c.llama_model_get_vocab(model);
+        self.vocab = llama.api.model.llama_model_get_vocab(model);
 
-        const tmpl_src = mod.common.c.llama_model_chat_template(model, "systemone");
+        const tmpl_src = llama.api.model.llama_model_chat_template(model, "systemone");
         if (tmpl_src == null) {
-            return mod.common.throw(error.RuntimeError, "decision model has no \"systemone\" template", .{});
+            return common_chat.exception.throw(error.RuntimeError, "decision model has no \"systemone\" template", .{});
         }
-        const t = try gpa.create(chat.template.Template);
-        t.* = chat.template.Template.init(gpa, std.mem.span(tmpl_src), "", "") catch |e| {
+        const t = try gpa.create(common_chat.template.Template);
+        t.* = common_chat.template.Template.init(gpa, std.mem.span(tmpl_src), "", "") catch |e| {
             gpa.destroy(t);
             return e;
         };
         self.tmpl = t;
 
         const prefix_temp = try std.mem.concat(ar, u8, &.{ prefix, "temperature." });
-        const n_meta = mod.common.c.llama_model_meta_count(model);
+        const n_meta = llama.api.model.llama_model_meta_count(model);
         var i: i32 = 0;
         while (i < n_meta) : (i += 1) {
             var key: [256]u8 = undefined;
             var val: [64]u8 = undefined;
-            if (mod.common.c.llama_model_meta_key_by_index(model, i, &key, key.len) < 0 or !std.mem.startsWith(u8, std.mem.sliceTo(&key, 0), prefix_temp)) {
+            if (llama.api.model.llama_model_meta_key_by_index(model, i, &key, key.len) < 0 or !std.mem.startsWith(u8, std.mem.sliceTo(&key, 0), prefix_temp)) {
                 continue;
             }
-            if (mod.common.c.llama_model_meta_val_str_by_index(model, i, &val, val.len) < 0) {
+            if (llama.api.model.llama_model_meta_val_str_by_index(model, i, &val, val.len) < 0) {
                 continue;
             }
             const temp = stdlib.num.strtof(std.mem.sliceTo(&val, 0)).value;
             const key_s = std.mem.sliceTo(&key, 0);
             if (temp <= 0.0) {
-                return mod.common.throw(error.RuntimeError, "invalid decision temperature: {s} = {s}", .{ key_s, std.mem.sliceTo(&val, 0) });
+                return common_chat.exception.throw(error.RuntimeError, "invalid decision temperature: {s} = {s}", .{ key_s, std.mem.sliceTo(&val, 0) });
             }
             // std::map's operator[]: a key seen twice keeps the last value
             const name = key_s[prefix_temp.len..];
@@ -227,10 +224,10 @@ pub const DecisionContext = struct {
         while (i < n_meta) : (i += 1) {
             var key: [256]u8 = undefined;
             var val: [64]u8 = undefined;
-            if (mod.common.c.llama_model_meta_key_by_index(model, i, &key, key.len) < 0 or !std.mem.startsWith(u8, std.mem.sliceTo(&key, 0), prefix_bias)) {
+            if (llama.api.model.llama_model_meta_key_by_index(model, i, &key, key.len) < 0 or !std.mem.startsWith(u8, std.mem.sliceTo(&key, 0), prefix_bias)) {
                 continue;
             }
-            if (mod.common.c.llama_model_meta_val_str_by_index(model, i, &val, val.len) < 0) {
+            if (llama.api.model.llama_model_meta_val_str_by_index(model, i, &val, val.len) < 0) {
                 continue;
             }
             const key_s = std.mem.sliceTo(&key, 0);
@@ -245,7 +242,7 @@ pub const DecisionContext = struct {
                 level = stdlib.num.strtoul(rest[dot + 1 ..], 10).value;
             }
             if (n < 2 or n > 255 or level >= n) {
-                return mod.common.throw(error.RuntimeError, "invalid decision score bias: {s}", .{key_s});
+                return common_chat.exception.throw(error.RuntimeError, "invalid decision score bias: {s}", .{key_s});
             }
             // std::map's operator[], then resize(n, 0.0f): a list seen before keeps its values
             const gop = try self.score_bias.getOrPut(gpa, n);
@@ -266,7 +263,7 @@ pub const DecisionContext = struct {
                 for (letters) |ch| {
                     const toks = try mod.common.tokenize(ar, self.vocab, &.{ch}, false, false);
                     if (toks.len != 1) {
-                        return mod.common.throw(error.RuntimeError, "decision label '{c}' is not a single token", .{ch});
+                        return common_chat.exception.throw(error.RuntimeError, "decision label '{c}' is not a single token", .{ch});
                     }
                     try self.labels.append(gpa, toks[0]);
                 }
@@ -306,23 +303,23 @@ pub const DecisionContext = struct {
                 // the hidden state of an option is read at the token that ends it
                 const toks = try mod.common.tokenize(ar, self.vocab, "<|box_end|>", false, true);
                 if (toks.len != 1) {
-                    return mod.common.throw(error.RuntimeError, "decision model has no <|box_end|> token", .{});
+                    return common_chat.exception.throw(error.RuntimeError, "decision model has no <|box_end|> token", .{});
                 }
                 self.token_marker = toks[0];
                 self.n_options_max = 255;
             },
             .laya => {
-                self.token_marker = mod.common.c.llama_vocab_mask(self.vocab);
-                self.token_sep = mod.common.c.llama_vocab_sep(self.vocab);
+                self.token_marker = llama.api.vocab.llama_vocab_mask(self.vocab);
+                self.token_sep = llama.api.vocab.llama_vocab_sep(self.vocab);
                 if (self.token_marker == mod.common.token_null or self.token_sep == mod.common.token_null) {
-                    return mod.common.throw(error.RuntimeError, "decision model has no mask or sep token", .{});
+                    return common_chat.exception.throw(error.RuntimeError, "decision model has no mask or sep token", .{});
                 }
-                self.text_marker = try gpa.dupe(u8, try tc.common.tokenToPiece(ar, self.vocab, self.token_marker, true));
+                self.text_marker = try gpa.dupe(u8, try tools_common.common.tokenToPiece(ar, self.vocab, self.token_marker, true));
 
                 const val = try metaStr(ar, model, try std.mem.concat(ar, u8, &.{ prefix, "max_head_tokens" }));
                 self.max_head_tokens = stdlib.num.strtoul(std.mem.sliceTo(val, 0), 10).value;
                 if (self.max_head_tokens == 0) {
-                    return mod.common.throw(error.RuntimeError, "decision model has no valid max_head_tokens", .{});
+                    return common_chat.exception.throw(error.RuntimeError, "decision model has no valid max_head_tokens", .{});
                 }
                 self.n_options_max = 255;
             },
@@ -342,13 +339,13 @@ pub const DecisionContext = struct {
                 self.noul_true_first = true;
                 if (model_type != .lfm2_d1) {
                     // the texts of the special tokens are broken in the input
-                    try self.initQuotedSpellings(mod.common.c.LLAMA_TOKEN_ATTR_CONTROL, 2);
+                    try self.initQuotedSpellings(llama.impl.llama_c.LLAMA_TOKEN_ATTR_CONTROL, 2);
                 }
             },
             .lfm2_d1_omni => {
-                self.token_marker = mod.common.c.llama_vocab_mask(self.vocab);
+                self.token_marker = llama.api.vocab.llama_vocab_mask(self.vocab);
                 if (self.token_marker == mod.common.token_null) {
-                    return mod.common.throw(error.RuntimeError, "decision model has no mask token", .{});
+                    return common_chat.exception.throw(error.RuntimeError, "decision model has no mask token", .{});
                 }
                 self.n_options_max = 255;
             },
@@ -358,8 +355,8 @@ pub const DecisionContext = struct {
                 while (decisionLabel(model, li)) |label| : (li += 1) {
                     const text = std.mem.span(label);
                     const toks = try mod.common.tokenize(ar, self.vocab, text, false, false);
-                    if (toks.len != 1 or std.mem.indexOfScalar(mod.common.Token, self.labels.items, toks[0]) != null) {
-                        return mod.common.throw(error.RuntimeError, "decision label \"{s}\" is not a single distinct token", .{text});
+                    if (toks.len != 1 or std.mem.indexOfScalar(llama.impl.llama_c.llama_token, self.labels.items, toks[0]) != null) {
+                        return common_chat.exception.throw(error.RuntimeError, "decision label \"{s}\" is not a single distinct token", .{text});
                     }
                     try self.labels.append(gpa, toks[0]);
                     const dup = try gpa.dupe(u8, text);
@@ -369,24 +366,24 @@ pub const DecisionContext = struct {
                     };
                 }
                 if (self.labels.items.len == 0) {
-                    return mod.common.throw(error.RuntimeError, "decision model has no labels", .{});
+                    return common_chat.exception.throw(error.RuntimeError, "decision model has no labels", .{});
                 }
                 // the texts of the control and user-defined tokens are quoted in the input, so that they stay text
-                try self.initQuotedSpellings(mod.common.c.LLAMA_TOKEN_ATTR_CONTROL | mod.common.c.LLAMA_TOKEN_ATTR_USER_DEFINED, 1);
+                try self.initQuotedSpellings(llama.impl.llama_c.LLAMA_TOKEN_ATTR_CONTROL | llama.impl.llama_c.LLAMA_TOKEN_ATTR_USER_DEFINED, 1);
                 self.n_options_max = self.labels.items.len;
                 self.noul_true_first = true;
             },
             .minicpm_ocr_jev => {
                 // the classes come from the GGUF classifier labels, the request API is binary: [inconsistent, consistent]
-                const n_classes = mod.common.c.llama_model_n_cls_out(model);
-                if (n_classes != 2 or mod.common.c.llama_model_n_embd_out(model) != @as(i32, @bitCast(n_classes))) {
-                    return mod.common.throw(error.RuntimeError, "decision model must have 2 classifier labels and output one score per class, got {d} labels and {d} scores", .{ n_classes, mod.common.c.llama_model_n_embd_out(model) });
+                const n_classes = llama.api.model.llama_model_n_cls_out(model);
+                if (n_classes != 2 or llama.api.model.llama_model_n_embd_out(model) != @as(i32, @bitCast(n_classes))) {
+                    return common_chat.exception.throw(error.RuntimeError, "decision model must have 2 classifier labels and output one score per class, got {d} labels and {d} scores", .{ n_classes, llama.api.model.llama_model_n_embd_out(model) });
                 }
                 self.n_options_max = n_classes;
                 self.choice_sorted = true;
             },
             else => {
-                return mod.common.throw(error.RuntimeError, "unsupported decision model type: {s}", .{type_name});
+                return common_chat.exception.throw(error.RuntimeError, "unsupported decision model type: {s}", .{type_name});
             },
         }
         self.type = model_type;
@@ -398,13 +395,13 @@ pub const DecisionContext = struct {
     /// Ports `init_quoted_spellings` (server-decision.cpp:213 @b1b770d90):
     /// the texts of the tokens with these attributes, `quoted_spellings`
     /// and `quoted_first`.
-    fn initQuotedSpellings(self: *DecisionContext, attrs: u32, min_size: usize) mod.common.Error!void {
+    fn initQuotedSpellings(self: *DecisionContext, attrs: u32, min_size: usize) common_chat.exception.Error!void {
         const gpa = self.gpa;
-        const n_tokens = mod.common.c.llama_vocab_n_tokens(self.vocab);
-        var id: mod.common.Token = 0;
+        const n_tokens = llama.api.vocab.llama_vocab_n_tokens(self.vocab);
+        var id: llama.impl.llama_c.llama_token = 0;
         while (id < n_tokens) : (id += 1) {
-            if ((@as(u32, @bitCast(@as(i32, @intCast(mod.common.c.llama_vocab_get_attr(self.vocab, id))))) & attrs) != 0) {
-                const text = std.mem.span(mod.common.c.llama_vocab_get_text(self.vocab, id));
+            if ((@as(u32, @bitCast(@as(i32, @intCast(llama.api.vocab.llama_vocab_get_attr(self.vocab, id))))) & attrs) != 0) {
+                const text = std.mem.span(llama.api.vocab.llama_vocab_get_text(self.vocab, id));
                 if (text.len >= min_size) {
                     const dup = try gpa.dupe(u8, text);
                     self.quoted_spellings.append(gpa, dup) catch |e| {
@@ -485,20 +482,20 @@ pub const DecisionContext = struct {
     /// `error.InvalidArgument` on bad input.
     ///
     /// Return: owned by `a` (an arena: nothing is freed piecewise).
-    pub fn parseQuestions(self: *const DecisionContext, a: Allocator, body: *const json.Value) mod.common.Error![]Question {
+    pub fn parseQuestions(self: *const DecisionContext, a: std.mem.Allocator, body: *const json.Value) common_chat.exception.Error![]Question {
         // lfm2-d1, lfm2-d1-omni, lfm3-d1 and vllm-d3 accept a null state, for example to ask about images only
         const null_state = self.type == .lfm2_d1 or self.type == .lfm2_d1_omni or self.type == .vllm_d3 or self.type == .lfm3_d1 or self.type == .lfm3_d1_omni;
         if (!body.contains("state") or ((try body.at("state")).isNull() and !null_state)) {
-            return mod.common.throw(error.InvalidArgument, "\"state\" must be provided", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "\"state\" must be provided", .{});
         }
         if (self.strict_payload and !isPayload(try body.at("state"))) {
-            return mod.common.throw(error.InvalidArgument, "\"state\" must be text, an object or an array", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "\"state\" must be text, an object or an array", .{});
         }
         if (!body.contains("questions") or !(try body.at("questions")).isObject() or (try body.at("questions")).empty()) {
-            return mod.common.throw(error.InvalidArgument, "\"questions\" must be a non-empty object", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "\"questions\" must be a non-empty object", .{});
         }
         if (self.type == .minicpm_ocr_jev and (try body.at("questions")).size() != 1) {
-            return mod.common.throw(error.InvalidArgument, "this model answers exactly one question", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "this model answers exactly one question", .{});
         }
 
         var questions: std.ArrayList(Question) = .empty;
@@ -633,10 +630,10 @@ pub const DecisionContext = struct {
     }
 
     /// The `err` lambda of `parse_questions`: `questions.<id>: <msg>`.
-    fn qerr(id: []const u8, comptime fmt: []const u8, args: anytype) mod.common.Error {
+    fn qerr(id: []const u8, comptime fmt: []const u8, args: anytype) common_chat.exception.Error {
         var buf: [512]u8 = undefined;
         const msg = std.fmt.bufPrint(&buf, fmt, args) catch fmt;
-        return mod.common.throw(error.InvalidArgument, "questions.{s}: {s}", .{ id, msg });
+        return common_chat.exception.throw(error.InvalidArgument, "questions.{s}: {s}", .{ id, msg });
     }
 
     /// Ports `parse_state` (server-decision.cpp:413 @b1b770d90): the state
@@ -646,12 +643,12 @@ pub const DecisionContext = struct {
     /// an audio clip if the model supports it.
     ///
     /// Return: owned by `a`; each file too.
-    pub fn parseState(self: *const DecisionContext, a: Allocator, body: *const json.Value, files: *std.ArrayList([]u8)) mod.common.Error!json.Value {
+    pub fn parseState(self: *const DecisionContext, a: std.mem.Allocator, body: *const json.Value, files: *std.ArrayList([]u8)) common_chat.exception.Error!json.Value {
         if (self.type == .minicpm_ocr_jev and !(try body.at("state")).isString()) {
-            return mod.common.throw(error.InvalidArgument, "\"state\" must be the OCR text", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "\"state\" must be the OCR text", .{});
         }
         if (body.contains("videos") and !(try body.at("videos")).isNull() and !(try body.at("videos")).empty()) {
-            return mod.common.throw(error.InvalidArgument, "\"videos\" is not supported", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "\"videos\" is not supported", .{});
         }
         // "images" is an alias of "files"
         for ([_][]const u8{ "files", "images" }) |key| {
@@ -660,7 +657,7 @@ pub const DecisionContext = struct {
             }
             const list = try body.at(key);
             if (!list.isArray()) {
-                return mod.common.throw(error.InvalidArgument, "\"{s}\" must be an array", .{key});
+                return common_chat.exception.throw(error.InvalidArgument, "\"{s}\" must be an array", .{key});
             }
             for (list.array.items) |*url| {
                 try loadImage(a, url, files);
@@ -669,7 +666,7 @@ pub const DecisionContext = struct {
 
         // the prompt has the original image, then the image rendered from the OCR text
         if (self.type == .minicpm_ocr_jev and files.items.len != 2) {
-            return mod.common.throw(error.InvalidArgument, "this model needs exactly 2 images (the original, then the rendered one), got {d}", .{files.items.len});
+            return common_chat.exception.throw(error.InvalidArgument, "this model needs exactly 2 images (the original, then the rendered one), got {d}", .{files.items.len});
         }
 
         const state = try body.at("state");
@@ -750,15 +747,15 @@ pub const DecisionContext = struct {
     ///
     /// Parameters:
     /// - `texts`, `groups`: appended to, owned by `a`.
-    fn d1Labels(self: *const DecisionContext, a: Allocator, question: *const Question, texts: *std.ArrayList([]const u8), groups: *std.ArrayList([]const mod.common.Token)) mod.common.Error!void {
+    fn d1Labels(self: *const DecisionContext, a: std.mem.Allocator, question: *const Question, texts: *std.ArrayList([]const u8), groups: *std.ArrayList([]const llama.impl.llama_c.llama_token)) common_chat.exception.Error!void {
         const n_options = question.options.len;
 
         const Single = struct {
-            fn tokens(ctx: *const DecisionContext, ar: Allocator, forms: []const []const u8) mod.common.Error![]const mod.common.Token {
-                var out: std.ArrayList(mod.common.Token) = .empty;
+            fn tokens(ctx: *const DecisionContext, ar: std.mem.Allocator, forms: []const []const u8) common_chat.exception.Error![]const llama.impl.llama_c.llama_token {
+                var out: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
                 for (forms) |form| {
                     const toks = try mod.common.tokenize(ar, ctx.vocab, form, false, false);
-                    if (toks.len == 1 and std.mem.indexOfScalar(mod.common.Token, out.items, toks[0]) == null) {
+                    if (toks.len == 1 and std.mem.indexOfScalar(llama.impl.llama_c.llama_token, out.items, toks[0]) == null) {
                         try out.append(ar, toks[0]);
                     }
                 }
@@ -775,7 +772,7 @@ pub const DecisionContext = struct {
                 else
                     try Single.tokens(self, a, &.{ "no", "No", "NO" });
                 if (group.len == 0) {
-                    return mod.common.throw(error.RuntimeError, "decision label is not a single token: {s}", .{opt.key});
+                    return common_chat.exception.throw(error.RuntimeError, "decision label is not a single token: {s}", .{opt.key});
                 }
                 try texts.append(a, opt.key);
                 try groups.append(a, group);
@@ -819,21 +816,21 @@ pub const DecisionContext = struct {
             while (y <= 'Z') : (y += 1) try pool.append(a, try a.dupe(u8, &.{ x, y }));
         }
 
-        var used: std.ArrayList(mod.common.Token) = .empty;
+        var used: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
         const Take = struct {
             ctx: *const DecisionContext,
-            ar: Allocator,
-            used: *std.ArrayList(mod.common.Token),
+            ar: std.mem.Allocator,
+            used: *std.ArrayList(llama.impl.llama_c.llama_token),
             texts: *std.ArrayList([]const u8),
-            groups: *std.ArrayList([]const mod.common.Token),
+            groups: *std.ArrayList([]const llama.impl.llama_c.llama_token),
 
-            fn run(t: @This(), code: []const u8) mod.common.Error!bool {
+            fn run(t: @This(), code: []const u8) common_chat.exception.Error!bool {
                 const toks = try mod.common.tokenize(t.ar, t.ctx.vocab, code, false, false);
-                if (toks.len != 1 or std.mem.indexOfScalar(mod.common.Token, t.used.items, toks[0]) != null) {
+                if (toks.len != 1 or std.mem.indexOfScalar(llama.impl.llama_c.llama_token, t.used.items, toks[0]) != null) {
                     return false;
                 }
                 try t.used.append(t.ar, toks[0]);
-                var group: std.ArrayList(mod.common.Token) = .empty;
+                var group: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
                 try group.append(t.ar, toks[0]);
                 const spaced = try std.mem.concat(t.ar, u8, &.{ " ", code });
                 for (try Single.tokens(t.ctx, t.ar, &.{spaced})) |tok| {
@@ -854,17 +851,17 @@ pub const DecisionContext = struct {
                 is_taken = try take.run(pool.items[i]);
             }
             if (!is_taken) {
-                return mod.common.throw(error.InvalidArgument, "no single-token label left for {d} options", .{n_options});
+                return common_chat.exception.throw(error.InvalidArgument, "no single-token label left for {d} options", .{n_options});
             }
         }
     }
 
     /// Ports `render_options` (server-decision.cpp:1067 @b1b770d90).
-    fn renderOptions(self: *const DecisionContext, a: Allocator, question: *const Question, variant: usize) mod.common.Error!json.Value {
+    fn renderOptions(self: *const DecisionContext, a: std.mem.Allocator, question: *const Question, variant: usize) common_chat.exception.Error!json.Value {
         const n_options = question.options.len;
 
         var d1_texts: std.ArrayList([]const u8) = .empty;
-        var d1_groups: std.ArrayList([]const mod.common.Token) = .empty;
+        var d1_groups: std.ArrayList([]const llama.impl.llama_c.llama_token) = .empty;
         if (self.type == .lfm2_d1 or self.type == .lfm3_d1 or self.type == .lfm3_d1_omni) {
             try self.d1Labels(a, question, &d1_texts, &d1_groups);
         }
@@ -898,14 +895,14 @@ pub const DecisionContext = struct {
     /// Return: owned by `a`.
     fn render(
         self: *const DecisionContext,
-        a: Allocator,
+        a: std.mem.Allocator,
         state: *const json.Value,
         questions: []const Question,
         question: *const Question,
         variant: usize,
         n_images: usize,
         is_audio: bool,
-    ) mod.common.Error![]u8 {
+    ) common_chat.exception.Error![]u8 {
         // the template is given raw JSON values, it serializes the ones that are not strings
         // h2o-lightning: the template is given texts
         var inp: json.Value = undefined;
@@ -999,7 +996,7 @@ pub const DecisionContext = struct {
     /// be parsed as such, in keys too.
     ///
     /// Return: owned by `a`.
-    fn escapeJson(self: *const DecisionContext, a: Allocator, val: *const json.Value, escape: Escape, depth: usize) mod.common.Error!json.Value {
+    fn escapeJson(self: *const DecisionContext, a: std.mem.Allocator, val: *const json.Value, escape: Escape, depth: usize) common_chat.exception.Error!json.Value {
         if (depth >= recursive_limit) {
             return tooDeep();
         }
@@ -1020,7 +1017,7 @@ pub const DecisionContext = struct {
         }
     }
 
-    fn escapeText(self: *const DecisionContext, a: Allocator, text: []const u8, escape: Escape) mod.common.Error![]const u8 {
+    fn escapeText(self: *const DecisionContext, a: std.mem.Allocator, text: []const u8, escape: Escape) common_chat.exception.Error![]const u8 {
         return switch (escape) {
             .special_tokens => escapeSpecialTokens(a, text),
             .d1_break => self.d1Break(a, text),
@@ -1040,7 +1037,7 @@ pub const DecisionContext = struct {
     /// text (d1 prompt.py: plain).
     ///
     /// Return: owned by `a`.
-    fn d1Break(self: *const DecisionContext, a: Allocator, text: []const u8) mod.common.Error![]const u8 {
+    fn d1Break(self: *const DecisionContext, a: std.mem.Allocator, text: []const u8) common_chat.exception.Error![]const u8 {
         const zwsp = "\xE2\x80\x8B";
         var cur = text;
         // again for a match that overlapped the one broken before it
@@ -1080,7 +1077,7 @@ pub const DecisionContext = struct {
     /// "..." line.
     ///
     /// Return: `text` itself, or owned by `a`.
-    fn h2oCutState(self: *const DecisionContext, a: Allocator, text: []const u8) mod.common.Error![]const u8 {
+    fn h2oCutState(self: *const DecisionContext, a: std.mem.Allocator, text: []const u8) common_chat.exception.Error![]const u8 {
         // a byte-level BPE never has more tokens than bytes
         const max_state_tokens = h2o_max_state_tokens;
         if (text.len <= max_state_tokens) {
@@ -1098,10 +1095,10 @@ pub const DecisionContext = struct {
     }
 
     /// `text_of` of `h2o_cut_state`: `json::parse(json::make(out).dump_safe())`.
-    fn pieceText(self: *const DecisionContext, a: Allocator, tokens: []const mod.common.Token) mod.common.Error![]const u8 {
+    fn pieceText(self: *const DecisionContext, a: std.mem.Allocator, tokens: []const llama.impl.llama_c.llama_token) common_chat.exception.Error![]const u8 {
         var out: std.ArrayList(u8) = .empty;
         for (tokens) |tok| {
-            try out.appendSlice(a, try tc.common.tokenToPiece(a, self.vocab, tok, true));
+            try out.appendSlice(a, try tools_common.common.tokenToPiece(a, self.vocab, tok, true));
         }
         var v: json.Value = .{ .string = out.items };
         const safe = try mod.common.safeJsonToStr(a, &v);
@@ -1114,7 +1111,7 @@ pub const DecisionContext = struct {
     /// they stay text.
     ///
     /// Return: owned by `a`.
-    fn h2oQuote(self: *const DecisionContext, a: Allocator, text: []const u8) mod.common.Error![]const u8 {
+    fn h2oQuote(self: *const DecisionContext, a: std.mem.Allocator, text: []const u8) common_chat.exception.Error![]const u8 {
         var out: std.ArrayList(u8) = .empty;
         var i: usize = 0;
         while (i < text.len) {
@@ -1140,7 +1137,7 @@ pub const DecisionContext = struct {
     /// most models.
     ///
     /// Return: owned by `a`.
-    pub fn prepareState(self: *const DecisionContext, a: Allocator, state: *const json.Value) mod.common.Error!json.Value {
+    pub fn prepareState(self: *const DecisionContext, a: std.mem.Allocator, state: *const json.Value) common_chat.exception.Error!json.Value {
         if (self.type != .h2o_lightning) {
             return state.clone(a);
         }
@@ -1153,7 +1150,7 @@ pub const DecisionContext = struct {
     /// the template, its texts are rendered as the reference shim does.
     ///
     /// Return: owned by `a`.
-    fn renderH2o(self: *const DecisionContext, a: Allocator, state: *const json.Value, question: *const Question) mod.common.Error!json.Value {
+    fn renderH2o(self: *const DecisionContext, a: std.mem.Allocator, state: *const json.Value, question: *const Question) common_chat.exception.Error!json.Value {
         // the instructions are JSON with an indent of 1, the descriptions are default JSON, the state is from prepare_state()
         const instructions = pyLstrip(if (question.instructions.isString()) question.instructions.string else try pyDumps(a, &question.instructions, 1, ",", ": ", true));
 
@@ -1198,8 +1195,8 @@ pub const DecisionContext = struct {
 
     /// `jinja::context` + `global_from_json(ctx, inp, false)` +
     /// `runtime.execute` + `gather_string_parts`.
-    fn runTemplate(self: *const DecisionContext, a: Allocator, inp: *const json.Value) mod.common.Error![]u8 {
-        var r: chat.template.Render = undefined;
+    fn runTemplate(self: *const DecisionContext, a: std.mem.Allocator, inp: *const json.Value) common_chat.exception.Error![]u8 {
+        var r: common_chat.template.Render = undefined;
         r.init(a, false);
         defer r.deinit();
         try r.bindJson(inp, false);
@@ -1211,17 +1208,17 @@ pub const DecisionContext = struct {
     /// `mctx` is only used if there are files.
     pub fn fillTask(
         self: *const DecisionContext,
-        a: Allocator,
-        gpa: Allocator,
+        a: std.mem.Allocator,
+        gpa: std.mem.Allocator,
         state: *const json.Value,
         questions: []const Question,
         question: *const Question,
         variant: usize,
         files: []const []const u8,
-        mctx: ?*mod.common.c.mtmd_context,
-        init_opt: mod.common.c.mtmd_helper_init_opt,
+        mctx: ?*mtmd.mtmd.Context,
+        init_opt: mtmd.helper.InitOpt,
         task: *mod.task.Task,
-    ) mod.common.Error!void {
+    ) common_chat.exception.Error!void {
         // each question has its own prompt, with the spans that the head reads
         if (self.type == .vllm_decision2) {
             return self.fillTaskJoint(a, gpa, state, question[0..1], files, mctx, init_opt, task);
@@ -1258,7 +1255,7 @@ pub const DecisionContext = struct {
         }
         if (self.type == .lfm2_d1 or self.type == .lfm3_d1 or self.type == .lfm3_d1_omni) {
             var texts: std.ArrayList([]const u8) = .empty;
-            var groups: std.ArrayList([]const mod.common.Token) = .empty;
+            var groups: std.ArrayList([]const llama.impl.llama_c.llama_token) = .empty;
             try self.d1Labels(a, question, &texts, &groups);
             for (groups.items) |group| {
                 try task.decision.labels.appendSlice(gpa, group);
@@ -1282,7 +1279,7 @@ pub const DecisionContext = struct {
             }
         }
 
-        var tokens: std.ArrayList(mod.common.Token) = .fromOwnedSlice(try mod.common.tokenize(a, self.vocab, prompt, false, true));
+        var tokens: std.ArrayList(llama.impl.llama_c.llama_token) = .fromOwnedSlice(try mod.common.tokenize(a, self.vocab, prompt, false, true));
         if (self.type == .laya) {
             try self.fillTaskLaya(a, gpa, &tokens, question, task);
         }
@@ -1294,7 +1291,7 @@ pub const DecisionContext = struct {
                 }
             }
             if (task.decision.markers.items.len != question.options.len) {
-                return mod.common.throw(error.RuntimeError, "unexpected layout of the decision prompt", .{});
+                return common_chat.exception.throw(error.RuntimeError, "unexpected layout of the decision prompt", .{});
             }
             task.decision.pointer = @as(i32, @truncate(@as(i64, @intCast(tokens.items.len)))) -% 1;
         }
@@ -1308,7 +1305,7 @@ pub const DecisionContext = struct {
     /// prompt is `[cls] question [sep] ([marker] option)* [sep] state [sep]`;
     /// options and question are cut to fit max_head_tokens, the same way the
     /// model was trained.
-    fn fillTaskLaya(self: *const DecisionContext, a: Allocator, gpa: Allocator, tokens: *std.ArrayList(mod.common.Token), question: *const Question, task: *mod.task.Task) mod.common.Error!void {
+    fn fillTaskLaya(self: *const DecisionContext, a: std.mem.Allocator, gpa: std.mem.Allocator, tokens: *std.ArrayList(llama.impl.llama_c.llama_token), question: *const Question, task: *mod.task.Task) common_chat.exception.Error!void {
         const n_options = question.options.len;
         const toks = tokens.items;
 
@@ -1320,26 +1317,26 @@ pub const DecisionContext = struct {
         }
         const invalid = "unexpected layout of the decision prompt";
         if (markers.items.len != n_options or markers.items[0] < 2 or toks[markers.items[0] - 1] != self.token_sep or toks[toks.len - 1] != self.token_sep) {
-            return mod.common.throw(error.RuntimeError, invalid, .{});
+            return common_chat.exception.throw(error.RuntimeError, invalid, .{});
         }
         const head_end = markers.items[0] - 1;
         const last = markers.items[markers.items.len - 1];
-        const opts_end = if (std.mem.indexOfScalar(mod.common.Token, toks[last..], self.token_sep)) |p| last + p else toks.len;
+        const opts_end = if (std.mem.indexOfScalar(llama.impl.llama_c.llama_token, toks[last..], self.token_sep)) |p| last + p else toks.len;
         if (opts_end + 1 >= toks.len) {
-            return mod.common.throw(error.RuntimeError, invalid, .{});
+            return common_chat.exception.throw(error.RuntimeError, invalid, .{});
         }
 
         // marker + text of each option
-        var options: std.ArrayList(std.ArrayList(mod.common.Token)) = .empty;
+        var options: std.ArrayList(std.ArrayList(llama.impl.llama_c.llama_token)) = .empty;
         var n_options_tokens: usize = 0;
         for (0..n_options) |i| {
             const end = if (i + 1 < n_options) markers.items[i + 1] else opts_end;
-            var opt: std.ArrayList(mod.common.Token) = .empty;
+            var opt: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
             try opt.appendSlice(a, toks[markers.items[i]..end]);
             try options.append(a, opt);
         }
         const SetMax = struct {
-            fn run(opts: []std.ArrayList(mod.common.Token), n_max: usize) usize {
+            fn run(opts: []std.ArrayList(llama.impl.llama_c.llama_token), n_max: usize) usize {
                 var n: usize = 0;
                 for (opts) |*opt| {
                     opt.shrinkRetainingCapacity(@min(opt.items.len, n_max));
@@ -1355,7 +1352,7 @@ pub const DecisionContext = struct {
         }
         const n_question_max = @max(@as(usize, 8), self.max_head_tokens - @min(self.max_head_tokens, n_options_tokens));
 
-        var out: std.ArrayList(mod.common.Token) = .empty;
+        var out: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
         try out.append(a, toks[0]);
         try out.appendSlice(a, toks[1..@min(head_end, 1 + n_question_max)]);
         try out.append(a, self.token_sep);
@@ -1376,17 +1373,17 @@ pub const DecisionContext = struct {
     /// come first, the text after them has a budget of its own.
     fn fillTaskD1omni(
         self: *const DecisionContext,
-        a: Allocator,
-        gpa: Allocator,
+        a: std.mem.Allocator,
+        gpa: std.mem.Allocator,
         state: *const json.Value,
         questions: []const Question,
         question: *const Question,
         variant: usize,
         files: []const []const u8,
-        mctx: ?*mod.common.c.mtmd_context,
-        init_opt: mod.common.c.mtmd_helper_init_opt,
+        mctx: ?*mtmd.mtmd.Context,
+        init_opt: mtmd.helper.InitOpt,
         task: *mod.task.Task,
-    ) mod.common.Error!void {
+    ) common_chat.exception.Error!void {
         const invalid = "unexpected layout of the decision prompt";
 
         // the prompt depends on the kind of media, mtmd tells an audio clip from an image by its content
@@ -1406,13 +1403,13 @@ pub const DecisionContext = struct {
             while (i < media.size()) : (i += 1) {
                 if (media.at(i) == mod.common.token_null) {
                     const chunk = try media.findChunk(i);
-                    is_audio = is_audio or mod.common.c.mtmd_input_chunk_get_type(chunk) == mod.common.c.MTMD_INPUT_CHUNK_TYPE_AUDIO;
-                    i +%= mod.common.c.mtmd_input_chunk_get_n_tokens(chunk) -% 1;
+                    is_audio = is_audio or mtmd.mtmd.mtmd_input_chunk_get_type(chunk) == mtmd.mtmd.ChunkType.audio;
+                    i +%= mtmd.mtmd.mtmd_input_chunk_get_n_tokens(chunk) -% 1;
                 }
             }
         }
         if (is_audio and files.len > 1) {
-            return mod.common.throw(error.InvalidArgument, "a request has images or one audio clip, not both", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "a request has images or one audio clip, not both", .{});
         }
         const n_media = media.size();
 
@@ -1423,14 +1420,14 @@ pub const DecisionContext = struct {
             while (it.next()) |p| try pieces.append(a, p);
         }
         if (pieces.items.len == 0 or !std.mem.eql(u8, pieces.items[0], markers.items)) {
-            return mod.common.throw(error.RuntimeError, invalid, .{});
+            return common_chat.exception.throw(error.RuntimeError, invalid, .{});
         }
 
         var n_max: usize = d1omni_max_tokens;
         if (files.len != 0) {
             n_max = @min(if (is_audio) d1omni_max_tokens_audio else d1omni_max_tokens_image, d1omni_max_tokens - @min(d1omni_max_tokens, n_media));
             if (n_max < 64) {
-                return mod.common.throw(error.InvalidArgument, "the media take {d} of the {d} positions, send fewer images", .{ n_media, d1omni_max_tokens });
+                return common_chat.exception.throw(error.InvalidArgument, "the media take {d} of the {d} positions, send fewer images", .{ n_media, d1omni_max_tokens });
             }
         }
 
@@ -1440,9 +1437,9 @@ pub const DecisionContext = struct {
         const n_option_max: i64 = @max(2, @divTrunc(n_budget - 3 * n_options, n_options));
         const n_question_max: i64 = @max(16, n_budget);
 
-        var head: std.ArrayList(mod.common.Token) = .empty; // before the state
-        var body: std.ArrayList(mod.common.Token) = .empty; // the state
-        var tail: std.ArrayList(mod.common.Token) = .empty; // after the state
+        var head: std.ArrayList(llama.impl.llama_c.llama_token) = .empty; // before the state
+        var body: std.ArrayList(llama.impl.llama_c.llama_token) = .empty; // the state
+        var tail: std.ArrayList(llama.impl.llama_c.llama_token) = .empty; // after the state
         var has_state = false;
         for (pieces.items[1..]) |piece_in| {
             var piece = piece_in;
@@ -1466,7 +1463,7 @@ pub const DecisionContext = struct {
 
             if (is_state) {
                 if (has_state) {
-                    return mod.common.throw(error.RuntimeError, invalid, .{});
+                    return common_chat.exception.throw(error.RuntimeError, invalid, .{});
                 }
                 body = .fromOwnedSlice(toks);
                 has_state = true;
@@ -1476,7 +1473,7 @@ pub const DecisionContext = struct {
             }
         }
         if (!has_state) {
-            return mod.common.throw(error.RuntimeError, invalid, .{});
+            return common_chat.exception.throw(error.RuntimeError, invalid, .{});
         }
 
         const n_room = n_max - @min(n_max, head.items.len + tail.items.len);
@@ -1493,7 +1490,7 @@ pub const DecisionContext = struct {
             }
         }
         if (@as(i64, @intCast(task.decision.markers.items.len)) != n_options) {
-            return mod.common.throw(error.InvalidArgument, "the options do not fit in the context", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "the options do not fit in the context", .{});
         }
 
         // the output has one score per question type
@@ -1518,15 +1515,15 @@ pub const DecisionContext = struct {
     /// options, in order. `mctx` is only used if there are files.
     pub fn fillTaskJoint(
         self: *const DecisionContext,
-        a: Allocator,
-        gpa: Allocator,
+        a: std.mem.Allocator,
+        gpa: std.mem.Allocator,
         state: *const json.Value,
         questions: []const Question,
         files: []const []const u8,
-        mctx: ?*mod.common.c.mtmd_context,
-        init_opt: mod.common.c.mtmd_helper_init_opt,
+        mctx: ?*mtmd.mtmd.Context,
+        init_opt: mtmd.helper.InitOpt,
         task: *mod.task.Task,
-    ) mod.common.Error!void {
+    ) common_chat.exception.Error!void {
         var inp_questions = json.Value.emptyArray();
         for (questions) |*question| {
             var options = json.Value.emptyArray();
@@ -1590,7 +1587,7 @@ pub const DecisionContext = struct {
                 i_piece += 1;
             }
             if (std.mem.indexOf(u8, head.items, marker) == null or std.mem.indexOf(u8, head.items, clef_marker) != null) {
-                return mod.common.throw(error.RuntimeError, invalid, .{});
+                return common_chat.exception.throw(error.RuntimeError, invalid, .{});
             }
             // assigned only once it succeeded: a failure leaves the task as it was, for its owner to free
             const head_tokens = try mod.tokens.processMtmdPrompt(gpa, mctx, head.items, files, init_opt, false);
@@ -1606,7 +1603,7 @@ pub const DecisionContext = struct {
             if (std.mem.startsWith(u8, piece, clef_mark_question)) {
                 piece = piece[clef_mark_question.len..];
                 if (i_question >= questions.len) {
-                    return mod.common.throw(error.RuntimeError, invalid, .{});
+                    return common_chat.exception.throw(error.RuntimeError, invalid, .{});
                 }
                 order = switch (questions[i_question].type) {
                     .noul => orderValue(.question_noul),
@@ -1622,7 +1619,7 @@ pub const DecisionContext = struct {
 
             const piece_tokens = try mod.common.tokenize(a, self.vocab, piece, false, true);
             if (order != orderValue(.none) and piece_tokens.len == 0) {
-                return mod.common.throw(error.InvalidArgument, "the instructions and the options of a question must not be empty", .{});
+                return common_chat.exception.throw(error.InvalidArgument, "the instructions and the options of a question must not be empty", .{});
             }
             for (piece_tokens) |token| {
                 try task.tokens.pushBackToken(token);
@@ -1639,7 +1636,7 @@ pub const DecisionContext = struct {
             n_options += question.options.len;
         }
         if (i_question != questions.len or @as(usize, @intCast(task.decision.n_scores)) != n_options) {
-            return mod.common.throw(error.RuntimeError, invalid, .{});
+            return common_chat.exception.throw(error.RuntimeError, invalid, .{});
         }
     }
 
@@ -1671,12 +1668,12 @@ pub const DecisionContext = struct {
 
     /// `format_answer` with its default argument, `has_media = false`
     /// (server-decision.h:128 @b1b770d90): see `formatAnswerMedia`.
-    pub fn formatAnswer(self: *const DecisionContext, a: Allocator, question: *const Question, scores: []const []const f32) mod.common.Error!json.Value {
+    pub fn formatAnswer(self: *const DecisionContext, a: std.mem.Allocator, question: *const Question, scores: []const []const f32) common_chat.exception.Error!json.Value {
         return self.formatAnswerMedia(a, question, scores, false);
     }
 
     /// Ports `get_decision_confidence` (server-decision.cpp:1635 @b1b770d90).
-    fn getDecisionConfidence(self: *const DecisionContext, question_type: QuestionType, probs: []const f64) mod.common.Error!f64 {
+    fn getDecisionConfidence(self: *const DecisionContext, question_type: QuestionType, probs: []const f64) common_chat.exception.Error!f64 {
         if (self.type == .vllm_decision2 or self.type == .vllm_d3) {
             return confidenceEntropy(probs);
         }
@@ -1689,7 +1686,7 @@ pub const DecisionContext = struct {
             .score => return confidenceScore(probs),
             .noul => {},
         }
-        return mod.common.throw(error.RuntimeError, "no confidence for this question type", .{});
+        return common_chat.exception.throw(error.RuntimeError, "no confidence for this question type", .{});
     }
 
     /// Ports `format_answer` (server-decision.cpp:1651 @b1b770d90): `scores`
@@ -1697,10 +1694,10 @@ pub const DecisionContext = struct {
     /// the request had images or audio.
     ///
     /// Return: owned by `a`.
-    pub fn formatAnswerMedia(self: *const DecisionContext, a: Allocator, question: *const Question, scores: []const []const f32, has_media: bool) mod.common.Error!json.Value {
+    pub fn formatAnswerMedia(self: *const DecisionContext, a: std.mem.Allocator, question: *const Question, scores: []const []const f32, has_media: bool) common_chat.exception.Error!json.Value {
         const n = self.nOutputs(question);
         if (scores.len != self.nVariants(question)) {
-            return mod.common.throw(error.RuntimeError, "decision result does not match the number of variants", .{});
+            return common_chat.exception.throw(error.RuntimeError, "decision result does not match the number of variants", .{});
         }
 
         // softmax over the outputs of each variant, then the average of the variants
@@ -1718,12 +1715,12 @@ pub const DecisionContext = struct {
         const logits = try a.alloc(f64, n);
         for (scores, 0..) |s, v| {
             if (s.len != n) {
-                return mod.common.throw(error.RuntimeError, "decision result does not match the number of options", .{});
+                return common_chat.exception.throw(error.RuntimeError, "decision result does not match the number of options", .{});
             }
             // a joint head returns NaN if it could not use the decision order, +inf would make the softmax NaN
             for (s) |x| {
                 if (std.math.isNan(x) or x == std.math.inf(f32)) {
-                    return mod.common.throw(error.RuntimeError, "the model could not evaluate the decision", .{});
+                    return common_chat.exception.throw(error.RuntimeError, "the model could not evaluate the decision", .{});
                 }
             }
             for (s, 0..) |x, i| logits[i] = x;
@@ -1903,24 +1900,24 @@ const max_images: usize = 8;
 
 /// Ports `decision_load_image` (server-decision.cpp:392 @b1b770d90): any
 /// media, mtmd tells an audio clip or a video from an image by its content.
-fn loadImage(a: Allocator, url: *const json.Value, files: *std.ArrayList([]u8)) mod.common.Error!void {
+fn loadImage(a: std.mem.Allocator, url: *const json.Value, files: *std.ArrayList([]u8)) common_chat.exception.Error!void {
     if (!url.isString() or !std.mem.startsWith(u8, url.string, "data:")) {
-        return mod.common.throw(error.InvalidArgument, "media must be data URLs (data:image/..., data:audio/... or data:video/...;base64,...)", .{});
+        return common_chat.exception.throw(error.InvalidArgument, "media must be data URLs (data:image/..., data:audio/... or data:video/...;base64,...)", .{});
     }
     if (files.items.len >= max_images) {
-        return mod.common.throw(error.InvalidArgument, "too many images, the maximum is {d}", .{max_images});
+        return common_chat.exception.throw(error.InvalidArgument, "too many images, the maximum is {d}", .{max_images});
     }
     try mod.oaicompat.handleMedia(a, files, url.string, "", false);
 }
 
 /// Ports `decision_load_audio` (server-decision.cpp:403 @b1b770d90): audio
 /// is base64 data, as a data URL or not (OpenAI input_audio).
-fn loadAudio(a: Allocator, data: *const json.Value, files: *std.ArrayList([]u8)) mod.common.Error!void {
+fn loadAudio(a: std.mem.Allocator, data: *const json.Value, files: *std.ArrayList([]u8)) common_chat.exception.Error!void {
     if (!data.isString() or std.mem.startsWith(u8, data.string, "http") or std.mem.startsWith(u8, data.string, "file://")) {
-        return mod.common.throw(error.InvalidArgument, "audio must be base64 data", .{});
+        return common_chat.exception.throw(error.InvalidArgument, "audio must be base64 data", .{});
     }
     if (files.items.len >= max_images) {
-        return mod.common.throw(error.InvalidArgument, "too many media files, the maximum is {d}", .{max_images});
+        return common_chat.exception.throw(error.InvalidArgument, "too many media files, the maximum is {d}", .{max_images});
     }
     try mod.oaicompat.handleMedia(a, files, data.string, "", false);
 }
@@ -1932,7 +1929,7 @@ fn loadAudio(a: Allocator, data: *const json.Value, files: *std.ArrayList([]u8))
 /// replace text in all strings of a JSON value.
 ///
 /// Return: owned by `a`.
-fn replaceText(a: Allocator, val: *const json.Value, search: []const u8, replace: []const u8, depth: usize) mod.common.Error!json.Value {
+fn replaceText(a: std.mem.Allocator, val: *const json.Value, search: []const u8, replace: []const u8, depth: usize) common_chat.exception.Error!json.Value {
     if (depth >= recursive_limit) {
         return tooDeep();
     }
@@ -1955,7 +1952,7 @@ fn replaceText(a: Allocator, val: *const json.Value, search: []const u8, replace
 }
 
 /// Ports `string_replace_all` (common/common.cpp:528 @b1b770d90).
-fn stringReplaceAll(a: Allocator, s: []const u8, search: []const u8, replace: []const u8) mod.common.Error![]u8 {
+fn stringReplaceAll(a: std.mem.Allocator, s: []const u8, search: []const u8, replace: []const u8) common_chat.exception.Error![]u8 {
     if (search.len == 0) {
         return a.dupe(u8, s);
     }
@@ -1976,11 +1973,11 @@ fn stringReplaceAll(a: Allocator, s: []const u8, search: []const u8, replace: []
 /// keys of all objects of a JSON value.
 ///
 /// Return: owned by `a`.
-fn sortKeys(a: Allocator, val: *const json.Value) mod.common.Error!json.Value {
+fn sortKeys(a: std.mem.Allocator, val: *const json.Value) common_chat.exception.Error!json.Value {
     return sortKeysAt(a, val, 0);
 }
 
-fn sortKeysAt(a: Allocator, val: *const json.Value, depth: usize) mod.common.Error!json.Value {
+fn sortKeysAt(a: std.mem.Allocator, val: *const json.Value, depth: usize) common_chat.exception.Error!json.Value {
     if (depth >= recursive_limit) {
         return tooDeep();
     }
@@ -2012,7 +2009,7 @@ fn sortKeysAt(a: Allocator, val: *const json.Value, depth: usize) mod.common.Err
 /// flattens a JSON value into text, the keys of an object are kept as labels.
 ///
 /// Return: owned by `a`.
-fn kevRender(a: Allocator, val: *const json.Value, indent: usize, depth: usize) mod.common.Error![]u8 {
+fn kevRender(a: std.mem.Allocator, val: *const json.Value, indent: usize, depth: usize) common_chat.exception.Error![]u8 {
     if (depth >= recursive_limit) {
         return tooDeep();
     }
@@ -2057,7 +2054,7 @@ fn kevRender(a: Allocator, val: *const json.Value, indent: usize, depth: usize) 
 /// `std::regex_replace` with `<\|([A-Za-z0-9_]+)\|>`.
 ///
 /// Return: `text` itself if nothing changed, else owned by `a`.
-pub fn escapeSpecialTokens(a: Allocator, text: []const u8) mod.common.Error![]const u8 {
+pub fn escapeSpecialTokens(a: std.mem.Allocator, text: []const u8) common_chat.exception.Error![]const u8 {
     const isName = struct {
         fn f(ch: u8) bool {
             return (ch >= 'A' and ch <= 'Z') or (ch >= 'a' and ch <= 'z') or (ch >= '0' and ch <= '9') or ch == '_';
@@ -2090,7 +2087,7 @@ pub fn escapeSpecialTokens(a: Allocator, text: []const u8) mod.common.Error![]co
 /// input, special tokens written in the text must not be parsed as such.
 ///
 /// Return: a string value owned by `a`.
-fn kevText(a: Allocator, val: *const json.Value) mod.common.Error!json.Value {
+fn kevText(a: std.mem.Allocator, val: *const json.Value) common_chat.exception.Error!json.Value {
     return json.Value.initString(a, try escapeSpecialTokens(a, try kevRender(a, val, 0, 0)));
 }
 
@@ -2152,7 +2149,7 @@ fn pyLstrip(s: []const u8) []const u8 {
 
 /// Ports `decision_py_escape_cp` (server-decision.cpp:711 @b1b770d90): a code
 /// point as JSON escapes, a surrogate pair above the BMP.
-fn pyEscapeCp(a: Allocator, out: *std.ArrayList(u8), cp_in: u32) mod.common.Error!void {
+fn pyEscapeCp(a: std.mem.Allocator, out: *std.ArrayList(u8), cp_in: u32) common_chat.exception.Error!void {
     if (cp_in < 0x10000) {
         return out.print(a, "\\u{x:0>4}", .{cp_in});
     }
@@ -2163,7 +2160,7 @@ fn pyEscapeCp(a: Allocator, out: *std.ArrayList(u8), cp_in: u32) mod.common.Erro
 /// Ports `decision_py_float` (server-decision.cpp:720 @b1b770d90): repr() of
 /// a Python float: the shortest digits that read back the same, in exponent
 /// form below 1e-4 and from 1e16.
-fn pyFloat(a: Allocator, out: *std.ArrayList(u8), v: f64) mod.common.Error!void {
+fn pyFloat(a: std.mem.Allocator, out: *std.ArrayList(u8), v: f64) common_chat.exception.Error!void {
     var buf: [64:0]u8 = undefined;
     // the fewest digits that read back the same
     var n_written: usize = 0;
@@ -2217,7 +2214,7 @@ fn pyFloat(a: Allocator, out: *std.ArrayList(u8), v: f64) mod.common.Error!void 
 }
 
 /// Ports `decision_py_str` (server-decision.cpp:754 @b1b770d90).
-fn pyStr(a: Allocator, out: *std.ArrayList(u8), s: []const u8, ensure_ascii: bool) mod.common.Error!void {
+fn pyStr(a: std.mem.Allocator, out: *std.ArrayList(u8), s: []const u8, ensure_ascii: bool) common_chat.exception.Error!void {
     try out.append(a, '"');
     var i: usize = 0;
     while (i < s.len) {
@@ -2251,7 +2248,7 @@ fn pyStr(a: Allocator, out: *std.ArrayList(u8), s: []const u8, ensure_ascii: boo
 }
 
 /// `newline` of `decision_py_dump`.
-fn pyNewline(a: Allocator, out: *std.ArrayList(u8), indent: i32, level: usize) mod.common.Error!void {
+fn pyNewline(a: std.mem.Allocator, out: *std.ArrayList(u8), indent: i32, level: usize) common_chat.exception.Error!void {
     if (indent >= 0) {
         try out.append(a, '\n');
         try out.appendNTimes(a, ' ', @as(usize, @intCast(indent)) * level);
@@ -2260,7 +2257,7 @@ fn pyNewline(a: Allocator, out: *std.ArrayList(u8), indent: i32, level: usize) m
 
 /// Ports `decision_py_dump` (server-decision.cpp:782 @b1b770d90): json.dumps()
 /// of Python: `indent` < 0 is no indent, keys stay in their order.
-fn pyDump(a: Allocator, out: *std.ArrayList(u8), val: *const json.Value, indent: i32, level: usize, item_sep: []const u8, key_sep: []const u8, ensure_ascii: bool) mod.common.Error!void {
+fn pyDump(a: std.mem.Allocator, out: *std.ArrayList(u8), val: *const json.Value, indent: i32, level: usize, item_sep: []const u8, key_sep: []const u8, ensure_ascii: bool) common_chat.exception.Error!void {
     if (level >= recursive_limit) {
         return tooDeep();
     }
@@ -2313,7 +2310,7 @@ fn pyDump(a: Allocator, out: *std.ArrayList(u8), val: *const json.Value, indent:
 /// Ports `decision_py_dumps` (server-decision.cpp:832 @b1b770d90).
 ///
 /// Return: owned by `a`.
-fn pyDumps(a: Allocator, val: *const json.Value, indent: i32, item_sep: []const u8, key_sep: []const u8, ensure_ascii: bool) mod.common.Error![]const u8 {
+fn pyDumps(a: std.mem.Allocator, val: *const json.Value, indent: i32, item_sep: []const u8, key_sep: []const u8, ensure_ascii: bool) common_chat.exception.Error![]const u8 {
     var out: std.ArrayList(u8) = .empty;
     try pyDump(a, &out, val, indent, 0, item_sep, key_sep, ensure_ascii);
     return out.items;
@@ -2321,7 +2318,7 @@ fn pyDumps(a: Allocator, val: *const json.Value, indent: i32, item_sep: []const 
 
 /// `llama_model_decision_label` (llama-ext.h:141 @b1b770d90): the label's
 /// text, or null past the last one.
-fn decisionLabel(model: ?*const mod.common.c.llama_model, i: u32) ?[*:0]const u8 {
+fn decisionLabel(model: ?*const llama.impl.llama_c.llama_model, i: u32) ?[*:0]const u8 {
     return @import("llama").api.model.llama_model_decision_label(@ptrCast(model), i);
 }
 
@@ -2365,7 +2362,7 @@ const clef_mark_option = "<<clef:option>>";
 /// - `tasks`: moved from; every element is left empty.
 ///
 /// Return: owned by `gpa`.
-pub fn groupTasks(gpa: Allocator, tasks: []mod.task.Task, n_slots_in: usize) mod.common.Error!std.ArrayList(mod.task.Task) {
+pub fn groupTasks(gpa: std.mem.Allocator, tasks: []mod.task.Task, n_slots_in: usize) common_chat.exception.Error!std.ArrayList(mod.task.Task) {
     const n_slots = @max(n_slots_in, 1);
 
     var groups: std.ArrayList(mod.task.Task) = .empty;

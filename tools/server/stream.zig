@@ -26,13 +26,9 @@
 
 const std = @import("std");
 const mod = @import("module.zig");
-const tc = @import("tools_common");
+const tools_common = @import("tools_common");
 const stdlib = @import("stdlib");
 const json = @import("json");
-
-const Allocator = std.mem.Allocator;
-
-const gpa = std.heap.c_allocator;
 
 /// Ports `stream_read_status` (server-stream.cpp:11 @b1b770d90).
 const ReadStatus = enum { ok, offset_lost };
@@ -73,14 +69,14 @@ pub const Session = struct {
 
     /// Ports `stream_session`'s constructor (server-stream.cpp:111 @b1b770d90).
     fn create(conversation_id: []const u8, max_bytes: usize) !*Session {
-        const self = try gpa.create(Session);
-        errdefer gpa.destroy(self);
+        const self = try std.heap.c_allocator.create(Session);
+        errdefer std.heap.c_allocator.destroy(self);
         self.* = .{
-            .conversation_id = try gpa.dupe(u8, conversation_id),
+            .conversation_id = try std.heap.c_allocator.dupe(u8, conversation_id),
             .started_ts = nowSeconds(),
             .cap_bytes = max_bytes,
         };
-        try self.buffer.ensureTotalCapacity(gpa, 64 * 1024);
+        try self.buffer.ensureTotalCapacity(std.heap.c_allocator, 64 * 1024);
         return self;
     }
 
@@ -93,9 +89,9 @@ pub const Session = struct {
     /// The `shared_ptr` release: the last one frees.
     pub fn release(self: *Session) void {
         if (self.refs.fetchSub(1, .acq_rel) == 1) {
-            self.buffer.deinit(gpa);
-            gpa.free(self.conversation_id);
-            gpa.destroy(self);
+            self.buffer.deinit(std.heap.c_allocator);
+            std.heap.c_allocator.free(self.conversation_id);
+            std.heap.c_allocator.destroy(self);
         }
     }
 
@@ -115,7 +111,7 @@ pub const Session = struct {
                 const skip = data.len - self.cap_bytes;
                 self.prefix_dropped += self.buffer.items.len + skip;
                 self.buffer.clearRetainingCapacity();
-                try self.buffer.appendSlice(gpa, data[skip..]);
+                try self.buffer.appendSlice(std.heap.c_allocator, data[skip..]);
             } else {
                 const needed = self.buffer.items.len + data.len;
                 if (needed > self.cap_bytes) {
@@ -124,7 +120,7 @@ pub const Session = struct {
                     self.buffer.shrinkRetainingCapacity(self.buffer.items.len - to_drop);
                     self.prefix_dropped += to_drop;
                 }
-                try self.buffer.appendSlice(gpa, data);
+                try self.buffer.appendSlice(std.heap.c_allocator, data);
             }
         }
         self.cv.broadcast();
@@ -164,11 +160,11 @@ pub const Session = struct {
             if (offset < logical_end) {
                 const local_off = offset - self.prefix_dropped;
                 // copy the available chunk under the lock, release before calling the sink
-                const chunk = gpa.dupe(u8, self.buffer.items[local_off..]) catch |e| {
+                const chunk = std.heap.c_allocator.dupe(u8, self.buffer.items[local_off..]) catch |e| {
                     self.mu.unlock();
                     return e;
                 };
-                defer gpa.free(chunk);
+                defer std.heap.c_allocator.free(chunk);
                 offset += chunk.len;
                 self.mu.unlock();
                 const keep_going = try sink.call(chunk);
@@ -244,7 +240,7 @@ const Manager = struct {
     gc_wake_cv: stdlib.sync.Condition = .{},
 
     fn map(self: *Manager) !*stdlib.libcxx.StringMap(?*Session) {
-        if (self.sessions == null) self.sessions = try stdlib.libcxx.StringMap(?*Session).init(gpa);
+        if (self.sessions == null) self.sessions = try stdlib.libcxx.StringMap(?*Session).init(std.heap.c_allocator);
         return &self.sessions.?;
     }
 
@@ -290,7 +286,7 @@ const Manager = struct {
     /// @b1b770d90), in the map's order.
     ///
     /// Return: references the caller releases.
-    fn listAll(self: *Manager, a: Allocator) ![]*Session {
+    fn listAll(self: *Manager, a: std.mem.Allocator) ![]*Session {
         var out: std.ArrayList(*Session) = .empty;
         self.map_mu.lock();
         defer self.map_mu.unlock();
@@ -327,19 +323,19 @@ const Manager = struct {
             const found: ?*?*Session = if (m.get(conversation_id)) |v| (if (v.* != null) v else null) else null;
             const v = found orelse {
                 var live: std.ArrayList(u8) = .empty;
-                defer live.deinit(gpa);
+                defer live.deinit(std.heap.c_allocator);
                 var n: usize = 0;
                 var it = m.iterator();
                 while (it.next()) |e| {
                     if (e.value.* == null) continue;
-                    if (live.items.len != 0) try live.appendSlice(gpa, ", ");
-                    try live.appendSlice(gpa, e.key);
+                    if (live.items.len != 0) try live.appendSlice(std.heap.c_allocator, ", ");
+                    try live.appendSlice(std.heap.c_allocator, e.key);
                     n += 1;
                 }
-                const id_z = try gpa.dupeSentinel(u8, conversation_id, 0);
-                defer gpa.free(id_z);
-                const live_z = try gpa.dupeSentinel(u8, live.items, 0);
-                defer gpa.free(live_z);
+                const id_z = try std.heap.c_allocator.dupeSentinel(u8, conversation_id, 0);
+                defer std.heap.c_allocator.free(id_z);
+                const live_z = try std.heap.c_allocator.dupeSentinel(u8, live.items, 0);
+                defer std.heap.c_allocator.free(live_z);
                 mod.common.srv(.wrn, "evict_and_cancel", "stop on unknown stream session, conv_id=%s matched nothing, %zu live: [%s]\n", .{ id_z.ptr, n, live_z.ptr });
                 return;
             };
@@ -386,14 +382,14 @@ const Manager = struct {
         }
         // finalize all live sessions so no reader ever hangs
         var snapshot: std.ArrayList(*Session) = .empty;
-        defer snapshot.deinit(gpa);
+        defer snapshot.deinit(std.heap.c_allocator);
         {
             self.map_mu.lock();
             defer self.map_mu.unlock();
             if (self.sessions) |*m| {
                 var it = m.iterator();
                 while (it.next()) |e| {
-                    if (e.value.*) |s| snapshot.append(gpa, s) catch s.release();
+                    if (e.value.*) |s| snapshot.append(std.heap.c_allocator, s) catch s.release();
                 }
                 m.deinit();
                 self.sessions = null;
@@ -421,7 +417,7 @@ const Manager = struct {
             }
             const cutoff = nowSeconds() - session_ttl_seconds;
             var to_drop: std.ArrayList(*Session) = .empty;
-            defer to_drop.deinit(gpa);
+            defer to_drop.deinit(std.heap.c_allocator);
             {
                 self.map_mu.lock();
                 defer self.map_mu.unlock();
@@ -431,7 +427,7 @@ const Manager = struct {
                         const s = e.value.* orelse continue;
                         const completed = s.completedAt();
                         if (completed != 0 and completed <= cutoff) {
-                            to_drop.append(gpa, s) catch continue;
+                            to_drop.append(std.heap.c_allocator, s) catch continue;
                             e.value.* = null;
                         }
                     }
@@ -471,7 +467,7 @@ pub const Producer = struct {
 
     /// Ports `stream_pipe_producer`'s `create` (server-stream.cpp:424 @b1b770d90).
     fn create(session: *Session) !*Producer {
-        const self = try gpa.create(Producer);
+        const self = try std.heap.c_allocator.create(Producer);
         self.* = .{ .session = session };
         return self;
     }
@@ -480,7 +476,7 @@ pub const Producer = struct {
     pub fn destroy(self: *Producer) void {
         self.session.finalize();
         self.session.release();
-        gpa.destroy(self);
+        std.heap.c_allocator.destroy(self);
     }
 
     /// Ports `stream_pipe_producer`'s `write` (server-stream.cpp:420 @b1b770d90).
@@ -497,7 +493,7 @@ pub const Producer = struct {
 /// Ports `make_error_response` (server-stream.cpp:445 @b1b770d90): the
 /// standard error response in a new `server_http_res`.
 fn makeErrorResponse(status: c_int, message: []const u8, ty: mod.common.ErrorType) !*mod.http.Res {
-    const res = try mod.http.Res.create(gpa);
+    const res = try mod.http.Res.create(std.heap.c_allocator);
     errdefer res.destroy();
     const a = res.allocator();
     var err = try mod.common.formatErrorResponse(a, message, ty);
@@ -524,17 +520,17 @@ const ReplayRes = struct {
         const self: *ReplayRes = @fieldParentPtr("base", res);
         self.session.release();
         self.base.arena.deinit();
-        gpa.destroy(self);
+        std.heap.c_allocator.destroy(self);
     }
 
     /// The `next` lambda of `server_stream_make_get_handler`
     /// (server-stream.cpp:454 @b1b770d90): exit each call after draining the
     /// available chunk so the chunked provider gets a chance to flush.
-    fn next(ctx: ?*anyopaque, out: *std.ArrayList(u8), a: Allocator) anyerror!bool {
+    fn next(ctx: ?*anyopaque, out: *std.ArrayList(u8), a: std.mem.Allocator) anyerror!bool {
         const self: *ReplayRes = @ptrCast(@alignCast(ctx.?));
         const Sink = struct {
             out: *std.ArrayList(u8),
-            a: Allocator,
+            a: std.mem.Allocator,
             offset: *usize,
             got_any: bool = false,
             fn call(s: *@This(), d: []const u8) !bool {
@@ -573,9 +569,9 @@ fn getHandler(_: ?*anyopaque, req: *const mod.http.Req) anyerror!*mod.http.Res {
     if (from < session.droppedPrefix()) {
         return makeErrorResponse(400, "Stream offset lost, please restart", .invalid_request);
     }
-    const self = try gpa.create(ReplayRes);
+    const self = try std.heap.c_allocator.create(ReplayRes);
     self.* = .{
-        .base = .{ .arena = std.heap.ArenaAllocator.init(gpa), .vtable = &ReplayRes.vtable },
+        .base = .{ .arena = std.heap.ArenaAllocator.init(std.heap.c_allocator), .vtable = &ReplayRes.vtable },
         .session = session,
         .offset = from,
         .should_stop = req.should_stop,
@@ -596,7 +592,7 @@ pub fn makeGetHandler() mod.http.Handler {
 /// @b1b770d90) makes: `POST /v1/streams/lookup` answers only for the ids
 /// asked about, each matching its exact key and any `<id>::<model>`.
 fn lookupHandler(_: ?*anyopaque, req: *const mod.http.Req) anyerror!*mod.http.Res {
-    const res = try mod.http.Res.create(gpa);
+    const res = try mod.http.Res.create(std.heap.c_allocator);
     errdefer res.destroy();
     const a = res.allocator();
     var requested: std.ArrayList([]const u8) = .empty;
@@ -632,7 +628,7 @@ fn lookupHandler(_: ?*anyopaque, req: *const mod.http.Req) anyerror!*mod.http.Re
     var all: []*Session = &.{};
     defer for (all) |s| s.release();
     if (requested.items.len != 0) {
-        all = try g_stream_sessions.listAll(gpa);
+        all = try g_stream_sessions.listAll(std.heap.c_allocator);
         for (requested.items) |rid| {
             const with_sep = try std.mem.concat(a, u8, &.{ rid, "::" });
             for (all) |s| {
@@ -673,12 +669,12 @@ fn deleteHandler(_: ?*anyopaque, req: *const mod.http.Req) anyerror!*mod.http.Re
         return makeErrorResponse(400, "Missing conversation id in path", .invalid_request);
     }
     {
-        const z = try gpa.dupeSentinel(u8, conv_id, 0);
-        defer gpa.free(z);
+        const z = try std.heap.c_allocator.dupeSentinel(u8, conv_id, 0);
+        defer std.heap.c_allocator.free(z);
         mod.common.srv(.trc, "operator()", "DELETE /v1/stream conv_id=%s -> evict_and_cancel\n", .{z.ptr});
     }
     try g_stream_sessions.evictAndCancel(conv_id);
-    const res = try mod.http.Res.create(gpa);
+    const res = try mod.http.Res.create(std.heap.c_allocator);
     res.status = 204;
     res.content_type = "application/json";
     return res;
@@ -708,8 +704,8 @@ pub fn convIdFromHeaders(headers: *const mod.http.StringMap) []const u8 {
 fn createSpipe(headers: *const mod.http.StringMap) !?*Producer {
     const conversation_id = convIdFromHeaders(headers);
     {
-        const z = try gpa.dupeSentinel(u8, conversation_id, 0);
-        defer gpa.free(z);
+        const z = try std.heap.c_allocator.dupeSentinel(u8, conversation_id, 0);
+        defer std.heap.c_allocator.free(z);
         mod.common.srv(.trc, "server_stream_create_spipe", "conv_id=%s (empty=%d)\n", .{ z.ptr, @as(c_int, @intFromBool(conversation_id.len == 0)) });
     }
     if (conversation_id.len == 0) {
@@ -753,7 +749,7 @@ pub const Spipe = struct {
 
     /// Ports `server_res_spipe`'s `conn_alive` (server-stream.cpp:617 @b1b770d90).
     pub fn connAlive(self: *const Spipe) bool {
-        tc.ggml.ggmlAssert(self.req != null, "server-stream.cpp", 618, "req != nullptr");
+        tools_common.ggml.ggmlAssert(self.req != null, "server-stream.cpp", 618, "req != nullptr");
         return !self.req.?.should_stop.call();
     }
 
@@ -781,10 +777,10 @@ pub const Spipe = struct {
             return;
         };
         var chunk: std.ArrayList(u8) = .empty;
-        defer chunk.deinit(gpa);
+        defer chunk.deinit(std.heap.c_allocator);
         while (!p.isCancelled()) {
             chunk.clearRetainingCapacity();
-            const has_next = next_orig.func(next_orig.ctx, &chunk, gpa) catch false;
+            const has_next = next_orig.func(next_orig.ctx, &chunk, std.heap.c_allocator) catch false;
             if (chunk.items.len != 0) {
                 _ = p.write(chunk.items) catch {};
             }
@@ -801,7 +797,7 @@ pub const Spipe = struct {
         res.next = .{ .ctx = self, .func = tee };
     }
 
-    fn tee(ctx: ?*anyopaque, out: *std.ArrayList(u8), a: Allocator) anyerror!bool {
+    fn tee(ctx: ?*anyopaque, out: *std.ArrayList(u8), a: std.mem.Allocator) anyerror!bool {
         const self: *Spipe = @ptrCast(@alignCast(ctx.?));
         const next_orig = self.next_orig.?;
         const has_next = try next_orig.func(next_orig.ctx, out, a);

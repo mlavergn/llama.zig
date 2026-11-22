@@ -109,7 +109,7 @@ pub fn getRopeParams(model: *const llama.model.Model, cparams: *const llama.cpar
 
     res.n_rot = @intCast(model.hparams.nEmbdHeadK(il));
     res.n_offs = 0;
-    res.type = llama.impl.c.LLAMA_ROPE_TYPE_NEOX;
+    res.type = llama.impl.llama_c.LLAMA_ROPE_TYPE_NEOX;
     res.n_ctx_orig = 0;
     res.freq_scale = 1.0;
     res.ext_factor = 0.0;

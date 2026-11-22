@@ -14,6 +14,7 @@
 //! and the line it began at.
 
 const std = @import("std");
+const llama = @import("llama");
 const mtmd = @import("../module.zig");
 const stdlib = @import("stdlib");
 
@@ -21,8 +22,8 @@ const stdlib = @import("stdlib");
 /// state carried between GEN_WAV calls: rope offset, short-conv taps and
 /// attention window of the codec decoder. The caller frees the slice with
 /// `module.freeSlots`.
-pub fn listStateSlots(hparams: *const mtmd.model.Hparams, model: *const mtmd.model.Model) mtmd.clip.Error![]mtmd.models.StateSlot {
-    var slots: std.ArrayList(mtmd.models.StateSlot) = .empty;
+pub fn listStateSlots(hparams: *const mtmd.model.Hparams, model: *const mtmd.model.Model) mtmd.clip.Error![]mtmd.models.dispatch.StateSlot {
+    var slots: std.ArrayList(mtmd.models.dispatch.StateSlot) = .empty;
     errdefer {
         for (slots.items) |s| std.heap.c_allocator.free(s.name);
         slots.deinit(std.heap.c_allocator);
@@ -49,20 +50,20 @@ fn buildLfmAttn(g: *const mtmd.graph.Graph, cur: mtmd.graph.T, layer: *const mtm
     const n_pos = mtmd.graph.ne(cur, 1);
     const head_dim = mtmd.graph.ne(layer.q_norm, 0);
 
-    var q_cur = mtmd.impl.c.ggml_reshape_3d(ctx0, g.buildMm(layer.q_w, cur), head_dim, n_head, n_pos);
-    var k_cur = mtmd.impl.c.ggml_reshape_3d(ctx0, g.buildMm(layer.k_w, cur), head_dim, n_head_kv, n_pos);
+    var q_cur = llama.impl.llama_c.ggml_reshape_3d(ctx0, g.buildMm(layer.q_w, cur), head_dim, n_head, n_pos);
+    var k_cur = llama.impl.llama_c.ggml_reshape_3d(ctx0, g.buildMm(layer.k_w, cur), head_dim, n_head_kv, n_pos);
     const v_cur = g.buildMm(layer.v_w, cur);
 
     q_cur = g.buildNorm(q_cur, layer.q_norm, null, .rms, eps, il);
     k_cur = g.buildNorm(k_cur, layer.k_norm, null, .rms, eps, il);
-    q_cur = mtmd.impl.c.ggml_rope_ext(ctx0, q_cur, inp_pos, null, @intCast(head_dim), mtmd.impl.c.GGML_ROPE_TYPE_NEOX, 0, rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
-    k_cur = mtmd.impl.c.ggml_rope_ext(ctx0, k_cur, inp_pos, null, @intCast(head_dim), mtmd.impl.c.GGML_ROPE_TYPE_NEOX, 0, rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
+    q_cur = llama.impl.llama_c.ggml_rope_ext(ctx0, q_cur, inp_pos, null, @intCast(head_dim), llama.impl.llama_c.GGML_ROPE_TYPE_NEOX, 0, rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
+    k_cur = llama.impl.llama_c.ggml_rope_ext(ctx0, k_cur, inp_pos, null, @intCast(head_dim), llama.impl.llama_c.GGML_ROPE_TYPE_NEOX, 0, rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
 
-    var k = mtmd.impl.c.ggml_reshape_2d(ctx0, k_cur, head_dim * n_head_kv, n_pos);
+    var k = llama.impl.llama_c.ggml_reshape_2d(ctx0, k_cur, head_dim * n_head_kv, n_pos);
     var v = v_cur;
     if (k_cache != null) {
-        k = mtmd.impl.c.ggml_concat(ctx0, k_cache, k, 1);
-        v = mtmd.impl.c.ggml_concat(ctx0, v_cache, v, 1);
+        k = llama.impl.llama_c.ggml_concat(ctx0, k_cache, k, 1);
+        v = llama.impl.llama_c.ggml_concat(ctx0, v_cache, v, 1);
     }
     if (k_all) |p| {
         p.* = k;
@@ -74,17 +75,17 @@ fn buildLfmAttn(g: *const mtmd.graph.Graph, cur: mtmd.graph.T, layer: *const mtm
         if (layer.attn_gate_w != null) null else layer.o_w,
         null,
         q_cur,
-        mtmd.impl.c.ggml_reshape_3d(ctx0, k, head_dim, n_head_kv, n_kv),
-        mtmd.impl.c.ggml_reshape_3d(ctx0, v, head_dim, n_head_kv, n_kv),
+        llama.impl.llama_c.ggml_reshape_3d(ctx0, k, head_dim, n_head_kv, n_kv),
+        llama.impl.llama_c.ggml_reshape_3d(ctx0, v, head_dim, n_head_kv, n_kv),
         kq_mask,
         1.0 / stdlib.libm.sqrtfInt(head_dim),
         il,
         null,
     );
     if (layer.attn_gate_w != null) {
-        const gate = mtmd.impl.c.ggml_sigmoid(ctx0, g.buildMm(layer.attn_gate_w, cur));
-        attn = mtmd.impl.c.ggml_mul(ctx0, mtmd.impl.c.ggml_reshape_3d(ctx0, attn, head_dim, n_head, n_pos), mtmd.impl.c.ggml_reshape_3d(ctx0, gate, 1, n_head, n_pos));
-        attn = g.buildMm(layer.o_w, mtmd.impl.c.ggml_reshape_2d(ctx0, attn, head_dim * n_head, n_pos));
+        const gate = llama.impl.llama_c.ggml_sigmoid(ctx0, g.buildMm(layer.attn_gate_w, cur));
+        attn = llama.impl.llama_c.ggml_mul(ctx0, llama.impl.llama_c.ggml_reshape_3d(ctx0, attn, head_dim, n_head, n_pos), llama.impl.llama_c.ggml_reshape_3d(ctx0, gate, 1, n_head, n_pos));
+        attn = g.buildMm(layer.o_w, llama.impl.llama_c.ggml_reshape_2d(ctx0, attn, head_dim * n_head, n_pos));
     }
     return attn;
 }
@@ -98,17 +99,17 @@ fn buildLfmConv(g: *const mtmd.graph.Graph, cur_in: mtmd.graph.T, layer: *const 
     const n_pos = mtmd.graph.ne(cur_in, 1);
 
     const bcx = g.buildMm(layer.conv_pw1_w, cur_in);
-    const b = mtmd.impl.c.ggml_view_2d(ctx0, bcx, n_embd_c, n_pos, mtmd.graph.nb(bcx, 1), 0);
-    const cc = mtmd.impl.c.ggml_view_2d(ctx0, bcx, n_embd_c, n_pos, mtmd.graph.nb(bcx, 1), mtmd.impl.c.ggml_row_size(bcx.?.type, n_embd_c));
-    const x = mtmd.impl.c.ggml_view_2d(ctx0, bcx, n_embd_c, n_pos, mtmd.graph.nb(bcx, 1), mtmd.impl.c.ggml_row_size(bcx.?.type, 2 * n_embd_c));
+    const b = llama.impl.llama_c.ggml_view_2d(ctx0, bcx, n_embd_c, n_pos, mtmd.graph.nb(bcx, 1), 0);
+    const cc = llama.impl.llama_c.ggml_view_2d(ctx0, bcx, n_embd_c, n_pos, mtmd.graph.nb(bcx, 1), llama.impl.llama_c.ggml_row_size(bcx.?.type, n_embd_c));
+    const x = llama.impl.llama_c.ggml_view_2d(ctx0, bcx, n_embd_c, n_pos, mtmd.graph.nb(bcx, 1), llama.impl.llama_c.ggml_row_size(bcx.?.type, 2 * n_embd_c));
 
-    var bx = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, mtmd.impl.c.ggml_mul(ctx0, b, x)));
-    bx = mtmd.impl.c.ggml_concat(ctx0, conv_state, bx, 0);
+    var bx = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, llama.impl.llama_c.ggml_mul(ctx0, b, x)));
+    bx = llama.impl.llama_c.ggml_concat(ctx0, conv_state, bx, 0);
     const d_conv = mtmd.graph.ne(conv_state, 0);
-    conv_state_out.* = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_view_2d(ctx0, bx, d_conv, n_embd_c, mtmd.graph.nb(bx, 1), @as(usize, @intCast(n_pos)) * mtmd.graph.nb(bx, 0)));
+    conv_state_out.* = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_view_2d(ctx0, bx, d_conv, n_embd_c, mtmd.graph.nb(bx, 1), @as(usize, @intCast(n_pos)) * mtmd.graph.nb(bx, 0)));
 
-    var cur = mtmd.impl.c.ggml_ssm_conv(ctx0, mtmd.impl.c.ggml_reshape_3d(ctx0, bx, mtmd.graph.ne(bx, 0), n_embd_c, 1), layer.conv_dw_w);
-    cur = mtmd.impl.c.ggml_mul(ctx0, cc, mtmd.impl.c.ggml_reshape_2d(ctx0, cur, n_embd_c, n_pos));
+    var cur = llama.impl.llama_c.ggml_ssm_conv(ctx0, llama.impl.llama_c.ggml_reshape_3d(ctx0, bx, mtmd.graph.ne(bx, 0), n_embd_c, 1), layer.conv_dw_w);
+    cur = llama.impl.llama_c.ggml_mul(ctx0, cc, llama.impl.llama_c.ggml_reshape_2d(ctx0, cur, n_embd_c, n_pos));
     g.cb(cur, "conv", il);
     return g.buildMm(layer.conv_pw2_w, cur);
 }
@@ -126,12 +127,12 @@ fn lfmLayerPost(g: *const mtmd.graph.Graph, inp_l_in: mtmd.graph.T, cur_in: mtmd
     const ctx0 = g.ctx0;
     var cur = cur_in;
     if (layer.attn_post_norm_w != null) cur = g.buildNorm(cur, layer.attn_post_norm_w, null, .rms, eps, il);
-    const inp_l = mtmd.impl.c.ggml_add(ctx0, cur, inp_l_in);
+    const inp_l = llama.impl.llama_c.ggml_add(ctx0, cur, inp_l_in);
 
     cur = g.buildNorm(inp_l, layer.ln_2_w, null, .rms, eps, il);
     cur = g.buildFfn(cur, layer.ff_up_w, null, layer.ff_gate_w, null, layer.ff_down_w, null, .silu, il);
     if (layer.ff_post_norm_w != null) cur = g.buildNorm(cur, layer.ff_post_norm_w, null, .rms, eps, il);
-    return mtmd.impl.c.ggml_add(ctx0, inp_l, cur);
+    return llama.impl.llama_c.ggml_add(ctx0, inp_l, cur);
 }
 
 /// Ports `build_gen_code` (lfm3a-gen.cpp:113 @b1b770d90), a member of
@@ -149,38 +150,38 @@ fn buildGenCode(g: *mtmd.graph.Graph, all_known: bool) mtmd.graph.T {
     const n_vocab = mtmd.graph.ne(embd_w, 1);
 
     // rows of the merged per-codebook tables: code + codebook * n_vocab
-    const inp_codes = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, n_cb);
-    _ = mtmd.impl.c.ggml_set_name(inp_codes, "inp_codes");
-    mtmd.impl.c.ggml_set_input(inp_codes);
+    const inp_codes = llama.impl.llama_c.ggml_new_tensor_1d(ctx0, llama.impl.llama_c.GGML_TYPE_I32, n_cb);
+    _ = llama.impl.llama_c.ggml_set_name(inp_codes, "inp_codes");
+    llama.impl.llama_c.ggml_set_input(inp_codes);
 
     // feedback embedding for the backbone
-    var fb = mtmd.impl.c.ggml_get_rows(ctx0, model.gen_code_out_embd_w, inp_codes); // [n_mmproj_embd, n_cb]
-    fb = mtmd.impl.c.ggml_sum_rows(ctx0, mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, fb)));
-    fb = mtmd.impl.c.ggml_reshape_2d(ctx0, fb, n_mmproj_embd, 1);
+    var fb = llama.impl.llama_c.ggml_get_rows(ctx0, model.gen_code_out_embd_w, inp_codes); // [n_mmproj_embd, n_cb]
+    fb = llama.impl.llama_c.ggml_sum_rows(ctx0, llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, fb)));
+    fb = llama.impl.llama_c.ggml_reshape_2d(ctx0, fb, n_mmproj_embd, 1);
     g.cb(fb, "gen_embd", -1);
     if (all_known) return fb;
 
-    const h_state = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_F32, n_mmproj_embd);
-    _ = mtmd.impl.c.ggml_set_name(h_state, "inp_raw");
-    mtmd.impl.c.ggml_set_input(h_state);
+    const h_state = llama.impl.llama_c.ggml_new_tensor_1d(ctx0, llama.impl.llama_c.GGML_TYPE_F32, n_mmproj_embd);
+    _ = llama.impl.llama_c.ggml_set_name(h_state, "inp_raw");
+    llama.impl.llama_c.ggml_set_input(h_state);
 
     // 1 for a revealed codebook, 0 for a masked one
-    const inp_mask = mtmd.impl.c.ggml_new_tensor_2d(ctx0, mtmd.impl.c.GGML_TYPE_F32, 1, n_cb);
-    _ = mtmd.impl.c.ggml_set_name(inp_mask, "inp_mask");
-    mtmd.impl.c.ggml_set_input(inp_mask);
+    const inp_mask = llama.impl.llama_c.ggml_new_tensor_2d(ctx0, llama.impl.llama_c.GGML_TYPE_F32, 1, n_cb);
+    _ = llama.impl.llama_c.ggml_set_name(inp_mask, "inp_mask");
+    llama.impl.llama_c.ggml_set_input(inp_mask);
 
     // one position per codebook: projected hidden state + token embedding or the mask embedding
-    var cur = mtmd.impl.c.ggml_add(ctx0, g.buildMm(model.gen_code_proj_in_w, h_state), model.gen_code_proj_in_b);
-    cur = mtmd.impl.c.ggml_reshape_2d(ctx0, cur, n_embd, n_cb);
+    var cur = llama.impl.llama_c.ggml_add(ctx0, g.buildMm(model.gen_code_proj_in_w, h_state), model.gen_code_proj_in_b);
+    cur = llama.impl.llama_c.ggml_reshape_2d(ctx0, cur, n_embd, n_cb);
 
-    var tok = mtmd.impl.c.ggml_get_rows(ctx0, mtmd.impl.c.ggml_reshape_2d(ctx0, embd_w, n_embd, n_vocab * n_cb), inp_codes);
-    tok = mtmd.impl.c.ggml_mul(ctx0, tok, inp_mask);
-    const msk = mtmd.impl.c.ggml_mul(ctx0, mtmd.impl.c.ggml_repeat(ctx0, model.gen_code_mask_embd, cur), mtmd.impl.c.ggml_scale_bias(ctx0, inp_mask, -1.0, 1.0));
-    cur = mtmd.impl.c.ggml_add(ctx0, cur, mtmd.impl.c.ggml_add(ctx0, tok, msk));
+    var tok = llama.impl.llama_c.ggml_get_rows(ctx0, llama.impl.llama_c.ggml_reshape_2d(ctx0, embd_w, n_embd, n_vocab * n_cb), inp_codes);
+    tok = llama.impl.llama_c.ggml_mul(ctx0, tok, inp_mask);
+    const msk = llama.impl.llama_c.ggml_mul(ctx0, llama.impl.llama_c.ggml_repeat(ctx0, model.gen_code_mask_embd, cur), llama.impl.llama_c.ggml_scale_bias(ctx0, inp_mask, -1.0, 1.0));
+    cur = llama.impl.llama_c.ggml_add(ctx0, cur, llama.impl.llama_c.ggml_add(ctx0, tok, msk));
     g.cb(cur, "depth_inp", -1);
 
     // bidirectional: no mask, no state
-    const inp_pos = mtmd.impl.c.ggml_cast(ctx0, mtmd.impl.c.ggml_arange(ctx0, 0.0, @floatFromInt(n_cb), 1.0), mtmd.impl.c.GGML_TYPE_I32);
+    const inp_pos = llama.impl.llama_c.ggml_cast(ctx0, llama.impl.llama_c.ggml_arange(ctx0, 0.0, @floatFromInt(n_cb), 1.0), llama.impl.llama_c.GGML_TYPE_I32);
     var il: c_int = 0;
     while (il < g.n_layer) : (il += 1) {
         const layer = &model.layers.items[@intCast(il)];
@@ -191,11 +192,11 @@ fn buildGenCode(g: *mtmd.graph.Graph, all_known: bool) mtmd.graph.T {
 
     cur = g.buildNorm(cur, model.gen_code_norm_w, null, .rms, eps, -1);
     cur = g.buildNorm(cur, model.gen_code_head_norm_w, null, .rms, eps, -1); // per codebook
-    var logits = mtmd.impl.c.ggml_mul_mat(ctx0, embd_w, mtmd.impl.c.ggml_reshape_3d(ctx0, cur, n_embd, 1, n_cb)); // [n_vocab, 1, n_cb]
-    logits = mtmd.impl.c.ggml_reshape_2d(ctx0, logits, n_vocab, n_cb);
-    _ = mtmd.impl.c.ggml_set_name(logits, "out_feats");
-    mtmd.impl.c.ggml_set_output(logits);
-    mtmd.impl.c.ggml_build_forward_expand(g.gf, logits);
+    var logits = llama.impl.llama_c.ggml_mul_mat(ctx0, embd_w, llama.impl.llama_c.ggml_reshape_3d(ctx0, cur, n_embd, 1, n_cb)); // [n_vocab, 1, n_cb]
+    logits = llama.impl.llama_c.ggml_reshape_2d(ctx0, logits, n_vocab, n_cb);
+    _ = llama.impl.llama_c.ggml_set_name(logits, "out_feats");
+    llama.impl.llama_c.ggml_set_output(logits);
+    llama.impl.llama_c.ggml_build_forward_expand(g.gf, logits);
 
     return fb;
 }
@@ -217,41 +218,41 @@ fn buildGenWav(g: *mtmd.graph.Graph, n_frames: c_int) mtmd.clip.Error!mtmd.graph
     const arena = arena_state.allocator();
 
     // frame-major codes
-    const inp_codes = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, n_cb * n_frames);
-    _ = mtmd.impl.c.ggml_set_name(inp_codes, "inp_codes");
-    mtmd.impl.c.ggml_set_input(inp_codes);
+    const inp_codes = llama.impl.llama_c.ggml_new_tensor_1d(ctx0, llama.impl.llama_c.GGML_TYPE_I32, n_cb * n_frames);
+    _ = llama.impl.llama_c.ggml_set_name(inp_codes, "inp_codes");
+    llama.impl.llama_c.ggml_set_input(inp_codes);
 
     var state_in: std.StringHashMapUnmanaged(mtmd.graph.T) = .empty;
     const StateOut = struct { name: [:0]const u8, t: mtmd.graph.T };
     var state_out: std.ArrayList(StateOut) = .empty;
     {
         const slots = try listStateSlots(hparams, model);
-        defer mtmd.models.freeSlots(slots);
+        defer mtmd.models.dispatch.freeSlots(slots);
         for (slots) |slot| {
-            const t = mtmd.impl.c.ggml_new_tensor_2d(ctx0, mtmd.impl.c.GGML_TYPE_F32, slot.ne0, slot.ne1);
+            const t = llama.impl.llama_c.ggml_new_tensor_2d(ctx0, llama.impl.llama_c.GGML_TYPE_F32, slot.ne0, slot.ne1);
             const name = try mtmd.impl.stringFormat(arena, "state_in_%s", .{slot.name.ptr});
-            _ = mtmd.impl.c.ggml_set_name(t, name.ptr);
-            mtmd.impl.c.ggml_set_input(t);
+            _ = llama.impl.llama_c.ggml_set_name(t, name.ptr);
+            llama.impl.llama_c.ggml_set_input(t);
             try state_in.put(arena, try arena.dupe(u8, slot.name), t);
         }
     }
 
     // FSQ decode: every codebook shares the level table, one projection over the n_cb code vectors of a frame
-    var q = mtmd.impl.c.ggml_get_rows(ctx0, c2w.quant_first_cb_w, inp_codes); // [n_lvl, n_cb * n_frames]
-    q = mtmd.impl.c.ggml_reshape_2d(ctx0, q, mtmd.graph.ne(q, 0) * n_cb, n_frames);
-    var cur = mtmd.impl.c.ggml_add(ctx0, g.buildMm(c2w.quant_first_out_w, q), c2w.quant_first_out_b);
-    cur = mtmd.impl.c.ggml_add(ctx0, g.buildMm(c2w.tfm_in_proj_w, cur), c2w.tfm_in_proj_b); // [n_embd_dec, n_frames]
+    var q = llama.impl.llama_c.ggml_get_rows(ctx0, c2w.quant_first_cb_w, inp_codes); // [n_lvl, n_cb * n_frames]
+    q = llama.impl.llama_c.ggml_reshape_2d(ctx0, q, mtmd.graph.ne(q, 0) * n_cb, n_frames);
+    var cur = llama.impl.llama_c.ggml_add(ctx0, g.buildMm(c2w.quant_first_out_w, q), c2w.quant_first_out_b);
+    cur = llama.impl.llama_c.ggml_add(ctx0, g.buildMm(c2w.tfm_in_proj_w, cur), c2w.tfm_in_proj_b); // [n_embd_dec, n_frames]
     const n_embd_dec = mtmd.graph.ne(cur, 0);
 
     // nearest-exact upsampling: every frame becomes n_fs decoder positions
-    cur = mtmd.impl.c.ggml_repeat_4d(ctx0, mtmd.impl.c.ggml_reshape_3d(ctx0, cur, n_embd_dec, 1, n_frames), n_embd_dec, n_fs, n_frames, 1);
-    cur = mtmd.impl.c.ggml_reshape_2d(ctx0, cur, n_embd_dec, n_pos);
+    cur = llama.impl.llama_c.ggml_repeat_4d(ctx0, llama.impl.llama_c.ggml_reshape_3d(ctx0, cur, n_embd_dec, 1, n_frames), n_embd_dec, n_fs, n_frames, 1);
+    cur = llama.impl.llama_c.ggml_reshape_2d(ctx0, cur, n_embd_dec, n_pos);
 
     // positions continue across calls from the "pos" slot, see mtmd_subcontext::encode()
-    const inp_pos = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, n_pos);
-    _ = mtmd.impl.c.ggml_set_name(inp_pos, "positions");
-    mtmd.impl.c.ggml_set_input(inp_pos);
-    try state_out.append(arena, .{ .name = "pos", .t = mtmd.impl.c.ggml_scale_bias(ctx0, state_in.get("pos").?, 1.0, @floatFromInt(n_pos)) });
+    const inp_pos = llama.impl.llama_c.ggml_new_tensor_1d(ctx0, llama.impl.llama_c.GGML_TYPE_I32, n_pos);
+    _ = llama.impl.llama_c.ggml_set_name(inp_pos, "positions");
+    llama.impl.llama_c.ggml_set_input(inp_pos);
+    try state_out.append(arena, .{ .name = "pos", .t = llama.impl.llama_c.ggml_scale_bias(ctx0, state_in.get("pos").?, 1.0, @floatFromInt(n_pos)) });
 
     // sliding-window causal mask over [cached window | this chunk]
     const kq_mask = g.buildInpAttnMask(prefix + n_pos, n_pos, 0);
@@ -273,25 +274,25 @@ fn buildGenWav(g: *mtmd.graph.Graph, n_frames: c_int) mtmd.clip.Error!mtmd.graph
             var k: mtmd.graph.T = null;
             var v: mtmd.graph.T = null;
             op = buildLfmAttn(g, x, layer, hparams.wav_tfm_n_head, hparams.wav_tfm_n_head_kv, eps_dec, hparams.wav_tfm_rope_theta, il, inp_pos, kq_mask, state_in.get(k_name).?, state_in.get(v_name).?, &k, &v);
-            try state_out.append(arena, .{ .name = k_name, .t = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_view_2d(ctx0, k, mtmd.graph.ne(k, 0), prefix, mtmd.graph.nb(k, 1), @as(usize, @intCast(n_pos)) * mtmd.graph.nb(k, 1))) });
-            try state_out.append(arena, .{ .name = v_name, .t = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_view_2d(ctx0, v, mtmd.graph.ne(v, 0), prefix, mtmd.graph.nb(v, 1), @as(usize, @intCast(n_pos)) * mtmd.graph.nb(v, 1))) });
+            try state_out.append(arena, .{ .name = k_name, .t = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_view_2d(ctx0, k, mtmd.graph.ne(k, 0), prefix, mtmd.graph.nb(k, 1), @as(usize, @intCast(n_pos)) * mtmd.graph.nb(k, 1))) });
+            try state_out.append(arena, .{ .name = v_name, .t = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_view_2d(ctx0, v, mtmd.graph.ne(v, 0), prefix, mtmd.graph.nb(v, 1), @as(usize, @intCast(n_pos)) * mtmd.graph.nb(v, 1))) });
         }
         cur = lfmLayerPost(g, cur, op, layer, eps_dec, il);
     }
 
     cur = g.buildNorm(cur, c2w.tfm_output_norm_w, null, .rms, eps_dec, -1);
-    cur = mtmd.impl.c.ggml_add(ctx0, g.buildMm(c2w.tfm_out_proj_w, cur), c2w.tfm_out_proj_b); // [2 * n_bins, n_pos]
+    cur = llama.impl.llama_c.ggml_add(ctx0, g.buildMm(c2w.tfm_out_proj_w, cur), c2w.tfm_out_proj_b); // [2 * n_bins, n_pos]
     g.cb(cur, "polar_out", -1);
 
     for (state_out.items) |s| {
         const name = try mtmd.impl.stringFormat(arena, "state_out_%s", .{s.name.ptr});
-        _ = mtmd.impl.c.ggml_set_name(s.t, name.ptr);
-        mtmd.impl.c.ggml_set_output(s.t);
-        mtmd.impl.c.ggml_build_forward_expand(g.gf, s.t);
+        _ = llama.impl.llama_c.ggml_set_name(s.t, name.ptr);
+        llama.impl.llama_c.ggml_set_output(s.t);
+        llama.impl.llama_c.ggml_build_forward_expand(g.gf, s.t);
     }
 
-    _ = mtmd.impl.c.ggml_set_name(cur, "out_feats");
-    mtmd.impl.c.ggml_set_output(cur);
+    _ = llama.impl.llama_c.ggml_set_name(cur, "out_feats");
+    llama.impl.llama_c.ggml_set_output(cur);
     return cur;
 }
 
@@ -299,7 +300,7 @@ fn buildGenWav(g: *mtmd.graph.Graph, n_frames: c_int) mtmd.clip.Error!mtmd.graph
 /// `mtmd_graph_lfm3a_gen`, with the builder's parameters derived as
 /// mtmd_get_graph_builder's `PROJECTOR_TYPE_LFM3A_GEN` arm does
 /// (mtmd-graph.cpp:996 @b1b770d90).
-pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*llama.impl.llama_c.ggml_cgraph {
     const gen_process: mtmd.impl.GenProcessType = if (params) |p| p.gen_process else .gen_code;
     const n_cb = mtmd.graph.ne(g.model.gen_code_embd_w, 2);
     var all_known = false;
@@ -322,7 +323,7 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
         }
     }
     const out = if (gen_process == .gen_wav) try buildGenWav(g, n_frames) else buildGenCode(g, all_known);
-    mtmd.impl.c.ggml_build_forward_expand(g.gf, out);
+    llama.impl.llama_c.ggml_build_forward_expand(g.gf, out);
     return g.gf;
 }
 

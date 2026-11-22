@@ -17,9 +17,9 @@
 //! (libc++ 22's `__copy_construct`), so iterating the original is the same.
 
 const std = @import("std");
+const llama = @import("llama");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const c = @import("tools_h");
 
 /// Ports `LLAMA_NGRAM_MIN`, `LLAMA_NGRAM_MAX`, `LLAMA_NGRAM_STATIC`
 /// (ngram-cache.h:9, 10, 11 @b1b770d90).
@@ -30,11 +30,11 @@ pub const ngram_static = 2;
 /// Ports `common_ngram` (ngram-cache.h:15 @b1b770d90): up to four tokens,
 /// padded with `LLAMA_TOKEN_NULL`. Saved to disk as its 16 bytes.
 pub const Ngram = extern struct {
-    tokens: [ngram_max]c.llama_token,
+    tokens: [ngram_max]llama.impl.llama_c.llama_token,
 
     /// The default constructor: every token `LLAMA_TOKEN_NULL`.
     pub fn empty() Ngram {
-        return .{ .tokens = @splat(c.LLAMA_TOKEN_NULL) };
+        return .{ .tokens = @splat(llama.impl.llama_c.LLAMA_TOKEN_NULL) };
     }
 
     /// The constructor from `ngram_size` tokens at `input`.
@@ -44,10 +44,10 @@ pub const Ngram = extern struct {
     /// - `ngram_size`: how many to take; the rest are `LLAMA_TOKEN_NULL`.
     ///
     /// Return: the n-gram.
-    pub fn fromSlice(input: [*]const c.llama_token, ngram_size: i32) Ngram {
+    pub fn fromSlice(input: [*]const llama.impl.llama_c.llama_token, ngram_size: i32) Ngram {
         var r: Ngram = undefined;
         for (0..ngram_max) |i| {
-            r.tokens[i] = if (@as(i32, @intCast(i)) < ngram_size) input[i] else c.LLAMA_TOKEN_NULL;
+            r.tokens[i] = if (@as(i32, @intCast(i)) < ngram_size) input[i] else llama.impl.llama_c.LLAMA_TOKEN_NULL;
         }
         return r;
     }
@@ -63,7 +63,7 @@ pub const Ngram = extern struct {
 
 /// Ports `common_token_hash_function` (ngram-cache.h:40 @b1b770d90):
 /// Fibonacci hashing, the token widened to 64 bits with its sign.
-pub fn tokenHash(token: c.llama_token) u64 {
+pub fn tokenHash(token: llama.impl.llama_c.llama_token) u64 {
     return @as(u64, @bitCast(@as(i64, token))) *% 11400714819323198485;
 }
 
@@ -78,7 +78,7 @@ pub fn ngramHash(ngram: Ngram) u64 {
 
 /// Ports `common_ngram_cache_part` (ngram-cache.h:58 @b1b770d90): token to
 /// the number of times it has been seen, keyed by `std::hash<int>`.
-pub const CachePart = mod.hash_map.HashMap(c.llama_token, i32, mod.hash_map.hashInt, mod.hash_map.eqlInt);
+pub const CachePart = mod.hash_map.HashMap(llama.impl.llama_c.llama_token, i32, mod.hash_map.hashInt, mod.hash_map.eqlInt);
 
 /// Ports `common_ngram_cache` (ngram-cache.h:61 @b1b770d90): n-gram to the
 /// empirical distribution of the tokens following it. Owns its parts.
@@ -105,8 +105,8 @@ pub fn cloneCache(allocator: std.mem.Allocator, cache: *const Cache) error{OutOf
 /// - `inp`: the history; it may only ever be appended to.
 /// - `nnew`: how many tokens were appended since the last call.
 /// - `print_progress`: report every ten million n-grams on stderr.
-pub fn update(cache: *Cache, ngram_min_: i32, ngram_max_: i32, inp: []const c.llama_token, nnew: i32, print_progress: bool) error{OutOfMemory}!void {
-    const t_start_ms = c.ggml_time_ms();
+pub fn update(cache: *Cache, ngram_min_: i32, ngram_max_: i32, inp: []const llama.impl.llama_c.llama_token, nnew: i32, print_progress: bool) error{OutOfMemory}!void {
+    const t_start_ms = llama.impl.llama_c.ggml_time_ms();
     const inp_size: i64 = @intCast(inp.len);
 
     const n_todo: i64 = inp_size * (ngram_max_ - ngram_min_ + 1);
@@ -136,7 +136,7 @@ pub fn update(cache: *Cache, ngram_min_: i32, ngram_max_: i32, inp: []const c.ll
             n_done += 1;
 
             if (print_progress and @mod(n_done, 10000000) == 0) {
-                const t_now_ms = c.ggml_time_ms();
+                const t_now_ms = llama.impl.llama_c.ggml_time_ms();
                 const eta_ms = @divTrunc((inp_size * (ngram_max_ - ngram_min_ + 1) - n_done) * (t_now_ms - t_start_ms), n_done);
                 const eta_min = @divTrunc(eta_ms, 60 * 1000);
                 const eta_s = @divTrunc(eta_ms - 60 * 1000 * eta_min, 1000);
@@ -151,10 +151,10 @@ pub fn update(cache: *Cache, ngram_min_: i32, ngram_max_: i32, inp: []const c.ll
 /// followed by `draft` without its first token. An index the C++ would read
 /// out of bounds -- `i` wrapped from a negative start, when `inp` is
 /// shorter than an n-gram -- is undefined there and `LLAMA_TOKEN_NULL` here.
-fn getToken(inp: []const c.llama_token, draft_: []const c.llama_token, i: u64) c.llama_token {
+fn getToken(inp: []const llama.impl.llama_c.llama_token, draft_: []const llama.impl.llama_c.llama_token, i: u64) llama.impl.llama_c.llama_token {
     if (i < inp.len) return inp[@intCast(i)];
     const j = 1 +% i -% inp.len;
-    return if (j < draft_.len) draft_[@intCast(j)] else c.LLAMA_TOKEN_NULL;
+    return if (j < draft_.len) draft_[@intCast(j)] else llama.impl.llama_c.LLAMA_TOKEN_NULL;
 }
 
 /// Ports `draft_min_sample_size_lax`, `draft_min_percent_lax`,
@@ -167,12 +167,12 @@ const draft_min_percent_strict = [ngram_max]i32{ 75, 66, 66, 66 };
 
 /// Ports `try_draft` (ngram-cache.cpp:66 @b1b770d90), the overload over the
 /// static cache alone: its most frequent token, if seen often enough.
-fn tryDraftStatic(nc_static: *const Cache, ngram_static_: Ngram) c.llama_token {
-    const part_static = nc_static.get(ngram_static_) orelse return c.LLAMA_TOKEN_NULL;
+fn tryDraftStatic(nc_static: *const Cache, ngram_static_: Ngram) llama.impl.llama_c.llama_token {
+    const part_static = nc_static.get(ngram_static_) orelse return llama.impl.llama_c.LLAMA_TOKEN_NULL;
 
     var max_count_static: i32 = 0;
     var sum_count_static: i32 = 0;
-    var max_token: c.llama_token = c.LLAMA_TOKEN_NULL;
+    var max_token: llama.impl.llama_c.llama_token = llama.impl.llama_c.LLAMA_TOKEN_NULL;
 
     var it = part_static.iterator();
     while (it.next()) |e| {
@@ -187,10 +187,10 @@ fn tryDraftStatic(nc_static: *const Cache, ngram_static_: Ngram) c.llama_token {
     }
 
     if (sum_count_static < draft_min_sample_size_lax[ngram_static - 1]) {
-        return c.LLAMA_TOKEN_NULL;
+        return llama.impl.llama_c.LLAMA_TOKEN_NULL;
     }
     if (100 *% max_count_static < draft_min_percent_lax[ngram_static - 1] *% sum_count_static) {
-        return c.LLAMA_TOKEN_NULL;
+        return llama.impl.llama_c.LLAMA_TOKEN_NULL;
     }
     return max_token;
 }
@@ -198,11 +198,11 @@ fn tryDraftStatic(nc_static: *const Cache, ngram_static_: Ngram) c.llama_token {
 /// Ports `try_draft` (ngram-cache.cpp:98 @b1b770d90), the overload over a
 /// primary cache (context or dynamic), validated against the static part:
 /// the longest n-gram first.
-fn tryDraft(nc_primary: *const Cache, ngrams_primary: []const Ngram, part_static: ?*const CachePart, min_sample_size: *const [ngram_max]i32, min_percent: *const [ngram_max]i32) c.llama_token {
-    var drafted_token: c.llama_token = c.LLAMA_TOKEN_NULL;
+fn tryDraft(nc_primary: *const Cache, ngrams_primary: []const Ngram, part_static: ?*const CachePart, min_sample_size: *const [ngram_max]i32, min_percent: *const [ngram_max]i32) llama.impl.llama_c.llama_token {
+    var drafted_token: llama.impl.llama_c.llama_token = llama.impl.llama_c.LLAMA_TOKEN_NULL;
 
     var i: i32 = @as(i32, @intCast(ngrams_primary.len)) - 1;
-    while (i >= 0 and drafted_token == c.LLAMA_TOKEN_NULL) : (i -= 1) {
+    while (i >= 0 and drafted_token == llama.impl.llama_c.LLAMA_TOKEN_NULL) : (i -= 1) {
         const ngram_primary = ngrams_primary[@intCast(i)];
 
         const part_primary = nc_primary.get(ngram_primary) orelse continue;
@@ -210,7 +210,7 @@ fn tryDraft(nc_primary: *const Cache, ngrams_primary: []const Ngram, part_static
         var max_count_primary: i32 = 0;
         var max_count_static: i32 = 0;
         var sum_count_primary: i32 = 0;
-        var max_token: c.llama_token = c.LLAMA_TOKEN_NULL;
+        var max_token: llama.impl.llama_c.llama_token = llama.impl.llama_c.LLAMA_TOKEN_NULL;
 
         var it = part_primary.iterator();
         while (it.next()) |e| {
@@ -253,8 +253,8 @@ fn tryDraft(nc_primary: *const Cache, ngrams_primary: []const Ngram, part_static
 /// - `n_draft`: at most this many tokens are added.
 /// - `ngram_min_`, `ngram_max_`: the n-gram sizes of the context and dynamic caches.
 /// - `nc_context`, `nc_dynamic`, `nc_static`: the three caches, read only.
-pub fn draft(inp: []const c.llama_token, draft_out: *std.ArrayList(c.llama_token), allocator: std.mem.Allocator, n_draft: i32, ngram_min_: i32, ngram_max_: i32, nc_context: *Cache, nc_dynamic: *Cache, nc_static: *Cache) error{OutOfMemory}!void {
-    if (draft_out.items.len != 1) _ = c.ggml_abort("ngram-cache.cpp", 150, "GGML_ASSERT(%s) failed", "draft.size() == 1");
+pub fn draft(inp: []const llama.impl.llama_c.llama_token, draft_out: *std.ArrayList(llama.impl.llama_c.llama_token), allocator: std.mem.Allocator, n_draft: i32, ngram_min_: i32, ngram_max_: i32, nc_context: *Cache, nc_dynamic: *Cache, nc_static: *Cache) error{OutOfMemory}!void {
+    if (draft_out.items.len != 1) _ = llama.impl.llama_c.ggml_abort("ngram-cache.cpp", 150, "GGML_ASSERT(%s) failed", "draft.size() == 1");
     const inp_size: i64 = @intCast(inp.len);
 
     if (inp_size < ngram_static) {
@@ -265,7 +265,7 @@ pub fn draft(inp: []const c.llama_token, draft_out: *std.ArrayList(c.llama_token
     defer ngrams_cd.deinit(allocator);
 
     while (@as(i64, @intCast(draft_out.items.len)) - 1 < n_draft) {
-        var drafted_token: c.llama_token = c.LLAMA_TOKEN_NULL;
+        var drafted_token: llama.impl.llama_c.llama_token = llama.impl.llama_c.LLAMA_TOKEN_NULL;
 
         const ngram_start_static: i64 = inp_size - ngram_static + @as(i64, @intCast(draft_out.items.len)) - 1;
         var ngram_static_ = Ngram.empty();
@@ -288,17 +288,17 @@ pub fn draft(inp: []const c.llama_token, draft_out: *std.ArrayList(c.llama_token
             }
             try ngrams_cd.append(allocator, ngram_cd);
         }
-        if (drafted_token == c.LLAMA_TOKEN_NULL) {
+        if (drafted_token == llama.impl.llama_c.LLAMA_TOKEN_NULL) {
             drafted_token = tryDraft(nc_context, ngrams_cd.items, part_static, &draft_min_sample_size_lax, &draft_min_percent_lax);
         }
-        if (drafted_token == c.LLAMA_TOKEN_NULL) {
+        if (drafted_token == llama.impl.llama_c.LLAMA_TOKEN_NULL) {
             drafted_token = tryDraft(nc_dynamic, ngrams_cd.items, part_static, &draft_min_sample_size_strict, &draft_min_percent_strict);
         }
-        if (drafted_token == c.LLAMA_TOKEN_NULL) {
+        if (drafted_token == llama.impl.llama_c.LLAMA_TOKEN_NULL) {
             drafted_token = tryDraftStatic(nc_static, ngram_static_);
         }
 
-        if (drafted_token == c.LLAMA_TOKEN_NULL) {
+        if (drafted_token == llama.impl.llama_c.LLAMA_TOKEN_NULL) {
             break;
         }
 
@@ -344,9 +344,9 @@ pub fn save(cache: *const Cache, filename: [:0]const u8) void {
     while (it.next()) |item| {
         const ngram = item.key;
         const token_counts = item.value;
-        if (token_counts.count() == 0) _ = c.ggml_abort("ngram-cache.cpp", 203, "GGML_ASSERT(%s) failed", "!token_counts.empty()");
+        if (token_counts.count() == 0) _ = llama.impl.llama_c.ggml_abort("ngram-cache.cpp", 203, "GGML_ASSERT(%s) failed", "!token_counts.empty()");
         const ntokens: i32 = @intCast(token_counts.count());
-        if (!(ntokens > 0)) _ = c.ggml_abort("ngram-cache.cpp", 205, "GGML_ASSERT(%s) failed", "ntokens > 0");
+        if (!(ntokens > 0)) _ = llama.impl.llama_c.ggml_abort("ngram-cache.cpp", 205, "GGML_ASSERT(%s) failed", "ntokens > 0");
 
         out.put(std.mem.asBytes(&ngram));
         out.put(std.mem.asBytes(&ntokens));
@@ -354,7 +354,7 @@ pub fn save(cache: *const Cache, filename: [:0]const u8) void {
         while (it2.next()) |item2| {
             const token = item2.key;
             const count_ = item2.value.*;
-            if (!(count_ > 0)) _ = c.ggml_abort("ngram-cache.cpp", 212, "GGML_ASSERT(%s) failed", "count > 0");
+            if (!(count_ > 0)) _ = llama.impl.llama_c.ggml_abort("ngram-cache.cpp", 212, "GGML_ASSERT(%s) failed", "count > 0");
 
             out.put(std.mem.asBytes(&token));
             out.put(std.mem.asBytes(&count_));
@@ -401,23 +401,23 @@ pub fn load(allocator: std.mem.Allocator, filename: [:0]const u8) error{ OutOfMe
 
     var ngram: Ngram = Ngram.empty();
     var ntokens: i32 = 0;
-    var token: c.llama_token = 0;
+    var token: llama.impl.llama_c.llama_token = 0;
     var count_: i32 = 0;
 
     while (hashmap_file.read(std.mem.asBytes(&ngram))) {
-        if (hashmap_file.eof) _ = c.ggml_abort("ngram-cache.cpp", 237, "GGML_ASSERT(%s) failed", "!hashmap_file.eof()");
-        if (!hashmap_file.read(std.mem.asBytes(&ntokens))) _ = c.ggml_abort("ngram-cache.cpp", 238, "GGML_ASSERT(%s) failed", "hashmap_file.read(ntokensc, sizeof(int32_t))");
-        if (!(ntokens > 0)) _ = c.ggml_abort("ngram-cache.cpp", 239, "GGML_ASSERT(%s) failed", "ntokens > 0");
+        if (hashmap_file.eof) _ = llama.impl.llama_c.ggml_abort("ngram-cache.cpp", 237, "GGML_ASSERT(%s) failed", "!hashmap_file.eof()");
+        if (!hashmap_file.read(std.mem.asBytes(&ntokens))) _ = llama.impl.llama_c.ggml_abort("ngram-cache.cpp", 238, "GGML_ASSERT(%s) failed", "hashmap_file.read(ntokensc, sizeof(int32_t))");
+        if (!(ntokens > 0)) _ = llama.impl.llama_c.ggml_abort("ngram-cache.cpp", 239, "GGML_ASSERT(%s) failed", "ntokens > 0");
         var token_counts = try CachePart.init(allocator);
         errdefer token_counts.deinit();
 
         var i: i32 = 0;
         while (i < ntokens) : (i += 1) {
-            if (hashmap_file.eof) _ = c.ggml_abort("ngram-cache.cpp", 243, "GGML_ASSERT(%s) failed", "!hashmap_file.eof()");
-            if (!hashmap_file.read(std.mem.asBytes(&token))) _ = c.ggml_abort("ngram-cache.cpp", 244, "GGML_ASSERT(%s) failed", "hashmap_file.read(tokenc, sizeof(llama_token))");
-            if (hashmap_file.eof) _ = c.ggml_abort("ngram-cache.cpp", 245, "GGML_ASSERT(%s) failed", "!hashmap_file.eof()");
-            if (!hashmap_file.read(std.mem.asBytes(&count_))) _ = c.ggml_abort("ngram-cache.cpp", 246, "GGML_ASSERT(%s) failed", "hashmap_file.read(countc, sizeof(int32_t))");
-            if (!(count_ > 0)) _ = c.ggml_abort("ngram-cache.cpp", 247, "GGML_ASSERT(%s) failed", "count > 0");
+            if (hashmap_file.eof) _ = llama.impl.llama_c.ggml_abort("ngram-cache.cpp", 243, "GGML_ASSERT(%s) failed", "!hashmap_file.eof()");
+            if (!hashmap_file.read(std.mem.asBytes(&token))) _ = llama.impl.llama_c.ggml_abort("ngram-cache.cpp", 244, "GGML_ASSERT(%s) failed", "hashmap_file.read(tokenc, sizeof(llama_token))");
+            if (hashmap_file.eof) _ = llama.impl.llama_c.ggml_abort("ngram-cache.cpp", 245, "GGML_ASSERT(%s) failed", "!hashmap_file.eof()");
+            if (!hashmap_file.read(std.mem.asBytes(&count_))) _ = llama.impl.llama_c.ggml_abort("ngram-cache.cpp", 246, "GGML_ASSERT(%s) failed", "hashmap_file.read(countc, sizeof(int32_t))");
+            if (!(count_ > 0)) _ = llama.impl.llama_c.ggml_abort("ngram-cache.cpp", 247, "GGML_ASSERT(%s) failed", "count > 0");
             _ = try token_counts.emplace(token, count_);
         }
 
@@ -425,7 +425,7 @@ pub fn load(allocator: std.mem.Allocator, filename: [:0]const u8) error{ OutOfMe
         const r = try ngram_cache.emplace(ngram, token_counts);
         if (!r.inserted) token_counts.deinit();
     }
-    if (!hashmap_file.eof) _ = c.ggml_abort("ngram-cache.cpp", 253, "GGML_ASSERT(%s) failed", "hashmap_file.eof()");
+    if (!hashmap_file.eof) _ = llama.impl.llama_c.ggml_abort("ngram-cache.cpp", 253, "GGML_ASSERT(%s) failed", "hashmap_file.eof()");
 
     return ngram_cache;
 }
@@ -453,7 +453,7 @@ pub fn merge(target: *Cache, add: *const Cache) error{OutOfMemory}!void {
         while (it2.next()) |token_count| {
             const token = token_count.key;
             const count_ = token_count.value.*;
-            if (!(count_ > 0)) _ = c.ggml_abort("ngram-cache.cpp", 272, "GGML_ASSERT(%s) failed", "count > 0");
+            if (!(count_ > 0)) _ = llama.impl.llama_c.ggml_abort("ngram-cache.cpp", 272, "GGML_ASSERT(%s) failed", "count > 0");
 
             const token_count_merged = part_merged.get(token) orelse {
                 _ = try part_merged.emplace(token, count_);
@@ -488,26 +488,26 @@ test "update counts every n-gram and a draft follows the most frequent continuat
     defer dyn.deinit();
     var sta = try Cache.init(a);
     defer sta.deinit();
-    const inp = [_]c.llama_token{ 1, 2, 3, 1, 2, 3, 1, 2 };
+    const inp = [_]llama.impl.llama_c.llama_token{ 1, 2, 3, 1, 2, 3, 1, 2 };
     try update(&ctx, 1, 4, &inp, inp.len, false);
     // 1-grams: 7 distinct positions over tokens {1,2,3}
-    const one = ctx.get(Ngram.fromSlice(&[_]c.llama_token{1}, 1)).?;
+    const one = ctx.get(Ngram.fromSlice(&[_]llama.impl.llama_c.llama_token{1}, 1)).?;
     try std.testing.expectEqual(@as(i32, 3), one.get(2).?.*);
 
-    var d: std.ArrayList(c.llama_token) = .empty;
+    var d: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
     defer d.deinit(a);
     try d.append(a, 3);
     try draft(&inp, &d, a, 3, 1, 4, &ctx, &dyn, &sta);
     // inp ends with the sampled token, which draft[0] repeats and the
     // n-grams skip: (2,3,1,2) -> 3, (3,1,2,3) -> 1, (1,2,3,1) -> 2
-    try std.testing.expectEqualSlices(c.llama_token, &.{ 3, 3, 1, 2 }, d.items);
+    try std.testing.expectEqualSlices(llama.impl.llama_c.llama_token, &.{ 3, 3, 1, 2 }, d.items);
 }
 
 test "save and load round-trip in iteration order, and merge adds counts" {
     const a = std.testing.allocator;
     var ctx = try Cache.init(a);
     defer ctx.deinit();
-    const inp = [_]c.llama_token{ 5, 6, 7, 5, 6, 8, 5, 6, 7 };
+    const inp = [_]llama.impl.llama_c.llama_token{ 5, 6, 7, 5, 6, 8, 5, 6, 7 };
     try update(&ctx, 1, 2, &inp, inp.len, false);
 
     var tmp = std.testing.tmpDir(.{});
@@ -530,18 +530,18 @@ test "save and load round-trip in iteration order, and merge adds counts" {
     try std.testing.expectError(error.OpenFailed, load(a, "/nonexistent/x/y"));
 
     try merge(&back, &ctx);
-    const p = back.get(Ngram.fromSlice(&[_]c.llama_token{ 5, 6 }, 2)).?;
+    const p = back.get(Ngram.fromSlice(&[_]llama.impl.llama_c.llama_token{ 5, 6 }, 2)).?;
     try std.testing.expectEqual(@as(i32, 4), p.get(7).?.*);
 }
 
 test "a map keyed by the Fibonacci hash iterates as libc++'s does" {
     // measured: libc++ 22 (zig c++) iterates these keys emplaced in this
     // order as 11 2 9 3 100 7 -1 5 over 11 buckets
-    const M = mod.hash_map.HashMap(c.llama_token, i32, tokenHash, mod.hash_map.eqlInt);
+    const M = mod.hash_map.HashMap(llama.impl.llama_c.llama_token, i32, tokenHash, mod.hash_map.eqlInt);
     var m = try M.init(std.testing.allocator);
     defer m.deinit();
-    for ([_]c.llama_token{ 5, -1, 7, 100, 3, 9, 11, 2 }) |k| _ = try m.emplace(k, 1);
+    for ([_]llama.impl.llama_c.llama_token{ 5, -1, 7, 100, 3, 9, 11, 2 }) |k| _ = try m.emplace(k, 1);
     try std.testing.expectEqual(@as(usize, 11), m.bucketCount());
     var it = m.iterator();
-    for ([_]c.llama_token{ 11, 2, 9, 3, 100, 7, -1, 5 }) |k| try std.testing.expectEqual(k, it.next().?.key);
+    for ([_]llama.impl.llama_c.llama_token{ 11, 2, 9, 3, 100, 7, -1, 5 }) |k| try std.testing.expectEqual(k, it.next().?.key);
 }

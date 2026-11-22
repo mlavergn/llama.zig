@@ -25,7 +25,6 @@
 //! four `e8m0` exponents through `ggml_e8m0_to_fp32_half`, element by
 //! element — there is no vector form of that conversion.
 
-const std = @import("std");
 const ggml = @import("../../../module.zig");
 
 // The `_generic` bodies, in `cpu/repack/`, that each export below falls to
@@ -36,8 +35,8 @@ const Fmt = enum { iq4_nl, mxfp4 };
 
 inline fn table(comptime fmt: Fmt) ggml.cpu.quants.arch.neon.i8x16 {
     return switch (fmt) {
-        .iq4_nl => @bitCast(@as(@Vector(16, i8), ggml.impl.c.kvalues_iq4nl[0..16].*)),
-        .mxfp4 => @bitCast(@as(@Vector(16, i8), ggml.impl.c.kvalues_mxfp4[0..16].*)),
+        .iq4_nl => @bitCast(@as(@Vector(16, i8), ggml.impl.ggml_c.kvalues_iq4nl[0..16].*)),
+        .mxfp4 => @bitCast(@as(@Vector(16, i8), ggml.impl.ggml_c.kvalues_mxfp4[0..16].*)),
     };
 }
 
@@ -79,7 +78,7 @@ fn gemv(comptime fmt: Fmt, comptime BlockX: type, n: c_int, s: [*]f32, bs: usize
     while (x < @divTrunc(nc, ncols_interleaved)) : (x += 1) {
         const b_ptr: [*]const BlockX =
             @as([*]const BlockX, @ptrCast(@alignCast(vx))) + @as(usize, @intCast(x * nb));
-        const a_ptr: [*]const ggml.impl.c.block_q8_0 = @ptrCast(@alignCast(vy));
+        const a_ptr: [*]const ggml.impl.ggml_c.block_q8_0 = @ptrCast(@alignCast(vy));
 
         var sumf: ggml.cpu.quants.arch.neon.f32x4 = @splat(0);
         var l: usize = 0;
@@ -165,23 +164,19 @@ fn gemm(comptime fmt: Fmt, comptime BlockX: type, n: c_int, s: [*]f32, bs: usize
     }
 }
 
-pub export fn ggml_gemv_iq4_nl_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemv_iq4_nl_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.nibble4.ggml_gemv_iq4_nl_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
     gemv(.iq4_nl, ggml.cpu.repack.blocks.block_iq4_nlx4, n, s, bs, vx, vy, nr, nc);
 }
-pub export fn ggml_gemv_mxfp4_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemv_mxfp4_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.nibble4.ggml_gemv_mxfp4_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
     gemv(.mxfp4, ggml.cpu.repack.blocks.block_mxfp4x4, n, s, bs, vx, vy, nr, nc);
 }
-pub export fn ggml_gemm_iq4_nl_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemm_iq4_nl_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.nibble4.ggml_gemm_iq4_nl_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
     gemm(.iq4_nl, ggml.cpu.repack.blocks.block_iq4_nlx4, n, s, bs, vx, vy, nr, nc);
 }
-pub export fn ggml_gemm_mxfp4_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemm_mxfp4_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.nibble4.ggml_gemm_mxfp4_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
     gemm(.mxfp4, ggml.cpu.repack.blocks.block_mxfp4x4, n, s, bs, vx, vy, nr, nc);
-}
-
-comptime {
-    _ = std;
 }

@@ -29,13 +29,10 @@
 //! command is spawned as given, through `PATH`.
 
 const std = @import("std");
+const common_chat = @import("common_chat");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 const json = @import("json");
-
-const Allocator = std.mem.Allocator;
-
-const gpa = std.heap.c_allocator;
 
 /// `poll(fds, 1, timeout_ms)`, the C library's on Darwin and the system
 /// call on Linux, as `std.posix.system` resolves it.
@@ -77,7 +74,7 @@ fn pumpNdjson(f: ?std.Io.File, running: *std.atomic.Value(bool), ctx: anytype, c
     const fd = file.handle;
     stdlib.subproc.setNonBlocking(fd);
     var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(gpa);
+    defer buf.deinit(std.heap.c_allocator);
     var skipping = false; // discarding an over-long line until its terminating newline
     var chunk: [4096]u8 = undefined;
     while (running.load(.seq_cst)) {
@@ -93,7 +90,7 @@ fn pumpNdjson(f: ?std.Io.File, running: *std.atomic.Value(bool), ctx: anytype, c
             error.WouldBlock => continue,
             else => break,
         };
-        buf.appendSlice(gpa, chunk[0..r]) catch break;
+        buf.appendSlice(std.heap.c_allocator, chunk[0..r]) catch break;
 
         // resync after an over-long, unterminated line: discard bytes until the next newline
         if (skipping) {
@@ -108,7 +105,7 @@ fn pumpNdjson(f: ?std.Io.File, running: *std.atomic.Value(bool), ctx: anytype, c
         while (std.mem.findScalar(u8, buf.items, '\n')) |pos| {
             var line = buf.items[0..pos];
             if (line.len != 0 and line[line.len - 1] == '\r') line = line[0 .. line.len - 1];
-            const owned = if (line.len != 0) gpa.dupe(u8, line) catch null else null;
+            const owned = if (line.len != 0) std.heap.c_allocator.dupe(u8, line) catch null else null;
             buf.replaceRangeAssumeCapacity(0, pos + 1, &.{});
             if (owned) |o| {
                 if (!on_line(ctx, o)) return;
@@ -180,10 +177,10 @@ pub const ServerConfig = struct {
             if (std.mem.order(u8, self.env.items[mid].key, key) == .lt) lo = mid + 1 else hi = mid;
         }
         if (lo < self.env.items.len and std.mem.eql(u8, self.env.items[lo].key, key)) {
-            self.env.items[lo].value = try gpa.dupe(u8, value);
+            self.env.items[lo].value = try std.heap.c_allocator.dupe(u8, value);
             return;
         }
-        try self.env.insert(gpa, lo, .{ .key = try gpa.dupe(u8, key), .value = try gpa.dupe(u8, value) });
+        try self.env.insert(std.heap.c_allocator, lo, .{ .key = try std.heap.c_allocator.dupe(u8, key), .value = try std.heap.c_allocator.dupe(u8, value) });
     }
 
     fn findEnv(self: *const ServerConfig, key: []const u8) bool {
@@ -195,7 +192,7 @@ pub const ServerConfig = struct {
 
     /// Ports `server_mcp_server_config`'s `parse_from_json` (server-mcp.cpp:136 @b1b770d90).
     pub fn parseFromJson(out: *std.ArrayList(ServerConfig), json_str: []const u8) !void {
-        var arena = std.heap.ArenaAllocator.init(gpa);
+        var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer arena.deinit();
         var j = try json.parse(arena.allocator(), json_str);
         return parseCursorFormat(out, &j);
@@ -209,13 +206,13 @@ pub const ServerConfig = struct {
         var it = (try j.at("mcpServers")).items();
         while (it.next()) |item| {
             const cfg = item.value;
-            var sc: ServerConfig = .{ .name = try gpa.dupe(u8, item.key) };
-            sc.command = try gpa.dupe(u8, try cfg.value("command", []const u8, ""));
-            sc.cwd = try gpa.dupe(u8, try cfg.value("cwd", []const u8, ""));
+            var sc: ServerConfig = .{ .name = try std.heap.c_allocator.dupe(u8, item.key) };
+            sc.command = try std.heap.c_allocator.dupe(u8, try cfg.value("command", []const u8, ""));
+            sc.cwd = try std.heap.c_allocator.dupe(u8, try cfg.value("cwd", []const u8, ""));
             sc.timeout_ms = try cfg.value("timeout_ms", c_int, sc.timeout_ms);
 
             if (cfg.contains("args") and (try cfg.at("args")).isArray()) {
-                for ((try cfg.at("args")).array.items) |*a| try sc.args.append(gpa, try gpa.dupe(u8, try a.get([]const u8)));
+                for ((try cfg.at("args")).array.items) |*a| try sc.args.append(std.heap.c_allocator, try std.heap.c_allocator.dupe(u8, try a.get([]const u8)));
             }
             if (cfg.contains("env") and (try cfg.at("env")).isObject()) {
                 var eit = (try cfg.at("env")).items();
@@ -228,7 +225,7 @@ pub const ServerConfig = struct {
                 mod.common.srv(.wrn, "parse_cursor_format", "MCP server '%s' has no command, skipping\n", .{n});
                 continue;
             }
-            try out.append(gpa, sc);
+            try out.append(std.heap.c_allocator, sc);
         }
     }
 };
@@ -244,10 +241,10 @@ pub const ToolDef = struct {
     /// A deep copy.
     pub fn clone(self: *const ToolDef) !ToolDef {
         return .{
-            .server_name = try gpa.dupe(u8, self.server_name),
-            .name = try gpa.dupe(u8, self.name),
-            .description = try gpa.dupe(u8, self.description),
-            .input_schema = try self.input_schema.clone(gpa),
+            .server_name = try std.heap.c_allocator.dupe(u8, self.server_name),
+            .name = try std.heap.c_allocator.dupe(u8, self.name),
+            .description = try std.heap.c_allocator.dupe(u8, self.description),
+            .input_schema = try self.input_schema.clone(std.heap.c_allocator),
         };
     }
 };
@@ -272,7 +269,7 @@ fn rpcErrorMessage(resp: *const json.Value) ![]const u8 {
 
 /// Ports `mcp_result_to_response` (server-mcp.cpp:197 @b1b770d90): the text
 /// parts of `result.content[]` joined, and an `isError` result surfaced.
-fn resultToResponse(a: Allocator, result: *const json.Value) !json.Value {
+fn resultToResponse(a: std.mem.Allocator, result: *const json.Value) !json.Value {
     var text: std.ArrayList(u8) = .empty;
     if (result.contains("content") and (try result.at("content")).isArray()) {
         for ((try result.at("content")).array.items) |*part| {
@@ -292,7 +289,7 @@ fn resultToResponse(a: Allocator, result: *const json.Value) !json.Value {
 }
 
 /// `{"error": {"code": -32603, "message": msg}}`.
-fn rpcError(a: Allocator, msg: []const u8) !json.Value {
+fn rpcError(a: std.mem.Allocator, msg: []const u8) !json.Value {
     var e = mod.common.Obj.init(a);
     try e.put("code", @as(i64, -32603));
     try e.put("message", msg);
@@ -341,12 +338,12 @@ pub const Transport = struct {
     ///
     /// Return: a transport with one reference; `release` frees it.
     pub fn create(config: *const ServerConfig) !*Transport {
-        const self = try gpa.create(Transport);
+        const self = try std.heap.c_allocator.create(Transport);
         self.* = .{
             .name = config.name,
             .timeout_ms = config.timeout_ms,
-            .to_server = StringPipe.init(gpa),
-            .from_server = StringPipe.init(gpa),
+            .to_server = StringPipe.init(std.heap.c_allocator),
+            .from_server = StringPipe.init(std.heap.c_allocator),
             .config = config,
         };
         // bound the reply queue: send_rpc only drains during a call, so unsolicited notifications would otherwise grow it without limit
@@ -369,31 +366,31 @@ pub const Transport = struct {
         drain(&self.from_server);
         self.to_server.deinit();
         self.from_server.deinit();
-        self.last_error.deinit(gpa);
-        self.err_tail.deinit(gpa);
+        self.last_error.deinit(std.heap.c_allocator);
+        self.err_tail.deinit(std.heap.c_allocator);
         for (self.tools.items) |*t| freeDef(t);
-        self.tools.deinit(gpa);
-        gpa.destroy(self);
+        self.tools.deinit(std.heap.c_allocator);
+        std.heap.c_allocator.destroy(self);
     }
 
     fn drain(p: *StringPipe) void {
         p.closeWrite();
         var s: []u8 = undefined;
-        while (p.read(&s, null, false)) gpa.free(s);
+        while (p.read(&s, null, false)) std.heap.c_allocator.free(s);
     }
 
     fn setLastError(self: *Transport, comptime fmt: []const u8, args: anytype) void {
         self.last_error.clearRetainingCapacity();
-        self.last_error.print(gpa, fmt, args) catch {};
+        self.last_error.print(std.heap.c_allocator, fmt, args) catch {};
     }
 
     /// Ports `server_mcp_transport`'s `send_rpc` (server-mcp.cpp:215 @b1b770d90): the
     /// reply, or an `{"error": ...}`; a request abandoned to a stop or the
     /// deadline is cancelled on the server. Assumes `rpc_mutex` is held.
-    fn sendRpc(self: *Transport, a: Allocator, request: *const json.Value, should_stop: ?StopFn) !json.Value {
-        const dumped = try json.dump(gpa, request, -1);
+    fn sendRpc(self: *Transport, a: std.mem.Allocator, request: *const json.Value, should_stop: ?StopFn) !json.Value {
+        const dumped = try json.dump(std.heap.c_allocator, request, -1);
         if (!(try self.to_server.write(dumped))) {
-            gpa.free(dumped);
+            std.heap.c_allocator.free(dumped);
             return rpcError(a, "transport closed");
         }
 
@@ -411,7 +408,7 @@ pub const Transport = struct {
 
         var frame: []u8 = undefined;
         while (self.from_server.read(&frame, .{ .ctx = &stop, .f = Stop.f }, false)) {
-            defer gpa.free(frame);
+            defer std.heap.c_allocator.free(frame);
             const reply = json.parse(a, frame) catch |e| {
                 if (e == error.OutOfMemory) return e;
                 if (stdlib.clock.steadyNs() >= deadline) break;
@@ -442,7 +439,7 @@ pub const Transport = struct {
     /// abandon work nobody waits for anymore (e.g. a slow tool call after
     /// the client dropped the connection). The spec forbids cancelling
     /// `initialize`. Assumes `rpc_mutex` is held.
-    fn notifyCancelled(self: *Transport, a: Allocator, request: *const json.Value, reason: []const u8) !void {
+    fn notifyCancelled(self: *Transport, a: std.mem.Allocator, request: *const json.Value, reason: []const u8) !void {
         if (!request.contains("id")) return;
         if (request.contains("method")) {
             // request.value("method", "")
@@ -457,13 +454,13 @@ pub const Transport = struct {
         try notif.put("method", "notifications/cancelled");
         try notif.put("params", params.done());
         const nv = notif.done();
-        const dumped = try json.dump(gpa, &nv, -1);
-        if (!(try self.to_server.write(dumped))) gpa.free(dumped);
+        const dumped = try json.dump(std.heap.c_allocator, &nv, -1);
+        if (!(try self.to_server.write(dumped))) std.heap.c_allocator.free(dumped);
     }
 
     /// Ports `server_mcp_transport`'s `ensure_init` (server-mcp.cpp:271 @b1b770d90): the
     /// `initialize` handshake, once. Assumes `rpc_mutex` is held.
-    fn ensureInit(self: *Transport, a: Allocator, should_stop: ?StopFn) !bool {
+    fn ensureInit(self: *Transport, a: std.mem.Allocator, should_stop: ?StopFn) !bool {
         if (self.initialized) return true;
 
         var client_info = mod.common.Obj.init(a);
@@ -492,8 +489,8 @@ pub const Transport = struct {
         try notif.put("jsonrpc", "2.0");
         try notif.put("method", "notifications/initialized");
         const nv = notif.done();
-        const nd = try json.dump(gpa, &nv, -1);
-        if (!(try self.to_server.write(nd))) gpa.free(nd);
+        const nd = try json.dump(std.heap.c_allocator, &nv, -1);
+        if (!(try self.to_server.write(nd))) std.heap.c_allocator.free(nd);
 
         self.initialized = true;
         return true;
@@ -506,7 +503,7 @@ pub const Transport = struct {
     pub fn listTools(self: *Transport, should_stop: ?StopFn) ![]ToolDef {
         self.rpc_mutex.lock();
         defer self.rpc_mutex.unlock();
-        var arena = std.heap.ArenaAllocator.init(gpa);
+        var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer arena.deinit();
         const a = arena.allocator();
         if (!try self.ensureInit(a, should_stop)) return &.{};
@@ -529,12 +526,12 @@ pub const Transport = struct {
         if (result.contains("tools") and (try result.at("tools")).isArray()) {
             for ((try result.at("tools")).array.items) |*t| {
                 var def: ToolDef = .{
-                    .server_name = try gpa.dupe(u8, self.name),
-                    .name = try gpa.dupe(u8, try t.value("name", []const u8, "")),
-                    .description = try gpa.dupe(u8, try t.value("description", []const u8, "")),
+                    .server_name = try std.heap.c_allocator.dupe(u8, self.name),
+                    .name = try std.heap.c_allocator.dupe(u8, try t.value("name", []const u8, "")),
+                    .description = try std.heap.c_allocator.dupe(u8, try t.value("description", []const u8, "")),
                 };
-                if (t.contains("inputSchema")) def.input_schema = try (try t.at("inputSchema")).clone(gpa);
-                try self.tools.append(gpa, def);
+                if (t.contains("inputSchema")) def.input_schema = try (try t.at("inputSchema")).clone(std.heap.c_allocator);
+                try self.tools.append(std.heap.c_allocator, def);
             }
         }
         return cloneDefs(self.tools.items);
@@ -544,7 +541,7 @@ pub const Transport = struct {
     /// `tools/call` result in the `/tools` shape, or an `{"error": ...}`.
     ///
     /// Return: allocated by `a`.
-    pub fn callTool(self: *Transport, a: Allocator, tool_name: []const u8, arguments: *const json.Value, should_stop: ?StopFn) !json.Value {
+    pub fn callTool(self: *Transport, a: std.mem.Allocator, tool_name: []const u8, arguments: *const json.Value, should_stop: ?StopFn) !json.Value {
         self.rpc_mutex.lock();
         defer self.rpc_mutex.unlock();
         if (!try self.ensureInit(a, should_stop)) {
@@ -580,12 +577,12 @@ pub const Transport = struct {
     pub fn start(self: *Transport) bool {
         const config = self.config;
         var argv_s: std.ArrayList([]const u8) = .empty;
-        defer argv_s.deinit(gpa);
-        argv_s.append(gpa, config.command) catch return false; // mcp_resolve_command: the command as given on POSIX
-        argv_s.appendSlice(gpa, config.args.items) catch return false;
+        defer argv_s.deinit(std.heap.c_allocator);
+        argv_s.append(std.heap.c_allocator, config.command) catch return false; // mcp_resolve_command: the command as given on POSIX
+        argv_s.appendSlice(std.heap.c_allocator, config.args.items) catch return false;
 
         var options = stdlib.subproc.option_no_window | stdlib.subproc.option_search_user_path;
-        var arena = std.heap.ArenaAllocator.init(gpa);
+        var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer arena.deinit();
         var envp_s: []const []const u8 = &.{};
         if (config.env.items.len == 0) {
@@ -594,11 +591,11 @@ pub const Transport = struct {
             envp_s = buildEnv(arena.allocator(), config) catch return false;
         }
 
-        const handle = gpa.create(stdlib.subproc.Subproc) catch return false;
+        const handle = std.heap.c_allocator.create(stdlib.subproc.Subproc) catch return false;
         handle.* = .{};
         const ok = handle.create(argv_s.items, options, envp_s, if (config.cwd.len == 0) null else config.cwd);
         if (!ok) {
-            gpa.destroy(handle);
+            std.heap.c_allocator.destroy(handle);
             const n = mod.common.dupZ(config.name);
             defer mod.common.freeZ(n);
             const cmd = mod.common.dupZ(config.command);
@@ -631,7 +628,7 @@ pub const Transport = struct {
     /// RPC error and the tail of the child's stderr.
     ///
     /// Return: owned by `a`.
-    pub fn diagnostics(self: *Transport, a: Allocator) ![]u8 {
+    pub fn diagnostics(self: *Transport, a: std.mem.Allocator) ![]u8 {
         var out: std.ArrayList(u8) = .empty;
         {
             self.rpc_mutex.lock(); // last_error is written by send_rpc's callers
@@ -653,7 +650,7 @@ pub const Transport = struct {
         const P = struct {
             fn onLine(t: *Transport, line: []u8) bool {
                 const ok = t.from_server.write(line) catch false; // false => consumer gone, stop
-                if (!ok) gpa.free(line);
+                if (!ok) std.heap.c_allocator.free(line);
                 return ok;
             }
         };
@@ -673,12 +670,12 @@ pub const Transport = struct {
         };
         var msg: []u8 = undefined;
         while (self.to_server.read(&msg, .{ .ctx = self, .f = Stop.f }, true)) {
-            const framed = std.mem.concat(gpa, u8, &.{ msg, "\n" }) catch {
-                gpa.free(msg);
+            const framed = std.mem.concat(std.heap.c_allocator, u8, &.{ msg, "\n" }) catch {
+                std.heap.c_allocator.free(msg);
                 break;
             };
-            gpa.free(msg);
-            defer gpa.free(framed);
+            std.heap.c_allocator.free(msg);
+            defer std.heap.c_allocator.free(framed);
             if (!writeAll(self.proc.?.stdinFile(), framed, &self.running)) break; // child gone or shutting down
         }
         self.running.store(false, .seq_cst);
@@ -693,7 +690,7 @@ pub const Transport = struct {
         const err_tail_max: usize = 4096;
         const P = struct {
             fn onLine(t: *Transport, line: []u8) bool {
-                defer gpa.free(line);
+                defer std.heap.c_allocator.free(line);
                 const n = mod.common.dupZ(t.name);
                 defer mod.common.freeZ(n);
                 const l = mod.common.dupZ(line);
@@ -701,10 +698,10 @@ pub const Transport = struct {
                 mod.common.srv(.dbg, "operator()", "MCP '%s' stderr: %s\n", .{ n, l });
                 t.err_mu.lock();
                 defer t.err_mu.unlock();
-                t.err_tail.appendSlice(gpa, line) catch |err| switch (err) {
+                t.err_tail.appendSlice(std.heap.c_allocator, line) catch |err| switch (err) {
                     error.OutOfMemory => {},
                 };
-                t.err_tail.append(gpa, '\n') catch |err| switch (err) {
+                t.err_tail.append(std.heap.c_allocator, '\n') catch |err| switch (err) {
                     error.OutOfMemory => {},
                 };
                 if (t.err_tail.items.len > err_tail_max) {
@@ -734,7 +731,7 @@ pub const Transport = struct {
 
         _ = proc.join(); // reap the child: never waiting would leave the pid a zombie for the process lifetime
         proc.deinit();
-        gpa.destroy(proc);
+        std.heap.c_allocator.destroy(proc);
         self.proc = null;
     }
 };
@@ -742,7 +739,7 @@ pub const Transport = struct {
 /// Ports `mcp_build_env` (server-mcp.cpp:435 @b1b770d90) over
 /// `mcp_parent_env` (server-mcp.cpp:414 @b1b770d90): the parent's
 /// environment with the configured overrides applied, `KEY=VALUE`.
-fn buildEnv(a: Allocator, config: *const ServerConfig) ![]const []const u8 {
+fn buildEnv(a: std.mem.Allocator, config: *const ServerConfig) ![]const []const u8 {
     var env: std.ArrayList([]const u8) = .empty;
     if (stdlib.env.map()) |inherited| {
         var it = inherited.iterator();
@@ -755,23 +752,23 @@ fn buildEnv(a: Allocator, config: *const ServerConfig) ![]const []const u8 {
 }
 
 fn cloneDefs(defs: []const ToolDef) ![]ToolDef {
-    const out = try gpa.alloc(ToolDef, defs.len);
+    const out = try std.heap.c_allocator.alloc(ToolDef, defs.len);
     for (defs, 0..) |*d, i| out[i] = try d.clone();
     return out;
 }
 
 /// Frees one definition's strings and schema.
 pub fn freeDef(d: *ToolDef) void {
-    gpa.free(d.server_name);
-    gpa.free(d.name);
-    gpa.free(d.description);
-    d.input_schema.deinit(gpa);
+    std.heap.c_allocator.free(d.server_name);
+    std.heap.c_allocator.free(d.name);
+    std.heap.c_allocator.free(d.description);
+    d.input_schema.deinit(std.heap.c_allocator);
 }
 
 /// Frees what `listTools` returned.
 pub fn freeDefs(defs: []ToolDef) void {
     for (defs) |*d| freeDef(d);
-    if (defs.len != 0) gpa.free(defs);
+    if (defs.len != 0) std.heap.c_allocator.free(defs);
 }
 
 // -----------------------------------------------------------------------------
@@ -807,11 +804,11 @@ pub const Mcp = struct {
     pub fn deinit(self: *Mcp) void {
         self.shutdown();
         var to_close: std.ArrayList(*Transport) = .empty;
-        defer to_close.deinit(gpa);
+        defer to_close.deinit(std.heap.c_allocator);
         {
             self.mutex.lock();
             defer self.mutex.unlock();
-            for (self.transports.items) |t| to_close.append(gpa, t.value) catch |err| switch (err) {
+            for (self.transports.items) |t| to_close.append(std.heap.c_allocator, t.value) catch |err| switch (err) {
                 error.OutOfMemory => {},
             };
             self.transports.clearRetainingCapacity();
@@ -820,10 +817,10 @@ pub const Mcp = struct {
             t.close();
             t.release();
         }
-        self.transports.deinit(gpa);
-        self.dead_servers.deinit(gpa);
+        self.transports.deinit(std.heap.c_allocator);
+        self.dead_servers.deinit(std.heap.c_allocator);
         for (self.registry.items) |*d| freeDef(d);
-        self.registry.deinit(gpa);
+        self.registry.deinit(std.heap.c_allocator);
     }
 
     /// Ports `server_mcp`'s `create_transport` (server-mcp.cpp:664 @b1b770d90): the
@@ -856,10 +853,10 @@ pub const Mcp = struct {
     /// names unique across both sources.
     fn append(self: *Mcp, json_str: []const u8) !void {
         var parsed: std.ArrayList(ServerConfig) = .empty;
-        defer parsed.deinit(gpa);
+        defer parsed.deinit(std.heap.c_allocator);
         ServerConfig.parseFromJson(&parsed, json_str) catch |e| {
             if (e == error.OutOfMemory) return e;
-            return mod.common.exception.rethrow(error.RuntimeError, e, "failed to parse MCP config JSON: ", "");
+            return common_chat.exception.rethrow(error.RuntimeError, e, "failed to parse MCP config JSON: ", "");
         };
         if (parsed.items.len == 0) {
             mod.common.srv(.wrn, "operator()", "%s", .{@as([*:0]const u8, "MCP config: no servers found in JSON\n")});
@@ -872,7 +869,7 @@ pub const Mcp = struct {
                 mod.common.srv(.wrn, "operator()", "MCP config: duplicate server name '%s', skipping\n", .{n});
                 continue;
             }
-            try self.configs.append(gpa, p);
+            try self.configs.append(std.heap.c_allocator, p);
         }
     }
 
@@ -887,9 +884,9 @@ pub const Mcp = struct {
     pub fn start(self: *Mcp, config_path: []const u8, config_json: []const u8) !void {
         if (config_path.len != 0) {
             // `fs_open_ifstream` and `ss << f.rdbuf()`
-            const text = (stdlib.file.readStream(stdlib.file.defaultIo(), gpa, config_path) catch null) orelse
-                return mod.common.throw(error.RuntimeError, "failed to open MCP config file: {s}", .{config_path});
-            defer gpa.free(text);
+            const text = (stdlib.file.readStream(stdlib.file.defaultIo(), std.heap.c_allocator, config_path) catch null) orelse
+                return common_chat.exception.throw(error.RuntimeError, "failed to open MCP config file: {s}", .{config_path});
+            defer std.heap.c_allocator.free(text);
             try self.append(text);
         }
         if (config_json.len != 0) try self.append(config_json);
@@ -901,7 +898,7 @@ pub const Mcp = struct {
             const t = try createTransport(cfg);
             defer t.release();
             if (!t.start()) {
-                var arena = std.heap.ArenaAllocator.init(gpa);
+                var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
                 defer arena.deinit();
                 const n = mod.common.dupZ(cfg.name);
                 defer mod.common.freeZ(n);
@@ -921,18 +918,18 @@ pub const Mcp = struct {
             };
             var stop: Stop = .{ .mgr = self, .deadline = stdlib.clock.steadyNs() + warmup_timeout_seconds * std.time.ns_per_s };
             const tools = try t.listTools(.{ .ctx = &stop, .f = Stop.f });
-            defer if (tools.len != 0) gpa.free(tools);
+            defer if (tools.len != 0) std.heap.c_allocator.free(tools);
             const n = mod.common.dupZ(cfg.name);
             defer mod.common.freeZ(n);
             mod.common.srv(.inf, "start", "MCP warmup: '%s' discovered %zu tools\n", .{ n, tools.len });
-            try discovered.appendSlice(gpa, tools);
+            try discovered.appendSlice(std.heap.c_allocator, tools);
             t.close();
         }
 
         self.mutex.lock();
         defer self.mutex.unlock();
         for (self.registry.items) |*d| freeDef(d);
-        self.registry.deinit(gpa);
+        self.registry.deinit(std.heap.c_allocator);
         self.registry = discovered;
     }
 
@@ -950,7 +947,7 @@ pub const Mcp = struct {
     /// `should_stop` is or-ed with the manager's cancel flag.
     ///
     /// Return: allocated by `a`.
-    pub fn callTool(self: *Mcp, a: Allocator, server_name: []const u8, tool_name: []const u8, arguments: *const json.Value, should_stop: ?StopFn) !json.Value {
+    pub fn callTool(self: *Mcp, a: std.mem.Allocator, server_name: []const u8, tool_name: []const u8, arguments: *const json.Value, should_stop: ?StopFn) !json.Value {
         const transport = (try self.getOrCreate(server_name)) orelse {
             var o = mod.common.Obj.init(a);
             try o.put("error", try std.mem.concat(a, u8, &.{ "MCP server unavailable: ", server_name }));
@@ -977,7 +974,7 @@ pub const Mcp = struct {
     /// Return: a reference the caller releases.
     fn getOrCreate(self: *Mcp, name: []const u8) !?*Transport {
         var to_close: std.ArrayList(*Transport) = .empty; // closed after unlock
-        defer to_close.deinit(gpa);
+        defer to_close.deinit(std.heap.c_allocator);
         var result: ?*Transport = null;
 
         {
@@ -997,14 +994,14 @@ pub const Mcp = struct {
             for (self.transports.items, 0..) |t, i| {
                 if (!std.mem.eql(u8, t.name, name)) continue;
                 if (t.value.isAlive()) return t.value.retain();
-                var arena = std.heap.ArenaAllocator.init(gpa);
+                var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
                 defer arena.deinit();
                 const n = mod.common.dupZ(name);
                 defer mod.common.freeZ(n);
                 const d = mod.common.dupZ(try t.value.diagnostics(arena.allocator()));
                 defer mod.common.freeZ(d);
                 mod.common.srv(.wrn, "get_or_create", "MCP '%s' is no longer alive: %s\n", .{ n, d });
-                try to_close.append(gpa, t.value);
+                try to_close.append(std.heap.c_allocator, t.value);
                 _ = self.transports.orderedRemove(i);
                 break;
             }
@@ -1012,17 +1009,17 @@ pub const Mcp = struct {
             if (self.findConfig(name)) |cfg| {
                 const fresh = try createTransport(cfg);
                 if (fresh.start() and fresh.isAlive()) {
-                    try self.transports.append(gpa, .{ .name = cfg.name, .value = fresh });
+                    try self.transports.append(std.heap.c_allocator, .{ .name = cfg.name, .value = fresh });
                     result = fresh.retain();
                 } else {
-                    var arena = std.heap.ArenaAllocator.init(gpa);
+                    var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
                     defer arena.deinit();
                     const n = mod.common.dupZ(name);
                     defer mod.common.freeZ(n);
                     const d = mod.common.dupZ(try fresh.diagnostics(arena.allocator()));
                     defer mod.common.freeZ(d);
                     mod.common.srv(.wrn, "get_or_create", "MCP '%s': failed to start: %s\n", .{ n, d });
-                    try to_close.append(gpa, fresh);
+                    try to_close.append(std.heap.c_allocator, fresh);
                     try self.setDead(cfg.name, now + cooldown_seconds * std.time.ns_per_s);
                 }
             }
@@ -1042,7 +1039,7 @@ pub const Mcp = struct {
                 return;
             }
         }
-        try self.dead_servers.append(gpa, .{ .name = name, .value = until });
+        try self.dead_servers.append(std.heap.c_allocator, .{ .name = name, .value = until });
     }
 };
 

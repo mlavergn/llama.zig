@@ -32,44 +32,38 @@
 const std = @import("std");
 const harness_root = @import("harness_root");
 
-const c = harness_root.impl.c;
-const Hparams = harness_root.hparams.Hparams;
-const M = harness_root.model;
-
-const gpa = std.heap.c_allocator;
-
-extern fn ref_load_metadata(path: [*:0]const u8, split_paths: [*]const [*:0]const u8, n_split_paths: c_int, overrides: ?[*]const c.llama_model_kv_override, vocab_only: c_int, what: [*]u8, n: usize) ?*c.llama_model;
-extern fn ref_free(model: *c.llama_model) void;
-extern fn ref_hparams(model: *const c.llama_model) *const anyopaque;
-extern fn ref_type(model: *const c.llama_model) c_int;
-extern fn ref_arch(model: *const c.llama_model) c_int;
-extern fn ref_name(model: *const c.llama_model) [*:0]const u8;
-extern fn ref_desc(model: *const c.llama_model, buf: [*]u8, n: usize) void;
-extern fn ref_n_elements(model: *const c.llama_model) u64;
-extern fn ref_n_bytes(model: *const c.llama_model) usize;
-extern fn ref_ftype(model: *const c.llama_model) c_int;
-extern fn ref_n_labels(model: *const c.llama_model) usize;
-extern fn ref_label(model: *const c.llama_model, i: usize) [*:0]const u8;
-extern fn ref_decision_label(model: *const c.llama_model, i: u32) ?[*:0]const u8;
-extern fn ref_n_decision_labels(model: *const c.llama_model) usize;
-extern fn ref_n_kv(model: *const c.llama_model) usize;
-extern fn ref_kv(model: *const c.llama_model, i: usize, key: *[*:0]const u8, value: *[*:0]const u8) c_int;
+extern fn ref_load_metadata(path: [*:0]const u8, split_paths: [*]const [*:0]const u8, n_split_paths: c_int, overrides: ?[*]const harness_root.impl.c.llama_model_kv_override, vocab_only: c_int, what: [*]u8, n: usize) ?*harness_root.impl.c.llama_model;
+extern fn ref_free(model: *harness_root.impl.c.llama_model) void;
+extern fn ref_hparams(model: *const harness_root.impl.c.llama_model) *const anyopaque;
+extern fn ref_type(model: *const harness_root.impl.c.llama_model) c_int;
+extern fn ref_arch(model: *const harness_root.impl.c.llama_model) c_int;
+extern fn ref_name(model: *const harness_root.impl.c.llama_model) [*:0]const u8;
+extern fn ref_desc(model: *const harness_root.impl.c.llama_model, buf: [*]u8, n: usize) void;
+extern fn ref_n_elements(model: *const harness_root.impl.c.llama_model) u64;
+extern fn ref_n_bytes(model: *const harness_root.impl.c.llama_model) usize;
+extern fn ref_ftype(model: *const harness_root.impl.c.llama_model) c_int;
+extern fn ref_n_labels(model: *const harness_root.impl.c.llama_model) usize;
+extern fn ref_label(model: *const harness_root.impl.c.llama_model, i: usize) [*:0]const u8;
+extern fn ref_decision_label(model: *const harness_root.impl.c.llama_model, i: u32) ?[*:0]const u8;
+extern fn ref_n_decision_labels(model: *const harness_root.impl.c.llama_model) usize;
+extern fn ref_n_kv(model: *const harness_root.impl.c.llama_model) usize;
+extern fn ref_kv(model: *const harness_root.impl.c.llama_model, i: usize, key: *[*:0]const u8, value: *[*:0]const u8) c_int;
 extern fn ref_hparams_sizeof() usize;
 extern fn ref_hparams_alignof() usize;
 extern fn ref_hparams_nfields() usize;
 extern fn ref_hparams_field(i: usize, offset: *usize, size: *usize) [*:0]const u8;
 extern "c" fn truncate(path: [*:0]const u8, length: i64) c_int;
-extern fn ref_layer_tensor(model: *const c.llama_model, il: c_int, field: [*:0]const u8) ?[*:0]const u8;
-extern fn ref_model_tensor(model: *const c.llama_model, field: [*:0]const u8) ?[*:0]const u8;
-extern fn ref_n_layers(model: *const c.llama_model) usize;
-extern fn ref_n_tensors(model: *const c.llama_model) usize;
-extern fn ref_tensor_at(model: *const c.llama_model, i: usize, name: *[*:0]const u8) *c.ggml_tensor;
-extern fn ref_n_devices(model: *const c.llama_model) usize;
-extern fn ref_device(model: *const c.llama_model, i: usize) c.ggml_backend_dev_t;
-extern fn ref_dev_layer(model: *const c.llama_model, il: c_int) c.ggml_backend_dev_t;
-extern fn ref_dev_output(model: *const c.llama_model) c.ggml_backend_dev_t;
-extern fn ref_memory_breakdown(model: *const c.llama_model, i: usize, buft: *c.ggml_backend_buffer_type_t) usize;
-extern fn ref_hash_tensor(t: *const c.ggml_tensor) u64;
+extern fn ref_layer_tensor(model: *const harness_root.impl.c.llama_model, il: c_int, field: [*:0]const u8) ?[*:0]const u8;
+extern fn ref_model_tensor(model: *const harness_root.impl.c.llama_model, field: [*:0]const u8) ?[*:0]const u8;
+extern fn ref_n_layers(model: *const harness_root.impl.c.llama_model) usize;
+extern fn ref_n_tensors(model: *const harness_root.impl.c.llama_model) usize;
+extern fn ref_tensor_at(model: *const harness_root.impl.c.llama_model, i: usize, name: *[*:0]const u8) *harness_root.impl.c.ggml_tensor;
+extern fn ref_n_devices(model: *const harness_root.impl.c.llama_model) usize;
+extern fn ref_device(model: *const harness_root.impl.c.llama_model, i: usize) harness_root.impl.c.ggml_backend_dev_t;
+extern fn ref_dev_layer(model: *const harness_root.impl.c.llama_model, il: c_int) harness_root.impl.c.ggml_backend_dev_t;
+extern fn ref_dev_output(model: *const harness_root.impl.c.llama_model) harness_root.impl.c.ggml_backend_dev_t;
+extern fn ref_memory_breakdown(model: *const harness_root.impl.c.llama_model, i: usize, buft: *harness_root.impl.c.ggml_backend_buffer_type_t) usize;
+extern fn ref_hash_tensor(t: *const harness_root.impl.c.ggml_tensor) u64;
 
 var checks: usize = 0;
 var failures: usize = 0;
@@ -96,9 +90,9 @@ fn expectInt(what: []const u8, ref: i128, port: i128) void {
 
 var log_target: ?*std.ArrayList(u8) = null;
 
-fn logCb(_: c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
+fn logCb(_: harness_root.impl.c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
     const t = log_target orelse return;
-    t.appendSlice(gpa, std.mem.span(@as([*:0]const u8, @ptrCast(text)))) catch unreachable;
+    t.appendSlice(std.heap.c_allocator, std.mem.span(@as([*:0]const u8, @ptrCast(text)))) catch unreachable;
 }
 
 /// The first line where two logs differ, for the report.
@@ -127,9 +121,9 @@ fn firstDiff(a: []const u8, b: []const u8) void {
 fn checkLayout() bool {
     @setEvalBranchQuota(20000);
     const before = failures;
-    const names = @typeInfo(Hparams).@"struct".field_names;
-    expectInt("sizeof(llama_hparams)", ref_hparams_sizeof(), @sizeOf(Hparams));
-    expectInt("alignof(llama_hparams)", ref_hparams_alignof(), @alignOf(Hparams));
+    const names = @typeInfo(harness_root.hparams.Hparams).@"struct".field_names;
+    expectInt("sizeof(llama_hparams)", ref_hparams_sizeof(), @sizeOf(harness_root.hparams.Hparams));
+    expectInt("alignof(llama_hparams)", ref_hparams_alignof(), @alignOf(harness_root.hparams.Hparams));
     expectInt("llama_hparams members", ref_hparams_nfields(), names.len);
     const n = @min(ref_hparams_nfields(), names.len);
     inline for (names, 0..) |name, i| {
@@ -138,16 +132,16 @@ fn checkLayout() bool {
             var size: usize = 0;
             const ref_name_ = std.mem.span(ref_hparams_field(i, &off, &size));
             expectStr("member name", ref_name_, name);
-            expectInt(name ++ " offset", off, @offsetOf(Hparams, name));
-            expectInt(name ++ " size", size, @sizeOf(@FieldType(Hparams, name)));
+            expectInt(name ++ " offset", off, @offsetOf(harness_root.hparams.Hparams, name));
+            expectInt(name ++ " size", size, @sizeOf(@FieldType(harness_root.hparams.Hparams, name)));
         }
     }
     return failures == before;
 }
 
-fn compareHparams(ref: *const Hparams, port: *const Hparams) void {
+fn compareHparams(ref: *const harness_root.hparams.Hparams, port: *const harness_root.hparams.Hparams) void {
     @setEvalBranchQuota(20000);
-    inline for (@typeInfo(Hparams).@"struct".field_names) |name| {
+    inline for (@typeInfo(harness_root.hparams.Hparams).@"struct".field_names) |name| {
         checks += 1;
         const a = std.mem.asBytes(&@field(ref.*, name));
         const b = std.mem.asBytes(&@field(port.*, name));
@@ -165,7 +159,7 @@ const Case = struct {
     name: []const u8,
     path: [:0]const u8,
     vocab_only: bool,
-    overrides: []const c.llama_model_kv_override = &.{},
+    overrides: []const harness_root.impl.c.llama_model_kv_override = &.{},
     /// The paths `llama_model_load_from_splits` would be given, `path`
     /// first; empty for `llama_model_load_from_file`.
     splits: []const [:0]const u8 = &.{},
@@ -182,18 +176,18 @@ fn runCase(cs: Case) void {
     case_failures = 0;
     const before = checks;
 
-    var ovr: std.ArrayList(c.llama_model_kv_override) = .empty;
-    defer ovr.deinit(gpa);
+    var ovr: std.ArrayList(harness_root.impl.c.llama_model_kv_override) = .empty;
+    defer ovr.deinit(std.heap.c_allocator);
     if (cs.overrides.len != 0) {
-        ovr.appendSlice(gpa, cs.overrides) catch unreachable;
-        ovr.append(gpa, std.mem.zeroes(c.llama_model_kv_override)) catch unreachable;
+        ovr.appendSlice(std.heap.c_allocator, cs.overrides) catch unreachable;
+        ovr.append(std.heap.c_allocator, std.mem.zeroes(harness_root.impl.c.llama_model_kv_override)) catch unreachable;
     }
-    const ovr_ptr: ?[*]const c.llama_model_kv_override = if (cs.overrides.len != 0) ovr.items.ptr else null;
+    const ovr_ptr: ?[*]const harness_root.impl.c.llama_model_kv_override = if (cs.overrides.len != 0) ovr.items.ptr else null;
 
     var ref_log: std.ArrayList(u8) = .empty;
-    defer ref_log.deinit(gpa);
+    defer ref_log.deinit(std.heap.c_allocator);
     var port_log: std.ArrayList(u8) = .empty;
-    defer port_log.deinit(gpa);
+    defer port_log.deinit(std.heap.c_allocator);
 
     // Reference.
     var what: [1024]u8 = undefined;
@@ -208,13 +202,13 @@ fn runCase(cs: Case) void {
     var exc: harness_root.impl.Exception = .{};
     var splits: std.ArrayList([:0]const u8) = .empty;
     defer {
-        for (splits.items) |s| gpa.free(s);
-        splits.deinit(gpa);
+        for (splits.items) |s| std.heap.c_allocator.free(s);
+        splits.deinit(std.heap.c_allocator);
     }
-    for (cs.splits) |sp| splits.append(gpa, gpa.dupeSentinel(u8, sp, 0) catch unreachable) catch unreachable;
-    var params = M.defaultParams();
+    for (cs.splits) |sp| splits.append(std.heap.c_allocator, std.heap.c_allocator.dupeSentinel(u8, sp, 0) catch unreachable) catch unreachable;
+    var params = harness_root.model.defaultParams();
     params.vocab_only = cs.vocab_only;
-    var loaded = M.loadMetadata(.{ .path = cs.path }, &splits, params, ovr_ptr, &exc);
+    var loaded = harness_root.model.loadMetadata(.{ .path = cs.path }, &splits, params, ovr_ptr, &exc);
     defer if (loaded == .model) loaded.model.deinit();
     log_target = null;
 
@@ -307,7 +301,7 @@ fn runCase(cs: Case) void {
 const FullCase = struct {
     name: []const u8,
     path: [:0]const u8,
-    edit: *const fn (*c.llama_model_params) void,
+    edit: *const fn (*harness_root.impl.c.llama_model_params) void,
 };
 
 /// A log line's free-memory figure moves with what the process has
@@ -317,14 +311,14 @@ fn normalizeLog(log: []const u8) std.ArrayList(u8) {
     var lines = std.mem.splitScalar(u8, log, '\n');
     var first = true;
     while (lines.next()) |line| {
-        if (!first) out.append(gpa, '\n') catch unreachable;
+        if (!first) out.append(std.heap.c_allocator, '\n') catch unreachable;
         first = false;
         if (std.mem.startsWith(u8, line, "ggml_metal_log_allocated_size:")) {
             // `( total / max)`: the process-wide total, which counts the
             // other side's model too.
             if (std.mem.findScalar(u8, line, '(')) |open| {
-                out.appendSlice(gpa, line[0..open]) catch unreachable;
-                out.appendSlice(gpa, "(N)") catch unreachable;
+                out.appendSlice(std.heap.c_allocator, line[0..open]) catch unreachable;
+                out.appendSlice(std.heap.c_allocator, "(N)") catch unreachable;
                 continue;
             }
         }
@@ -332,18 +326,18 @@ fn normalizeLog(log: []const u8) std.ArrayList(u8) {
             // CUDA on a unified-memory device reads the system's free
             // memory from /proc/meminfo, which moves between any two reads.
             // `context_diff.zig` masks it the same way.
-            out.appendSlice(gpa, line[0 .. at + "available_memory_kb: ".len]) catch unreachable;
-            out.appendSlice(gpa, "N") catch unreachable;
+            out.appendSlice(std.heap.c_allocator, line[0 .. at + "available_memory_kb: ".len]) catch unreachable;
+            out.appendSlice(std.heap.c_allocator, "N") catch unreachable;
             continue;
         }
         if (std.mem.find(u8, line, " MiB free")) |end| {
             var start = end;
             while (start > 0 and std.ascii.isDigit(line[start - 1])) start -= 1;
-            out.appendSlice(gpa, line[0..start]) catch unreachable;
-            out.appendSlice(gpa, "N") catch unreachable;
-            out.appendSlice(gpa, line[end..]) catch unreachable;
+            out.appendSlice(std.heap.c_allocator, line[0..start]) catch unreachable;
+            out.appendSlice(std.heap.c_allocator, "N") catch unreachable;
+            out.appendSlice(std.heap.c_allocator, line[end..]) catch unreachable;
         } else {
-            out.appendSlice(gpa, line) catch unreachable;
+            out.appendSlice(std.heap.c_allocator, line) catch unreachable;
         }
     }
     return out;
@@ -353,11 +347,11 @@ fn cancelHalfway(progress: f32, _: ?*anyopaque) callconv(.c) bool {
     return progress < 0.5;
 }
 
-fn devName(dev: c.ggml_backend_dev_t) []const u8 {
-    return if (dev == null) "(null)" else std.mem.span(c.ggml_backend_dev_name(dev));
+fn devName(dev: harness_root.impl.c.ggml_backend_dev_t) []const u8 {
+    return if (dev == null) "(null)" else std.mem.span(harness_root.impl.c.ggml_backend_dev_name(dev));
 }
 
-fn compareTensor(what: []const u8, ref: *const c.ggml_tensor, port: *const c.ggml_tensor, hash: bool) void {
+fn compareTensor(what: []const u8, ref: *const harness_root.impl.c.ggml_tensor, port: *const harness_root.impl.c.ggml_tensor, hash: bool) void {
     expectStr(what, std.mem.sliceTo(&ref.name, 0), std.mem.sliceTo(&port.name, 0));
     expectInt("type", ref.type, port.type);
     for (0..4) |d| {
@@ -370,10 +364,10 @@ fn compareTensor(what: []const u8, ref: *const c.ggml_tensor, port: *const c.ggm
         return;
     }
     if (ref.buffer == null) return;
-    expectStr("buffer", std.mem.span(c.ggml_backend_buffer_name(ref.buffer)), std.mem.span(c.ggml_backend_buffer_name(port.buffer)));
-    expectInt("usage", c.ggml_backend_buffer_get_usage(ref.buffer), c.ggml_backend_buffer_get_usage(port.buffer));
-    const rb = c.ggml_backend_buffer_get_base(ref.buffer);
-    const pb = c.ggml_backend_buffer_get_base(port.buffer);
+    expectStr("buffer", std.mem.span(harness_root.impl.c.ggml_backend_buffer_name(ref.buffer)), std.mem.span(harness_root.impl.c.ggml_backend_buffer_name(port.buffer)));
+    expectInt("usage", harness_root.impl.c.ggml_backend_buffer_get_usage(ref.buffer), harness_root.impl.c.ggml_backend_buffer_get_usage(port.buffer));
+    const rb = harness_root.impl.c.ggml_backend_buffer_get_base(ref.buffer);
+    const pb = harness_root.impl.c.ggml_backend_buffer_get_base(port.buffer);
     if (rb != null and pb != null and ref.data != null and port.data != null) {
         expectInt("offset in buffer", @as(i128, @intFromPtr(ref.data)) - @intFromPtr(rb), @as(i128, @intFromPtr(port.data)) - @intFromPtr(pb));
     }
@@ -386,42 +380,42 @@ fn runFullCase(fc: FullCase) void {
     case_failures = 0;
     const before = checks;
 
-    var params = c.llama_model_default_params();
+    var params = harness_root.impl.c.llama_model_default_params();
     fc.edit(&params);
-    var port_params = M.defaultParams();
+    var port_params = harness_root.model.defaultParams();
     fc.edit(&port_params);
 
     // The first load in the process initializes the backends, which log.
     if (!warmed_up) {
         warmed_up = true;
-        var warm = c.llama_model_default_params();
+        var warm = harness_root.impl.c.llama_model_default_params();
         warm.vocab_only = true;
-        if (c.llama_model_load_from_file(fc.path.ptr, warm)) |m| c.llama_model_free(m);
+        if (harness_root.impl.c.llama_model_load_from_file(fc.path.ptr, warm)) |m| harness_root.impl.c.llama_model_free(m);
     }
 
     var ref_log: std.ArrayList(u8) = .empty;
-    defer ref_log.deinit(gpa);
+    defer ref_log.deinit(std.heap.c_allocator);
     var port_log: std.ArrayList(u8) = .empty;
-    defer port_log.deinit(gpa);
+    defer port_log.deinit(std.heap.c_allocator);
 
     log_target = &ref_log;
-    const rm = c.llama_model_load_from_file(fc.path.ptr, params);
-    defer if (rm) |m| c.llama_model_free(m);
+    const rm = harness_root.impl.c.llama_model_load_from_file(fc.path.ptr, params);
+    defer if (rm) |m| harness_root.impl.c.llama_model_free(m);
 
     log_target = &port_log;
     var splits: std.ArrayList([:0]const u8) = .empty;
     defer {
-        for (splits.items) |s| gpa.free(s);
-        splits.deinit(gpa);
+        for (splits.items) |s| std.heap.c_allocator.free(s);
+        splits.deinit(std.heap.c_allocator);
     }
-    const pm = M.loadFromFileImpl(.{ .path = fc.path }, &splits, null, null, port_params);
-    defer if (pm) |m| M.destroy(m);
+    const pm = harness_root.model.loadFromFileImpl(.{ .path = fc.path }, &splits, null, null, port_params);
+    defer if (pm) |m| harness_root.model.destroy(m);
     log_target = null;
 
     var rl = normalizeLog(ref_log.items);
-    defer rl.deinit(gpa);
+    defer rl.deinit(std.heap.c_allocator);
     var pl = normalizeLog(port_log.items);
-    defer pl.deinit(gpa);
+    defer pl.deinit(std.heap.c_allocator);
     checks += 1;
     if (rl.items.len == 0) fail("{s}: the C++ logged nothing", .{fc.name});
     firstDiff(rl.items, pl.items);
@@ -451,9 +445,9 @@ fn runFullCase(fc: FullCase) void {
         // port's structs, so a name the C++ does not know reads "?".
         {
             @setEvalBranchQuota(200_000);
-            const minfo = @typeInfo(M.Model).@"struct";
+            const minfo = @typeInfo(harness_root.model.Model).@"struct";
             inline for (minfo.field_names, minfo.field_types) |f, F| {
-                if (F != ?*c.ggml_tensor) continue;
+                if (F != ?*harness_root.impl.c.ggml_tensor) continue;
                 const rt = ref_model_tensor(r, f);
                 const pt = @field(m.*, f);
                 expectStr("model." ++ f, if (rt) |p| std.mem.span(p) else "(null)", if (pt) |p| std.mem.sliceTo(&p.name, 0) else "(null)");
@@ -463,7 +457,7 @@ fn runFullCase(fc: FullCase) void {
         expectInt("n layers", ref_n_layers(r), m.layers.len);
         for (m.layers, 0..) |*layer, il| {
             if (il >= ref_n_layers(r)) break;
-            compareLayer(M.Layer, "", r, @intCast(il), layer);
+            compareLayer(harness_root.model.Layer, "", r, @intCast(il), layer);
         }
 
         expectInt("n devices", ref_n_devices(r), m.devices.items.len);
@@ -476,14 +470,14 @@ fn runFullCase(fc: FullCase) void {
         }
 
         const mb = m.memoryBreakdown();
-        defer gpa.free(mb);
+        defer std.heap.c_allocator.free(mb);
         for (mb, 0..) |e, i| {
-            var buft: c.ggml_backend_buffer_type_t = null;
+            var buft: harness_root.impl.c.ggml_backend_buffer_type_t = null;
             const size = ref_memory_breakdown(r, i, &buft);
-            expectStr("memory_breakdown buft", if (buft == null) "(none)" else std.mem.span(c.ggml_backend_buft_name(buft)), std.mem.span(c.ggml_backend_buft_name(e.buft)));
+            expectStr("memory_breakdown buft", if (buft == null) "(none)" else std.mem.span(harness_root.impl.c.ggml_backend_buft_name(buft)), std.mem.span(harness_root.impl.c.ggml_backend_buft_name(e.buft)));
             expectInt("memory_breakdown size", size, e.size);
         }
-        var extra: c.ggml_backend_buffer_type_t = null;
+        var extra: harness_root.impl.c.ggml_backend_buffer_type_t = null;
         _ = ref_memory_breakdown(r, mb.len, &extra);
         checks += 1;
         if (extra != null) fail("memory_breakdown: the C++ has more entries", .{});
@@ -492,142 +486,142 @@ fn runFullCase(fc: FullCase) void {
 }
 
 const Edit = struct {
-    fn none(_: *c.llama_model_params) void {}
-    fn cpuOnly(p: *c.llama_model_params) void {
+    fn none(_: *harness_root.impl.c.llama_model_params) void {}
+    fn cpuOnly(p: *harness_root.impl.c.llama_model_params) void {
         p.n_gpu_layers = 0;
     }
-    fn partial(p: *c.llama_model_params) void {
+    fn partial(p: *harness_root.impl.c.llama_model_params) void {
         p.n_gpu_layers = 10;
     }
-    fn noMmap(p: *c.llama_model_params) void {
-        p.load_mode = c.LLAMA_LOAD_MODE_NONE;
+    fn noMmap(p: *harness_root.impl.c.llama_model_params) void {
+        p.load_mode = harness_root.impl.c.LLAMA_LOAD_MODE_NONE;
     }
-    fn noMmapCpu(p: *c.llama_model_params) void {
-        p.load_mode = c.LLAMA_LOAD_MODE_NONE;
+    fn noMmapCpu(p: *harness_root.impl.c.llama_model_params) void {
+        p.load_mode = harness_root.impl.c.LLAMA_LOAD_MODE_NONE;
         p.n_gpu_layers = 0;
     }
-    fn mmapExplicit(p: *c.llama_model_params) void {
-        p.load_mode = c.LLAMA_LOAD_MODE_MMAP;
+    fn mmapExplicit(p: *harness_root.impl.c.llama_model_params) void {
+        p.load_mode = harness_root.impl.c.LLAMA_LOAD_MODE_MMAP;
     }
     /// Direct I/O: `O_DIRECT` reads through the bounded, aligned staging
     /// buffer on Linux (`readAlignedChunk`); macOS reports alignment 1
     /// and reads as without it.
-    fn directIo(p: *c.llama_model_params) void {
-        p.load_mode = c.LLAMA_LOAD_MODE_DIRECT_IO;
+    fn directIo(p: *harness_root.impl.c.llama_model_params) void {
+        p.load_mode = harness_root.impl.c.LLAMA_LOAD_MODE_DIRECT_IO;
     }
-    fn directIoCpu(p: *c.llama_model_params) void {
-        p.load_mode = c.LLAMA_LOAD_MODE_DIRECT_IO;
+    fn directIoCpu(p: *harness_root.impl.c.llama_model_params) void {
+        p.load_mode = harness_root.impl.c.LLAMA_LOAD_MODE_DIRECT_IO;
         p.n_gpu_layers = 0;
     }
-    fn noExtraBufts(p: *c.llama_model_params) void {
+    fn noExtraBufts(p: *harness_root.impl.c.llama_model_params) void {
         p.use_extra_bufts = false;
         p.n_gpu_layers = 0;
     }
-    fn noHost(p: *c.llama_model_params) void {
+    fn noHost(p: *harness_root.impl.c.llama_model_params) void {
         p.no_host = true;
         p.n_gpu_layers = 0;
     }
-    fn checkTensors(p: *c.llama_model_params) void {
+    fn checkTensors(p: *harness_root.impl.c.llama_model_params) void {
         p.check_tensors = true;
     }
     /// `no_alloc` with mmap trips `GGML_ASSERT(!ml.no_alloc)` in the C++
     /// itself (llama-model.cpp:1701), so it is only ever used without.
-    fn noAlloc(p: *c.llama_model_params) void {
+    fn noAlloc(p: *harness_root.impl.c.llama_model_params) void {
         p.no_alloc = true;
-        p.load_mode = c.LLAMA_LOAD_MODE_NONE;
+        p.load_mode = harness_root.impl.c.LLAMA_LOAD_MODE_NONE;
     }
-    fn noAllocCpu(p: *c.llama_model_params) void {
+    fn noAllocCpu(p: *harness_root.impl.c.llama_model_params) void {
         p.no_alloc = true;
-        p.load_mode = c.LLAMA_LOAD_MODE_NONE;
+        p.load_mode = harness_root.impl.c.LLAMA_LOAD_MODE_NONE;
         p.n_gpu_layers = 0;
     }
-    fn vocabOnly(p: *c.llama_model_params) void {
+    fn vocabOnly(p: *harness_root.impl.c.llama_model_params) void {
         p.vocab_only = true;
     }
-    fn loadMtp(p: *c.llama_model_params) void {
+    fn loadMtp(p: *harness_root.impl.c.llama_model_params) void {
         p.load_mtp = true;
     }
-    fn splitNoneNoGpu(p: *c.llama_model_params) void {
-        p.split_mode = c.LLAMA_SPLIT_MODE_NONE;
+    fn splitNoneNoGpu(p: *harness_root.impl.c.llama_model_params) void {
+        p.split_mode = harness_root.impl.c.LLAMA_SPLIT_MODE_NONE;
         p.main_gpu = -1;
     }
-    fn splitNone(p: *c.llama_model_params) void {
-        p.split_mode = c.LLAMA_SPLIT_MODE_NONE;
+    fn splitNone(p: *harness_root.impl.c.llama_model_params) void {
+        p.split_mode = harness_root.impl.c.LLAMA_SPLIT_MODE_NONE;
     }
-    fn badMainGpu(p: *c.llama_model_params) void {
-        p.split_mode = c.LLAMA_SPLIT_MODE_NONE;
+    fn badMainGpu(p: *harness_root.impl.c.llama_model_params) void {
+        p.split_mode = harness_root.impl.c.LLAMA_SPLIT_MODE_NONE;
         p.main_gpu = 5;
     }
-    fn tensorSplit(p: *c.llama_model_params) void {
+    fn tensorSplit(p: *harness_root.impl.c.llama_model_params) void {
         const S = struct {
             var split: [16]f32 = .{ 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
         };
         p.tensor_split = &S.split;
     }
-    fn cancel(p: *c.llama_model_params) void {
+    fn cancel(p: *harness_root.impl.c.llama_model_params) void {
         p.progress_callback = cancelHalfway;
     }
-    fn overrideFfnCpu(p: *c.llama_model_params) void {
+    fn overrideFfnCpu(p: *harness_root.impl.c.llama_model_params) void {
         const S = struct {
-            var o: [2]c.llama_model_tensor_buft_override = undefined;
+            var o: [2]harness_root.impl.c.llama_model_tensor_buft_override = undefined;
         };
-        S.o = .{ .{ .pattern = "ffn_(up|down)", .buft = c.ggml_backend_cpu_buffer_type() }, .{ .pattern = null, .buft = null } };
+        S.o = .{ .{ .pattern = "ffn_(up|down)", .buft = harness_root.impl.c.ggml_backend_cpu_buffer_type() }, .{ .pattern = null, .buft = null } };
         p.tensor_buft_overrides = &S.o;
     }
-    fn overrideBadRegex(p: *c.llama_model_params) void {
+    fn overrideBadRegex(p: *harness_root.impl.c.llama_model_params) void {
         const S = struct {
-            var o: [2]c.llama_model_tensor_buft_override = undefined;
+            var o: [2]harness_root.impl.c.llama_model_tensor_buft_override = undefined;
         };
-        S.o = .{ .{ .pattern = "blk.(", .buft = c.ggml_backend_cpu_buffer_type() }, .{ .pattern = null, .buft = null } };
+        S.o = .{ .{ .pattern = "blk.(", .buft = harness_root.impl.c.ggml_backend_cpu_buffer_type() }, .{ .pattern = null, .buft = null } };
         p.tensor_buft_overrides = &S.o;
     }
     // `TENSOR_READ_LAZY`: the architectures that mark a tensor lazy are
     // gemma4 and qwen4exp. A fixture's tensors are far below the 4 GiB
     // `LLAMA_LAZY_MODE_AUTO` wants, so only `ON` reaches the lazy path.
-    fn lazyOn(p: *c.llama_model_params) void {
-        p.lazy_mode = c.LLAMA_LAZY_MODE_ON;
+    fn lazyOn(p: *harness_root.impl.c.llama_model_params) void {
+        p.lazy_mode = harness_root.impl.c.LLAMA_LAZY_MODE_ON;
     }
-    fn lazyOff(p: *c.llama_model_params) void {
-        p.lazy_mode = c.LLAMA_LAZY_MODE_OFF;
+    fn lazyOff(p: *harness_root.impl.c.llama_model_params) void {
+        p.lazy_mode = harness_root.impl.c.LLAMA_LAZY_MODE_OFF;
     }
-    fn lazyOnCpu(p: *c.llama_model_params) void {
-        p.lazy_mode = c.LLAMA_LAZY_MODE_ON;
+    fn lazyOnCpu(p: *harness_root.impl.c.llama_model_params) void {
+        p.lazy_mode = harness_root.impl.c.LLAMA_LAZY_MODE_ON;
         p.n_gpu_layers = 0;
     }
     /// Lazy without mmap: the files are mapped for the lazy tensors alone,
     /// not prefetched, and the rest are read biggest-staged-first.
-    fn lazyOnNoMmap(p: *c.llama_model_params) void {
-        p.lazy_mode = c.LLAMA_LAZY_MODE_ON;
-        p.load_mode = c.LLAMA_LOAD_MODE_NONE;
+    fn lazyOnNoMmap(p: *harness_root.impl.c.llama_model_params) void {
+        p.lazy_mode = harness_root.impl.c.LLAMA_LAZY_MODE_ON;
+        p.load_mode = harness_root.impl.c.LLAMA_LOAD_MODE_NONE;
     }
-    fn lazyOnNoMmapCpu(p: *c.llama_model_params) void {
-        p.lazy_mode = c.LLAMA_LAZY_MODE_ON;
-        p.load_mode = c.LLAMA_LOAD_MODE_NONE;
+    fn lazyOnNoMmapCpu(p: *harness_root.impl.c.llama_model_params) void {
+        p.lazy_mode = harness_root.impl.c.LLAMA_LAZY_MODE_ON;
+        p.load_mode = harness_root.impl.c.LLAMA_LOAD_MODE_NONE;
         p.n_gpu_layers = 0;
     }
     /// `no_alloc` asks without recording: the tensor still goes in the lazy
     /// context, and nothing is mapped for it.
-    fn lazyOnNoAlloc(p: *c.llama_model_params) void {
-        p.lazy_mode = c.LLAMA_LAZY_MODE_ON;
+    fn lazyOnNoAlloc(p: *harness_root.impl.c.llama_model_params) void {
+        p.lazy_mode = harness_root.impl.c.LLAMA_LAZY_MODE_ON;
         p.no_alloc = true;
-        p.load_mode = c.LLAMA_LOAD_MODE_NONE;
+        p.load_mode = harness_root.impl.c.LLAMA_LOAD_MODE_NONE;
     }
     /// mlock skips the lazy tensors.
-    fn lazyOnMlock(p: *c.llama_model_params) void {
-        p.lazy_mode = c.LLAMA_LAZY_MODE_ON;
-        p.load_mode = c.LLAMA_LOAD_MODE_MMAP_MLOCK;
+    fn lazyOnMlock(p: *harness_root.impl.c.llama_model_params) void {
+        p.lazy_mode = harness_root.impl.c.LLAMA_LAZY_MODE_ON;
+        p.load_mode = harness_root.impl.c.LLAMA_LOAD_MODE_MMAP_MLOCK;
     }
-    fn lazyOnDirectIo(p: *c.llama_model_params) void {
-        p.lazy_mode = c.LLAMA_LAZY_MODE_ON;
-        p.load_mode = c.LLAMA_LOAD_MODE_DIRECT_IO;
+    fn lazyOnDirectIo(p: *harness_root.impl.c.llama_model_params) void {
+        p.lazy_mode = harness_root.impl.c.LLAMA_LAZY_MODE_ON;
+        p.load_mode = harness_root.impl.c.LLAMA_LOAD_MODE_DIRECT_IO;
     }
-    fn lazyOnCheck(p: *c.llama_model_params) void {
-        p.lazy_mode = c.LLAMA_LAZY_MODE_ON;
+    fn lazyOnCheck(p: *harness_root.impl.c.llama_model_params) void {
+        p.lazy_mode = harness_root.impl.c.LLAMA_LAZY_MODE_ON;
         p.check_tensors = true;
     }
-    fn overrideEmpty(p: *c.llama_model_params) void {
+    fn overrideEmpty(p: *harness_root.impl.c.llama_model_params) void {
         const S = struct {
-            var o: [1]c.llama_model_tensor_buft_override = .{.{ .pattern = null, .buft = null }};
+            var o: [1]harness_root.impl.c.llama_model_tensor_buft_override = .{.{ .pattern = null, .buft = null }};
         };
         p.tensor_buft_overrides = &S.o;
     }
@@ -636,33 +630,33 @@ const Edit = struct {
 // -----------------------------------------------------------------------------
 // Synthetic files
 
-fn kvInt(key: []const u8, v: i64) c.llama_model_kv_override {
-    var o = std.mem.zeroes(c.llama_model_kv_override);
-    o.tag = c.LLAMA_KV_OVERRIDE_TYPE_INT;
+fn kvInt(key: []const u8, v: i64) harness_root.impl.c.llama_model_kv_override {
+    var o = std.mem.zeroes(harness_root.impl.c.llama_model_kv_override);
+    o.tag = harness_root.impl.c.LLAMA_KV_OVERRIDE_TYPE_INT;
     @memcpy(o.key[0..key.len], key);
     o.unnamed_0.val_i64 = v;
     return o;
 }
 
-fn kvFloat(key: []const u8, v: f64) c.llama_model_kv_override {
-    var o = std.mem.zeroes(c.llama_model_kv_override);
-    o.tag = c.LLAMA_KV_OVERRIDE_TYPE_FLOAT;
+fn kvFloat(key: []const u8, v: f64) harness_root.impl.c.llama_model_kv_override {
+    var o = std.mem.zeroes(harness_root.impl.c.llama_model_kv_override);
+    o.tag = harness_root.impl.c.LLAMA_KV_OVERRIDE_TYPE_FLOAT;
     @memcpy(o.key[0..key.len], key);
     o.unnamed_0.val_f64 = v;
     return o;
 }
 
-fn kvBool(key: []const u8, v: bool) c.llama_model_kv_override {
-    var o = std.mem.zeroes(c.llama_model_kv_override);
-    o.tag = c.LLAMA_KV_OVERRIDE_TYPE_BOOL;
+fn kvBool(key: []const u8, v: bool) harness_root.impl.c.llama_model_kv_override {
+    var o = std.mem.zeroes(harness_root.impl.c.llama_model_kv_override);
+    o.tag = harness_root.impl.c.LLAMA_KV_OVERRIDE_TYPE_BOOL;
     @memcpy(o.key[0..key.len], key);
     o.unnamed_0.val_bool = v;
     return o;
 }
 
-fn kvStr(key: []const u8, v: []const u8) c.llama_model_kv_override {
-    var o = std.mem.zeroes(c.llama_model_kv_override);
-    o.tag = c.LLAMA_KV_OVERRIDE_TYPE_STR;
+fn kvStr(key: []const u8, v: []const u8) harness_root.impl.c.llama_model_kv_override {
+    var o = std.mem.zeroes(harness_root.impl.c.llama_model_kv_override);
+    o.tag = harness_root.impl.c.LLAMA_KV_OVERRIDE_TYPE_STR;
     @memcpy(o.key[0..key.len], key);
     @memcpy(o.unnamed_0.val_str[0..v.len], v);
     return o;
@@ -670,31 +664,31 @@ fn kvStr(key: []const u8, v: []const u8) c.llama_model_kv_override {
 
 /// The edits on fixtures' metadata.
 const Fixture = struct {
-    fn hrmPrefix(ctx: *c.gguf_context) void {
-        c.gguf_set_val_bool(ctx, "hrm_text.hrm.prefix_lm", true);
+    fn hrmPrefix(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_bool(ctx, "hrm_text.hrm.prefix_lm", true);
     }
-    fn hrmNoL(ctx: *c.gguf_context) void {
-        _ = c.gguf_remove_key(ctx, "hrm_text.hrm.l_cycles");
+    fn hrmNoL(ctx: *harness_root.impl.c.gguf_context) void {
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "hrm_text.hrm.l_cycles");
     }
-    fn hrmHFloat(ctx: *c.gguf_context) void {
-        c.gguf_set_val_f32(ctx, "hrm_text.hrm.h_cycles", 2.0);
+    fn hrmHFloat(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_f32(ctx, "hrm_text.hrm.h_cycles", 2.0);
     }
-    fn hrmScale(ctx: *c.gguf_context) void {
-        c.gguf_set_val_f32(ctx, "hrm_text.embedding_scale", 39.19);
+    fn hrmScale(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_f32(ctx, "hrm_text.embedding_scale", 39.19);
     }
-    fn nemotronNoRms(ctx: *c.gguf_context) void {
-        _ = c.gguf_remove_key(ctx, "nemotron_h.attention.layer_norm_rms_epsilon");
-        c.gguf_set_val_f32(ctx, "nemotron_h.attention.layer_norm_epsilon", 3.0e-5);
+    fn nemotronNoRms(ctx: *harness_root.impl.c.gguf_context) void {
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "nemotron_h.attention.layer_norm_rms_epsilon");
+        harness_root.impl.c.gguf_set_val_f32(ctx, "nemotron_h.attention.layer_norm_epsilon", 3.0e-5);
     }
-    fn nemotronNoEps(ctx: *c.gguf_context) void {
-        _ = c.gguf_remove_key(ctx, "nemotron_h.attention.layer_norm_epsilon");
+    fn nemotronNoEps(ctx: *harness_root.impl.c.gguf_context) void {
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "nemotron_h.attention.layer_norm_epsilon");
     }
     /// A section order needs M-RoPE, which nemotron_h has not.
-    fn nemotronSectionOrder(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "nemotron_h.rope.section_order", "zyxt");
+    fn nemotronSectionOrder(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "nemotron_h.rope.section_order", "zyxt");
     }
     /// prism.hadamard on an architecture not verified to apply it.
-    fn nemotronHadamard(ctx: *c.gguf_context) void {
+    fn nemotronHadamard(ctx: *harness_root.impl.c.gguf_context) void {
         Hadamard.base(ctx, 1, false);
     }
 };
@@ -703,113 +697,113 @@ const Fixture = struct {
 /// on Qwen3.5: a valid base, then one fault at a time, each a throw of
 /// `load_hparams_hadamard`'s.
 const Hadamard = struct {
-    fn base(ctx: *c.gguf_context, version: u32, tied: bool) void {
-        c.gguf_set_val_u32(ctx, "prism.hadamard.version", version);
-        c.gguf_set_val_bool(ctx, "prism.hadamard.tied_output", tied);
-        c.gguf_set_val_u32(ctx, "prism.hadamard.block_size", 64);
-        c.gguf_set_val_str(ctx, "prism.hadamard.transform", "normalized-sylvester-walsh-hadamard");
-        c.gguf_set_val_str(ctx, "prism.hadamard.axis", "input-last-dimension");
-        c.gguf_set_val_str(ctx, "prism.hadamard.sign_mode", "identity");
+    fn base(ctx: *harness_root.impl.c.gguf_context, version: u32, tied: bool) void {
+        harness_root.impl.c.gguf_set_val_u32(ctx, "prism.hadamard.version", version);
+        harness_root.impl.c.gguf_set_val_bool(ctx, "prism.hadamard.tied_output", tied);
+        harness_root.impl.c.gguf_set_val_u32(ctx, "prism.hadamard.block_size", 64);
+        harness_root.impl.c.gguf_set_val_str(ctx, "prism.hadamard.transform", "normalized-sylvester-walsh-hadamard");
+        harness_root.impl.c.gguf_set_val_str(ctx, "prism.hadamard.axis", "input-last-dimension");
+        harness_root.impl.c.gguf_set_val_str(ctx, "prism.hadamard.sign_mode", "identity");
         setStrs(ctx, "prism.hadamard.weight_names", &.{ "blk.0.attn_qkv.weight", "blk.0.ffn_up.weight", "blk.3.attn_output.weight", "blk.0.ssm_out.weight" });
     }
-    fn identity(ctx: *c.gguf_context) void {
+    fn identity(ctx: *harness_root.impl.c.gguf_context) void {
         base(ctx, 1, false);
     }
-    fn tiedLatent(ctx: *c.gguf_context) void {
+    fn tiedLatent(ctx: *harness_root.impl.c.gguf_context) void {
         base(ctx, 2, true);
         setStrs(ctx, "prism.hadamard.inverse_weight_names", &.{"token_embd.weight"});
-        c.gguf_set_val_bool(ctx, "prism.hadamard.gdn_v_grouped", true);
+        harness_root.impl.c.gguf_set_val_bool(ctx, "prism.hadamard.gdn_v_grouped", true);
     }
-    fn explicit(ctx: *c.gguf_context) void {
+    fn explicit(ctx: *harness_root.impl.c.gguf_context) void {
         base(ctx, 1, false);
-        c.gguf_set_val_str(ctx, "prism.hadamard.sign_mode", "explicit");
+        harness_root.impl.c.gguf_set_val_str(ctx, "prism.hadamard.sign_mode", "explicit");
         setI32s(ctx, "prism.hadamard.sign_widths", &.{ 64, 128 });
         var v: [192]i32 = undefined;
         for (&v, 0..) |*x, i| x.* = if (i % 3 == 0) -1 else 1;
         setI32s(ctx, "prism.hadamard.sign_values", &v);
     }
-    fn badVersion(ctx: *c.gguf_context) void {
+    fn badVersion(ctx: *harness_root.impl.c.gguf_context) void {
         base(ctx, 3, false);
     }
-    fn v2Untied(ctx: *c.gguf_context) void {
+    fn v2Untied(ctx: *harness_root.impl.c.gguf_context) void {
         base(ctx, 2, false);
     }
-    fn v1Tied(ctx: *c.gguf_context) void {
+    fn v1Tied(ctx: *harness_root.impl.c.gguf_context) void {
         base(ctx, 1, true);
     }
-    fn tiedNoVersion(ctx: *c.gguf_context) void {
-        c.gguf_set_val_bool(ctx, "prism.hadamard.tied_output", true);
+    fn tiedNoVersion(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_bool(ctx, "prism.hadamard.tied_output", true);
     }
-    fn tiedNoLatent(ctx: *c.gguf_context) void {
+    fn tiedNoLatent(ctx: *harness_root.impl.c.gguf_context) void {
         base(ctx, 2, true);
     }
-    fn latentUntied(ctx: *c.gguf_context) void {
+    fn latentUntied(ctx: *harness_root.impl.c.gguf_context) void {
         base(ctx, 1, false);
         setStrs(ctx, "prism.hadamard.inverse_weight_names", &.{"token_embd.weight"});
     }
-    fn blockNotPow2(ctx: *c.gguf_context) void {
+    fn blockNotPow2(ctx: *harness_root.impl.c.gguf_context) void {
         base(ctx, 1, false);
-        c.gguf_set_val_u32(ctx, "prism.hadamard.block_size", 48);
+        harness_root.impl.c.gguf_set_val_u32(ctx, "prism.hadamard.block_size", 48);
     }
-    fn noBlock(ctx: *c.gguf_context) void {
+    fn noBlock(ctx: *harness_root.impl.c.gguf_context) void {
         base(ctx, 1, false);
-        _ = c.gguf_remove_key(ctx, "prism.hadamard.block_size");
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "prism.hadamard.block_size");
     }
-    fn badTransform(ctx: *c.gguf_context) void {
+    fn badTransform(ctx: *harness_root.impl.c.gguf_context) void {
         base(ctx, 1, false);
-        c.gguf_set_val_str(ctx, "prism.hadamard.transform", "walsh");
+        harness_root.impl.c.gguf_set_val_str(ctx, "prism.hadamard.transform", "walsh");
     }
-    fn badAxis(ctx: *c.gguf_context) void {
+    fn badAxis(ctx: *harness_root.impl.c.gguf_context) void {
         base(ctx, 1, false);
-        c.gguf_set_val_str(ctx, "prism.hadamard.axis", "output");
+        harness_root.impl.c.gguf_set_val_str(ctx, "prism.hadamard.axis", "output");
     }
-    fn badSignMode(ctx: *c.gguf_context) void {
+    fn badSignMode(ctx: *harness_root.impl.c.gguf_context) void {
         base(ctx, 1, false);
-        c.gguf_set_val_str(ctx, "prism.hadamard.sign_mode", "random");
+        harness_root.impl.c.gguf_set_val_str(ctx, "prism.hadamard.sign_mode", "random");
     }
-    fn noWeights(ctx: *c.gguf_context) void {
+    fn noWeights(ctx: *harness_root.impl.c.gguf_context) void {
         base(ctx, 1, false);
         setStrs(ctx, "prism.hadamard.weight_names", &.{});
     }
-    fn explicitNoWidths(ctx: *c.gguf_context) void {
+    fn explicitNoWidths(ctx: *harness_root.impl.c.gguf_context) void {
         explicit(ctx);
         setI32s(ctx, "prism.hadamard.sign_widths", &.{});
     }
-    fn explicitBadWidth(ctx: *c.gguf_context) void {
+    fn explicitBadWidth(ctx: *harness_root.impl.c.gguf_context) void {
         explicit(ctx);
         setI32s(ctx, "prism.hadamard.sign_widths", &.{ 64, 96 });
     }
-    fn explicitDupWidth(ctx: *c.gguf_context) void {
+    fn explicitDupWidth(ctx: *harness_root.impl.c.gguf_context) void {
         explicit(ctx);
         setI32s(ctx, "prism.hadamard.sign_widths", &.{ 64, 64 });
     }
-    fn explicitBadValue(ctx: *c.gguf_context) void {
+    fn explicitBadValue(ctx: *harness_root.impl.c.gguf_context) void {
         explicit(ctx);
         var v: [192]i32 = @splat(1);
         v[70] = 2;
         setI32s(ctx, "prism.hadamard.sign_values", &v);
     }
-    fn explicitShort(ctx: *c.gguf_context) void {
+    fn explicitShort(ctx: *harness_root.impl.c.gguf_context) void {
         explicit(ctx);
         setI32s(ctx, "prism.hadamard.sign_widths", &.{64});
     }
-    fn notFoldable(ctx: *c.gguf_context) void {
+    fn notFoldable(ctx: *harness_root.impl.c.gguf_context) void {
         base(ctx, 1, false);
         setStrs(ctx, "prism.hadamard.weight_names", &.{ "blk.0.attn_qkv.weight", "blk.0.ssm_alpha.weight" });
     }
-    fn badBlockName(ctx: *c.gguf_context) void {
+    fn badBlockName(ctx: *harness_root.impl.c.gguf_context) void {
         base(ctx, 1, false);
         setStrs(ctx, "prism.hadamard.weight_names", &.{"blk..attn_q.weight"});
     }
-    fn duplicateWeight(ctx: *c.gguf_context) void {
+    fn duplicateWeight(ctx: *harness_root.impl.c.gguf_context) void {
         base(ctx, 1, false);
         setStrs(ctx, "prism.hadamard.weight_names", &.{ "output.weight", "blk.2.ffn_down.weight", "output.weight" });
     }
-    fn badInverse(ctx: *c.gguf_context) void {
+    fn badInverse(ctx: *harness_root.impl.c.gguf_context) void {
         base(ctx, 2, true);
         setStrs(ctx, "prism.hadamard.inverse_weight_names", &.{"output.weight"});
     }
-    fn duplicateInverse(ctx: *c.gguf_context) void {
+    fn duplicateInverse(ctx: *harness_root.impl.c.gguf_context) void {
         base(ctx, 2, true);
         setStrs(ctx, "prism.hadamard.inverse_weight_names", &.{ "token_embd.weight", "token_embd.weight" });
     }
@@ -817,162 +811,162 @@ const Hadamard = struct {
 
 /// A tensor-less copy of `base`'s metadata with `edit` applied, written to
 /// `dir/name.gguf`.
-fn derive(dir: []const u8, base: [:0]const u8, name: []const u8, comptime edit: fn (*c.gguf_context) void) [:0]const u8 {
-    const src = c.gguf_init_from_file(base.ptr, .{ .no_alloc = true, .ctx = null }).?;
-    defer c.gguf_free(src);
-    const ctx = c.gguf_init_empty().?;
-    defer c.gguf_free(ctx);
-    c.gguf_set_kv(ctx, src);
+fn derive(dir: []const u8, base: [:0]const u8, name: []const u8, comptime edit: fn (*harness_root.impl.c.gguf_context) void) [:0]const u8 {
+    const src = harness_root.impl.c.gguf_init_from_file(base.ptr, .{ .no_alloc = true, .ctx = null }).?;
+    defer harness_root.impl.c.gguf_free(src);
+    const ctx = harness_root.impl.c.gguf_init_empty().?;
+    defer harness_root.impl.c.gguf_free(ctx);
+    harness_root.impl.c.gguf_set_kv(ctx, src);
     edit(ctx);
-    const path = gpa.printSentinel("{s}/{s}.gguf", .{ dir, name }, 0) catch unreachable;
-    if (!c.gguf_write_to_file(ctx, path.ptr, true)) @panic("cannot write a synthetic file");
+    const path = std.heap.c_allocator.printSentinel("{s}/{s}.gguf", .{ dir, name }, 0) catch unreachable;
+    if (!harness_root.impl.c.gguf_write_to_file(ctx, path.ptr, true)) @panic("cannot write a synthetic file");
     return path;
 }
 
-fn setI32s(ctx: *c.gguf_context, key: [:0]const u8, v: []const i32) void {
-    c.gguf_set_arr_data(ctx, key.ptr, c.GGUF_TYPE_INT32, v.ptr, v.len);
+fn setI32s(ctx: *harness_root.impl.c.gguf_context, key: [:0]const u8, v: []const i32) void {
+    harness_root.impl.c.gguf_set_arr_data(ctx, key.ptr, harness_root.impl.c.GGUF_TYPE_INT32, v.ptr, v.len);
 }
 
-fn setU32s(ctx: *c.gguf_context, key: [:0]const u8, v: []const u32) void {
-    c.gguf_set_arr_data(ctx, key.ptr, c.GGUF_TYPE_UINT32, v.ptr, v.len);
+fn setU32s(ctx: *harness_root.impl.c.gguf_context, key: [:0]const u8, v: []const u32) void {
+    harness_root.impl.c.gguf_set_arr_data(ctx, key.ptr, harness_root.impl.c.GGUF_TYPE_UINT32, v.ptr, v.len);
 }
 
 /// `n` copies of `pattern`, cycled, as a `uint32` array.
-fn setCycle(ctx: *c.gguf_context, key: [:0]const u8, pattern: []const u32, n: usize) void {
+fn setCycle(ctx: *harness_root.impl.c.gguf_context, key: [:0]const u8, pattern: []const u32, n: usize) void {
     var v: [512]u32 = undefined;
     for (v[0..n], 0..) |*x, i| x.* = pattern[i % pattern.len];
     setU32s(ctx, key, v[0..n]);
 }
 
-fn setStrs(ctx: *c.gguf_context, key: [:0]const u8, strs: []const [*:0]const u8) void {
-    c.gguf_set_arr_str(ctx, key.ptr, @ptrCast(@constCast(strs.ptr)), strs.len);
+fn setStrs(ctx: *harness_root.impl.c.gguf_context, key: [:0]const u8, strs: []const [*:0]const u8) void {
+    harness_root.impl.c.gguf_set_arr_str(ctx, key.ptr, @ptrCast(@constCast(strs.ptr)), strs.len);
 }
 
 /// Edits of Qwen3.5's metadata, one key or one family at a time.
 const Qwen = struct {
-    fn asIs(_: *c.gguf_context) void {}
+    fn asIs(_: *harness_root.impl.c.gguf_context) void {}
 
-    fn noContext(ctx: *c.gguf_context) void {
-        _ = c.gguf_remove_key(ctx, "qwen35.context_length");
+    fn noContext(ctx: *harness_root.impl.c.gguf_context) void {
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "qwen35.context_length");
     }
 
-    fn contextAsString(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "qwen35.context_length", "262144");
+    fn contextAsString(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "qwen35.context_length", "262144");
     }
 
-    fn headsPerLayer(ctx: *c.gguf_context) void {
+    fn headsPerLayer(ctx: *harness_root.impl.c.gguf_context) void {
         setCycle(ctx, "qwen35.attention.head_count", &.{ 8, 16, 8, 4 }, 24);
         setCycle(ctx, "qwen35.attention.head_count_kv", &.{ 2, 4 }, 24);
         setCycle(ctx, "qwen35.feed_forward_length", &.{ 6144, 3072 }, 24);
     }
 
-    fn headsWrongLength(ctx: *c.gguf_context) void {
+    fn headsWrongLength(ctx: *harness_root.impl.c.gguf_context) void {
         setCycle(ctx, "qwen35.attention.head_count", &.{8}, 23);
     }
 
-    fn headsHuge(ctx: *c.gguf_context) void {
+    fn headsHuge(ctx: *harness_root.impl.c.gguf_context) void {
         // Past INT32_MAX: print_info's lambda returns int32_t.
         setCycle(ctx, "qwen35.attention.head_count_kv", &.{ 0x80000001, 2 }, 24);
     }
 
-    fn sectionsScalar(ctx: *c.gguf_context) void {
-        c.gguf_set_val_i32(ctx, "qwen35.rope.dimension_sections", 11);
+    fn sectionsScalar(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_i32(ctx, "qwen35.rope.dimension_sections", 11);
     }
 
-    fn sectionsShort(ctx: *c.gguf_context) void {
+    fn sectionsShort(ctx: *harness_root.impl.c.gguf_context) void {
         setI32s(ctx, "qwen35.rope.dimension_sections", &.{ 11, 11, 10 });
     }
 
-    fn sectionsU32(ctx: *c.gguf_context) void {
+    fn sectionsU32(ctx: *harness_root.impl.c.gguf_context) void {
         setU32s(ctx, "qwen35.rope.dimension_sections", &.{ 7, 0, 3, 1 });
     }
 
-    fn sectionsFloat(ctx: *c.gguf_context) void {
+    fn sectionsFloat(ctx: *harness_root.impl.c.gguf_context) void {
         const v = [_]f32{ 1, 2, 3, 4 };
-        c.gguf_set_arr_data(ctx, "qwen35.rope.dimension_sections", c.GGUF_TYPE_FLOAT32, &v, v.len);
+        harness_root.impl.c.gguf_set_arr_data(ctx, "qwen35.rope.dimension_sections", harness_root.impl.c.GGUF_TYPE_FLOAT32, &v, v.len);
     }
 
-    fn noSections(ctx: *c.gguf_context) void {
-        _ = c.gguf_remove_key(ctx, "qwen35.rope.dimension_sections");
+    fn noSections(ctx: *harness_root.impl.c.gguf_context) void {
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "qwen35.rope.dimension_sections");
     }
 
-    fn yarn(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "qwen35.rope.scaling.type", "yarn");
-        c.gguf_set_val_f32(ctx, "qwen35.rope.scaling.factor", 4.0);
-        c.gguf_set_val_u32(ctx, "qwen35.rope.scaling.original_context_length", 32768);
-        c.gguf_set_val_bool(ctx, "qwen35.rope.scaling.finetuned", true);
-        c.gguf_set_val_f32(ctx, "qwen35.rope.scaling.attn_factor", 0.5);
+    fn yarn(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "qwen35.rope.scaling.type", "yarn");
+        harness_root.impl.c.gguf_set_val_f32(ctx, "qwen35.rope.scaling.factor", 4.0);
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.rope.scaling.original_context_length", 32768);
+        harness_root.impl.c.gguf_set_val_bool(ctx, "qwen35.rope.scaling.finetuned", true);
+        harness_root.impl.c.gguf_set_val_f32(ctx, "qwen35.rope.scaling.attn_factor", 0.5);
     }
 
-    fn scaleLinear(ctx: *c.gguf_context) void {
-        c.gguf_set_val_f32(ctx, "qwen35.rope.scale_linear", 3.0);
+    fn scaleLinear(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_f32(ctx, "qwen35.rope.scale_linear", 3.0);
     }
 
-    fn interval0(ctx: *c.gguf_context) void {
-        c.gguf_set_val_u32(ctx, "qwen35.full_attention_interval", 0);
+    fn interval0(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.full_attention_interval", 0);
     }
 
-    fn interval3(ctx: *c.gguf_context) void {
-        c.gguf_set_val_u32(ctx, "qwen35.full_attention_interval", 3);
+    fn interval3(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.full_attention_interval", 3);
     }
 
-    fn recurrentArray(ctx: *c.gguf_context) void {
+    fn recurrentArray(ctx: *harness_root.impl.c.gguf_context) void {
         setCycle(ctx, "qwen35.attention.recurrent_layers", &.{ 1, 0, 0 }, 24);
     }
 
-    fn recurrentBools(ctx: *c.gguf_context) void {
+    fn recurrentBools(ctx: *harness_root.impl.c.gguf_context) void {
         var v: [24]bool = undefined;
         for (&v, 0..) |*x, i| x.* = i % 5 == 0;
-        c.gguf_set_arr_data(ctx, "qwen35.attention.recurrent_layers", c.GGUF_TYPE_BOOL, &v, v.len);
+        harness_root.impl.c.gguf_set_arr_data(ctx, "qwen35.attention.recurrent_layers", harness_root.impl.c.GGUF_TYPE_BOOL, &v, v.len);
     }
 
-    fn nextn(ctx: *c.gguf_context) void {
-        c.gguf_set_val_u32(ctx, "qwen35.nextn_predict_layers", 2);
+    fn nextn(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.nextn_predict_layers", 2);
     }
 
-    fn size4b(ctx: *c.gguf_context) void {
-        c.gguf_set_val_u32(ctx, "qwen35.block_count", 32);
-        c.gguf_set_val_u32(ctx, "qwen35.embedding_length", 2560);
+    fn size4b(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.block_count", 32);
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.embedding_length", 2560);
     }
 
-    fn size9b(ctx: *c.gguf_context) void {
-        c.gguf_set_val_u32(ctx, "qwen35.block_count", 32);
+    fn size9b(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.block_count", 32);
     }
 
-    fn size27b(ctx: *c.gguf_context) void {
-        c.gguf_set_val_u32(ctx, "qwen35.block_count", 64);
+    fn size27b(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.block_count", 64);
     }
 
-    fn sizeOdd(ctx: *c.gguf_context) void {
-        c.gguf_set_val_u32(ctx, "qwen35.block_count", 7);
+    fn sizeOdd(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.block_count", 7);
     }
 
-    fn size0_8b(ctx: *c.gguf_context) void {
-        c.gguf_set_val_u32(ctx, "qwen35.embedding_length", 1024);
+    fn size0_8b(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.embedding_length", 1024);
     }
 
-    fn fileType(ctx: *c.gguf_context) void {
-        c.gguf_set_val_u32(ctx, "general.file_type", c.LLAMA_FTYPE_MOSTLY_IQ3_M);
+    fn fileType(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_u32(ctx, "general.file_type", harness_root.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_M);
     }
 
-    fn fileTypeF8(ctx: *c.gguf_context) void {
-        c.gguf_set_val_u32(ctx, "general.file_type", c.LLAMA_FTYPE_MOSTLY_F8_E4M3);
+    fn fileTypeF8(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_u32(ctx, "general.file_type", harness_root.impl.c.LLAMA_FTYPE_MOSTLY_F8_E4M3);
     }
 
-    fn noFileType(ctx: *c.gguf_context) void {
-        _ = c.gguf_remove_key(ctx, "general.file_type");
+    fn noFileType(ctx: *harness_root.impl.c.gguf_context) void {
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "general.file_type");
     }
 
-    fn noName(ctx: *c.gguf_context) void {
-        _ = c.gguf_remove_key(ctx, "general.name");
+    fn noName(ctx: *harness_root.impl.c.gguf_context) void {
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "general.name");
     }
 
-    fn labels(ctx: *c.gguf_context) void {
+    fn labels(ctx: *harness_root.impl.c.gguf_context) void {
         setStrs(ctx, "qwen35.classifier.output_labels", &.{ "negative", "neutral", "positive \"quoted\"" });
     }
 
     /// The `<arch>.decision.labels`.
-    fn decisionLabels(ctx: *c.gguf_context) void {
+    fn decisionLabels(ctx: *harness_root.impl.c.gguf_context) void {
         setStrs(ctx, "qwen35.decision.labels", &.{ "yes", "no", "maybe \"so\"" });
     }
 
@@ -980,7 +974,7 @@ const Qwen = struct {
     /// past 40 bytes, so the dump must show the same around that edge: one
     /// short of it, at it, one past it, a last element that crosses it, and
     /// an element that ends in an escape exactly there.
-    fn arrayEdges(ctx: *c.gguf_context) void {
+    fn arrayEdges(ctx: *harness_root.impl.c.gguf_context) void {
         const fits = "12345678901234567890123456789012345";
         setStrs(ctx, "general.arr_38", &.{fits});
         setStrs(ctx, "general.arr_39", &.{fits ++ "6"});
@@ -992,112 +986,112 @@ const Qwen = struct {
         setStrs(ctx, "general.arr_bs", &.{ "a\\b", "c\"d" });
         setStrs(ctx, "general.arr_empty", &.{});
         const ints = [_]u32{ 100000, 200000, 300000, 400000, 500000, 600000, 700000, 800000 };
-        c.gguf_set_arr_data(ctx, "general.ints_8", c.GGUF_TYPE_UINT32, &ints, ints.len);
-        c.gguf_set_arr_data(ctx, "general.ints_5", c.GGUF_TYPE_UINT32, &ints, 5);
-        c.gguf_set_arr_data(ctx, "general.ints_4", c.GGUF_TYPE_UINT32, &ints, 4);
+        harness_root.impl.c.gguf_set_arr_data(ctx, "general.ints_8", harness_root.impl.c.GGUF_TYPE_UINT32, &ints, ints.len);
+        harness_root.impl.c.gguf_set_arr_data(ctx, "general.ints_5", harness_root.impl.c.GGUF_TYPE_UINT32, &ints, 5);
+        harness_root.impl.c.gguf_set_arr_data(ctx, "general.ints_4", harness_root.impl.c.GGUF_TYPE_UINT32, &ints, 4);
     }
 
-    fn headSizes(ctx: *c.gguf_context) void {
-        c.gguf_set_val_u32(ctx, "qwen35.attention.key_length", 96);
-        c.gguf_set_val_u32(ctx, "qwen35.attention.value_length", 80);
-        c.gguf_set_val_u32(ctx, "qwen35.rope.dimension_count", 48);
-        c.gguf_set_val_u32(ctx, "qwen35.attention.key_length_swa", 32);
-        c.gguf_set_val_u32(ctx, "qwen35.rope.dimension_count_swa", 16);
+    fn headSizes(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.attention.key_length", 96);
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.attention.value_length", 80);
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.rope.dimension_count", 48);
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.attention.key_length_swa", 32);
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.rope.dimension_count_swa", 16);
     }
 
-    fn noHeads(ctx: *c.gguf_context) void {
-        c.gguf_set_val_u32(ctx, "qwen35.attention.head_count", 0);
+    fn noHeads(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.attention.head_count", 0);
     }
 
-    fn pooling(ctx: *c.gguf_context) void {
-        c.gguf_set_val_u32(ctx, "qwen35.pooling_type", 2);
-        c.gguf_set_val_bool(ctx, "qwen35.attention.causal", false);
-        c.gguf_set_val_u32(ctx, "qwen35.embedding_length_out", 512);
+    fn pooling(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.pooling_type", 2);
+        harness_root.impl.c.gguf_set_val_bool(ctx, "qwen35.attention.causal", false);
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.embedding_length_out", 512);
     }
 
     /// The `pooling_type_cls`, the pooling before a RANK classifier
     /// head (ModernBERT's "mean").
-    fn classifierPooling(ctx: *c.gguf_context) void {
-        c.gguf_set_val_u32(ctx, "qwen35.classifier.pooling_type", 1);
+    fn classifierPooling(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.classifier.pooling_type", 1);
     }
 
-    fn moe(ctx: *c.gguf_context) void {
-        c.gguf_set_val_u32(ctx, "qwen35.expert_count", 8);
-        c.gguf_set_val_u32(ctx, "qwen35.expert_used_count", 2);
+    fn moe(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.expert_count", 8);
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.expert_used_count", 2);
     }
 
-    fn noSsm(ctx: *c.gguf_context) void {
-        _ = c.gguf_remove_key(ctx, "qwen35.ssm.state_size");
+    fn noSsm(ctx: *harness_root.impl.c.gguf_context) void {
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "qwen35.ssm.state_size");
     }
 
-    fn rmsEpsAsDouble(ctx: *c.gguf_context) void {
-        c.gguf_set_val_f64(ctx, "qwen35.attention.layer_norm_rms_epsilon", 1e-6);
+    fn rmsEpsAsDouble(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_f64(ctx, "qwen35.attention.layer_norm_rms_epsilon", 1e-6);
     }
 
-    fn freqBase(ctx: *c.gguf_context) void {
-        c.gguf_set_val_f32(ctx, "qwen35.rope.freq_base", 1234567.875);
+    fn freqBase(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_f32(ctx, "qwen35.rope.freq_base", 1234567.875);
     }
 
-    fn unknownArch(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "general.architecture", "no-such-arch");
+    fn unknownArch(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "general.architecture", "no-such-arch");
     }
 
-    fn noArch(ctx: *c.gguf_context) void {
-        _ = c.gguf_remove_key(ctx, "general.architecture");
+    fn noArch(ctx: *harness_root.impl.c.gguf_context) void {
+        _ = harness_root.impl.c.gguf_remove_key(ctx, "general.architecture");
     }
 
-    fn gptj(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "general.architecture", "gptj");
+    fn gptj(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "general.architecture", "gptj");
     }
 
     /// The `<arch>.classifier.activation`.
-    fn clsActGelu(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "qwen35.classifier.activation", "gelu");
+    fn clsActGelu(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "qwen35.classifier.activation", "gelu");
     }
-    fn clsActSilu(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "qwen35.classifier.activation", "silu");
+    fn clsActSilu(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "qwen35.classifier.activation", "silu");
     }
     /// The `<arch>.classifier_free_guidance` (b1c902f02), read for
     /// every architecture.
-    fn cfgOn(ctx: *c.gguf_context) void {
-        c.gguf_set_val_bool(ctx, "qwen35.classifier_free_guidance", true);
+    fn cfgOn(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_bool(ctx, "qwen35.classifier_free_guidance", true);
     }
-    fn cfgAsU32(ctx: *c.gguf_context) void {
-        c.gguf_set_val_u32(ctx, "qwen35.classifier_free_guidance", 1);
+    fn cfgAsU32(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.classifier_free_guidance", 1);
     }
     /// The `<arch>.rope.section_order`, which Qwen3.5's M-RoPE takes.
-    fn sectionOrderZyxt(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "qwen35.rope.section_order", "zyxt");
+    fn sectionOrderZyxt(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "qwen35.rope.section_order", "zyxt");
     }
-    fn sectionOrderTyxz(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "qwen35.rope.section_order", "tyxz");
+    fn sectionOrderTyxz(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "qwen35.rope.section_order", "tyxz");
     }
-    fn sectionOrderBad(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "qwen35.rope.section_order", "txyz");
+    fn sectionOrderBad(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "qwen35.rope.section_order", "txyz");
     }
-    fn sectionOrderU32(ctx: *c.gguf_context) void {
-        c.gguf_set_val_u32(ctx, "qwen35.rope.section_order", 1);
+    fn sectionOrderU32(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.rope.section_order", 1);
     }
     /// The MoVA counts (K2 Horizon), which only that architecture
     /// reads: present here they change nothing but the metadata log.
-    fn valueExperts(ctx: *c.gguf_context) void {
-        c.gguf_set_val_u32(ctx, "qwen35.attention.value_expert_count", 8);
-        c.gguf_set_val_u32(ctx, "qwen35.attention.value_expert_used_count", 2);
+    fn valueExperts(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.attention.value_expert_count", 8);
+        harness_root.impl.c.gguf_set_val_u32(ctx, "qwen35.attention.value_expert_used_count", 2);
     }
 
-    fn longValues(ctx: *c.gguf_context) void {
-        c.gguf_set_val_str(ctx, "general.description", "line one\nline two, which is long enough to be cut off at forty bytes");
-        c.gguf_set_val_str(ctx, "general.short", "a\nb");
-        c.gguf_set_val_f64(ctx, "general.f64", 3.14159265358979);
-        c.gguf_set_val_i8(ctx, "general.i8", -5);
-        c.gguf_set_val_u64(ctx, "general.u64", 18446744073709551615);
-        c.gguf_set_val_i64(ctx, "general.i64", -9223372036854775807);
-        c.gguf_set_val_i16(ctx, "general.i16", -300);
-        c.gguf_set_val_u16(ctx, "general.u16", 65535);
+    fn longValues(ctx: *harness_root.impl.c.gguf_context) void {
+        harness_root.impl.c.gguf_set_val_str(ctx, "general.description", "line one\nline two, which is long enough to be cut off at forty bytes");
+        harness_root.impl.c.gguf_set_val_str(ctx, "general.short", "a\nb");
+        harness_root.impl.c.gguf_set_val_f64(ctx, "general.f64", 3.14159265358979);
+        harness_root.impl.c.gguf_set_val_i8(ctx, "general.i8", -5);
+        harness_root.impl.c.gguf_set_val_u64(ctx, "general.u64", 18446744073709551615);
+        harness_root.impl.c.gguf_set_val_i64(ctx, "general.i64", -9223372036854775807);
+        harness_root.impl.c.gguf_set_val_i16(ctx, "general.i16", -300);
+        harness_root.impl.c.gguf_set_val_u16(ctx, "general.u16", 65535);
         const v = [_]f32{ 0.1, -2.5e10, 7 };
-        c.gguf_set_arr_data(ctx, "general.f32s", c.GGUF_TYPE_FLOAT32, &v, v.len);
+        harness_root.impl.c.gguf_set_arr_data(ctx, "general.f32s", harness_root.impl.c.GGUF_TYPE_FLOAT32, &v, v.len);
         const b = [_]bool{ true, false };
-        c.gguf_set_arr_data(ctx, "general.bools", c.GGUF_TYPE_BOOL, &b, b.len);
+        harness_root.impl.c.gguf_set_arr_data(ctx, "general.bools", harness_root.impl.c.GGUF_TYPE_BOOL, &b, b.len);
     }
 };
 
@@ -1105,71 +1099,71 @@ const Qwen = struct {
 /// check. `blk.2.*` is Q6_K and `blk.10.*` Q4_K, two each: in
 /// `weight_name_comparer` order Q6_K reaches two first and wins the tie,
 /// where a plain name sort would put `blk.10` first and pick Q4_K.
-fn tensorFile(dir: []const u8, base: [:0]const u8, name: []const u8, comptime edit: fn (*c.gguf_context, *c.ggml_context) void, truncate_by: usize) [:0]const u8 {
-    const src = c.gguf_init_from_file(base.ptr, .{ .no_alloc = true, .ctx = null }).?;
-    defer c.gguf_free(src);
-    const gctx = c.gguf_init_empty().?;
-    defer c.gguf_free(gctx);
-    c.gguf_set_kv(gctx, src);
+fn tensorFile(dir: []const u8, base: [:0]const u8, name: []const u8, comptime edit: fn (*harness_root.impl.c.gguf_context, *harness_root.impl.c.ggml_context) void, truncate_by: usize) [:0]const u8 {
+    const src = harness_root.impl.c.gguf_init_from_file(base.ptr, .{ .no_alloc = true, .ctx = null }).?;
+    defer harness_root.impl.c.gguf_free(src);
+    const gctx = harness_root.impl.c.gguf_init_empty().?;
+    defer harness_root.impl.c.gguf_free(gctx);
+    harness_root.impl.c.gguf_set_kv(gctx, src);
 
-    const ctx = c.ggml_init(.{ .mem_size = 1 << 22, .mem_buffer = null, .no_alloc = false }).?;
-    defer c.ggml_free(ctx);
+    const ctx = harness_root.impl.c.ggml_init(.{ .mem_size = 1 << 22, .mem_buffer = null, .no_alloc = false }).?;
+    defer harness_root.impl.c.ggml_free(ctx);
     edit(gctx, ctx);
 
-    const path = gpa.printSentinel("{s}/{s}.gguf", .{ dir, name }, 0) catch unreachable;
-    if (!c.gguf_write_to_file(gctx, path.ptr, false)) @panic("cannot write a synthetic file");
+    const path = std.heap.c_allocator.printSentinel("{s}/{s}.gguf", .{ dir, name }, 0) catch unreachable;
+    if (!harness_root.impl.c.gguf_write_to_file(gctx, path.ptr, false)) @panic("cannot write a synthetic file");
     if (truncate_by != 0) {
-        const f = c.fopen(path.ptr, "rb+").?;
-        _ = c.fseeko(f, 0, c.SEEK_END);
-        const size = c.ftello(f);
-        _ = c.fclose(f);
+        const f = harness_root.impl.c.fopen(path.ptr, "rb+").?;
+        _ = harness_root.impl.c.fseeko(f, 0, harness_root.impl.c.SEEK_END);
+        const size = harness_root.impl.c.ftello(f);
+        _ = harness_root.impl.c.fclose(f);
         if (truncate(path.ptr, size - @as(i64, @intCast(truncate_by))) != 0) @panic("truncate");
     }
     return path;
 }
 
-fn addTensor(gctx: *c.gguf_context, ctx: *c.ggml_context, name: [:0]const u8, ty: c.enum_ggml_type, n: i64) void {
-    const t = c.ggml_new_tensor_1d(ctx, ty, n);
-    _ = c.ggml_set_name(t, name.ptr);
-    @memset(@as([*]u8, @ptrCast(t.*.data))[0..c.ggml_nbytes(t)], 0);
-    c.gguf_add_tensor(gctx, t);
+fn addTensor(gctx: *harness_root.impl.c.gguf_context, ctx: *harness_root.impl.c.ggml_context, name: [:0]const u8, ty: harness_root.impl.c.enum_ggml_type, n: i64) void {
+    const t = harness_root.impl.c.ggml_new_tensor_1d(ctx, ty, n);
+    _ = harness_root.impl.c.ggml_set_name(t, name.ptr);
+    @memset(@as([*]u8, @ptrCast(t.*.data))[0..harness_root.impl.c.ggml_nbytes(t)], 0);
+    harness_root.impl.c.gguf_add_tensor(gctx, t);
 }
 
 const Tensors = struct {
-    fn tie(g: *c.gguf_context, ctx: *c.ggml_context) void {
-        addTensor(g, ctx, "output.weight", c.GGML_TYPE_F32, 64);
-        addTensor(g, ctx, "blk.10.a.weight", c.GGML_TYPE_Q4_K, 256);
-        addTensor(g, ctx, "blk.10.b.weight", c.GGML_TYPE_Q4_K, 256);
-        addTensor(g, ctx, "blk.2.b.weight", c.GGML_TYPE_Q6_K, 256);
-        addTensor(g, ctx, "blk.2.a.weight", c.GGML_TYPE_Q6_K, 256);
-        _ = c.gguf_remove_key(g, "general.file_type");
+    fn tie(g: *harness_root.impl.c.gguf_context, ctx: *harness_root.impl.c.ggml_context) void {
+        addTensor(g, ctx, "output.weight", harness_root.impl.c.GGML_TYPE_F32, 64);
+        addTensor(g, ctx, "blk.10.a.weight", harness_root.impl.c.GGML_TYPE_Q4_K, 256);
+        addTensor(g, ctx, "blk.10.b.weight", harness_root.impl.c.GGML_TYPE_Q4_K, 256);
+        addTensor(g, ctx, "blk.2.b.weight", harness_root.impl.c.GGML_TYPE_Q6_K, 256);
+        addTensor(g, ctx, "blk.2.a.weight", harness_root.impl.c.GGML_TYPE_Q6_K, 256);
+        _ = harness_root.impl.c.gguf_remove_key(g, "general.file_type");
     }
 
-    fn integers(g: *c.gguf_context, ctx: *c.ggml_context) void {
-        addTensor(g, ctx, "blk.0.x", c.GGML_TYPE_I32, 16);
-        addTensor(g, ctx, "blk.0.y", c.GGML_TYPE_I32, 16);
-        addTensor(g, ctx, "blk.-1.z", c.GGML_TYPE_F16, 16);
-        _ = c.gguf_remove_key(g, "general.file_type");
+    fn integers(g: *harness_root.impl.c.gguf_context, ctx: *harness_root.impl.c.ggml_context) void {
+        addTensor(g, ctx, "blk.0.x", harness_root.impl.c.GGML_TYPE_I32, 16);
+        addTensor(g, ctx, "blk.0.y", harness_root.impl.c.GGML_TYPE_I32, 16);
+        addTensor(g, ctx, "blk.-1.z", harness_root.impl.c.GGML_TYPE_F16, 16);
+        _ = harness_root.impl.c.gguf_remove_key(g, "general.file_type");
     }
 
     /// `tie` with a per-layer embedding table of its own, for an external
     /// one to replace (5f490d7bf).
-    fn withPle(g: *c.gguf_context, ctx: *c.ggml_context) void {
+    fn withPle(g: *harness_root.impl.c.gguf_context, ctx: *harness_root.impl.c.ggml_context) void {
         tie(g, ctx);
-        addTensor(g, ctx, "per_layer_token_embd.weight", c.GGML_TYPE_F16, 64);
+        addTensor(g, ctx, "per_layer_token_embd.weight", harness_root.impl.c.GGML_TYPE_F16, 64);
     }
 
     /// F8_E4M3: the guessed type and its file-type name.
-    fn f8(g: *c.gguf_context, ctx: *c.ggml_context) void {
-        addTensor(g, ctx, "output.weight", c.GGML_TYPE_F32, 64);
-        addTensor(g, ctx, "blk.0.a.weight", c.GGML_TYPE_F8_E4M3, 256);
-        addTensor(g, ctx, "blk.0.b.weight", c.GGML_TYPE_F8_E4M3, 256);
-        addTensor(g, ctx, "blk.1.a.weight", c.GGML_TYPE_Q8_0, 256);
-        _ = c.gguf_remove_key(g, "general.file_type");
+    fn f8(g: *harness_root.impl.c.gguf_context, ctx: *harness_root.impl.c.ggml_context) void {
+        addTensor(g, ctx, "output.weight", harness_root.impl.c.GGML_TYPE_F32, 64);
+        addTensor(g, ctx, "blk.0.a.weight", harness_root.impl.c.GGML_TYPE_F8_E4M3, 256);
+        addTensor(g, ctx, "blk.0.b.weight", harness_root.impl.c.GGML_TYPE_F8_E4M3, 256);
+        addTensor(g, ctx, "blk.1.a.weight", harness_root.impl.c.GGML_TYPE_Q8_0, 256);
+        _ = harness_root.impl.c.gguf_remove_key(g, "general.file_type");
     }
 
-    fn many(g: *c.gguf_context, ctx: *c.ggml_context) void {
-        const types = [_]c.enum_ggml_type{ c.GGML_TYPE_Q8_0, c.GGML_TYPE_BF16, c.GGML_TYPE_IQ4_NL, c.GGML_TYPE_Q5_1, c.GGML_TYPE_Q8_0 };
+    fn many(g: *harness_root.impl.c.gguf_context, ctx: *harness_root.impl.c.ggml_context) void {
+        const types = [_]harness_root.impl.c.enum_ggml_type{ harness_root.impl.c.GGML_TYPE_Q8_0, harness_root.impl.c.GGML_TYPE_BF16, harness_root.impl.c.GGML_TYPE_IQ4_NL, harness_root.impl.c.GGML_TYPE_Q5_1, harness_root.impl.c.GGML_TYPE_Q8_0 };
         for (types, 0..) |ty, i| {
             var buf: [32]u8 = undefined;
             const n = std.fmt.bufPrintSentinel(&buf, "blk.{d}.w", .{i % 3}, 0) catch unreachable;
@@ -1183,61 +1177,61 @@ const Tensors = struct {
 /// A split set derived from `base`: the first file holds the metadata and
 /// one tensor, the second another tensor; `kind` breaks it in one place.
 fn splitSet(dir: []const u8, base: [:0]const u8, name: []const u8, kind: enum { ok, wrong_idx, first_not_zero, bad_count, missing_second, duplicate, bad_name, ple_second, missing_bad_count }) [:0]const u8 {
-    const src = c.gguf_init_from_file(base.ptr, .{ .no_alloc = true, .ctx = null }).?;
-    defer c.gguf_free(src);
+    const src = harness_root.impl.c.gguf_init_from_file(base.ptr, .{ .no_alloc = true, .ctx = null }).?;
+    defer harness_root.impl.c.gguf_free(src);
 
     var paths: [2][:0]const u8 = undefined;
     for (0..2) |i| {
         paths[i] = if (kind == .bad_name and i == 0)
-            gpa.printSentinel("{s}/{s}-first.gguf", .{ dir, name }, 0) catch unreachable
+            std.heap.c_allocator.printSentinel("{s}/{s}-first.gguf", .{ dir, name }, 0) catch unreachable
         else
-            gpa.printSentinel("{s}/{s}-{d:0>5}-of-00002.gguf", .{ dir, name, i + 1 }, 0) catch unreachable;
+            std.heap.c_allocator.printSentinel("{s}/{s}-{d:0>5}-of-00002.gguf", .{ dir, name, i + 1 }, 0) catch unreachable;
     }
     for (0..2) |i| {
         if ((kind == .missing_second or kind == .missing_bad_count) and i == 1) continue;
-        const g = c.gguf_init_empty().?;
-        defer c.gguf_free(g);
-        if (i == 0) c.gguf_set_kv(g, src);
-        _ = c.gguf_remove_key(g, "general.file_type");
+        const g = harness_root.impl.c.gguf_init_empty().?;
+        defer harness_root.impl.c.gguf_free(g);
+        if (i == 0) harness_root.impl.c.gguf_set_kv(g, src);
+        _ = harness_root.impl.c.gguf_remove_key(g, "general.file_type");
         const no: u16 = switch (kind) {
             .wrong_idx => if (i == 1) 5 else 0,
             .first_not_zero => if (i == 0) 1 else 1,
             else => @intCast(i),
         };
-        c.gguf_set_val_u16(g, "split.no", no);
-        c.gguf_set_val_u16(g, "split.count", 2);
-        c.gguf_set_val_i32(g, "split.tensors.count", if (kind == .bad_count or kind == .missing_bad_count) 3 else 2);
-        const ctx = c.ggml_init(.{ .mem_size = 1 << 20, .mem_buffer = null, .no_alloc = false }).?;
-        defer c.ggml_free(ctx);
+        harness_root.impl.c.gguf_set_val_u16(g, "split.no", no);
+        harness_root.impl.c.gguf_set_val_u16(g, "split.count", 2);
+        harness_root.impl.c.gguf_set_val_i32(g, "split.tensors.count", if (kind == .bad_count or kind == .missing_bad_count) 3 else 2);
+        const ctx = harness_root.impl.c.ggml_init(.{ .mem_size = 1 << 20, .mem_buffer = null, .no_alloc = false }).?;
+        defer harness_root.impl.c.ggml_free(ctx);
         const tname: [:0]const u8 = if (kind == .duplicate) "blk.0.dup" else if (i == 0) "blk.0.a" else if (kind == .ple_second) "per_layer_token_embd.weight" else "blk.1.b";
-        addTensor(g, ctx, tname, if (i == 0) c.GGML_TYPE_F16 else c.GGML_TYPE_Q8_0, 64);
-        if (!c.gguf_write_to_file(g, paths[i].ptr, false)) @panic("cannot write a split");
+        addTensor(g, ctx, tname, if (i == 0) harness_root.impl.c.GGML_TYPE_F16 else harness_root.impl.c.GGML_TYPE_Q8_0, 64);
+        if (!harness_root.impl.c.gguf_write_to_file(g, paths[i].ptr, false)) @panic("cannot write a split");
     }
     return paths[0];
 }
 
 /// The second file of `splitSet`'s set `name` in `dir`.
 fn splitSecond(dir: []const u8, name: []const u8) [:0]const u8 {
-    return gpa.printSentinel("{s}/{s}-00002-of-00002.gguf", .{ dir, name }, 0) catch unreachable;
+    return std.heap.c_allocator.printSentinel("{s}/{s}-00002-of-00002.gguf", .{ dir, name }, 0) catch unreachable;
 }
 
 /// Extra GGUF shards (5f490d7bf): a file of the given tensors and
 /// no other metadata -- with `numbered`, the split keys too, which the
 /// loader ignores on an extra. One tensor named `per_layer_token_embd.weight`
 /// makes it an external per-layer embedding table.
-fn shardFile(dir: []const u8, name: []const u8, tensors: []const [:0]const u8, ty: c.enum_ggml_type, numbered: bool) [:0]const u8 {
-    const g = c.gguf_init_empty().?;
-    defer c.gguf_free(g);
+fn shardFile(dir: []const u8, name: []const u8, tensors: []const [:0]const u8, ty: harness_root.impl.c.enum_ggml_type, numbered: bool) [:0]const u8 {
+    const g = harness_root.impl.c.gguf_init_empty().?;
+    defer harness_root.impl.c.gguf_free(g);
     if (numbered) {
-        c.gguf_set_val_u16(g, "split.no", 0);
-        c.gguf_set_val_u16(g, "split.count", 1);
-        c.gguf_set_val_i32(g, "split.tensors.count", @intCast(tensors.len));
+        harness_root.impl.c.gguf_set_val_u16(g, "split.no", 0);
+        harness_root.impl.c.gguf_set_val_u16(g, "split.count", 1);
+        harness_root.impl.c.gguf_set_val_i32(g, "split.tensors.count", @intCast(tensors.len));
     }
-    const ctx = c.ggml_init(.{ .mem_size = 1 << 20, .mem_buffer = null, .no_alloc = false }).?;
-    defer c.ggml_free(ctx);
+    const ctx = harness_root.impl.c.ggml_init(.{ .mem_size = 1 << 20, .mem_buffer = null, .no_alloc = false }).?;
+    defer harness_root.impl.c.ggml_free(ctx);
     for (tensors) |t| addTensor(g, ctx, t, ty, 64);
-    const path = gpa.printSentinel("{s}/{s}.gguf", .{ dir, name }, 0) catch unreachable;
-    if (!c.gguf_write_to_file(g, path.ptr, false)) @panic("cannot write a shard");
+    const path = std.heap.c_allocator.printSentinel("{s}/{s}.gguf", .{ dir, name }, 0) catch unreachable;
+    if (!harness_root.impl.c.gguf_write_to_file(g, path.ptr, false)) @panic("cannot write a shard");
     return path;
 }
 
@@ -1245,11 +1239,11 @@ fn shardFile(dir: []const u8, name: []const u8, tensors: []const [:0]const u8, t
 
 /// One layer's members against the C++'s, recursing into the nested
 /// structs with their path as the prefix.
-fn compareLayer(comptime T: type, comptime prefix: []const u8, r: *const c.llama_model, il: c_int, layer: *const T) void {
+fn compareLayer(comptime T: type, comptime prefix: []const u8, r: *const harness_root.impl.c.llama_model, il: c_int, layer: *const T) void {
     @setEvalBranchQuota(200_000);
     const info = @typeInfo(T).@"struct";
     inline for (info.field_names, info.field_types) |f, F| {
-        if (F == ?*c.ggml_tensor) {
+        if (F == ?*harness_root.impl.c.ggml_tensor) {
             const rt = ref_layer_tensor(r, il, prefix ++ f);
             const pt = @field(layer.*, f);
             expectStr("layer." ++ prefix ++ f, if (rt) |p| std.mem.span(p) else "(null)", if (pt) |p| std.mem.sliceTo(&p.name, 0) else "(null)");
@@ -1266,9 +1260,9 @@ pub fn main(init: std.process.Init) !void {
         std.process.exit(2);
     }
     const dir = args[1];
-    c.llama_log_set(logCb, null);
+    harness_root.impl.c.llama_log_set(logCb, null);
     harness_root.api.impl.llama_log_set(logCb, null);
-    c.ggml_log_set(logCb, null);
+    harness_root.impl.c.ggml_log_set(logCb, null);
 
     std.debug.print("  llama_hparams layout\n", .{});
     if (!checkLayout()) {
@@ -1281,7 +1275,7 @@ pub fn main(init: std.process.Init) !void {
     var hrm: ?[:0]const u8 = null;
     var nemotron_h: ?[:0]const u8 = null;
     for (args[2..]) |a| {
-        const path = try gpa.dupeSentinel(u8, a, 0);
+        const path = try std.heap.c_allocator.dupeSentinel(u8, a, 0);
         const name = std.fs.path.basename(a);
         if (std.mem.startsWith(u8, name, "Qwen3.5")) qwen = path;
         if (std.mem.startsWith(u8, name, "hrm_text-")) hrm = path;
@@ -1305,14 +1299,14 @@ pub fn main(init: std.process.Init) !void {
         runCase(.{ .name = "split: second missing", .path = splitSet(dir, base, "s-missing", .missing_second), .vocab_only = true });
         runCase(.{ .name = "split: duplicate tensor", .path = splitSet(dir, base, "s-dup", .duplicate), .vocab_only = true });
         runCase(.{ .name = "split: unrecognized name", .path = splitSet(dir, base, "s-name", .bad_name), .vocab_only = true });
-        runCase(.{ .name = "missing file", .path = try gpa.printSentinel("{s}/no-such-file.gguf", .{dir}, 0), .vocab_only = true });
+        runCase(.{ .name = "missing file", .path = try std.heap.c_allocator.printSentinel("{s}/no-such-file.gguf", .{dir}, 0), .vocab_only = true });
         // Extra shards and external per-layer embedding tables
         // (5f490d7bf), given as llama_model_load_from_splits' paths.
-        const ple = shardFile(dir, "ple", &.{"per_layer_token_embd.weight"}, c.GGML_TYPE_Q8_0, false);
-        const ple2 = shardFile(dir, "ple2", &.{"per_layer_token_embd.weight"}, c.GGML_TYPE_F16, false);
-        const ple_numbered = shardFile(dir, "ple-numbered", &.{"per_layer_token_embd.weight"}, c.GGML_TYPE_Q8_0, true);
-        const extra_dup = shardFile(dir, "extra-dup", &.{"output.weight"}, c.GGML_TYPE_F16, false);
-        const extra_new = shardFile(dir, "extra-new", &.{ "blk.9.x", "blk.9.y" }, c.GGML_TYPE_F16, false);
+        const ple = shardFile(dir, "ple", &.{"per_layer_token_embd.weight"}, harness_root.impl.c.GGML_TYPE_Q8_0, false);
+        const ple2 = shardFile(dir, "ple2", &.{"per_layer_token_embd.weight"}, harness_root.impl.c.GGML_TYPE_F16, false);
+        const ple_numbered = shardFile(dir, "ple-numbered", &.{"per_layer_token_embd.weight"}, harness_root.impl.c.GGML_TYPE_Q8_0, true);
+        const extra_dup = shardFile(dir, "extra-dup", &.{"output.weight"}, harness_root.impl.c.GGML_TYPE_F16, false);
+        const extra_new = shardFile(dir, "extra-new", &.{ "blk.9.x", "blk.9.y" }, harness_root.impl.c.GGML_TYPE_F16, false);
         const single = tensorFile(dir, base, "single", Tensors.tie, 0);
         const single_ple = tensorFile(dir, base, "single-ple", Tensors.withPle, 0);
         runCase(.{ .name = "extra: one file, given alone", .path = single, .vocab_only = true, .splits = &.{single} });
@@ -1322,7 +1316,7 @@ pub fn main(init: std.process.Init) !void {
         runCase(.{ .name = "extra: two PLEs", .path = single, .vocab_only = true, .splits = &.{ single, ple, ple2 } });
         runCase(.{ .name = "extra: duplicate, not PLE", .path = single, .vocab_only = true, .splits = &.{ single, extra_dup } });
         runCase(.{ .name = "extra: new tensors", .path = single, .vocab_only = true, .splits = &.{ single, extra_new } });
-        runCase(.{ .name = "extra: missing file", .path = single, .vocab_only = true, .splits = &.{ single, try gpa.printSentinel("{s}/no-such-extra.gguf", .{dir}, 0) } });
+        runCase(.{ .name = "extra: missing file", .path = single, .vocab_only = true, .splits = &.{ single, try std.heap.c_allocator.printSentinel("{s}/no-such-extra.gguf", .{dir}, 0) } });
 
         const s_extra = splitSet(dir, base, "s-extra", .ok);
         runCase(.{ .name = "split: given, with an extra", .path = s_extra, .vocab_only = true, .splits = &.{ s_extra, extra_new } });
@@ -1341,7 +1335,7 @@ pub fn main(init: std.process.Init) !void {
         runCase(.{ .name = "split: unrecognized name, given with a PLE", .path = s_name, .vocab_only = true, .splits = &.{ s_name, splitSecond(dir, "s-gname"), ple } });
         // A numbered split given from another directory wins over the one
         // the name implies, which is missing.
-        const sub = try gpa.printSentinel("{s}/sub", .{dir}, 0);
+        const sub = try std.heap.c_allocator.printSentinel("{s}/sub", .{dir}, 0);
         _ = std.c.mkdir(sub.ptr, 0o755);
         const s_moved = splitSet(dir, base, "s-moved", .missing_second);
         _ = splitSet(sub, base, "s-moved", .ok);
@@ -1490,7 +1484,7 @@ pub fn main(init: std.process.Init) !void {
     for (args[2..]) |a| {
         const name = std.fs.path.basename(a);
         if (!std.mem.startsWith(u8, name, "Qwen3.5")) continue;
-        const path = try gpa.dupeSentinel(u8, a, 0);
+        const path = try std.heap.c_allocator.dupeSentinel(u8, a, 0);
         var nb: [128]u8 = undefined;
         runFullCase(.{ .name = try std.fmt.bufPrint(&nb, "{s} (tensors)", .{name}), .path = path, .edit = Edit.none });
         if (first_qwen == null) first_qwen = path;
@@ -1535,7 +1529,7 @@ pub fn main(init: std.process.Init) !void {
         if (!std.mem.startsWith(u8, name, "gemma4-dense") and !std.mem.startsWith(u8, name, "gemma4-moe") and
             !std.mem.startsWith(u8, name, "qwen4exp-") and !std.mem.startsWith(u8, name, "hrm_text-")) continue;
         n_lazy += 1;
-        const path = try gpa.dupeSentinel(u8, a, 0);
+        const path = try std.heap.c_allocator.dupeSentinel(u8, a, 0);
         const variants = .{
             .{ "lazy: default (auto)", Edit.none },
             .{ "lazy: off", Edit.lazyOff },

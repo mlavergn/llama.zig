@@ -31,7 +31,7 @@ const mod = @import("module.zig");
 const llama = @import("llama");
 const stdlib = @import("stdlib");
 
-const token_null: mod.impl.c.llama_token = -1; // LLAMA_TOKEN_NULL
+const token_null: llama.impl.llama_c.llama_token = -1; // LLAMA_TOKEN_NULL
 
 // chatterbox's host voice encoder and perceiver (cbx_ref_cond)
 
@@ -69,16 +69,16 @@ pub const ProgressCallback = ?*const fn (f32, ?*anyopaque) callconv(.c) bool;
 /// Ports `mtmd_context_params` (mtmd.h:108 @b1b770d90).
 pub const ContextParams = extern struct {
     use_gpu: bool,
-    device: mod.impl.c.ggml_backend_dev_t,
+    device: llama.impl.llama_c.ggml_backend_dev_t,
     print_timings: bool,
     n_threads: c_int,
     image_marker: ?[*:0]const u8, // deprecated, use media_marker instead
     media_marker: ?[*:0]const u8,
-    flash_attn_type: mod.impl.c.enum_llama_flash_attn_type,
+    flash_attn_type: llama.impl.llama_c.enum_llama_flash_attn_type,
     warmup: bool, // whether to run a warmup encode pass after initialization
     image_min_tokens: c_int,
     image_max_tokens: c_int,
-    cb_eval: mod.impl.c.ggml_backend_sched_eval_callback,
+    cb_eval: llama.impl.llama_c.ggml_backend_sched_eval_callback,
     cb_eval_user_data: ?*anyopaque,
     batch_max_tokens: i32,
     progress_callback: ProgressCallback,
@@ -672,7 +672,7 @@ pub const AudioTokens = struct {
 /// Ports `mtmd_input_chunk` (mtmd.cpp:450 @b1b770d90).
 pub const InputChunk = struct {
     type: ChunkType = .text,
-    tokens_text: std.ArrayList(mod.impl.c.llama_token) = .empty,
+    tokens_text: std.ArrayList(llama.impl.llama_c.llama_token) = .empty,
     tokens_image: ?*ImageTokens = null,
     tokens_audio: ?*AudioTokens = null,
 
@@ -726,7 +726,7 @@ pub const InputChunk = struct {
         const n_tokens_text = try ser.read(u64);
         // reject before resize() so a tiny corrupted/malicious buffer can't force a huge allocation
         if (n_tokens_text > ser.remaining() / @sizeOf(i32)) return mod.clip.throwStr("tokens_text length exceeds buffer size");
-        try resizeZero(mod.impl.c.llama_token, &self.tokens_text, @intCast(n_tokens_text));
+        try resizeZero(llama.impl.llama_c.llama_token, &self.tokens_text, @intCast(n_tokens_text));
         for (self.tokens_text.items) |*t| t.* = try ser.read(i32);
 
         if (try ser.read(bool)) {
@@ -798,11 +798,11 @@ pub fn mtmd_default_marker() callconv(.c) [*:0]const u8 {
 }
 
 /// Ports `mtmd_to_flash_attn_type` (mtmd.cpp:574 @b1b770d90).
-fn toFlashAttnType(t: mod.impl.c.enum_llama_flash_attn_type) mod.impl.FlashAttnType {
+fn toFlashAttnType(t: llama.impl.llama_c.enum_llama_flash_attn_type) mod.impl.FlashAttnType {
     return switch (t) {
-        mod.impl.c.LLAMA_FLASH_ATTN_TYPE_AUTO => .auto,
-        mod.impl.c.LLAMA_FLASH_ATTN_TYPE_DISABLED => .disabled,
-        mod.impl.c.LLAMA_FLASH_ATTN_TYPE_ENABLED => .enabled,
+        llama.impl.llama_c.LLAMA_FLASH_ATTN_TYPE_AUTO => .auto,
+        llama.impl.llama_c.LLAMA_FLASH_ATTN_TYPE_DISABLED => .disabled,
+        llama.impl.llama_c.LLAMA_FLASH_ATTN_TYPE_ENABLED => .enabled,
         else => .auto,
     };
 }
@@ -816,7 +816,7 @@ pub fn mtmd_context_params_default() callconv(.c) ContextParams {
         .n_threads = 4,
         .image_marker = null,
         .media_marker = mtmd_default_marker(),
-        .flash_attn_type = mod.impl.c.LLAMA_FLASH_ATTN_TYPE_AUTO,
+        .flash_attn_type = llama.impl.llama_c.LLAMA_FLASH_ATTN_TYPE_AUTO,
         .warmup = true,
         .image_min_tokens = -1,
         .image_max_tokens = -1,
@@ -860,8 +860,8 @@ pub const Context = struct {
     n_threads: c_int = 0,
     media_marker: Str = .{},
     n_embd_text: c_int = -1, // -1 means llm context not provided, skip checking this
-    vocab: ?*const mod.impl.c.struct_llama_vocab = null, // can be nullptr if text_model is not provided
-    text_model: ?*const mod.impl.c.struct_llama_model = null, // for the token embeddings of mtmd_audio_stream
+    vocab: ?*const llama.impl.llama_c.struct_llama_vocab = null, // can be nullptr if text_model is not provided
+    text_model: ?*const llama.impl.llama_c.struct_llama_model = null, // for the token embeddings of mtmd_audio_stream
     // The C++ leaves this indeterminate without a text model; `normal` is
     // what fresh heap memory gives.
     pos_type: PosType = .normal,
@@ -877,14 +877,14 @@ pub const Context = struct {
     // for llava-uhd style models, we need special tokens in-between slices
     // minicpmv calls them "slices", llama 4 calls them "tiles"
     slice_tmpl: SliceTmpl = .none,
-    tok_ov_img_start: std.ArrayList(mod.impl.c.llama_token) = .empty, // overview image
-    tok_ov_img_end: std.ArrayList(mod.impl.c.llama_token) = .empty, // overview image
-    tok_slices_start: std.ArrayList(mod.impl.c.llama_token) = .empty, // start of all slices
-    tok_slices_end: std.ArrayList(mod.impl.c.llama_token) = .empty, // end of all slices
-    tok_sli_img_start: std.ArrayList(mod.impl.c.llama_token) = .empty, // single slice start
-    tok_sli_img_end: std.ArrayList(mod.impl.c.llama_token) = .empty, // single slice end
-    tok_sli_img_mid: std.ArrayList(mod.impl.c.llama_token) = .empty, // between 2 slices
-    tok_row_end: std.ArrayList(mod.impl.c.llama_token) = .empty, // end of row
+    tok_ov_img_start: std.ArrayList(llama.impl.llama_c.llama_token) = .empty, // overview image
+    tok_ov_img_end: std.ArrayList(llama.impl.llama_c.llama_token) = .empty, // overview image
+    tok_slices_start: std.ArrayList(llama.impl.llama_c.llama_token) = .empty, // start of all slices
+    tok_slices_end: std.ArrayList(llama.impl.llama_c.llama_token) = .empty, // end of all slices
+    tok_sli_img_start: std.ArrayList(llama.impl.llama_c.llama_token) = .empty, // single slice start
+    tok_sli_img_end: std.ArrayList(llama.impl.llama_c.llama_token) = .empty, // single slice end
+    tok_sli_img_mid: std.ArrayList(llama.impl.llama_c.llama_token) = .empty, // between 2 slices
+    tok_row_end: std.ArrayList(llama.impl.llama_c.llama_token) = .empty, // end of row
     tok_row_end_trail: bool = false,
     ov_img_first: bool = false,
 
@@ -907,7 +907,7 @@ pub const Context = struct {
     /// contexts as the C++'s does -- its destructor never runs for an
     /// object whose constructor threw, and the pointers are raw -- so that
     /// freeing them logs nothing upstream does not.
-    fn create(mmproj_fname: [*:0]const u8, text_model: ?*const mod.impl.c.struct_llama_model, ctx_params: *const ContextParams, no_alloc: bool) mod.clip.Error!*Context {
+    fn create(mmproj_fname: [*:0]const u8, text_model: ?*const llama.impl.llama_c.struct_llama_model, ctx_params: *const ContextParams, no_alloc: bool) mod.clip.Error!*Context {
         const self = try std.heap.c_allocator.create(Context);
         self.* = .{};
         // errdefers run last-registered first: the members go before the
@@ -935,8 +935,8 @@ pub const Context = struct {
         if (text_model != null) {
             const decoder_rope_type = llama.api.model.llama_model_rope_type(text_model);
             switch (decoder_rope_type) {
-                mod.impl.c.LLAMA_ROPE_TYPE_NONE, mod.impl.c.LLAMA_ROPE_TYPE_NORM, mod.impl.c.LLAMA_ROPE_TYPE_NEOX => self.pos_type = .normal,
-                mod.impl.c.LLAMA_ROPE_TYPE_MROPE, mod.impl.c.LLAMA_ROPE_TYPE_IMROPE => self.pos_type = .mrope,
+                llama.impl.llama_c.LLAMA_ROPE_TYPE_NONE, llama.impl.llama_c.LLAMA_ROPE_TYPE_NORM, llama.impl.llama_c.LLAMA_ROPE_TYPE_NEOX => self.pos_type = .normal,
+                llama.impl.llama_c.LLAMA_ROPE_TYPE_MROPE, llama.impl.llama_c.LLAMA_ROPE_TYPE_IMROPE => self.pos_type = .mrope,
                 else => return mod.clip.throwErr("unsupported decoder rope type: %d\n", .{@as(c_int, decoder_rope_type)}),
             }
         }
@@ -952,9 +952,9 @@ pub const Context = struct {
         };
 
         const buft = if (device != null)
-            mod.impl.c.ggml_backend_dev_buffer_type(device)
+            llama.impl.llama_c.ggml_backend_dev_buffer_type(device)
         else
-            mod.impl.c.ggml_backend_dev_buffer_type(mod.impl.c.ggml_backend_dev_by_type(mod.impl.c.GGML_BACKEND_DEVICE_TYPE_CPU));
+            llama.impl.llama_c.ggml_backend_dev_buffer_type(llama.impl.llama_c.ggml_backend_dev_by_type(llama.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_CPU));
         self.models = try mod.clip.modelLoad(std.mem.span(mmproj_fname), &model_params, buft);
 
         // soprano and pocket-tts without voice cloning have no encoder
@@ -981,9 +981,9 @@ pub const Context = struct {
         {
             const be = self.backends.?;
             for (be.ptrs.items, 0..) |b, i| {
-                const size = mod.impl.c.ggml_backend_sched_get_buffer_size(be.sched, b);
+                const size = llama.impl.llama_c.ggml_backend_sched_get_buffer_size(be.sched, b);
                 if (size > 1) {
-                    mod.impl.logInf("%s: %10s compute buffer size = %8.2f MiB\n", .{ "mtmd_context", mod.impl.c.ggml_backend_buft_name(be.bufts.items[i]), @as(f64, @floatFromInt(size)) / 1024.0 / 1024.0 });
+                    mod.impl.logInf("%s: %10s compute buffer size = %8.2f MiB\n", .{ "mtmd_context", llama.impl.llama_c.ggml_backend_buft_name(be.bufts.items[i]), @as(f64, @floatFromInt(size)) / 1024.0 / 1024.0 });
                 }
             }
         }
@@ -1017,7 +1017,7 @@ pub const Context = struct {
         return self;
     }
 
-    fn setTokens(list: *std.ArrayList(mod.impl.c.llama_token), toks: []const mod.impl.c.llama_token) !void {
+    fn setTokens(list: *std.ArrayList(llama.impl.llama_c.llama_token), toks: []const llama.impl.llama_c.llama_token) !void {
         list.clearRetainingCapacity();
         try list.appendSlice(std.heap.c_allocator, toks);
     }
@@ -1471,13 +1471,13 @@ pub const Context = struct {
 
     /// Ports `lookup_token` (mtmd.cpp:1337 @b1b770d90): the first token
     /// whose special piece is `token_text`.
-    fn lookupToken(self: *const Context, token_text: []const u8) mod.impl.c.llama_token {
+    fn lookupToken(self: *const Context, token_text: []const u8) llama.impl.llama_c.llama_token {
         // TODO @ngxson : this case is currently hit by mtmd_get_memory_usage
         const vocab = self.vocab orelse return token_null;
         const n_vocab = llama.api.vocab.llama_vocab_n_tokens(vocab);
         var piece: std.ArrayList(u8) = .empty;
         defer piece.deinit(std.heap.c_allocator);
-        var i: mod.impl.c.llama_token = 0;
+        var i: llama.impl.llama_c.llama_token = 0;
         while (i < n_vocab) : (i += 1) {
             tokenToPiece(vocab, i, true, &piece) catch return token_null;
             if (std.mem.eql(u8, piece.items, token_text)) return i;
@@ -1487,7 +1487,7 @@ pub const Context = struct {
 
     /// Ports `token_to_piece` (mtmd.cpp:1352 @b1b770d90). The first try
     /// uses libc++'s short-string capacity, 22 bytes.
-    fn tokenToPiece(vocab: *const mod.impl.c.struct_llama_vocab, token: mod.impl.c.llama_token, special: bool, piece: *std.ArrayList(u8)) !void {
+    fn tokenToPiece(vocab: *const llama.impl.llama_c.struct_llama_vocab, token: llama.impl.llama_c.llama_token, special: bool, piece: *std.ArrayList(u8)) !void {
         try resizeZero(u8, piece, 22); // using string internal cache
         const n_chars = llama.api.vocab.llama_token_to_piece(vocab, token, piece.items.ptr, @intCast(piece.items.len), 0, special);
         if (n_chars < 0) {
@@ -1501,7 +1501,7 @@ pub const Context = struct {
 };
 
 /// Ports `mtmd_init_from_file` (mtmd.cpp:1370 @b1b770d90).
-pub fn mtmd_init_from_file(mmproj_fname: [*:0]const u8, text_model: ?*const mod.impl.c.struct_llama_model, ctx_params: ContextParams) callconv(.c) ?*Context {
+pub fn mtmd_init_from_file(mmproj_fname: [*:0]const u8, text_model: ?*const llama.impl.llama_c.struct_llama_model, ctx_params: ContextParams) callconv(.c) ?*Context {
     return Context.create(mmproj_fname, text_model, &ctx_params, false) catch |e| {
         mod.impl.logErr("%s: error: %s\n", .{ "mtmd_init_from_file", whatOf(e) });
         return null;
@@ -1578,7 +1578,7 @@ const Tokenizer = struct {
     input_text: []const u8, // note: can contain null bytes
     add_special: bool,
     parse_special: bool,
-    vocab: ?*const mod.impl.c.struct_llama_vocab,
+    vocab: ?*const llama.impl.llama_c.struct_llama_vocab,
 
     parts: std.ArrayList(InternalPart) = .empty,
     // these will be freed when the tokenizer finishes
@@ -1659,7 +1659,7 @@ const Tokenizer = struct {
     fn deinit(self: *Tokenizer) void {
         for (self.bm_from_lazy.items) |b| b.destroy();
         self.bm_from_lazy.deinit(std.heap.c_allocator);
-        for (self.text_from_lazy.items) |s| stdlib.libc.free(s);
+        for (self.text_from_lazy.items) |s| std.c.free(s);
         self.text_from_lazy.deinit(std.heap.c_allocator);
         for (self.soundtracks.items) |*st| st.deinit();
         self.soundtracks.deinit(std.heap.c_allocator);
@@ -1801,7 +1801,7 @@ const Tokenizer = struct {
     }
 
     /// Ports `add_text` (mtmd.cpp:1629 @b1b770d90), the tokens overload.
-    fn addTextTokens(self: *Tokenizer, tokens: []const mod.impl.c.llama_token) !void {
+    fn addTextTokens(self: *Tokenizer, tokens: []const llama.impl.llama_c.llama_token) !void {
         if (tokens.len == 0) return;
         // if last entry is also a text chunk, add tokens to it instead of creating new chunk
         const entries = self.cur.entries.items;
@@ -2354,12 +2354,12 @@ const Tokenizer = struct {
 
     /// Ports `mtmd_tokenize_text_internal` (mtmd.cpp:2213 @b1b770d90),
     /// copied upstream from `common_tokenize`. The caller owns the tokens.
-    fn tokenizeTextInternal(vocab: *const mod.impl.c.struct_llama_vocab, text: []const u8, add_special: bool, parse_special: bool) mod.clip.Error!std.ArrayList(mod.impl.c.llama_token) {
+    fn tokenizeTextInternal(vocab: *const llama.impl.llama_c.struct_llama_vocab, text: []const u8, add_special: bool, parse_special: bool) mod.clip.Error!std.ArrayList(llama.impl.llama_c.llama_token) {
         // upper limit for the number of tokens
         var n_tokens: c_int = @truncate(@as(isize, @intCast(text.len)) + 2 * @as(isize, @intFromBool(add_special)));
-        var result: std.ArrayList(mod.impl.c.llama_token) = .empty;
+        var result: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
         errdefer result.deinit(std.heap.c_allocator);
-        try resizeZero(mod.impl.c.llama_token, &result, @intCast(n_tokens));
+        try resizeZero(llama.impl.llama_c.llama_token, &result, @intCast(n_tokens));
         // libllama's throw (a vocabulary with no byte token for a byte) is
         // `error.Thrown` here, rethrown for `mtmd_tokenize`'s catch, as the
         // C++'s exception reaches it.
@@ -2370,7 +2370,7 @@ const Tokenizer = struct {
             return mod.clip.throwStr("Tokenization failed: input text too large, tokenization result exceeds int32_t limit");
         }
         if (n_tokens < 0) {
-            try resizeZero(mod.impl.c.llama_token, &result, @intCast(-n_tokens));
+            try resizeZero(llama.impl.llama_c.llama_token, &result, @intCast(-n_tokens));
             const check = llama.api.vocab.tokenize(vocab, text, result.items, add_special, parse_special, &exc) catch
                 return mod.clip.throwStr(exc.what());
             mod.impl.ggmlAssert(check == -n_tokens, "mtmd.cpp", 2231, "check == -n_tokens");
@@ -3917,10 +3917,10 @@ pub fn mtmd_input_chunk_get_type(chunk: *const InputChunk) callconv(.c) ChunkTyp
 }
 
 /// Ports `mtmd_input_chunk_get_tokens_text` (mtmd.cpp:3528 @b1b770d90).
-pub fn mtmd_input_chunk_get_tokens_text(chunk: *const InputChunk, n_tokens_output: *usize) callconv(.c) ?[*]const mod.impl.c.llama_token {
+pub fn mtmd_input_chunk_get_tokens_text(chunk: *const InputChunk, n_tokens_output: *usize) callconv(.c) ?[*]const llama.impl.llama_c.llama_token {
     if (chunk.type == .text) {
         n_tokens_output.* = chunk.tokens_text.items.len;
-        return dataPtr(mod.impl.c.llama_token, &chunk.tokens_text);
+        return dataPtr(llama.impl.llama_c.llama_token, &chunk.tokens_text);
     }
     n_tokens_output.* = 0;
     return null;
@@ -3943,7 +3943,7 @@ pub fn mtmd_input_chunk_get_n_tokens(chunk: *const InputChunk) callconv(.c) usiz
 }
 
 /// Ports `mtmd_input_chunk_get_n_pos` (mtmd.cpp:3556 @b1b770d90).
-pub fn mtmd_input_chunk_get_n_pos(chunk: *const InputChunk) callconv(.c) mod.impl.c.llama_pos {
+pub fn mtmd_input_chunk_get_n_pos(chunk: *const InputChunk) callconv(.c) llama.impl.llama_c.llama_pos {
     return switch (chunk.type) {
         .text => @truncate(@as(isize, @intCast(chunk.tokens_text.items.len))),
         .image => mtmd_image_tokens_get_n_pos(chunk.tokens_image.?),
@@ -4085,7 +4085,7 @@ fn canvasScale(coord: u32, grid: u32, canvas: u32) u32 {
 /// fills its own cell, and the time component is the origin, in slot z. A
 /// tile takes one position in slot t (the KV cache position), the
 /// separators after it take one position each.
-fn canvasDecoderPos(image_tokens: *const ImageTokens, pos_0: mod.impl.c.llama_pos, i_in: usize) DecoderPos {
+fn canvasDecoderPos(image_tokens: *const ImageTokens, pos_0: llama.impl.llama_c.llama_pos, i_in: usize) DecoderPos {
     const entries = image_tokens.batch_f32.entries.items;
     const grid = entries[0].anyres;
     const nx = image_tokens.nx;
@@ -4139,7 +4139,7 @@ fn canvasDecoderPos(image_tokens: *const ImageTokens, pos_0: mod.impl.c.llama_po
 /// Ports `mtmd_image_tokens_get_decoder_pos` (mtmd.cpp:3732 @b1b770d90).
 /// The arithmetic is the C++'s: `llama_pos + size_t` in `size_t`,
 /// truncated into each `uint32_t`.
-pub fn mtmd_image_tokens_get_decoder_pos(image_tokens: *const ImageTokens, pos_0: mod.impl.c.llama_pos, i: usize) callconv(.c) DecoderPos {
+pub fn mtmd_image_tokens_get_decoder_pos(image_tokens: *const ImageTokens, pos_0: llama.impl.llama_c.llama_pos, i: usize) callconv(.c) DecoderPos {
     var pos: DecoderPos = undefined;
     const p0: usize = @bitCast(@as(isize, pos_0));
     const p0u: u32 = @bitCast(pos_0);
@@ -4198,7 +4198,7 @@ pub fn mtmd_image_tokens_get_id(image_tokens: *const ImageTokens) callconv(.c) [
 }
 
 /// Ports `mtmd_image_tokens_get_n_pos` (mtmd.cpp:3802 @b1b770d90).
-pub fn mtmd_image_tokens_get_n_pos(image_tokens: *const ImageTokens) callconv(.c) mod.impl.c.llama_pos {
+pub fn mtmd_image_tokens_get_n_pos(image_tokens: *const ImageTokens) callconv(.c) llama.impl.llama_c.llama_pos {
     return switch (image_tokens.pos) {
         .mrope => @bitCast(@max(image_tokens.nx, image_tokens.ny)),
         .normal => @bitCast(image_tokens.nTokens()),
@@ -4208,9 +4208,9 @@ pub fn mtmd_image_tokens_get_n_pos(image_tokens: *const ImageTokens) callconv(.c
         .hunyuanvl => @bitCast(image_tokens.nTokens()),
         .canvas => blk: {
             // one position per tile, plus one per separator
-            var n_pos: mod.impl.c.llama_pos = 0;
+            var n_pos: llama.impl.llama_c.llama_pos = 0;
             for (image_tokens.batch_f32.entries.items) |*entry| {
-                n_pos +%= 1 +% @as(mod.impl.c.llama_pos, @intCast(mod.impl.suffixRows(entry.suffix_type).len));
+                n_pos +%= 1 +% @as(llama.impl.llama_c.llama_pos, @intCast(mod.impl.suffixRows(entry.suffix_type).len));
             }
             break :blk n_pos;
         },
@@ -4241,7 +4241,7 @@ pub fn mtmd_test_create_input_chunks() callconv(.c) ?*InputChunks {
 }
 
 /// Ports `mtmd_log_set` (mtmd.cpp:3865 @b1b770d90).
-pub fn mtmd_log_set(log_callback: mod.impl.c.ggml_log_callback, user_data: ?*anyopaque) callconv(.c) void {
+pub fn mtmd_log_set(log_callback: llama.impl.llama_c.ggml_log_callback, user_data: ?*anyopaque) callconv(.c) void {
     mod.impl.g_logger_state.log_callback = log_callback orelse mod.impl.logCallbackDefault;
     mod.impl.g_logger_state.log_callback_user_data = user_data;
 }
@@ -4255,7 +4255,7 @@ pub fn mtmd_get_cap_from_file(fname: [*:0]const u8) callconv(.c) Caps {
     return .{ .inp_audio = tmp.has_audio, .inp_vision = tmp.has_vision, .gen_audio = tmp.has_gen_audio };
 }
 
-fn stubLogCallback(level: mod.impl.c.enum_ggml_log_level, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
+fn stubLogCallback(level: llama.impl.llama_c.enum_ggml_log_level, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
     _ = level;
     _ = text;
     _ = user_data;
@@ -4326,7 +4326,7 @@ pub const AudioStreamParams = extern struct {
 
     // tokens that open the stream, they go out with the first rows (default: none)
     // with the prompt of its "asr" chat template, LFM3-Audio transcribes live
-    prompt: ?[*]const mod.impl.c.llama_token,
+    prompt: ?[*]const llama.impl.llama_c.llama_token,
     n_prompt: usize,
 };
 
@@ -4341,7 +4341,7 @@ const StreamVoxtralRt = struct {
     n_right_pad: c_int = 0, // silence tokens added by flush()
     log_mel_max: f32 = 0.0, // global_log_mel_max in params.json
 
-    prefix: std.ArrayList(mod.impl.c.llama_token) = .empty, // text tokens paired with the first rows
+    prefix: std.ArrayList(llama.impl.llama_c.llama_token) = .empty, // text tokens paired with the first rows
 
     cache: mod.audio.Cache = .{},
 
@@ -4367,9 +4367,9 @@ const StreamLfm3a = struct {
     win: c_int = 0, // samples per mel frame
     enc_state: ?*mod.clip.EncState = null,
 
-    prompt: std.ArrayList(mod.impl.c.llama_token) = .empty, // empty: the rows of a chat turn
-    tok_text_end: mod.impl.c.llama_token = token_null,
-    tok_mixed_end: mod.impl.c.llama_token = token_null,
+    prompt: std.ArrayList(llama.impl.llama_c.llama_token) = .empty, // empty: the rows of a chat turn
+    tok_text_end: llama.impl.llama_c.llama_token = token_null,
+    tok_mixed_end: llama.impl.llama_c.llama_token = token_null,
     soft_seq_rows: i64 = 0,
     max_seq_rows: i64 = 0,
 
@@ -4381,7 +4381,7 @@ const StreamLfm3a = struct {
     n_chunk_text: i32 = 0,
     n_chunk_rows: i64 = 0,
     n_seq_rows: i64 = 0, // audio rows since the sequence started
-    closing: std.ArrayList(mod.impl.c.llama_token) = .empty, // the tokens that close the last chunk, they go in before the next one
+    closing: std.ArrayList(llama.impl.llama_c.llama_token) = .empty, // the tokens that close the last chunk, they go in before the next one
     tok_embd: std.ArrayList(f32) = .empty,
     // the audio markers of the model (LFM3-Omni), as rows around the audio
     beg_rows: std.ArrayList(f32) = .empty,
@@ -4559,7 +4559,7 @@ pub const AudioStream = struct {
         m.n_right_pad = n_delay + 1 + 10;
         {
             const pad_str = "[STREAMING_PAD]";
-            var pad: [8]mod.impl.c.llama_token = undefined;
+            var pad: [8]llama.impl.llama_c.llama_token = undefined;
             const n_pad = llama.api.vocab.llama_tokenize(vocab, pad_str, pad_str.len, &pad, pad.len, false, true);
             if (n_pad != 1) {
                 mod.impl.logErr("%s: cannot find the %s token\n", .{ func, @as([*:0]const u8, pad_str) });
@@ -4675,7 +4675,7 @@ pub const AudioStream = struct {
 
     /// Ports `mtmd_audio_stream_add_rows` (mtmd.cpp:4431 @b1b770d90): out rows =
     /// audio embeddings + token embeddings.
-    fn voxtralAddRows(self: *AudioStream, tokens: [*]const mod.impl.c.llama_token, n: usize) mod.clip.Error!bool {
+    fn voxtralAddRows(self: *AudioStream, tokens: [*]const llama.impl.llama_c.llama_token, n: usize) mod.clip.Error!bool {
         const m = &self.model.voxtral_rt;
         const n_embd: usize = @intCast(self.n_embd);
         try resizeZero(f32, &m.tok_embd, n * n_embd);
@@ -4691,7 +4691,7 @@ pub const AudioStream = struct {
     }
 
     /// Ports `step` (mtmd.cpp:4446 @b1b770d90), a member of `mtmd_audio_stream_voxtral_rt`.
-    fn voxtralStep(self: *AudioStream, last_token_in: mod.impl.c.llama_token) mod.clip.Error!i32 {
+    fn voxtralStep(self: *AudioStream, last_token_in: llama.impl.llama_c.llama_token) mod.clip.Error!i32 {
         const m = &self.model.voxtral_rt;
         var last_token = last_token_in;
         const force = self.pending_flush;
@@ -4729,8 +4729,8 @@ pub const AudioStream = struct {
     // ---- LFM3-Audio ----
 
     /// The `find_token` lambda of `mtmd_audio_stream_lfm3a::init`.
-    fn lfm3aFindToken(vocab: ?*const mod.impl.c.struct_llama_vocab, piece: [:0]const u8) mod.impl.c.llama_token {
-        var tok: [2]mod.impl.c.llama_token = undefined;
+    fn lfm3aFindToken(vocab: ?*const llama.impl.llama_c.struct_llama_vocab, piece: [:0]const u8) llama.impl.llama_c.llama_token {
+        var tok: [2]llama.impl.llama_c.llama_token = undefined;
         const n = llama.api.vocab.llama_tokenize(vocab, piece.ptr, @intCast(piece.len), &tok, 2, false, true);
         return if (n == 1) tok[0] else token_null;
     }
@@ -4743,7 +4743,7 @@ pub const AudioStream = struct {
         if (text.len == 0) return true;
         const ctx = self.ctx;
         const vocab = llama.api.model.llama_model_get_vocab(ctx.text_model);
-        const tokens = try std.heap.c_allocator.alloc(mod.impl.c.llama_token, text.len + 4);
+        const tokens = try std.heap.c_allocator.alloc(llama.impl.llama_c.llama_token, text.len + 4);
         defer std.heap.c_allocator.free(tokens);
         @memset(tokens, 0);
         const n = llama.api.vocab.llama_tokenize(vocab, text.ptr, @intCast(text.len), tokens.ptr, @intCast(tokens.len), false, true);
@@ -4887,7 +4887,7 @@ pub const AudioStream = struct {
     }
 
     /// Ports `step` (mtmd.cpp:4631 @b1b770d90), a member of `mtmd_audio_stream_lfm3a`.
-    fn lfm3aStep(self: *AudioStream, last_token: mod.impl.c.llama_token) mod.clip.Error!i32 {
+    fn lfm3aStep(self: *AudioStream, last_token: llama.impl.llama_c.llama_token) mod.clip.Error!i32 {
         const m = &self.model.lfm3a;
         const flush = self.pending_flush;
         self.pending_flush = false;
@@ -4920,7 +4920,7 @@ pub const AudioStream = struct {
     }
 
     /// Ports `add_tokens` (mtmd.cpp:4667 @b1b770d90), a member of `mtmd_audio_stream_lfm3a`.
-    fn lfm3aAddTokens(self: *AudioStream, tokens: [*]const mod.impl.c.llama_token, n: usize) mod.clip.Error!bool {
+    fn lfm3aAddTokens(self: *AudioStream, tokens: [*]const llama.impl.llama_c.llama_token, n: usize) mod.clip.Error!bool {
         if (n == 0) return true;
         const m = &self.model.lfm3a;
         try resizeZero(f32, &m.tok_embd, n * @as(usize, @intCast(self.n_embd)));
@@ -4935,7 +4935,7 @@ pub const AudioStream = struct {
     /// Ports `step_live` (mtmd.cpp:4681 @b1b770d90), a member of `mtmd_audio_stream_lfm3a`:
     /// `last_token` continues the text of the chunk, or <|text_end|> closes it
     /// and the next 12 rows go out (the rest at the end).
-    fn lfm3aStepLive(self: *AudioStream, last_token_in: mod.impl.c.llama_token) mod.clip.Error!i32 {
+    fn lfm3aStepLive(self: *AudioStream, last_token_in: llama.impl.llama_c.llama_token) mod.clip.Error!i32 {
         const m = &self.model.lfm3a;
         var last_token = last_token_in;
         self.out.clearRetainingCapacity();
@@ -5158,7 +5158,7 @@ pub const AudioStream = struct {
             // next segment starts from a zero state
             m.seg_start = seg_end;
             self.n_frames = 0;
-            mod.impl.c.ggml_backend_buffer_clear(m.enc_state.?.buf, 0);
+            llama.impl.llama_c.ggml_backend_buffer_clear(m.enc_state.?.buf, 0);
         }
 
         // rows carry no text, all of them go out at once and last_token is not used
@@ -5277,7 +5277,7 @@ pub fn mtmd_audio_stream_flush(s: *AudioStream, end: bool) callconv(.c) i32 {
 /// `last_token` is the token sampled from the previous row, `LLAMA_TOKEN_NULL`
 /// before the first sample. `> 0` rows ready, 0 more audio is needed, -1 end of
 /// stream, -2 error.
-pub fn mtmd_audio_stream_step(s: *AudioStream, last_token: mod.impl.c.llama_token) callconv(.c) i32 {
+pub fn mtmd_audio_stream_step(s: *AudioStream, last_token: llama.impl.llama_c.llama_token) callconv(.c) i32 {
     s.ctx.compute_mutex.lock();
     defer s.ctx.compute_mutex.unlock();
     return (switch (s.model) {
@@ -5339,5 +5339,5 @@ test "decoder positions" {
     var t: ImageTokens = .{ .nx = 3, .ny = 2, .pos = .mrope };
     const p = mtmd_image_tokens_get_decoder_pos(&t, 10, 4);
     try std.testing.expectEqual(DecoderPos{ .t = 10, .x = 11, .y = 11, .z = 0 }, p);
-    try std.testing.expectEqual(@as(mod.impl.c.llama_pos, 3), mtmd_image_tokens_get_n_pos(&t));
+    try std.testing.expectEqual(@as(llama.impl.llama_c.llama_pos, 3), mtmd_image_tokens_get_n_pos(&t));
 }

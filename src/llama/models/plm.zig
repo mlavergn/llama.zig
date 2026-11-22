@@ -99,49 +99,49 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 
         // Self-attention.
         {
-            var q: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, layer.wq, cur);
+            var q: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_mul_mat(ctx, layer.wq, cur);
             b.cb(q, "q", il);
 
             // `{n_embd_head_k, n_head, n_tokens}`; RoPE is applied to the
             // trailing dimensions only.
-            q = llama.impl.c.ggml_reshape_3d(ctx, q, hp.nEmbdHeadK(0), b.n_head, b.n_tokens);
+            q = llama.impl.llama_c.ggml_reshape_3d(ctx, q, hp.nEmbdHeadK(0), b.n_head, b.n_tokens);
             b.cb(q, "q", il);
 
             // `{n_embd, kv_lora_rank + n_embd_head_qk_rope} * {n_embd, n_tokens} -> {kv_lora_rank + n_embd_head_qk_rope, n_tokens}`.
-            const kv_pe_compresseed: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, layer.wkv_a_mqa, cur);
+            const kv_pe_compresseed: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_mul_mat(ctx, layer.wkv_a_mqa, cur);
             b.cb(kv_pe_compresseed, "kv_pe_compresseed", il);
 
             // Split into `{kv_lora_rank, n_tokens}`.
-            var kv_compressed: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, kv_pe_compresseed, kv_lora_rank, b.n_tokens, kv_pe_compresseed.nb[1], 0);
+            var kv_compressed: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_2d(ctx, kv_pe_compresseed, kv_lora_rank, b.n_tokens, kv_pe_compresseed.nb[1], 0);
             b.cb(kv_compressed, "kv_compressed", il);
 
             // And `{n_embd_head_qk_rope, n_tokens}`.
-            var k_pe: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, kv_pe_compresseed, n_embd_head_qk_rope, 1, b.n_tokens, kv_pe_compresseed.nb[1], kv_pe_compresseed.nb[1], llama.impl.c.ggml_row_size(kv_pe_compresseed.type, kv_lora_rank));
+            var k_pe: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, kv_pe_compresseed, n_embd_head_qk_rope, 1, b.n_tokens, kv_pe_compresseed.nb[1], kv_pe_compresseed.nb[1], llama.impl.llama_c.ggml_row_size(kv_pe_compresseed.type, kv_lora_rank));
             b.cb(k_pe, "k_pe", il);
 
             kv_compressed = b.buildNorm(kv_compressed, layer.attn_kv_a_norm, null, .rms, il);
             b.cb(kv_compressed, "kv_compressed", il);
 
             // `{kv_lora_rank, n_head * (n_embd_head_qk_nope + n_embd_head_v)} * {kv_lora_rank, n_tokens} -> {n_head * (n_embd_head_qk_nope + n_embd_head_v), n_tokens}`.
-            const kv: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, layer.wkv_b, kv_compressed);
+            const kv: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_mul_mat(ctx, layer.wkv_b, kv_compressed);
             b.cb(kv, "kv", il);
 
             // Split into `{n_head * n_embd_head_qk_nope, n_tokens}`.
-            const k_nope: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, kv, n_embd_head_qk_nope, b.n_head, b.n_tokens, llama.impl.c.ggml_row_size(kv.type, n_embd_head_qk_nope + hp.nEmbdHeadV(0)), llama.impl.c.ggml_row_size(kv.type, b.n_head * (n_embd_head_qk_nope + hp.nEmbdHeadV(0))), 0);
+            const k_nope: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, kv, n_embd_head_qk_nope, b.n_head, b.n_tokens, llama.impl.llama_c.ggml_row_size(kv.type, n_embd_head_qk_nope + hp.nEmbdHeadV(0)), llama.impl.llama_c.ggml_row_size(kv.type, b.n_head * (n_embd_head_qk_nope + hp.nEmbdHeadV(0))), 0);
             b.cb(k_nope, "k_nope", il);
 
             // And `{n_head * n_embd_head_v, n_tokens}`.
-            var v_states: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, kv, hp.nEmbdHeadV(0), b.n_head, b.n_tokens, llama.impl.c.ggml_row_size(kv.type, (n_embd_head_qk_nope + hp.nEmbdHeadV(0))), llama.impl.c.ggml_row_size(kv.type, (n_embd_head_qk_nope + hp.nEmbdHeadV(0)) * b.n_head), llama.impl.c.ggml_row_size(kv.type, (n_embd_head_qk_nope)));
+            var v_states: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, kv, hp.nEmbdHeadV(0), b.n_head, b.n_tokens, llama.impl.llama_c.ggml_row_size(kv.type, (n_embd_head_qk_nope + hp.nEmbdHeadV(0))), llama.impl.llama_c.ggml_row_size(kv.type, (n_embd_head_qk_nope + hp.nEmbdHeadV(0)) * b.n_head), llama.impl.llama_c.ggml_row_size(kv.type, (n_embd_head_qk_nope)));
             b.cb(v_states, "v_states", il);
 
-            v_states = llama.impl.c.ggml_cont(ctx, v_states);
+            v_states = llama.impl.llama_c.ggml_cont(ctx, v_states);
             b.cb(v_states, "v_states", il);
 
-            v_states = llama.impl.c.ggml_view_2d(ctx, v_states, hp.nEmbdHeadV(0) * b.n_head, b.n_tokens, llama.impl.c.ggml_row_size(kv.type, hp.nEmbdHeadV(0) * b.n_head), 0);
+            v_states = llama.impl.llama_c.ggml_view_2d(ctx, v_states, hp.nEmbdHeadV(0) * b.n_head, b.n_tokens, llama.impl.llama_c.ggml_row_size(kv.type, hp.nEmbdHeadV(0) * b.n_head), 0);
             b.cb(v_states, "v_states", il);
 
             q = b.buildRope(q, inp_pos, il);
-            q = llama.impl.c.ggml_rope_set_offset(q, @bitCast(n_embd_head_qk_nope));
+            q = llama.impl.llama_c.ggml_rope_set_offset(q, @bitCast(n_embd_head_qk_nope));
             b.cb(q, "q_rope", il);
 
             // The shared RoPE key.
@@ -151,16 +151,16 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             const q_states = q;
             b.cb(q_states, "q_states", il);
 
-            const k_states: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_concat(ctx, k_nope, llama.impl.c.ggml_repeat_4d(ctx, k_pe, n_embd_head_qk_rope, b.n_head, b.n_tokens, 1), 0);
+            const k_states: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_concat(ctx, k_nope, llama.impl.llama_c.ggml_repeat_4d(ctx, k_pe, n_embd_head_qk_rope, b.n_head, b.n_tokens, 1), 0);
             b.cb(k_states, "k_states", il);
 
             cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, q_states, k_states, v_states, null, null, null, kq_scale, il);
         }
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -169,7 +169,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         cur = b.buildFfn(cur, layer.ffn_up, null, null, null, null, null, layer.ffn_down, null, null, null, .relu_sqr, .seq, il);
         b.cb(cur, "ffn_out", il);
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

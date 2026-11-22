@@ -17,8 +17,6 @@ const std = @import("std");
 const mod = @import("module.zig");
 const peg = @import("peg");
 
-const Allocator = std.mem.Allocator;
-
 /// Ports `common_grammar_trigger_type` (common/common.h:148 @b1b770d90).
 pub const TriggerType = enum(c_int) { token, word, pattern, pattern_full };
 
@@ -52,12 +50,12 @@ pub const ChatParams = struct {
     message_delimiters: mod.msg.MsgDelimiters = .{},
 
     /// `push_back` of each of `items` onto `list`.
-    pub fn appendAll(a: Allocator, list: *std.ArrayList([]const u8), items: []const []const u8) !void {
+    pub fn appendAll(a: std.mem.Allocator, list: *std.ArrayList([]const u8), items: []const []const u8) !void {
         try list.appendSlice(a, items);
     }
 
     /// `data.grammar_triggers.push_back({ COMMON_GRAMMAR_TRIGGER_TYPE_WORD, word })`.
-    pub fn addWordTrigger(self: *ChatParams, a: Allocator, word: []const u8) !void {
+    pub fn addWordTrigger(self: *ChatParams, a: std.mem.Allocator, word: []const u8) !void {
         try self.grammar_triggers.append(a, .{ .type = .word, .value = word });
     }
 };

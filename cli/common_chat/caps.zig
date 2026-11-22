@@ -14,8 +14,8 @@
 //!
 //! Upstream renders each probe with `context`'s `is_get_stats` on, and its
 //! runtime records, on the value itself, that it was used and which
-//! operations it met. zigjinja records the same at the same points when a
-//! `jinja.stats.Stats` is active (`zigjinja/src/stats.zig`), keyed by the
+//! operations it met. jinja records the same at the same points when a
+//! `jinja.stats.Stats` is active (`jinja/src/stats.zig`), keyed by the
 //! value's identity, which a copy keeps; the questions below are asked of
 //! the values this file bound.
 
@@ -23,8 +23,6 @@ const std = @import("std");
 const mod = @import("module.zig");
 const json = @import("json");
 const jinja = @import("zigjinja");
-
-const Allocator = std.mem.Allocator;
 
 /// `g_jinja_debug` (runtime.h:15 @b1b770d90): the engine's debug switch,
 /// off unless a debugger sets it.
@@ -68,7 +66,7 @@ pub const Caps = struct {
     /// Ports `to_string` (caps.cpp:122 @b1b770d90).
     ///
     /// Return: owned by `a`.
-    pub fn toString(self: Caps, a: Allocator) mod.exception.Error![]u8 {
+    pub fn toString(self: Caps, a: std.mem.Allocator) mod.exception.Error![]u8 {
         var out: std.ArrayList(u8) = .empty;
         try out.appendSlice(a, "Caps(\n");
         for (self.toMap()) |e| try out.print(a, "  {s}={s}\n", .{ e.name, if (e.value) "true" else "false" });
@@ -120,7 +118,7 @@ const CtxFn = union(enum) {
 /// first it is retried once with an empty `reasoning_content` on every
 /// assistant turn that lacks one, for templates that require a thinking
 /// field on each (K2 Horizon's). `p` holds the last attempt.
-fn tryExecute(p: *Probe, gpa: Allocator, tmpl: *const mod.template.Template, messages_json: []const u8, tools_json: ?[]const u8, ctx_fn: CtxFn) mod.exception.Error!?jinja.Value {
+fn tryExecute(p: *Probe, gpa: std.mem.Allocator, tmpl: *const mod.template.Template, messages_json: []const u8, tools_json: ?[]const u8, ctx_fn: CtxFn) mod.exception.Error!?jinja.Value {
     var attempt: usize = 0;
     while (true) : (attempt += 1) {
         p.* = .{ .r = undefined, .stats = jinja.stats.Stats.init(gpa) };
@@ -180,7 +178,7 @@ fn tryExecute(p: *Probe, gpa: Allocator, tmpl: *const mod.template.Template, mes
 /// With `a` null it only reports whether there is one to add.
 ///
 /// Return: whether a message lacked it.
-fn addEmptyReasoning(a: ?Allocator, msgs: *json.Value) mod.exception.Error!bool {
+fn addEmptyReasoning(a: ?std.mem.Allocator, msgs: *json.Value) mod.exception.Error!bool {
     var added = false;
     var it = msgs.items();
     while (it.next()) |item| {
@@ -228,7 +226,7 @@ fn toolCallMessages(comptime args: []const u8, comptime second_call: bool) []con
 /// the given effort, nothing when the template raises.
 ///
 /// Return: the text, owned by `gpa`, or null.
-fn renderEffort(gpa: Allocator, tmpl: *const mod.template.Template, effort: []const u8) mod.exception.Error!?[]u8 {
+fn renderEffort(gpa: std.mem.Allocator, tmpl: *const mod.template.Template, effort: []const u8) mod.exception.Error!?[]u8 {
     var p: Probe = undefined;
     _ = try tryExecute(&p, gpa, tmpl, "[{\"role\":\"user\",\"content\":\"User message\"}]", null, .{ .reasoning_effort = effort });
     defer p.deinit();
@@ -241,7 +239,7 @@ fn renderEffort(gpa: Allocator, tmpl: *const mod.template.Template, effort: []co
 /// the highest one is kept.
 ///
 /// Return: the levels, owned by `gpa`; the strings are static.
-fn reasoningEffortLevels(gpa: Allocator, tmpl: *const mod.template.Template) mod.exception.Error![]const []const u8 {
+fn reasoningEffortLevels(gpa: std.mem.Allocator, tmpl: *const mod.template.Template) mod.exception.Error![]const []const u8 {
     const candidates = [_][]const u8{ "minimal", "low", "medium", "high", "xhigh", "max" };
 
     const unknown = try renderEffort(gpa, tmpl, "REASONING_EFFORT_UNKNOWN");

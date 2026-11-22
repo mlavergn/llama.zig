@@ -99,9 +99,9 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
         }
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            sa_inp = llama.impl.c.ggml_get_rows(ctx, sa_inp, inp_out_ids);
-            inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            sa_inp = llama.impl.llama_c.ggml_get_rows(ctx, sa_inp, inp_out_ids);
+            inpL = llama.impl.llama_c.ggml_get_rows(ctx, inpL, inp_out_ids);
         }
         const sa_out = cur;
 
@@ -112,8 +112,8 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             cur = b.buildFfn(cur, layer.ffn_up, null, null, layer.ffn_gate, null, null, layer.ffn_down, null, null, null, .silu, .par, il);
             b.cb(cur, "ffn_out", il);
         }
-        cur = llama.impl.c.ggml_add(ctx, cur, sa_out);
-        cur = llama.impl.c.ggml_add(ctx, cur, inpL);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, sa_out);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, inpL);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

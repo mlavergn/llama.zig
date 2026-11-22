@@ -270,10 +270,10 @@ fn switchColsPerBlock(comptime T: type, rows_per_block: c_int, x: ?*const anyopa
 }
 
 /// Ports `ggml_cuda_mul_mat_f` (mmf.cu:13 @b1b770d90).
-pub fn mulMatF(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.c.ggml_tensor, src1: *const ggml.impl.c.ggml_tensor, ids: ?*const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor) void {
-    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "        src1->type == GGML_TYPE_F32");
-    ggml.impl.assert(ids == null or ids.?.type == ggml.impl.c.GGML_TYPE_I32, "!ids ||  ids->type == GGML_TYPE_I32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "         dst->type == GGML_TYPE_F32");
+pub fn mulMatF(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, ids: ?*const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "        src1->type == GGML_TYPE_F32");
+    ggml.impl.assert(ids == null or ids.?.type == ggml.impl.ggml_c.GGML_TYPE_I32, "!ids ||  ids->type == GGML_TYPE_I32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "         dst->type == GGML_TYPE_F32");
 
     const ne00 = src0.ne[0];
     const ne01 = src0.ne[1];
@@ -286,15 +286,15 @@ pub fn mulMatF(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.c.ggml_ten
     const ne2 = dst.ne[2];
     const ne3 = dst.ne[3];
 
-    const ts_src0 = ggml.impl.c.ggml_type_size(src0.type);
-    const ts_src1 = ggml.impl.c.ggml_type_size(src1.type);
-    const ts_dst = ggml.impl.c.ggml_type_size(dst.type);
+    const ts_src0 = ggml.impl.ggml_c.ggml_type_size(src0.type);
+    const ts_src1 = ggml.impl.ggml_c.ggml_type_size(src1.type);
+    const ts_dst = ggml.impl.ggml_c.ggml_type_size(dst.type);
 
     ggml.impl.assert(ne13 == ne3, "ne13 == ne3");
 
     ggml.impl.assert(src0.nb[0] == ts_src0, "        nb00       == ts_src0");
     ggml.impl.assert(src1.nb[0] == ts_src1, "        nb10       == ts_src1");
-    ggml.impl.assert(ids == null or ids.?.nb[0] == ggml.impl.c.ggml_type_size(ids.?.type), "!ids || ids->nb[0] == ggml_type_size(ids->type)");
+    ggml.impl.assert(ids == null or ids.?.nb[0] == ggml.impl.ggml_c.ggml_type_size(ids.?.type), "!ids || ids->nb[0] == ggml_type_size(ids->type)");
     ggml.impl.assert(dst.nb[0] == ts_dst, "        nb0        == ts_dst");
 
     const src1_d: ?*const f32 = @ptrCast(@alignCast(src1.data));
@@ -311,8 +311,8 @@ pub fn mulMatF(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.c.ggml_ten
     const s13: i64 = @intCast(src1.nb[3] / ts_src1);
     const s3: i64 = @intCast(dst.nb[3] / ts_dst);
 
-    const ids_s0: i64 = if (ids) |i| @intCast(i.nb[0] / ggml.impl.c.ggml_type_size(i.type)) else 0;
-    const ids_s1: i64 = if (ids) |i| @intCast(i.nb[1] / ggml.impl.c.ggml_type_size(i.type)) else 0;
+    const ids_s0: i64 = if (ids) |i| @intCast(i.nb[0] / ggml.impl.ggml_c.ggml_type_size(i.type)) else 0;
+    const ids_s1: i64 = if (ids) |i| @intCast(i.nb[1] / ggml.impl.ggml_c.ggml_type_size(i.type)) else 0;
 
     var ids_info: IdsData = .{};
     var ids_info_ptr: ?*const IdsData = null;
@@ -375,37 +375,37 @@ pub fn mulMatF(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.c.ggml_ten
 
     const stream = ctx.stream();
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => {
+        ggml.impl.ggml_c.GGML_TYPE_F32 => {
             const vals_per_t = 1;
             switchColsPerBlock(f32, rows_per_block, src0.data, src1_d, ids_d, dst_d, @divTrunc(ne00, vals_per_t), ne01, ncols_dst, @divTrunc(s01, vals_per_t), @divTrunc(stride_col_y, vals_per_t), stride_col_dst, ids_s0, i32Of(ids_s1), ne02, nchannels_y, nchannels_dst, @divTrunc(s02, vals_per_t), stride_channel_y, stride_channel_dst, ne03, ne3, @divTrunc(s03, vals_per_t), s13, s3, stream, ids_info_ptr);
         },
-        ggml.impl.c.GGML_TYPE_F16 => {
+        ggml.impl.ggml_c.GGML_TYPE_F16 => {
             const vals_per_t = 2;
             switchColsPerBlock(ggml.cuda.kernels.half2, rows_per_block, src0.data, src1_d, ids_d, dst_d, @divTrunc(ne00, vals_per_t), ne01, ncols_dst, @divTrunc(s01, vals_per_t), @divTrunc(stride_col_y, vals_per_t), stride_col_dst, ids_s0, i32Of(ids_s1), ne02, nchannels_y, nchannels_dst, @divTrunc(s02, vals_per_t), stride_channel_y, stride_channel_dst, ne03, ne3, @divTrunc(s03, vals_per_t), s13, s3, stream, ids_info_ptr);
         },
-        ggml.impl.c.GGML_TYPE_BF16 => {
+        ggml.impl.ggml_c.GGML_TYPE_BF16 => {
             const vals_per_t = 2;
             switchColsPerBlock(ggml.cuda.kernels.bf162, rows_per_block, src0.data, src1_d, ids_d, dst_d, @divTrunc(ne00, vals_per_t), ne01, ncols_dst, @divTrunc(s01, vals_per_t), @divTrunc(stride_col_y, vals_per_t), stride_col_dst, ids_s0, i32Of(ids_s1), ne02, nchannels_y, nchannels_dst, @divTrunc(s02, vals_per_t), stride_channel_y, stride_channel_dst, ne03, ne3, @divTrunc(s03, vals_per_t), s13, s3, stream, ids_info_ptr);
         },
         else => {
-            ggml.impl.logError("unsupported type: %s\n", .{ggml.impl.c.ggml_type_name(src0.type)});
+            ggml.impl.logError("unsupported type: %s\n", .{ggml.impl.ggml_c.ggml_type_name(src0.type)});
             ggml.impl.abort("unsupported type");
         },
     }
 }
 
 /// Ports `ggml_cuda_should_use_mmf` (mmf.cu:137 @b1b770d90), NVIDIA arms.
-pub fn shouldUseMmf(ty: ggml.impl.c.enum_ggml_type, x: c_int, warp_size: c_int, src0_ne: *const [4]i64, src0_nb: *const [4]usize, src1_ncols: c_int, mul_mat_id: bool) bool {
-    if (ggml.impl.c.ggml_is_quantized(ty)) return false;
+pub fn shouldUseMmf(ty: ggml.impl.ggml_c.enum_ggml_type, x: c_int, warp_size: c_int, src0_ne: *const [4]i64, src0_nb: *const [4]usize, src1_ncols: c_int, mul_mat_id: bool) bool {
+    if (ggml.impl.ggml_c.ggml_is_quantized(ty)) return false;
 
-    const ts = ggml.impl.c.ggml_type_size(ty);
+    const ts = ggml.impl.ggml_c.ggml_type_size(ty);
     if (@rem(src0_ne[0], @as(i64, warp_size) * @as(i64, @intCast(4 / ts))) != 0) return false;
 
     if (src0_nb[0] != ts) return false;
 
     // Pointers not aligned to the size of half2/nv_bfloat162/float2 would
     // result in a crash:
-    for (1..ggml.impl.c.GGML_MAX_DIMS) |i| {
+    for (1..ggml.impl.ggml_c.GGML_MAX_DIMS) |i| {
         if (src0_nb[i] % (2 * ts) != 0) return false;
     }
     if (@rem(src0_ne[1], getRowsPerBlock(x)) != 0) return false;
@@ -421,9 +421,9 @@ pub fn shouldUseMmf(ty: ggml.impl.c.enum_ggml_type, x: c_int, warp_size: c_int, 
     }
 
     return switch (ty) {
-        ggml.impl.c.GGML_TYPE_F32 => ggml.cuda.common.ampereMmaAvailable(x),
-        ggml.impl.c.GGML_TYPE_F16 => ggml.cuda.common.voltaMmaAvailable(x) or ggml.cuda.common.turingMmaAvailable(x),
-        ggml.impl.c.GGML_TYPE_BF16 => ggml.cuda.common.ampereMmaAvailable(x),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => ggml.cuda.common.ampereMmaAvailable(x),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => ggml.cuda.common.voltaMmaAvailable(x) or ggml.cuda.common.turingMmaAvailable(x),
+        ggml.impl.ggml_c.GGML_TYPE_BF16 => ggml.cuda.common.ampereMmaAvailable(x),
         else => false,
     };
 }

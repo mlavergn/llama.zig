@@ -11,11 +11,10 @@
 //! what it ports and the line it began at.
 
 const std = @import("std");
+const common_chat = @import("common_chat");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const tc = @import("tools_common");
-
-const Allocator = std.mem.Allocator;
+const tools_common = @import("tools_common");
 
 /// Ports `CONNECT_ROOM_CODE_LEN` and `CONNECT_PASS_CODE_LEN`
 /// (server-connect.cpp:18, 19 @b1b770d90): share code = room code + pass
@@ -36,7 +35,7 @@ const connect_stop_timeout_ms = 3000;
 /// Ports `gen_share_code` (server-connect.cpp:35 @b1b770d90): the pass code
 /// guards the tunnel, so it is drawn from the system's random device,
 /// uniformly, by rejection.
-fn genShareCode(a: Allocator) Allocator.Error![]u8 {
+fn genShareCode(a: std.mem.Allocator) std.mem.Allocator.Error![]u8 {
     const code = try a.alloc(u8, connect_room_code_len + connect_pass_code_len);
     const n = connect_code_chars.len;
     const limit = 256 - (256 % n);
@@ -52,7 +51,7 @@ fn genShareCode(a: Allocator) Allocator.Error![]u8 {
 }
 
 /// Ports `format_share_code` (server-connect.cpp:47 @b1b770d90): blocks of 8.
-fn formatShareCode(a: Allocator, code: []const u8) Allocator.Error![]u8 {
+fn formatShareCode(a: std.mem.Allocator, code: []const u8) std.mem.Allocator.Error![]u8 {
     var out: std.ArrayList(u8) = .empty;
     var i: usize = 0;
     while (i < code.len) : (i += 8) {
@@ -69,7 +68,7 @@ fn formatShareCode(a: Allocator, code: []const u8) Allocator.Error![]u8 {
 /// paste it back.
 ///
 /// Return: an empty string if it is not a valid share code.
-fn normalizeShareCode(a: Allocator, key: []const u8) Allocator.Error![]const u8 {
+fn normalizeShareCode(a: std.mem.Allocator, key: []const u8) std.mem.Allocator.Error![]const u8 {
     var code: std.ArrayList(u8) = .empty;
     for (key) |ch| {
         if (!std.ascii.isWhitespace(ch)) {
@@ -116,10 +115,10 @@ fn forwardChildLog(line: [*:0]const u8) void {
     }
 
     switch (level) {
-        .err => tc.log.err("connect | %s", .{text}),
-        .wrn => tc.log.wrn("connect | %s", .{text}),
-        .dbg => tc.log.dbg("connect | %s", .{text}),
-        .inf => tc.log.inf("connect | %s", .{text}),
+        .err => tools_common.log.err("connect | %s", .{text}),
+        .wrn => tools_common.log.wrn("connect | %s", .{text}),
+        .dbg => tools_common.log.dbg("connect | %s", .{text}),
+        .inf => tools_common.log.inf("connect | %s", .{text}),
     }
 }
 
@@ -128,7 +127,7 @@ fn forwardChildLog(line: [*:0]const u8) void {
 /// itself.
 ///
 /// Return: empty when every listener is a unix socket.
-fn upstreamHost(a: Allocator, hosts: []const []const u8) Allocator.Error![]const u8 {
+fn upstreamHost(a: std.mem.Allocator, hosts: []const []const u8) std.mem.Allocator.Error![]const u8 {
     for (hosts) |host| {
         if (std.mem.endsWith(u8, host, ".sock")) {
             continue;
@@ -160,7 +159,7 @@ pub const ServerConnect = struct {
     /// llama-server over an unrelated one in `PATH`.
     ///
     /// Return: empty if not found.
-    pub fn findBinary(a: Allocator) Allocator.Error![]const u8 {
+    pub fn findBinary(a: std.mem.Allocator) std.mem.Allocator.Error![]const u8 {
         if (mod.models.getServerExecPath(a)) |exe| {
             const sibling = try stdlib.path.join(a, stdlib.path.parent(exe), connect_exe_name);
             if (stdlib.fs.isRegularFile(sibling)) {
@@ -168,7 +167,7 @@ pub const ServerConnect = struct {
             }
         } else |e| {
             if (e == error.OutOfMemory) return error.OutOfMemory;
-            mod.common.srv(.wrn, "find_binary", "could not resolve the llama-server path (%s), looking for llama-connect in PATH only\n", .{try mod.common.zs(a, mod.common.what(e))});
+            mod.common.srv(.wrn, "find_binary", "could not resolve the llama-server path (%s), looking for llama-connect in PATH only\n", .{try mod.common.zs(a, common_chat.exception.what(e))});
         }
 
         const path_env: []const u8 = stdlib.env.get("PATH") orelse "";
@@ -192,7 +191,7 @@ pub const ServerConnect = struct {
     /// `--connect` cannot work here.
     ///
     /// Return: empty if it can.
-    pub fn unavailableReason(a: Allocator, params: *const tc.params.Params) Allocator.Error![]const u8 {
+    pub fn unavailableReason(a: std.mem.Allocator, params: *const tools_common.params.Params) std.mem.Allocator.Error![]const u8 {
         if (!stdlib.subproc.Subproc.isSupported()) {
             return "this build has subprocess support disabled, rebuild with -DLLAMA_SUBPROCESS=ON";
         }
@@ -215,7 +214,7 @@ pub const ServerConnect = struct {
     }
 
     /// Ports `resolve_code` (server-connect.cpp:190 @b1b770d90).
-    pub fn resolveCode(a: Allocator, code: []const u8) Allocator.Error![]const u8 {
+    pub fn resolveCode(a: std.mem.Allocator, code: []const u8) std.mem.Allocator.Error![]const u8 {
         return if (code.len == 0) try genShareCode(a) else try normalizeShareCode(a, code);
     }
 
@@ -262,7 +261,7 @@ pub const ServerConnect = struct {
     /// Parameters:
     /// - `port`: the bound one, which differs from `params.port` with
     ///   `--port 0` or the GCP override.
-    pub fn start(self: *ServerConnect, a: Allocator, params: *const tc.params.Params, port: c_int) !bool {
+    pub fn start(self: *ServerConnect, a: std.mem.Allocator, params: *const tools_common.params.Params, port: c_int) !bool {
         const func = "start";
         const bin = try findBinary(a);
         if (bin.len == 0) {
@@ -272,7 +271,7 @@ pub const ServerConnect = struct {
 
         // main() resolves this before anything can read it from /props
         const code = params.server_connect_code;
-        tc.ggml.ggmlAssert(code.len != 0, "tools/server/server-connect.cpp", 203, "!code.empty()");
+        tools_common.ggml.ggmlAssert(code.len != 0, "tools/server/server-connect.cpp", 203, "!code.empty()");
 
         const args = [_][]const u8{
             bin,
@@ -287,7 +286,7 @@ pub const ServerConnect = struct {
             "--exit-on-stdin-eof",
         };
 
-        const proc = try mod.context.gpa.create(stdlib.subproc.Subproc);
+        const proc = try std.heap.c_allocator.create(stdlib.subproc.Subproc);
         proc.* = .{};
 
         const options = stdlib.subproc.option_no_window |
@@ -297,7 +296,7 @@ pub const ServerConnect = struct {
         if (!proc.create(&args, options, &.{}, null)) {
             mod.common.srv(.err, func, "failed to spawn '%s'\n", .{try mod.common.zs(a, bin)});
             proc.deinit();
-            mod.context.gpa.destroy(proc);
+            std.heap.c_allocator.destroy(proc);
             return false;
         }
         self.proc = proc;
@@ -341,7 +340,7 @@ pub const ServerConnect = struct {
 
         _ = proc.join(); // reap the zombie
         proc.deinit();
-        mod.context.gpa.destroy(proc);
+        std.heap.c_allocator.destroy(proc);
         self.proc = null;
     }
 

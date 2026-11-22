@@ -60,16 +60,16 @@ const stdlib = @import("stdlib");
 /// - `ir1_start`, `ir1_end`: flattened range over `dst`'s other dimensions.
 fn oneChunk(
     params: *const ggml.cpu.defs.ComputeParams,
-    dst: *ggml.impl.c.ggml_tensor,
-    @"type": ggml.impl.c.enum_ggml_type,
+    dst: *ggml.impl.ggml_c.ggml_tensor,
+    @"type": ggml.impl.ggml_c.enum_ggml_type,
     num_rows_per_vec_dot: i64,
     ir0_start: i64,
     ir0_end: i64,
     ir1_start: i64,
     ir1_end: i64,
 ) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
     const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
@@ -171,14 +171,14 @@ fn oneChunk(
 /// - `params`: this thread's index, count, and work buffer.
 /// - `dst`: the result; `src[0]` is the weight matrix and `src[1]` the
 ///   activations.
-pub export fn ggml_compute_forward_mul_mat(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+pub fn ggml_compute_forward_mul_mat(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
     // A Hadamard-structured src0 has a fast transform that beats the general
     // product outright, unless the caller asked for the reference path.
     const hint = ggml.impl.getOpParamsI32(dst, 1);
-    if (hint == ggml.impl.c.GGML_HINT_SRC0_IS_HADAMARD and !params.use_ref) {
+    if (hint == ggml.impl.ggml_c.GGML_HINT_SRC0_IS_HADAMARD and !params.use_ref) {
         ggml.cpu.ops.sort.ggml_compute_forward_fwht(params, dst);
         return;
     }
@@ -257,10 +257,10 @@ pub export fn ggml_compute_forward_mul_mat(params: *const ggml.cpu.defs.ComputeP
 
         std.debug.assert(params.wsize >= @as(usize, @intCast(l.ne13)) * nbw3);
         // src1 is either packed from F32 into vec_dot_type, or widened from F16 or BF16 into the F32 work buffer
-        const widen = src1.type != ggml.impl.c.GGML_TYPE_F32;
+        const widen = src1.type != ggml.impl.ggml_c.GGML_TYPE_F32;
 
-        ggml.impl.assert(!widen or vec_dot_type == ggml.impl.c.GGML_TYPE_F32, "!widen || vec_dot_type == GGML_TYPE_F32");
-        ggml.impl.assert(!widen or src1.type == ggml.impl.c.GGML_TYPE_F16 or src1.type == ggml.impl.c.GGML_TYPE_BF16, "!widen || src1->type == GGML_TYPE_F16 || src1->type == GGML_TYPE_BF16");
+        ggml.impl.assert(!widen or vec_dot_type == ggml.impl.ggml_c.GGML_TYPE_F32, "!widen || vec_dot_type == GGML_TYPE_F32");
+        ggml.impl.assert(!widen or src1.type == ggml.impl.ggml_c.GGML_TYPE_F16 or src1.type == ggml.impl.ggml_c.GGML_TYPE_BF16, "!widen || src1->type == GGML_TYPE_F16 || src1->type == GGML_TYPE_BF16");
 
         // Every thread walks every row and converts its own slice of the
         // columns, rather than taking whole rows round-robin. Block-quantised
@@ -280,9 +280,9 @@ pub export fn ggml_compute_forward_mul_mat(params: *const ggml.cpu.defs.ComputeP
                         @as(usize, @intCast(block_start)) * nbw0;
                     const n_block = (block_end - block_start) * bs;
 
-                    if (src1.type == ggml.impl.c.GGML_TYPE_F16) {
+                    if (src1.type == ggml.impl.ggml_c.GGML_TYPE_F16) {
                         ggml.cpu.convert.ggml_cpu_fp16_to_fp32(@ptrCast(@alignCast(src)), @ptrCast(@alignCast(dstw)), n_block);
-                    } else if (src1.type == ggml.impl.c.GGML_TYPE_BF16) {
+                    } else if (src1.type == ggml.impl.ggml_c.GGML_TYPE_BF16) {
                         ggml.cpu.convert.ggml_cpu_bf16_to_fp32(@ptrCast(@alignCast(src)), @ptrCast(@alignCast(dstw)), n_block);
                     } else {
                         from_float.?(@ptrCast(@alignCast(src)), dstw, n_block);
@@ -403,7 +403,7 @@ pub const RowMapping = extern struct {
 };
 
 /// Ports the `MMID_MATRIX_ROW` macro (ggml-cpu.c:1488 @b1b770d90).
-inline fn matrixRow(matrix_rows: [*]RowMapping, ids: *const ggml.impl.c.ggml_tensor, row_id: i64, idx1: i64) *RowMapping {
+inline fn matrixRow(matrix_rows: [*]RowMapping, ids: *const ggml.impl.ggml_c.ggml_tensor, row_id: i64, idx1: i64) *RowMapping {
     return &matrix_rows[@intCast(row_id * ids.ne[0] * ids.ne[1] + idx1)];
 }
 
@@ -442,10 +442,10 @@ fn incrPtrAligned(p: *[*]u8, size: usize, alignment: usize) [*]u8 {
 /// - `src1_cont`: whether `src1` is one contiguous block.
 /// - `wdata`: where the staged `src1` lives.
 fn idOneChunk(
-    dst: *ggml.impl.c.ggml_tensor,
-    src0: *const ggml.impl.c.ggml_tensor,
-    src1: *const ggml.impl.c.ggml_tensor,
-    ids: *const ggml.impl.c.ggml_tensor,
+    dst: *ggml.impl.ggml_c.ggml_tensor,
+    src0: *const ggml.impl.ggml_c.ggml_tensor,
+    src1: *const ggml.impl.ggml_c.ggml_tensor,
+    ids: *const ggml.impl.ggml_c.ggml_tensor,
     cur_a: i64,
     ir0_start: i64,
     ir0_end: i64,
@@ -521,10 +521,10 @@ fn idOneChunk(
 /// - `params`: this thread's index, count, and work buffer.
 /// - `dst`: the result; `src[0]` is the stack of experts, `src[1]` the
 ///   activations, `src[2]` the routing table.
-pub fn computeForwardMulMatId(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const ids = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
+pub fn computeForwardMulMatId(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const ids = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]);
 
     const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
@@ -602,7 +602,7 @@ pub fn computeForwardMulMatId(params: *const ggml.cpu.defs.ComputeParams, dst: *
         const nbw3 = nbw2 * @as(usize, @intCast(l.ne12));
 
         std.debug.assert(params.wsize >= @as(usize, @intCast(l.ne13)) * nbw3);
-        ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+        ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
 
         const bs = ggml.types.ggml_blck_size(vec_dot_type);
         const block_start = @divTrunc(@as(i64, ith) * @divTrunc(l.ne10, bs), nth);
@@ -762,7 +762,7 @@ test "the routing table is addressed as the C's macro addresses it" {
     // `MMID_MATRIX_ROW(row_id, i1)` indexes by `ids->ne[0]*ids->ne[1]`, not by
     // the number of rows actually routed. Getting that wrong overlaps two
     // experts' rows, which shows up as a wrong answer rather than a crash.
-    var ids: ggml.impl.c.ggml_tensor = std.mem.zeroes(ggml.impl.c.ggml_tensor);
+    var ids: ggml.impl.ggml_c.ggml_tensor = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
     ids.ne = .{ 2, 5, 1, 1 };
 
     var rows: [64]RowMapping = @splat(.{ .i1 = 0, .i2 = 0 });

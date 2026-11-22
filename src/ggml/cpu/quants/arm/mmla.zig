@@ -115,7 +115,7 @@ const s8b: ggml.cpu.quants.arch.neon.i8x16 = @splat(0x8);
 /// Ports `ggml_vec_dot_q4_0_q8_0` (arch/arm/quants.c:300 @b1b770d90), the
 /// `__ARM_FEATURE_MATMUL_INT8` arm at line 315: two rows.
 pub fn q4_0(n: c_int, s: [*c]f32, bs: usize, vx: ?*const anyopaque, bx: usize, vy: ?*const anyopaque, by: usize) void {
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK8_0));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK8_0));
 
     const vx0 = rowAt(ggml.quants.blocks.Q4_0, vx, 0);
     const vx1 = rowAt(ggml.quants.blocks.Q4_0, vx, bx);
@@ -160,7 +160,7 @@ pub fn q4_0(n: c_int, s: [*c]f32, bs: usize, vx: ?*const anyopaque, bx: usize, v
 /// `summs_t` lists `x0.y0, x1.y0, x0.y1, x1.y1` -- and is added after the
 /// reorder, not before.
 pub fn q4_1(n: c_int, s: [*c]f32, bs: usize, vx: ?*const anyopaque, bx: usize, vy: ?*const anyopaque, by: usize) void {
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK8_1));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK8_1));
 
     const vx0 = rowAt(ggml.quants.blocks.Q4_1, vx, 0);
     const vx1 = rowAt(ggml.quants.blocks.Q4_1, vx, bx);
@@ -210,7 +210,7 @@ pub fn q4_1(n: c_int, s: [*c]f32, bs: usize, vx: ?*const anyopaque, bx: usize, v
 /// Ports `ggml_vec_dot_q8_0_q8_0` (arch/arm/quants.c:1153 @b1b770d90), the
 /// `__ARM_FEATURE_MATMUL_INT8` arm at line 1168: two rows.
 pub fn q8_0(n: c_int, s: [*c]f32, bs: usize, vx: ?*const anyopaque, bx: usize, vy: ?*const anyopaque, by: usize) void {
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK8_0));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK8_0));
 
     const vx0 = rowAt(ggml.quants.blocks.Q8_0, vx, 0);
     const vx1 = rowAt(ggml.quants.blocks.Q8_0, vx, bx);
@@ -260,7 +260,7 @@ const Q4KScales = struct {
 /// - `packed_scales`: a `block_q4_K`'s twelve `scales` bytes.
 ///
 /// Return: the decoded scales and mins.
-inline fn decodeQ4K(packed_scales: *const [ggml.impl.c.K_SCALE_SIZE]u8) Q4KScales {
+inline fn decodeQ4K(packed_scales: *const [ggml.impl.ggml_c.K_SCALE_SIZE]u8) Q4KScales {
     const kmask1: u32 = 0x3f3f3f3f;
     const kmask2: u32 = 0x0f0f0f0f;
     const kmask3: u32 = 0x03030303;
@@ -289,7 +289,7 @@ inline fn decodeQ4K(packed_scales: *const [ggml.impl.c.K_SCALE_SIZE]u8) Q4KScale
 /// the super-block epilogue is float: the mins first, fused-subtracted, then
 /// the scaled sum, fused-added -- two statements, in that order.
 pub fn q4_K(n: c_int, s: [*c]f32, bs: usize, vx: ?*const anyopaque, bx: usize, vy: ?*const anyopaque, by: usize) void {
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK_K));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK_K));
 
     const x0 = rowAt(ggml.quants.blocks.Q4_K, vx, 0);
     const x1 = rowAt(ggml.quants.blocks.Q4_K, vx, bx);
@@ -310,7 +310,7 @@ pub fn q4_K(n: c_int, s: [*c]f32, bs: usize, vx: ?*const anyopaque, bx: usize, v
         var visum: ggml.cpu.quants.arch.neon.i32x4 = @splat(0);
 
         // 64 weights per iteration, 256 in all.
-        for (0..ggml.impl.c.QK_K / 64) |j| {
+        for (0..ggml.impl.ggml_c.QK_K / 64) |j| {
             const yo = j * 64;
             const vy0 = [4]ggml.cpu.quants.arch.neon.i8x16{
                 ggml.cpu.quants.arch.neon.loadFrom(ggml.cpu.quants.arch.neon.i8x16, qy0 + yo),      ggml.cpu.quants.arch.neon.loadFrom(ggml.cpu.quants.arch.neon.i8x16, qy0 + yo + 16),
@@ -443,7 +443,7 @@ inline fn q6Bias(q8sums: [2]ggml.cpu.quants.arch.neon.i16x8, q6scales: [2]ggml.c
 }
 
 /// The sixteen `i8` scales of a `q6_K` block widened to two `i16x8`.
-inline fn q6Scales(scales: *const [ggml.impl.c.QK_K / 16]i8) [2]ggml.cpu.quants.arch.neon.i16x8 {
+inline fn q6Scales(scales: *const [ggml.impl.ggml_c.QK_K / 16]i8) [2]ggml.cpu.quants.arch.neon.i16x8 {
     const v = ggml.cpu.quants.arch.neon.loadFrom(ggml.cpu.quants.arch.neon.i8x16, scales);
     return .{ ggml.cpu.quants.arch.neon.movl_s8(ggml.cpu.quants.arch.neon.low(v)), ggml.cpu.quants.arch.neon.movl_s8(ggml.cpu.quants.arch.neon.high(v)) };
 }
@@ -455,7 +455,7 @@ inline fn q6Scales(scales: *const [ggml.impl.c.QK_K / 16]i8) [2]ggml.cpu.quants.
 /// integer sum at the end of each super-block as `32 * sum(bsums * scales)`
 /// -- the same arithmetic, exact, done once.
 pub fn q6_K(n: c_int, s: [*c]f32, bs: usize, vx: ?*const anyopaque, bx: usize, vy: ?*const anyopaque, by: usize) void {
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK_K));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK_K));
 
     const x0 = rowAt(ggml.quants.blocks.Q6_K, vx, 0);
     const x1 = rowAt(ggml.quants.blocks.Q6_K, vx, bx);

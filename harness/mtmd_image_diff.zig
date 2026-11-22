@@ -20,12 +20,9 @@
 //! Usage: mtmd-image-diff [kind-name-substring | sweep | vectors | death] [-v]
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
+const llama = @import("llama");
 const mtmd = @import("mtmd");
-const image = mtmd.image;
-const impl = mtmd.impl;
-const model = mtmd.model;
-const names = mtmd.names;
 
 const RefHparams = extern struct {
     image_size: i32 = 0,
@@ -58,39 +55,35 @@ const RefHparams = extern struct {
     image_floor_before_align: i32 = 0,
 };
 
-const ImageSize = impl.ImageSize;
-
 extern fn ref_preprocess(kind: c_int, proj_type: c_int, hp: *const RefHparams, rgb: ?[*]const u8, nx: c_int, ny: c_int, video: c_int, out: *?[*]u8, out_len: *usize) c_int;
-extern fn ref_video_frame_size(kind: c_int, hp: *const RefHparams, n_frames: c_int, width: c_int, height: c_int, out: *ImageSize) c_int;
-extern fn ref_dyn_target_size(hp: *const RefHparams, w: c_int, h: c_int, out: *ImageSize) void;
-extern fn ref_longest_target_size(hp: *const RefHparams, w: c_int, h: c_int, out: *ImageSize, what: *?[*]u8, what_len: *usize) c_int;
-extern fn ref_qwen3vl_smart_resize(w: c_int, h: c_int, factor: c_int, min_pixels: i64, max_pixels: i64, n_frames: c_int, temporal_factor: c_int, out: *ImageSize) void;
+extern fn ref_video_frame_size(kind: c_int, hp: *const RefHparams, n_frames: c_int, width: c_int, height: c_int, out: *mtmd.impl.ImageSize) c_int;
+extern fn ref_dyn_target_size(hp: *const RefHparams, w: c_int, h: c_int, out: *mtmd.impl.ImageSize) void;
+extern fn ref_longest_target_size(hp: *const RefHparams, w: c_int, h: c_int, out: *mtmd.impl.ImageSize, what: *?[*]u8, what_len: *usize) c_int;
+extern fn ref_qwen3vl_smart_resize(w: c_int, h: c_int, factor: c_int, min_pixels: i64, max_pixels: i64, n_frames: c_int, temporal_factor: c_int, out: *mtmd.impl.ImageSize) void;
 extern fn ref_lfm2_should_tile(hp: *const RefHparams, w: c_int, h: c_int) c_int;
-extern fn ref_lfm2_smart_resize(hp: *const RefHparams, w: c_int, h: c_int, out: *ImageSize) void;
-extern fn ref_lfm2_grid_layout(hp: *const RefHparams, height: c_int, width: c_int, out: *ImageSize) void;
+extern fn ref_lfm2_smart_resize(hp: *const RefHparams, w: c_int, h: c_int, out: *mtmd.impl.ImageSize) void;
+extern fn ref_lfm2_grid_layout(hp: *const RefHparams, height: c_int, width: c_int, out: *mtmd.impl.ImageSize) void;
 extern fn ref_deepseek41v_plan_grid(w: c_int, h: c_int, p: c_int, r: c_int, max_n_token: c_int, min_pixels: c_int, best_w: *c_int, best_h: *c_int) void;
 extern fn ref_lfm2_slice_hash(hp: *const RefHparams, rgb: [*]const u8, nx: c_int, ny: c_int) u32;
 extern fn ref_free(p: ?[*]u8) void;
 extern fn ref_set_log(f: *const fn (c_int, [*c]const u8, ?*anyopaque) callconv(.c) void, ud: ?*anyopaque) void;
-
-const gpa = std.heap.c_allocator;
 
 var ref_log: std.ArrayList(u8) = .empty;
 var port_log: std.ArrayList(u8) = .empty;
 
 fn capture(level: c_int, text: [*c]const u8, ud: ?*anyopaque) callconv(.c) void {
     const buf: *std.ArrayList(u8) = @ptrCast(@alignCast(ud.?));
-    buf.print(gpa, "[{d}] {s}", .{ level, std.mem.span(text) }) catch {};
+    buf.print(std.heap.c_allocator, "[{d}] {s}", .{ level, std.mem.span(text) }) catch {};
 }
 
-fn portCapture(level: impl.c.enum_ggml_log_level, text: [*c]const u8, ud: ?*anyopaque) callconv(.c) void {
+fn portCapture(level: llama.impl.llama_c.enum_ggml_log_level, text: [*c]const u8, ud: ?*anyopaque) callconv(.c) void {
     capture(@intCast(level), text, ud);
 }
 
 /// The port's hparams for a case, built from the same flat struct the
 /// reference reads.
-fn toHparams(rh: *const RefHparams) !model.Hparams {
-    var h: model.Hparams = .{};
+fn toHparams(rh: *const RefHparams) !mtmd.model.Hparams {
+    var h: mtmd.model.Hparams = .{};
     h.image_size = rh.image_size;
     h.patch_size = rh.patch_size;
     h.n_merge = rh.n_merge;
@@ -106,7 +99,7 @@ fn toHparams(rh: *const RefHparams) !model.Hparams {
     h.image_std = rh.image_std;
     var i: usize = 0;
     while (i < @as(usize, @intCast(rh.n_candidates))) : (i += 1) {
-        try h.image_res_candidates.append(gpa, .{ .width = rh.candidates[2 * i], .height = rh.candidates[2 * i + 1] });
+        try h.image_res_candidates.append(std.heap.c_allocator, .{ .width = rh.candidates[2 * i], .height = rh.candidates[2 * i + 1] });
     }
     h.preproc_min_tiles = rh.preproc_min_tiles;
     h.preproc_max_tiles = rh.preproc_max_tiles;
@@ -125,11 +118,11 @@ fn toHparams(rh: *const RefHparams) !model.Hparams {
 }
 
 fn putI32(out: *std.ArrayList(u8), v: i32) !void {
-    try out.appendSlice(gpa, std.mem.asBytes(&v));
+    try out.appendSlice(std.heap.c_allocator, std.mem.asBytes(&v));
 }
 
 /// `put_image` of the reference shim, over the port's image.
-fn putImage(out: *std.ArrayList(u8), img: *const impl.ImageF32) !void {
+fn putImage(out: *std.ArrayList(u8), img: *const mtmd.impl.ImageF32) !void {
     try putI32(out, img.nx());
     try putI32(out, img.ny());
     try putI32(out, @intFromBool(img.add_viewsep));
@@ -139,18 +132,18 @@ fn putImage(out: *std.ArrayList(u8), img: *const impl.ImageF32) !void {
     try putI32(out, img.anyres.orig_nx);
     try putI32(out, img.anyres.orig_ny);
     const n: u64 = img.roBuf().len;
-    try out.appendSlice(gpa, std.mem.asBytes(&n));
-    try out.appendSlice(gpa, std.mem.sliceAsBytes(img.roBuf()));
+    try out.appendSlice(std.heap.c_allocator, std.mem.asBytes(&n));
+    try out.appendSlice(std.heap.c_allocator, std.mem.sliceAsBytes(img.roBuf()));
 }
 
-fn serialize(res: *const image.PreprocOut) !std.ArrayList(u8) {
+fn serialize(res: *const mtmd.image.PreprocOut) !std.ArrayList(u8) {
     var out: std.ArrayList(u8) = .empty;
     try putI32(&out, res.grid_x);
     try putI32(&out, res.grid_y);
     try putI32(&out, @intFromBool(res.hasOverview()));
     try putImage(&out, &res.overview);
     const n: u64 = res.entries.items.len;
-    try out.appendSlice(gpa, std.mem.asBytes(&n));
+    try out.appendSlice(std.heap.c_allocator, std.mem.asBytes(&n));
     for (res.entries.items) |*e| try putImage(&out, e);
     return out;
 }
@@ -159,7 +152,7 @@ const Pattern = enum { random, gradient, checker, white, placeholder };
 
 fn makeImage(nx: c_int, ny: c_int, pattern: Pattern, seed: u64) ![]u8 {
     const n = @as(usize, @intCast(nx)) * @as(usize, @intCast(ny)) * 3;
-    const buf = try gpa.alloc(u8, n);
+    const buf = try std.heap.c_allocator.alloc(u8, n);
     var rng = std.Random.DefaultPrng.init(seed);
     const r = rng.random();
     var i: usize = 0;
@@ -178,8 +171,8 @@ fn makeImage(nx: c_int, ny: c_int, pattern: Pattern, seed: u64) ![]u8 {
 }
 
 const Case = struct {
-    kind: image.Kind,
-    proj: names.ProjectorType = .mlp,
+    kind: mtmd.image.Kind,
+    proj: mtmd.names.ProjectorType = .mlp,
     hp: RefHparams,
     nx: c_int,
     ny: c_int,
@@ -197,9 +190,9 @@ var n_log_bytes: usize = 0;
 var n_tiled: usize = 0;
 var n_overview: usize = 0;
 var n_placeholder: usize = 0;
-var kinds_tiled: std.EnumSet(image.Kind) = .empty;
+var kinds_tiled: std.EnumSet(mtmd.image.Kind) = .empty;
 var n_threw: usize = 0;
-var kinds_threw: std.EnumSet(image.Kind) = .empty;
+var kinds_threw: std.EnumSet(mtmd.image.Kind) = .empty;
 var n_video: usize = 0;
 var n_checks: usize = 0;
 var n_death: usize = 0;
@@ -212,7 +205,7 @@ fn failCheck(comptime fmt: []const u8, args: anytype) void {
 
 fn runCase(cs: *const Case, seed: u64) !void {
     const rgb = try makeImage(cs.nx, cs.ny, cs.pattern, seed);
-    defer gpa.free(rgb);
+    defer std.heap.c_allocator.free(rgb);
     const ph = cs.pattern == .placeholder;
 
     ref_log.clearRetainingCapacity();
@@ -228,24 +221,24 @@ fn runCase(cs: *const Case, seed: u64) !void {
 
     var hp = try toHparams(&cs.hp);
     defer hp.deinit();
-    var img: impl.ImageU8 = .{};
+    var img: mtmd.impl.ImageU8 = .{};
     defer img.deinit();
     try img.setSize(.{ .width = cs.nx, .height = cs.ny }, ph);
     if (!ph) try img.cpyBuf(rgb);
-    const pp = image.Preprocessor.init(cs.kind, &hp, cs.proj);
+    const pp = mtmd.image.Preprocessor.init(cs.kind, &hp, cs.proj);
     const port_res = if (cs.video) pp.preprocessVideoFrame(&img) else pp.preprocess(&img);
     const port_threw = if (port_res) |_| false else |err| switch (err) {
         error.Runtime => true,
         else => return err,
     };
-    var res: image.PreprocOut = port_res catch .{};
+    var res: mtmd.image.PreprocOut = port_res catch .{};
     defer res.deinit();
     var port_bytes: std.ArrayList(u8) = .empty;
-    defer port_bytes.deinit(gpa);
+    defer port_bytes.deinit(std.heap.c_allocator);
     if (port_threw) {
-        try port_bytes.appendSlice(gpa, mtmd.clip.what());
+        try port_bytes.appendSlice(std.heap.c_allocator, mtmd.clip.what());
     } else {
-        port_bytes.deinit(gpa);
+        port_bytes.deinit(std.heap.c_allocator);
         port_bytes = try serialize(&res);
     }
 
@@ -266,7 +259,7 @@ fn runCase(cs: *const Case, seed: u64) !void {
     n_floats += res.overview.roBuf().len;
 
     // the video size, which every kind answers
-    var ref_vsz: ImageSize = .{ .width = -1, .height = -1 };
+    var ref_vsz: mtmd.impl.ImageSize = .{ .width = -1, .height = -1 };
     var port_vsz = ref_vsz;
     const n_frames = @as(c_int, @intCast(seed % 9)) + 1;
     const ref_has = ref_video_frame_size(@backingInt(cs.kind), &cs.hp, n_frames, cs.nx, cs.ny, &ref_vsz) != 0;
@@ -326,7 +319,7 @@ const sizes = [_][2]c_int{
 
 /// Sizes only one kind runs: each sits on a decision that kind makes, and
 /// several would abort another kind.
-fn extraSizes(kind: image.Kind) []const [2]c_int {
+fn extraSizes(kind: mtmd.image.Kind) []const [2]c_int {
     return switch (kind) {
         // torchvision's precision search on a knife edge; three of each, so
         // the rotation over variants reaches each one
@@ -359,8 +352,6 @@ fn extraSizes(kind: image.Kind) []const [2]c_int {
 }
 
 /// `RESIZE_ALGO_FLAG_TORCH`.
-const torch = model.ResizeAlgo.flag_torch;
-
 const clip_mean = [3]f32{ 0.48145466, 0.4578275, 0.40821073 };
 const clip_std = [3]f32{ 0.26862954, 0.26130258, 0.27577711 };
 
@@ -373,7 +364,7 @@ fn setCandidates(hp: *RefHparams, cands: []const [2]i32) void {
 }
 
 /// The hparams variants for one kind.
-fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.ProjectorType, []const u8 })) !void {
+fn variants(kind: mtmd.image.Kind, out: *std.ArrayList(struct { RefHparams, mtmd.names.ProjectorType, []const u8 })) !void {
     var base: RefHparams = .{ .image_mean = clip_mean, .image_std = clip_std };
     switch (kind) {
         .fixed_size => {
@@ -383,16 +374,16 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
             // from `extraSizes`' 669 and 1021 the largest weight is just
             // under a power of two and only the search's 0.5 rounds it up to
             // 2^15. Below 1600 only six pairs of sizes do that.
-            for ([_]i32{ 0, 1, 2, torch | 0, torch | 1 }) |algo| for ([_]i32{ 0, 1, 2 }) |pad| for ([_][4]u8{ .{ 0, 0, 0, 0 }, .{ 127, 128, 129, 0 }, .{ 255, 0, 128, 0 } }) |col| {
+            for ([_]i32{ 0, 1, 2, mtmd.model.ResizeAlgo.flag_torch | 0, mtmd.model.ResizeAlgo.flag_torch | 1 }) |algo| for ([_]i32{ 0, 1, 2 }) |pad| for ([_][4]u8{ .{ 0, 0, 0, 0 }, .{ 127, 128, 129, 0 }, .{ 255, 0, 128, 0 } }) |col| {
                 var h = base;
                 h.image_size = if (algo == 1) 224 else 336;
-                if (algo & torch != 0 and col[0] == 255) h.image_size = 3;
-                if (algo & torch != 0 and col[0] == 127) h.image_size = if (algo == torch | 1) 77 else 7;
+                if (algo & mtmd.model.ResizeAlgo.flag_torch != 0 and col[0] == 255) h.image_size = 3;
+                if (algo & mtmd.model.ResizeAlgo.flag_torch != 0 and col[0] == 127) h.image_size = if (algo == mtmd.model.ResizeAlgo.flag_torch | 1) 77 else 7;
                 h.patch_size = 14;
                 h.image_resize_algo = algo;
                 h.image_resize_pad = pad;
                 h.image_pad_color = col;
-                try out.append(gpa, .{ h, .mlp, "fixed" });
+                try out.append(std.heap.c_allocator, .{ h, .mlp, "fixed" });
             };
         },
         .llava_uhd, .minicpmv, .internvl, .minicpm_ocr_1_0 => {
@@ -422,11 +413,11 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
                     const s = h.image_size;
                     setCandidates(&h, &.{ .{ s, 2 * s }, .{ 2 * s, s }, .{ 2 * s, 2 * s }, .{ 3 * s, s }, .{ s, 3 * s } });
                 }
-                try out.append(gpa, .{ h, .mlp, if (pins) "pinpoints" else "dynamic" });
+                try out.append(std.heap.c_allocator, .{ h, .mlp, if (pins) "pinpoints" else "dynamic" });
             };
         },
         .dyn_size => {
-            for ([_]i32{ 14, 16 }) |ps| for ([_]i32{ 1, 2 }) |merge| for ([_][2]i32{ .{ 8, 1024 }, .{ 4, 64 }, .{ 2048, 4096 } }) |mm| for ([_]i32{ 0, 1, 2, torch | 0, torch | 1 }) |algo| for ([_]i32{ 0, 1 }) |pad| for ([_]i32{ 0, 1 }) |even| {
+            for ([_]i32{ 14, 16 }) |ps| for ([_]i32{ 1, 2 }) |merge| for ([_][2]i32{ .{ 8, 1024 }, .{ 4, 64 }, .{ 2048, 4096 } }) |mm| for ([_]i32{ 0, 1, 2, mtmd.model.ResizeAlgo.flag_torch | 0, mtmd.model.ResizeAlgo.flag_torch | 1 }) |algo| for ([_]i32{ 0, 1 }) |pad| for ([_]i32{ 0, 1 }) |even| {
                 var h = base;
                 h.patch_size = ps;
                 h.n_merge = merge;
@@ -437,14 +428,14 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
                 h.image_resize_pad = pad;
                 h.image_pad_color = .{ 1, 2, 3, 0 };
                 h.image_round_half_even = even;
-                try out.append(gpa, .{ h, .qwen2vl, "dyn" });
+                try out.append(std.heap.c_allocator, .{ h, .qwen2vl, "dyn" });
             };
         },
         .lfm3vl, .qwen3vl => {
             // as load_hparams sets it, PAD_NONE, and with padding; budgets
             // around the test sizes, an unset minimum; torchvision's resize
             // (qwen3vl is lfm3vl with dyn_size's image size)
-            for ([_]i32{ 14, 16 }) |ps| for ([_][2]i32{ .{ 64, 256 }, .{ 16, 64 }, .{ 256, 1024 }, .{ 0, 4096 }, .{ -1, 8 } }) |mm| for ([_]i32{ 0, 1, 2, torch | 0, torch | 1 }) |algo| for ([_]i32{ 0, 1 }) |pad| {
+            for ([_]i32{ 14, 16 }) |ps| for ([_][2]i32{ .{ 64, 256 }, .{ 16, 64 }, .{ 256, 1024 }, .{ 0, 4096 }, .{ -1, 8 } }) |mm| for ([_]i32{ 0, 1, 2, mtmd.model.ResizeAlgo.flag_torch | 0, mtmd.model.ResizeAlgo.flag_torch | 1 }) |algo| for ([_]i32{ 0, 1 }) |pad| {
                 // dyn_size's image size asserts both budgets
                 if (kind == .qwen3vl and mm[0] <= 0) continue;
                 var h = base;
@@ -456,7 +447,7 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
                 h.image_resize_algo = algo;
                 h.image_resize_pad = pad;
                 h.image_pad_color = .{ 4, 5, 6, 0 };
-                if (kind == .lfm3vl) try out.append(gpa, .{ h, .lfm3vl, "lfm3vl" }) else try out.append(gpa, .{ h, .qwen3vl, "qwen3vl" });
+                if (kind == .lfm3vl) try out.append(std.heap.c_allocator, .{ h, .lfm3vl, "lfm3vl" }) else try out.append(std.heap.c_allocator, .{ h, .qwen3vl, "qwen3vl" });
             };
         },
         .longest_edge => {
@@ -470,14 +461,14 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
                 h.image_resize_algo = 1;
                 h.image_resize_pad = 0;
                 h.image_floor_before_align = floored;
-                try out.append(gpa, .{ h, .lightonocr, "longest" });
+                try out.append(std.heap.c_allocator, .{ h, .lightonocr, "longest" });
             };
         },
         .lfm2 => {
             // the tiling as load_hparams defaults it, and in hparams a
             // gguf can set: no splitting at all, a single-tile minimum, a
             // minimum above two, other tile sizes and tolerances
-            for ([_][2]i32{ .{ 64, 256 }, .{ 16, 64 }, .{ 256, 1024 } }) |mm| for ([_]i32{ 0, 1, 2, torch | 0, torch | 1 }) |algo| for ([_][4]i32{ .{ 2, 10, 512, 20 }, .{ 1, 1, 512, 20 }, .{ 1, 4, 256, 10 }, .{ 3, 12, 384, 15 } }) |tiling| {
+            for ([_][2]i32{ .{ 64, 256 }, .{ 16, 64 }, .{ 256, 1024 } }) |mm| for ([_]i32{ 0, 1, 2, mtmd.model.ResizeAlgo.flag_torch | 0, mtmd.model.ResizeAlgo.flag_torch | 1 }) |algo| for ([_][4]i32{ .{ 2, 10, 512, 20 }, .{ 1, 1, 512, 20 }, .{ 1, 4, 256, 10 }, .{ 3, 12, 384, 15 } }) |tiling| {
                 var h = base;
                 h.patch_size = 16;
                 h.n_merge = 2;
@@ -492,7 +483,7 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
                 h.preproc_max_tiles = tiling[1];
                 h.preproc_tile_size = tiling[2];
                 h.preproc_max_pixels_tolerance = @as(f32, @floatFromInt(tiling[3])) / 10.0;
-                try out.append(gpa, .{ h, .lfm2, "lfm2" });
+                try out.append(std.heap.c_allocator, .{ h, .lfm2, "lfm2" });
             };
         },
         .idefics3 => {
@@ -507,18 +498,18 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
                 h.image_resize_algo_ov = 2;
                 h.image_pad_rf = 0;
                 h.image_pad_ov = 0;
-                try out.append(gpa, .{ h, .idefics3, "idefics3" });
+                try out.append(std.heap.c_allocator, .{ h, .idefics3, "idefics3" });
             };
         },
         .deepseekocr => {
-            for ([_]names.ProjectorType{ .deepseekocr, .deepseekocr2 }) |pt| for ([_][2]i32{ .{ 256, 160 }, .{ 1024, 640 } }) |bt| for ([_][2]i32{ .{ 2, 9 }, .{ 1, 6 }, .{ 1, 40 } }) |tiles| {
+            for ([_]mtmd.names.ProjectorType{ .deepseekocr, .deepseekocr2 }) |pt| for ([_][2]i32{ .{ 256, 160 }, .{ 1024, 640 } }) |bt| for ([_][2]i32{ .{ 2, 9 }, .{ 1, 6 }, .{ 1, 40 } }) |tiles| {
                 var h = base;
                 h.image_size = bt[0];
                 h.preproc_tile_size = bt[1];
                 h.preproc_min_tiles = tiles[0];
                 h.preproc_max_tiles = tiles[1];
                 h.image_pad_color = .{ 127, 127, 127, 0 };
-                try out.append(gpa, .{ h, pt, "deepseek" });
+                try out.append(std.heap.c_allocator, .{ h, pt, "deepseek" });
             };
         },
         .step3vl => {
@@ -527,7 +518,7 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
                 h.image_size = is;
                 h.patch_size = 14;
                 h.image_longest_edge = le;
-                try out.append(gpa, .{ h, .step3vl, "step3vl" });
+                try out.append(std.heap.c_allocator, .{ h, .step3vl, "step3vl" });
             };
         },
         .youtuvl => {
@@ -539,7 +530,7 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
                 h.image_resize_algo = algo;
                 h.image_resize_pad = pad;
                 h.image_pad_color = .{ 9, 9, 9, 0 };
-                try out.append(gpa, .{ h, .youtuvl, "youtuvl" });
+                try out.append(std.heap.c_allocator, .{ h, .youtuvl, "youtuvl" });
             };
         },
         .granite => {
@@ -553,14 +544,14 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
                 h.image_pad_ov = pads[1];
                 h.image_pad_color_rf = .{ 0, 128, 255, 0 };
                 setCandidates(&h, &.{ .{ 384, 768 }, .{ 768, 384 }, .{ 768, 768 }, .{ 1152, 384 }, .{ 384, 1152 } });
-                try out.append(gpa, .{ h, .granite4_vision, "granite" });
+                try out.append(std.heap.c_allocator, .{ h, .granite4_vision, "granite" });
             };
         },
         .kimik25 => {
             // Kimi-K2.5 / K3.1: patch 14 (K2.5) and 16, merges 1, 2
             // and 4, a patch budget below and above the test sizes and one
             // past every size, each resize algorithm and torchvision's
-            for ([_]i32{ 14, 16 }) |ps| for ([_]i32{ 1, 2, 4 }) |merge| for ([_]i32{ 16, 1024, 16384, 1 << 20 }) |np| for ([_]i32{ 0, 1, 2, torch | 0, torch | 1 }) |algo| {
+            for ([_]i32{ 14, 16 }) |ps| for ([_]i32{ 1, 2, 4 }) |merge| for ([_]i32{ 16, 1024, 16384, 1 << 20 }) |np| for ([_]i32{ 0, 1, 2, mtmd.model.ResizeAlgo.flag_torch | 0, mtmd.model.ResizeAlgo.flag_torch | 1 }) |algo| {
                 var h = base;
                 h.patch_size = ps;
                 h.n_merge = merge;
@@ -569,7 +560,7 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
                 // ignored: the canvas is padded with black
                 h.image_resize_pad = 1;
                 h.image_pad_color = .{ 200, 100, 50, 0 };
-                try out.append(gpa, .{ h, if (ps == 14) .kimik25 else .kimik31, "kimik25" });
+                try out.append(std.heap.c_allocator, .{ h, if (ps == 14) .kimik25 else .kimik31, "kimik25" });
             };
         },
         .muse_glimmer => {
@@ -579,7 +570,7 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
                 h.n_merge = merge;
                 h.image_max_pixels = mt * ps * ps * merge * merge;
                 h.image_resize_algo = 1;
-                try out.append(gpa, .{ h, .muse_glimmer, "muse" });
+                try out.append(std.heap.c_allocator, .{ h, .muse_glimmer, "muse" });
             };
         },
         .deepseek4v => {
@@ -597,7 +588,7 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
                 h.image_min_pixels = if (mn == 0) 0 else @min(mn * area, h.image_max_pixels);
                 h.image_resize_algo = algo;
                 h.image_pad_color = .{ 127, 127, 127, 0 };
-                try out.append(gpa, .{ h, .deepseek4v, "deepseek4v" });
+                try out.append(std.heap.c_allocator, .{ h, .deepseek4v, "deepseek4v" });
             };
         },
         .deepseek41v => {
@@ -614,7 +605,7 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
                 h.image_min_pixels = if (mn == 0) 0 else @min(mn * area, h.image_max_pixels);
                 h.image_resize_algo = algo;
                 h.image_pad_color = if (merge == 2) .{ 127, 127, 127, 0 } else .{ 3, 200, 40, 0 };
-                try out.append(gpa, .{ h, .deepseek41v, "deepseek41v" });
+                try out.append(std.heap.c_allocator, .{ h, .deepseek41v, "deepseek41v" });
             };
         },
         .glm5v => {
@@ -633,7 +624,7 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
                 h.image_resize_algo = algo;
                 h.image_resize_pad = 1;
                 h.image_pad_color = .{ 1, 2, 3, 0 };
-                try out.append(gpa, .{ h, .glm5v, "glm5v" });
+                try out.append(std.heap.c_allocator, .{ h, .glm5v, "glm5v" });
             };
         },
         .cohere2v => {
@@ -650,7 +641,7 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
                 h.image_resize_algo_ov = algos[1];
                 h.image_pad_rf = 0;
                 h.image_pad_ov = 0;
-                try out.append(gpa, .{ h, .cohere2v, "cohere2v" });
+                try out.append(std.heap.c_allocator, .{ h, .cohere2v, "cohere2v" });
             };
         },
     }
@@ -660,7 +651,7 @@ fn variants(kind: image.Kind, out: *std.ArrayList(struct { RefHparams, names.Pro
 // -----------------------------------------------------------------------------
 // sweep
 
-fn sameSize(a: ImageSize, b: ImageSize) bool {
+fn sameSize(a: mtmd.impl.ImageSize, b: mtmd.impl.ImageSize) bool {
     return a.width == b.width and a.height == b.height;
 }
 
@@ -693,9 +684,9 @@ fn sweepDyn() !void {
         var hp = try toHparams(&rh);
         defer hp.deinit();
         for (sweep_edges) |w| for (sweep_edges) |h| {
-            var ref: ImageSize = .{};
+            var ref: mtmd.impl.ImageSize = .{};
             ref_dyn_target_size(&rh, w, h, &ref);
-            const port = image.Preprocessor.dynSizeGetTargetSize(&hp, .{ .width = w, .height = h });
+            const port = mtmd.image.Preprocessor.dynSizeGetTargetSize(&hp, .{ .width = w, .height = h });
             n_checks += 1;
             if (!sameSize(ref, port)) failCheck("dyn get_target_size {d}x{d} p{d} m{d} even={d}: {d}x{d} vs {d}x{d}", .{ w, h, pm[0], pm[1], even, ref.width, ref.height, port.width, port.height });
         };
@@ -708,13 +699,13 @@ fn sweepLongest() !void {
         var hp = try toHparams(&rh);
         defer hp.deinit();
         for (sweep_edges) |w| for (sweep_edges) |h| {
-            var ref: ImageSize = .{};
+            var ref: mtmd.impl.ImageSize = .{};
             var what_ptr: ?[*]u8 = null;
             var what_len: usize = 0;
             const rc = ref_longest_target_size(&rh, w, h, &ref, &what_ptr, &what_len);
             defer if (rc == 2) ref_free(what_ptr);
             n_checks += 1;
-            if (image.Preprocessor.longestEdgeGetTargetSize(&hp, .{ .width = w, .height = h })) |port| {
+            if (mtmd.image.Preprocessor.longestEdgeGetTargetSize(&hp, .{ .width = w, .height = h })) |port| {
                 if (rc != 0 or !sameSize(ref, port)) failCheck("longest get_target_size {d}x{d} le{d} m{d} floor={d}: rc {d} {d}x{d} vs {d}x{d}", .{ w, h, le, merge, floored, rc, ref.width, ref.height, port.width, port.height });
             } else |err| {
                 if (err != error.Runtime) return err;
@@ -729,9 +720,9 @@ fn sweepLfm3vl() void {
     const budgets = [_][2]i64{ .{ 65536, 262144 }, .{ 4096, 25165824 }, .{ 0, 4194304 }, .{ 1048576, 1048576 }, .{ 1024, 2048 } };
     for ([_]c_int{ 32, 28, 16 }) |factor| for (budgets) |mm| for ([_][2]c_int{ .{ 1, 1 }, .{ 1, 2 }, .{ 2, 2 }, .{ 3, 2 }, .{ 4, 2 }, .{ 5, 2 }, .{ 7, 2 }, .{ 8, 2 }, .{ 16, 2 }, .{ 101, 2 }, .{ 5, 3 } }) |ft| {
         for (sweep_edges) |w| for (sweep_edges) |h| {
-            var ref: ImageSize = .{};
+            var ref: mtmd.impl.ImageSize = .{};
             ref_qwen3vl_smart_resize(w, h, factor, mm[0], mm[1], ft[0], ft[1], &ref);
-            const port = image.Preprocessor.qwen3vlSmartResize(w, h, factor, mm[0], mm[1], ft[0], ft[1]);
+            const port = mtmd.image.Preprocessor.qwen3vlSmartResize(w, h, factor, mm[0], mm[1], ft[0], ft[1]);
             n_checks += 1;
             if (!sameSize(ref, port)) failCheck("lfm3vl smart_resize {d}x{d} f{d} {d}..{d} frames {d}/{d}: {d}x{d} vs {d}x{d}", .{ w, h, factor, mm[0], mm[1], ft[0], ft[1], ref.width, ref.height, port.width, port.height });
         };
@@ -747,13 +738,13 @@ fn sweepVideoFrame() !void {
         var hp = try toHparams(&rh);
         defer hp.deinit();
         // qwen3vl owns the video size, lfm3vl inherits it
-        for ([_]struct { image.Kind, names.ProjectorType }{ .{ .lfm3vl, .lfm3vl }, .{ .qwen3vl, .qwen3vl } }) |kp| {
-            const pp = image.Preprocessor.init(kp[0], &hp, kp[1]);
+        for ([_]struct { mtmd.image.Kind, mtmd.names.ProjectorType }{ .{ .lfm3vl, .lfm3vl }, .{ .qwen3vl, .qwen3vl } }) |kp| {
+            const pp = mtmd.image.Preprocessor.init(kp[0], &hp, kp[1]);
             var n_frames: c_int = 1;
             while (n_frames <= 32) : (n_frames += 1) {
                 for (sweep_edges) |w| for (sweep_edges) |h| {
-                    var ref: ImageSize = .{};
-                    var port: ImageSize = .{};
+                    var ref: mtmd.impl.ImageSize = .{};
+                    var port: mtmd.impl.ImageSize = .{};
                     const ref_has = ref_video_frame_size(@backingInt(kp[0]), &rh, n_frames, w, h, &ref) != 0;
                     const port_has = pp.getVideoFrameSize(n_frames, w, h, &port);
                     n_checks += 1;
@@ -779,15 +770,15 @@ fn sweepLfm2() !void {
         var hp = try toHparams(&rh);
         defer hp.deinit();
         for (sweep_edges) |w| for (sweep_edges) |h| {
-            const sz: ImageSize = .{ .width = w, .height = h };
+            const sz: mtmd.impl.ImageSize = .{ .width = w, .height = h };
             const ref_tile = ref_lfm2_should_tile(&rh, w, h) != 0;
-            const port_tile = image.Preprocessor.lfm2ShouldTile(&hp, sz);
-            var ref: ImageSize = .{};
+            const port_tile = mtmd.image.Preprocessor.lfm2ShouldTile(&hp, sz);
+            var ref: mtmd.impl.ImageSize = .{};
             ref_lfm2_smart_resize(&rh, w, h, &ref);
-            const port = image.Preprocessor.lfm2SmartResize(&hp, sz);
-            var ref_grid: ImageSize = .{};
+            const port = mtmd.image.Preprocessor.lfm2SmartResize(&hp, sz);
+            var ref_grid: mtmd.impl.ImageSize = .{};
             ref_lfm2_grid_layout(&rh, h, w, &ref_grid);
-            const port_grid = try image.Preprocessor.lfm2GetGridLayout(&hp, h, w);
+            const port_grid = try mtmd.image.Preprocessor.lfm2GetGridLayout(&hp, h, w);
             n_checks += 3;
             if (ref_tile != port_tile) failCheck("lfm2 should_tile {d}x{d} tiling {any}: {any} vs {any}", .{ w, h, tiling, ref_tile, port_tile });
             if (!sameSize(ref, port)) failCheck("lfm2 smart_resize {d}x{d} {any}: {d}x{d} vs {d}x{d}", .{ w, h, mm, ref.width, ref.height, port.width, port.height });
@@ -804,7 +795,7 @@ fn sweepPlanGrid() void {
             ref_deepseek41v_plan_grid(w, h, pr[0], pr[1], mt, mn, &rw, &rh);
             var pw: c_int = -1;
             var ph: c_int = -1;
-            image.Preprocessor.deepseek41vPlanGrid(w, h, pr[0], pr[1], mt, mn, &pw, &ph);
+            mtmd.image.Preprocessor.deepseek41vPlanGrid(w, h, pr[0], pr[1], mt, mn, &pw, &ph);
             n_checks += 1;
             if (rw != pw or rh != ph) failCheck("plan_grid {d}x{d} p{d} r{d} max {d} min {d}: {d}x{d} vs {d}x{d}", .{ w, h, pr[0], pr[1], mt, mn, rw, rh, pw, ph });
         };
@@ -814,14 +805,14 @@ fn sweepPlanGrid() void {
 // -----------------------------------------------------------------------------
 // vectors
 
-fn expectSize(name: []const u8, got: ImageSize, want: [2]c_int) void {
+fn expectSize(name: []const u8, got: mtmd.impl.ImageSize, want: [2]c_int) void {
     n_checks += 1;
     if (got.width != want[0] or got.height != want[1]) failCheck("vector {s}: {d}x{d}, HF says {d}x{d}", .{ name, got.width, got.height, want[0], want[1] });
 }
 
 /// `make_test_image` (tests/test-mtmd-impl.cpp:118): the LCG's pixels.
 fn lcgImage(nx: c_int, ny: c_int) ![]u8 {
-    const buf = try gpa.alloc(u8, @as(usize, @intCast(nx)) * @as(usize, @intCast(ny)) * 3);
+    const buf = try std.heap.c_allocator.alloc(u8, @as(usize, @intCast(nx)) * @as(usize, @intCast(ny)) * 3);
     var s: u32 = 1;
     for (buf) |*b| {
         s = s *% 1103515245 +% 12345;
@@ -830,7 +821,7 @@ fn lcgImage(nx: c_int, ny: c_int) ![]u8 {
     return buf;
 }
 
-fn hashPixels(img: *const impl.ImageU8, seed: u32) u32 {
+fn hashPixels(img: *const mtmd.impl.ImageU8, seed: u32) u32 {
     var hash = seed;
     for (img.roBuf()) |v| hash = (hash ^ v) *% 16777619;
     return hash;
@@ -846,12 +837,12 @@ fn runVectors() !void {
         var hp = try toHparams(&rh);
         defer hp.deinit();
         for ([_][4]c_int{ .{ 463, 463, 476, 476 }, .{ 463, 300, 476, 308 }, .{ 448, 280, 448, 280 }, .{ 2000, 1000, 1540, 784 } }) |v| {
-            var ref: ImageSize = .{};
+            var ref: mtmd.impl.ImageSize = .{};
             var what_ptr: ?[*]u8 = null;
             var what_len: usize = 0;
             if (ref_longest_target_size(&rh, v[0], v[1], &ref, &what_ptr, &what_len) != 0) return error.RefFailed;
             expectSize("longest_edge ref", ref, .{ v[2], v[3] });
-            expectSize("longest_edge port", try image.Preprocessor.longestEdgeGetTargetSize(&hp, .{ .width = v[0], .height = v[1] }), .{ v[2], v[3] });
+            expectSize("longest_edge port", try mtmd.image.Preprocessor.longestEdgeGetTargetSize(&hp, .{ .width = v[0], .height = v[1] }), .{ v[2], v[3] });
         }
     }
     // test_image_preprocessor_dyn_size
@@ -860,10 +851,10 @@ fn runVectors() !void {
         const rh: RefHparams = .{ .patch_size = v[0], .n_merge = 2, .image_round_half_even = 1, .image_min_pixels = 8 * area, .image_max_pixels = 4096 * area };
         var hp = try toHparams(&rh);
         defer hp.deinit();
-        var ref: ImageSize = .{};
+        var ref: mtmd.impl.ImageSize = .{};
         ref_dyn_target_size(&rh, v[1], v[2], &ref);
         expectSize("dyn_size ref", ref, .{ v[3], v[4] });
-        expectSize("dyn_size port", image.Preprocessor.dynSizeGetTargetSize(&hp, .{ .width = v[1], .height = v[2] }), .{ v[3], v[4] });
+        expectSize("dyn_size port", mtmd.image.Preprocessor.dynSizeGetTargetSize(&hp, .{ .width = v[1], .height = v[2] }), .{ v[3], v[4] });
     }
 
     // test_image_preprocessor_lfm2
@@ -883,19 +874,19 @@ fn runVectors() !void {
     for ([_]struct { c_int, c_int, bool }{ .{ 704, 704, false }, .{ 720, 720, false }, .{ 736, 736, true }, .{ 1024, 977, true }, .{ 1056, 384, false } }) |v| {
         n_checks += 2;
         if ((ref_lfm2_should_tile(&rh, v[0], v[1]) != 0) != v[2]) failCheck("vector should_tile ref {d}x{d}", .{ v[0], v[1] });
-        if (image.Preprocessor.lfm2ShouldTile(&hp, .{ .width = v[0], .height = v[1] }) != v[2]) failCheck("vector should_tile port {d}x{d}", .{ v[0], v[1] });
+        if (mtmd.image.Preprocessor.lfm2ShouldTile(&hp, .{ .width = v[0], .height = v[1] }) != v[2]) failCheck("vector should_tile port {d}x{d}", .{ v[0], v[1] });
     }
     for ([_][4]c_int{ .{ 400, 600, 384, 608 }, .{ 480, 336, 480, 320 }, .{ 64, 169, 160, 416 }, .{ 1024, 768, 576, 416 } }) |v| {
-        var ref: ImageSize = .{};
+        var ref: mtmd.impl.ImageSize = .{};
         ref_lfm2_smart_resize(&rh, v[0], v[1], &ref);
         expectSize("lfm2 smart_resize ref", ref, .{ v[2], v[3] });
-        expectSize("lfm2 smart_resize port", image.Preprocessor.lfm2SmartResize(&hp, .{ .width = v[0], .height = v[1] }), .{ v[2], v[3] });
+        expectSize("lfm2 smart_resize port", mtmd.image.Preprocessor.lfm2SmartResize(&hp, .{ .width = v[0], .height = v[1] }), .{ v[2], v[3] });
     }
     for ([_][4]c_int{ .{ 720, 1600, 2, 4 }, .{ 420, 1440, 1, 3 }, .{ 255, 2160, 1, 8 }, .{ 1024, 768, 3, 2 } }) |v| {
-        var ref: ImageSize = .{};
+        var ref: mtmd.impl.ImageSize = .{};
         ref_lfm2_grid_layout(&rh, v[1], v[0], &ref);
         expectSize("lfm2 grid ref", ref, .{ v[2], v[3] });
-        expectSize("lfm2 grid port", try image.Preprocessor.lfm2GetGridLayout(&hp, v[1], v[0]), .{ v[2], v[3] });
+        expectSize("lfm2 grid port", try mtmd.image.Preprocessor.lfm2GetGridLayout(&hp, v[1], v[0]), .{ v[2], v[3] });
     }
     {
         // do_image_splitting=false
@@ -906,7 +897,7 @@ fn runVectors() !void {
         defer hp_one.deinit();
         n_checks += 2;
         if (ref_lfm2_should_tile(&one, 1024, 977) != 0) failCheck("vector should_tile ref max_tiles=1", .{});
-        if (image.Preprocessor.lfm2ShouldTile(&hp_one, .{ .width = 1024, .height = 977 })) failCheck("vector should_tile port max_tiles=1", .{});
+        if (mtmd.image.Preprocessor.lfm2ShouldTile(&hp_one, .{ .width = 1024, .height = 977 })) failCheck("vector should_tile port max_tiles=1", .{});
     }
 
     // test_image_preprocessor_lfm2_torch_resize: Lfm2VlImageProcessor's pixels
@@ -917,16 +908,16 @@ fn runVectors() !void {
         .{ 1, 2000, 1500, 0xb035d942 },
     }) |v| {
         const rgb = try lcgImage(v[1], v[2]);
-        defer gpa.free(rgb);
-        rh.image_resize_algo_rf = torch | v[0];
-        rh.image_resize_algo_ov = torch | v[0];
+        defer std.heap.c_allocator.free(rgb);
+        rh.image_resize_algo_rf = mtmd.model.ResizeAlgo.flag_torch | v[0];
+        rh.image_resize_algo_ov = mtmd.model.ResizeAlgo.flag_torch | v[0];
         var hpt = try toHparams(&rh);
         defer hpt.deinit();
-        var img: impl.ImageU8 = .{};
+        var img: mtmd.impl.ImageU8 = .{};
         defer img.deinit();
         try img.setSize(.{ .width = v[1], .height = v[2] }, false);
         try img.cpyBuf(rgb);
-        const pp = image.Preprocessor.init(.lfm2, &hpt, .lfm2);
+        const pp = mtmd.image.Preprocessor.init(.lfm2, &hpt, .lfm2);
         var inst = try pp.getSliceInstructions(img.getSize());
         defer inst.deinit();
         var sliced = try pp.sliceImage(&img, &inst);
@@ -949,28 +940,28 @@ const DeathResult = struct { status: c_int, msg: []u8 };
 /// Runs `body` in a forked child with its stderr captured, the backtrace off.
 fn inChild(comptime body: anytype, args: anytype) !DeathResult {
     var fds: [2]c_int = undefined;
-    if (libc.pipe(&fds) != 0) return error.PipeFailed;
-    const pid = libc.fork();
+    if (std.c.pipe(&fds) != 0) return error.PipeFailed;
+    const pid = std.c.fork();
     if (pid < 0) return error.ForkFailed;
     if (pid == 0) {
-        _ = libc.setenv("GGML_NO_BACKTRACE", "1", 1);
-        _ = libc.dup2(fds[1], 2);
-        _ = libc.close(fds[0]);
+        _ = stdlib.libc.setenv("GGML_NO_BACKTRACE", "1", 1);
+        _ = std.c.dup2(fds[1], 2);
+        _ = std.c.close(fds[0]);
         @call(.auto, body, args) catch {};
-        libc._exit(0);
+        std.c._exit(0);
     }
-    _ = libc.close(fds[1]);
+    _ = std.c.close(fds[1]);
     var msg: std.ArrayList(u8) = .empty;
     var chunk: [4096]u8 = undefined;
     while (true) {
-        const n = libc.read(fds[0], &chunk, chunk.len);
+        const n = std.c.read(fds[0], &chunk, chunk.len);
         if (n <= 0) break;
-        try msg.appendSlice(gpa, chunk[0..@intCast(n)]);
+        try msg.appendSlice(std.heap.c_allocator, chunk[0..@intCast(n)]);
     }
-    _ = libc.close(fds[0]);
+    _ = std.c.close(fds[0]);
     var status: c_int = 0;
-    _ = libc.waitpid(pid, &status, 0);
-    return .{ .status = status, .msg = try msg.toOwnedSlice(gpa) };
+    _ = std.c.waitpid(pid, &status, 0);
+    return .{ .status = status, .msg = try msg.toOwnedSlice(std.heap.c_allocator) };
 }
 
 /// `__FILE__` is a full path on the reference's side and a bare name on the
@@ -981,24 +972,24 @@ fn fromBasename(msg: []const u8) []const u8 {
     return msg[name + 1 ..];
 }
 
-fn refDie(kind: image.Kind, rh: *const RefHparams, rgb: []const u8, nx: c_int, ny: c_int) !void {
+fn refDie(kind: mtmd.image.Kind, rh: *const RefHparams, rgb: []const u8, nx: c_int, ny: c_int) !void {
     var out_ptr: ?[*]u8 = null;
     var out_len: usize = 0;
     _ = ref_preprocess(@backingInt(kind), 0, rh, rgb.ptr, nx, ny, 0, &out_ptr, &out_len);
 }
 
-fn portDie(kind: image.Kind, rh: *const RefHparams, rgb: []const u8, nx: c_int, ny: c_int) !void {
+fn portDie(kind: mtmd.image.Kind, rh: *const RefHparams, rgb: []const u8, nx: c_int, ny: c_int) !void {
     var hp = try toHparams(rh);
-    var img: impl.ImageU8 = .{};
+    var img: mtmd.impl.ImageU8 = .{};
     try img.setSize(.{ .width = nx, .height = ny }, false);
     try img.cpyBuf(rgb);
-    const pp = image.Preprocessor.init(kind, &hp, .mlp);
+    const pp = mtmd.image.Preprocessor.init(kind, &hp, .mlp);
     _ = try pp.preprocess(&img);
 }
 
 fn compareDeath(label: []const u8, phrase: []const u8, ref: DeathResult, port: DeathResult) void {
-    defer gpa.free(ref.msg);
-    defer gpa.free(port.msg);
+    defer std.heap.c_allocator.free(ref.msg);
+    defer std.heap.c_allocator.free(port.msg);
     n_death += 1;
     const ref_msg = fromBasename(ref.msg);
     const port_msg = fromBasename(port.msg);
@@ -1010,12 +1001,12 @@ fn compareDeath(label: []const u8, phrase: []const u8, ref: DeathResult, port: D
 
 fn runDeaths() !void {
     const rgb = try makeImage(64, 48, .random, 7);
-    defer gpa.free(rgb);
-    const Die = struct { []const u8, []const u8, image.Kind, RefHparams };
+    defer std.heap.c_allocator.free(rgb);
+    const Die = struct { []const u8, []const u8, mtmd.image.Kind, RefHparams };
     for ([_]Die{
-        .{ "torch lanczos", "torchvision has no lanczos", .fixed_size, .{ .image_size = 224, .patch_size = 14, .image_resize_algo = torch | 2 } },
+        .{ "torch lanczos", "torchvision has no lanczos", .fixed_size, .{ .image_size = 224, .patch_size = 14, .image_resize_algo = mtmd.model.ResizeAlgo.flag_torch | 2 } },
         .{ "unknown algo", "unsupported resize algo: 3", .fixed_size, .{ .image_size = 224, .patch_size = 14, .image_resize_algo = 3 } },
-        .{ "unknown torch algo", "unsupported resize algo: 3", .fixed_size, .{ .image_size = 224, .patch_size = 14, .image_resize_algo = torch | 3 } },
+        .{ "unknown torch algo", "unsupported resize algo: 3", .fixed_size, .{ .image_size = 224, .patch_size = 14, .image_resize_algo = mtmd.model.ResizeAlgo.flag_torch | 3 } },
         .{ "dyn_size pixels", "hparams.image_min_pixels > 0", .dyn_size, .{ .patch_size = 14, .image_min_pixels = 0, .image_max_pixels = 1024 } },
         .{ "longest_edge unset", "hparams.image_longest_edge > 0", .longest_edge, .{ .patch_size = 14 } },
         .{ "kimik25 pixels", "hparams.image_max_pixels > 0", .kimik25, .{ .patch_size = 14, .n_merge = 2, .image_max_pixels = -1 } },
@@ -1039,14 +1030,14 @@ pub fn main(init: std.process.Init) !u8 {
     }
 
     ref_set_log(capture, &ref_log);
-    impl.g_logger_state = .{ .log_callback = portCapture, .log_callback_user_data = &port_log };
+    mtmd.impl.g_logger_state = .{ .log_callback = portCapture, .log_callback_user_data = &port_log };
 
     var seed: u64 = 1;
-    inline for (@typeInfo(image.Kind).@"enum".field_names, @typeInfo(image.Kind).@"enum".field_values) |fname, fvalue| {
-        const kind: image.Kind = @fromBackingInt(@intCast(fvalue));
+    inline for (@typeInfo(mtmd.image.Kind).@"enum".field_names, @typeInfo(mtmd.image.Kind).@"enum".field_values) |fname, fvalue| {
+        const kind: mtmd.image.Kind = @fromBackingInt(@intCast(fvalue));
         if (filter == null or std.mem.indexOf(u8, fname, filter.?) != null) {
-            var vs: std.ArrayList(struct { RefHparams, names.ProjectorType, []const u8 }) = .empty;
-            defer vs.deinit(gpa);
+            var vs: std.ArrayList(struct { RefHparams, mtmd.names.ProjectorType, []const u8 }) = .empty;
+            defer vs.deinit(std.heap.c_allocator);
             try variants(kind, &vs);
             const extra = extraSizes(kind);
             for (vs.items, 0..) |v, vi| {

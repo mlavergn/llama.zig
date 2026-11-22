@@ -34,20 +34,17 @@
 //! downloaded in its iteration order, which `libcxx.StringMap` reproduces.
 
 const std = @import("std");
+const common_chat = @import("common_chat");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 const builtin = @import("builtin");
-const tc = @import("tools_common");
+const tools_common = @import("tools_common");
 const json = @import("json");
 const llama = @import("llama");
 
-const Allocator = std.mem.Allocator;
-
-pub const Error = mod.common.Error;
-
 /// Ports `llama_build_info` (build-info.cpp.in:27 @b1b770d90): `b<number>-<commit>`.
 pub fn buildInfo() []const u8 {
-    return @import("result.zig").build_info;
+    return mod.result.build_info;
 }
 
 // -----------------------------------------------------------------------------
@@ -55,7 +52,7 @@ pub fn buildInfo() []const u8 {
 
 /// Ports `common_get_model_endpoint` (common/common.cpp:1555 @b1b770d90):
 /// `MODEL_ENDPOINT`, else `HF_ENDPOINT`, else the hub, ending in `/`.
-pub fn commonGetModelEndpoint(a: Allocator) Allocator.Error![]const u8 {
+pub fn commonGetModelEndpoint(a: std.mem.Allocator) std.mem.Allocator.Error![]const u8 {
     var endpoint: []const u8 = getEnv("MODEL_ENDPOINT");
     if (endpoint.len == 0) {
         // the HF_ENDPOINT variable is respected for backward compatibility
@@ -76,8 +73,8 @@ fn getEnv(name: [:0]const u8) []const u8 {
 }
 
 /// `get_home_directory` (`tc.arg.homeDirectory`), throwing where it does.
-fn getHomeDirectory() Error![]const u8 {
-    const home = tc.arg.homeDirectory() orelse return mod.common.throw(error.RuntimeError, "Failed to find $HOME directory", .{});
+fn getHomeDirectory() common_chat.exception.Error![]const u8 {
+    const home = tools_common.arg.homeDirectory() orelse return common_chat.exception.throw(error.RuntimeError, "Failed to find $HOME directory", .{});
     return std.mem.span(home);
 }
 
@@ -85,7 +82,7 @@ fn getHomeDirectory() Error![]const u8 {
 /// macOS and Linux arms: `LLAMA_CACHE` as it is, else the platform's cache
 /// directory with `llama.cpp` appended -- a path, with no trailing
 /// separator added.
-pub fn fsGetCacheDirectory(a: Allocator) Error![]const u8 {
+pub fn fsGetCacheDirectory(a: std.mem.Allocator) common_chat.exception.Error![]const u8 {
     var cache_directory: []const u8 = getEnv("LLAMA_CACHE");
     if (cache_directory.len != 0) {
         return cache_directory;
@@ -103,13 +100,13 @@ pub fn fsGetCacheDirectory(a: Allocator) Error![]const u8 {
 
 /// Ports `fs_get_cache_file` (common/common.cpp:1017 @b1b770d90): `filename`
 /// in the cache directory, which is created.
-pub fn fsGetCacheFile(a: Allocator, filename: []const u8) Error![]const u8 {
-    tc.ggml.ggmlAssert(std.mem.indexOfScalar(u8, filename, '/') == null, "common/common.cpp", 1018, "filename.find(DIRECTORY_SEPARATOR) == std::string::npos");
+pub fn fsGetCacheFile(a: std.mem.Allocator, filename: []const u8) common_chat.exception.Error![]const u8 {
+    tools_common.ggml.ggmlAssert(std.mem.indexOfScalar(u8, filename, '/') == null, "common/common.cpp", 1018, "filename.find(DIRECTORY_SEPARATOR) == std::string::npos");
     const cache_directory = try fsGetCacheDirectory(a);
     // `common_create_directories` (common/common.h:944 @b1b770d90): on Linux through
     // `path / ""`, which makes no difference here
     if (stdlib.fs.createDirectories(cache_directory) != 0) {
-        return mod.common.throw(error.RuntimeError, "failed to create cache directory: {s}", .{cache_directory});
+        return common_chat.exception.throw(error.RuntimeError, "failed to create cache directory: {s}", .{cache_directory});
     }
     return stdlib.path.join(a, cache_directory, filename);
 }
@@ -118,9 +115,9 @@ pub fn fsGetCacheFile(a: Allocator, filename: []const u8) Error![]const u8 {
 /// temporary file renamed into place, the parent directories created first
 /// (their failure ignored). A random suffix gives every writer its own
 /// temporary file, across processes and containers.
-pub fn fsWriteAtomic(a: Allocator, path: []const u8, data: []const u8) Error!void {
+pub fn fsWriteAtomic(a: std.mem.Allocator, path: []const u8, data: []const u8) common_chat.exception.Error!void {
     var id_bytes: [8]u8 = undefined;
-    @import("httplib/ws.zig").fillRandomBytes(&id_bytes);
+    mod.httplib.ws.fillRandomBytes(&id_bytes);
     const path_tmp = try std.fmt.allocPrint(a, "{s}.{d}.tmp", .{ path, std.mem.readInt(u64, &id_bytes, .little) });
 
     const parent = stdlib.path.parent(path);
@@ -138,7 +135,7 @@ pub fn fsWriteAtomic(a: Allocator, path: []const u8, data: []const u8) Error!voi
 
     if (fail or ec) {
         _ = stdlib.fs.removeIfExists(path_tmp);
-        return mod.common.throw(error.RuntimeError, "failed to write file: {s}", .{path});
+        return common_chat.exception.throw(error.RuntimeError, "failed to write file: {s}", .{path});
     }
 }
 
@@ -157,21 +154,21 @@ pub const HttpUrl = struct {
 
 /// Ports `common_http_format_host` (http.h:27 @b1b770d90): an IPv6 literal
 /// bracketed for a URL's authority.
-pub fn commonHttpFormatHost(a: Allocator, host: []const u8) Allocator.Error![]const u8 {
+pub fn commonHttpFormatHost(a: std.mem.Allocator, host: []const u8) std.mem.Allocator.Error![]const u8 {
     if (std.mem.indexOfScalar(u8, host, ':') != null) return std.mem.concat(a, u8, &.{ "[", host, "]" });
     return host;
 }
 
 /// Ports `common_http_parse_url` (http.h:31 @b1b770d90).
-pub fn commonHttpParseUrl(a: Allocator, url: []const u8) Error!HttpUrl {
+pub fn commonHttpParseUrl(a: std.mem.Allocator, url: []const u8) common_chat.exception.Error!HttpUrl {
     var parts: HttpUrl = .{};
     const scheme_end = std.mem.indexOf(u8, url, "://") orelse {
-        return mod.common.throw(error.RuntimeError, "invalid URL: no scheme", .{});
+        return common_chat.exception.throw(error.RuntimeError, "invalid URL: no scheme", .{});
     };
     parts.scheme = url[0..scheme_end];
 
     if (!std.mem.eql(u8, parts.scheme, "http") and !std.mem.eql(u8, parts.scheme, "https")) {
-        return mod.common.throw(error.RuntimeError, "unsupported URL scheme: {s}", .{parts.scheme});
+        return common_chat.exception.throw(error.RuntimeError, "unsupported URL scheme: {s}", .{parts.scheme});
     }
 
     var rest = url[scheme_end + 3 ..];
@@ -199,7 +196,7 @@ pub fn commonHttpParseUrl(a: Allocator, url: []const u8) Error!HttpUrl {
     var port_str: []const u8 = "";
     if (parts.host.len != 0 and parts.host[0] == '[') {
         const close = std.mem.indexOfScalar(u8, parts.host, ']') orelse {
-            return mod.common.throw(error.RuntimeError, "invalid IPv6 URL authority: {s}", .{parts.host});
+            return common_chat.exception.throw(error.RuntimeError, "invalid IPv6 URL authority: {s}", .{parts.host});
         };
         const after = parts.host[close + 1 ..];
         if (after.len != 0 and after[0] == ':') {
@@ -213,13 +210,13 @@ pub fn commonHttpParseUrl(a: Allocator, url: []const u8) Error!HttpUrl {
 
     if (port_str.len != 0) {
         const z = try a.dupeSentinel(u8, port_str, 0);
-        parts.port = tc.arg.stoi(z) catch return mod.common.throw(error.InvalidArgument, "{s}", .{tc.arg.what()});
+        parts.port = tools_common.arg.stoi(z) catch return common_chat.exception.throw(error.InvalidArgument, "{s}", .{tools_common.arg.what()});
     } else if (std.mem.eql(u8, parts.scheme, "http")) {
         parts.port = 80;
     } else if (std.mem.eql(u8, parts.scheme, "https")) {
         parts.port = 443;
     } else {
-        return mod.common.throw(error.RuntimeError, "unsupported URL scheme: {s}", .{parts.scheme});
+        return common_chat.exception.throw(error.RuntimeError, "unsupported URL scheme: {s}", .{parts.scheme});
     }
 
     return parts;
@@ -229,7 +226,7 @@ pub fn commonHttpParseUrl(a: Allocator, url: []const u8) Error!HttpUrl {
 /// `Location` resolved against the URL it came from.
 ///
 /// Return: owned by `a` (or `location` itself when it has a scheme).
-pub fn commonHttpResolveLocation(a: Allocator, base_url: []const u8, location: []const u8) Error![]const u8 {
+pub fn commonHttpResolveLocation(a: std.mem.Allocator, base_url: []const u8, location: []const u8) common_chat.exception.Error![]const u8 {
     if (std.mem.indexOf(u8, location, "://") != null) {
         return location;
     }
@@ -253,7 +250,7 @@ pub fn commonHttpResolveLocation(a: Allocator, base_url: []const u8, location: [
 /// destination; a remote proxy can never reach the client machine's own
 /// loopback, so these hosts are always contacted directly, before `NO_PROXY`
 /// is consulted (similar to Go's net/http).
-fn commonHttpIsLoopback(a: Allocator, host: []const u8) Allocator.Error!bool {
+fn commonHttpIsLoopback(a: std.mem.Allocator, host: []const u8) std.mem.Allocator.Error!bool {
     const h = try asciiLower(a, host);
 
     if (std.mem.eql(u8, h, "localhost") or std.mem.eql(u8, h, "::1") or std.mem.eql(u8, h, "0.0.0.0")) {
@@ -298,7 +295,7 @@ fn commonHttpIsLoopback(a: Allocator, host: []const u8) Allocator.Error!bool {
 
 /// The `lower` lambda of `common_http_is_loopback` and
 /// `common_http_proxy_bypass`.
-fn asciiLower(a: Allocator, s: []const u8) Allocator.Error![]u8 {
+fn asciiLower(a: std.mem.Allocator, s: []const u8) std.mem.Allocator.Error![]u8 {
     const out = try a.dupe(u8, s);
     for (out) |*ch| {
         if (ch.* >= 'A' and ch.* <= 'Z') ch.* += 'a' - 'A';
@@ -310,7 +307,7 @@ fn asciiLower(a: Allocator, s: []const u8) Allocator.Error![]u8 {
 /// `NO_PROXY` list: comma separated entries, `*` bypasses the proxy for every
 /// host, an entry matches the host itself or any of its subdomains, a
 /// leading dot is optional, ports are ignored.
-fn commonHttpProxyBypass(a: Allocator, no_proxy: []const u8, host: []const u8) Allocator.Error!bool {
+fn commonHttpProxyBypass(a: std.mem.Allocator, no_proxy: []const u8, host: []const u8) std.mem.Allocator.Error!bool {
     const h = try asciiLower(a, host);
 
     var pos: usize = 0;
@@ -357,16 +354,16 @@ fn getenvS(upper: [:0]const u8, lower: [:0]const u8) []const u8 {
 /// Ports `common_http_client` (http.h:234 @b1b770d90): a client for the
 /// URL's host, following redirects, with its credentials, through the proxy
 /// `HTTP_PROXY` names. `https` is refused: the reference builds without SSL.
-pub fn commonHttpClient(a: Allocator, url: []const u8) Error!HttpClient {
+pub fn commonHttpClient(a: std.mem.Allocator, url: []const u8) common_chat.exception.Error!HttpClient {
     const parts = try commonHttpParseUrl(a, url);
 
     if (parts.host.len == 0) {
-        return mod.common.throw(error.RuntimeError, "error: invalid URL format", .{});
+        return common_chat.exception.throw(error.RuntimeError, "error: invalid URL format", .{});
     }
 
     // #ifndef CPPHTTPLIB_OPENSSL_SUPPORT
     if (std.mem.eql(u8, parts.scheme, "https")) {
-        return mod.common.throw(error.RuntimeError, "HTTPS is not supported. Please rebuild with one of:\n" ++
+        return common_chat.exception.throw(error.RuntimeError, "HTTPS is not supported. Please rebuild with one of:\n" ++
             "  -DLLAMA_BUILD_BORINGSSL=ON\n" ++
             "  -DLLAMA_BUILD_LIBRESSL=ON\n" ++
             "  -DLLAMA_OPENSSL=ON (default, requires OpenSSL dev files installed)", .{});
@@ -394,7 +391,7 @@ pub fn commonHttpClient(a: Allocator, url: []const u8) Error!HttpClient {
         } else |e| {
             if (e == error.OutOfMemory) return error.OutOfMemory;
             // fall back to a direct connection, the URL itself is not logged as it can carry credentials
-            tc.log.wrn("%s: ignoring malformed proxy URL from the environment: %s\n", .{ @as([*:0]const u8, "common_http_client"), try mod.common.zs(a, mod.common.what(e)) });
+            tools_common.log.wrn("%s: ignoring malformed proxy URL from the environment: %s\n", .{ @as([*:0]const u8, "common_http_client"), try mod.common.zs(a, common_chat.exception.what(e)) });
         }
     }
 
@@ -403,7 +400,7 @@ pub fn commonHttpClient(a: Allocator, url: []const u8) Error!HttpClient {
 
 /// Ports `common_http_show_masked_url` (http.h:290 @b1b770d90): the URL
 /// without its credentials.
-pub fn commonHttpShowMaskedUrl(a: Allocator, parts: *const HttpUrl) Allocator.Error![]const u8 {
+pub fn commonHttpShowMaskedUrl(a: std.mem.Allocator, parts: *const HttpUrl) std.mem.Allocator.Error![]const u8 {
     return std.mem.concat(a, u8, &.{ parts.scheme, "://", if (parts.user.len == 0) "" else "****:****@", try commonHttpFormatHost(a, parts.host), parts.path });
 }
 
@@ -475,7 +472,7 @@ pub const RemoteParams = struct {
 /// common_remote_params: a `std::function<std::string(const std::string & host)>`.
 pub const ResolveHost = struct {
     ctx: ?*const anyopaque = null,
-    call: *const fn (ctx: ?*const anyopaque, a: Allocator, host: []const u8) Error![]const u8,
+    call: *const fn (ctx: ?*const anyopaque, a: std.mem.Allocator, host: []const u8) common_chat.exception.Error![]const u8,
 };
 
 /// Ports `common_cached_model_info` (download.h:47 @b1b770d90).
@@ -485,7 +482,7 @@ pub const CachedModelInfo = struct {
 
     /// Ports `to_string` (download.h:50 @b1b770d90), a member of
     /// `common_cached_model_info`.
-    pub fn toString(self: CachedModelInfo, a: Allocator) Allocator.Error![]const u8 {
+    pub fn toString(self: CachedModelInfo, a: std.mem.Allocator) std.mem.Allocator.Error![]const u8 {
         return std.mem.concat(a, u8, &.{ self.repo, ":", self.tag });
     }
 };
@@ -526,7 +523,7 @@ pub const Task = struct {
 
     /// Ports the constructor taking an `hf_file` (download.h:78
     /// @b1b770d90).
-    pub fn fromHf(a: Allocator, f: *const mod.hf_cache.HfFile, opts: Opts, on_done: OnDone) Error!Task {
+    pub fn fromHf(a: std.mem.Allocator, f: *const mod.hf_cache.HfFile, opts: Opts, on_done: OnDone) common_chat.exception.Error!Task {
         return .{
             .opts = opts,
             .url = f.url,
@@ -580,21 +577,21 @@ pub const Partial = struct {
 const partial_suffix = ".downloadInProgress";
 
 /// Ports `write_etag` (download.cpp:46 @b1b770d90).
-fn writeEtag(a: Allocator, path: []const u8, etag: []const u8) Error!void {
+fn writeEtag(a: std.mem.Allocator, path: []const u8, etag: []const u8) common_chat.exception.Error!void {
     const etag_path = try std.mem.concat(a, u8, &.{ path, ".etag" });
     try fsWriteAtomic(a, etag_path, etag);
-    tc.log.dbg("%s: file etag saved: %s\n", .{ @as([*:0]const u8, "write_etag"), try mod.common.zs(a, etag_path) });
+    tools_common.log.dbg("%s: file etag saved: %s\n", .{ @as([*:0]const u8, "write_etag"), try mod.common.zs(a, etag_path) });
 }
 
 /// Ports `read_etag` (download.cpp:52 @b1b770d90): the first line of
 /// `<path>.etag`, or nothing.
-fn readEtag(a: Allocator, path: []const u8) Allocator.Error![]const u8 {
+fn readEtag(a: std.mem.Allocator, path: []const u8) std.mem.Allocator.Error![]const u8 {
     const etag_path = try std.mem.concat(a, u8, &.{ path, ".etag" });
     if (!stdlib.fs.exists(etag_path)) {
         return "";
     }
     const etag = (try stdlib.file.readFirstLine(stdlib.file.defaultIo(), a, etag_path)) orelse {
-        tc.log.err("%s: could not open .etag file for reading: %s\n", .{ @as([*:0]const u8, "read_etag"), try mod.common.zs(a, etag_path) });
+        tools_common.log.err("%s: could not open .etag file for reading: %s\n", .{ @as([*:0]const u8, "read_etag"), try mod.common.zs(a, etag_path) });
         return "";
     };
     return etag;
@@ -607,13 +604,13 @@ fn isHttpStatusOk(status: c_int) bool {
 
 /// Ports `common_download_split_repo_tag` (download.cpp:71 @b1b770d90):
 /// `user/model:tag` into the repository and the tag, which may be empty.
-pub fn splitRepoTag(a: Allocator, hf_repo_with_tag: []const u8) Error!struct { []const u8, []const u8 } {
+pub fn splitRepoTag(a: std.mem.Allocator, hf_repo_with_tag: []const u8) common_chat.exception.Error!struct { []const u8, []const u8 } {
     const parts = try stdlib.strings.split(a, hf_repo_with_tag, ':');
     const tag: []const u8 = if (parts.items.len > 1) parts.items[parts.items.len - 1] else "";
     const hf_repo = parts.items[0];
     const sp = try stdlib.strings.split(a, hf_repo, '/');
     if (sp.items.len != 2) {
-        return mod.common.throw(error.InvalidArgument, "error: invalid HF repo format, expected <user>/<model>[:quant]\n", .{});
+        return common_chat.exception.throw(error.InvalidArgument, "error: invalid HF repo format, expected <user>/<model>[:quant]\n", .{});
     }
     return .{ hf_repo, tag };
 }
@@ -699,7 +696,7 @@ const ProgressBar = struct {
         mutex.lock();
         defer mutex.unlock();
 
-        const io = tc.io;
+        const io = tools_common.io;
         if (!lines.contains(self)) {
             lines.put(std.heap.c_allocator, self, max_line) catch return;
             max_line += 1;
@@ -736,7 +733,7 @@ const ProgressBar = struct {
 
 /// The two `httplib::Client::Get` handlers of `common_pull_file`.
 const PullState = struct {
-    a: Allocator,
+    a: std.mem.Allocator,
     out: stdlib.file.Out,
     open: bool = true,
     path_tmp: []const u8,
@@ -744,12 +741,12 @@ const PullState = struct {
     callback: ?*const Callback,
     progress_step: usize = 0,
 
-    fn onResponse(ctx: *anyopaque, response: *const Response) bool {
+    fn onResponse(ctx: *anyopaque, response: *const mod.httplib.client.Response) bool {
         const self: *PullState = @ptrCast(@alignCast(ctx));
         const func = "common_pull_file";
         const p = self.p;
         if (p.downloaded > 0 and response.status != 206) {
-            tc.log.wrn("%s: server did not respond with 206 Partial Content for a resume request. Status: %d\n", .{ func, response.status });
+            tools_common.log.wrn("%s: server did not respond with 206 Partial Content for a resume request. Status: %d\n", .{ func, response.status });
             if (response.status == 416 or response.status == 200) {
                 // the kept partial cannot be resumed: 416 for a complete or stale one,
                 // 200 from a server that ignores the range; drop it, so the next
@@ -761,14 +758,14 @@ const PullState = struct {
             return false;
         }
         if (p.downloaded == 0 and response.status != 200) {
-            tc.log.wrn("%s: download received non-successful status code: %d\n", .{ func, response.status });
+            tools_common.log.wrn("%s: download received non-successful status code: %d\n", .{ func, response.status });
             return false;
         }
         if (p.total == 0 and response.hasHeader("Content-Length")) {
             if (stoull(response.getHeaderValue("Content-Length"))) |content_length| {
                 p.total = p.downloaded + content_length;
             } else |_| {
-                tc.log.wrn("%s: invalid Content-Length header: %s\n", .{ func, @as([*:0]const u8, "stoull: no conversion") });
+                tools_common.log.wrn("%s: invalid Content-Length header: %s\n", .{ func, @as([*:0]const u8, "stoull: no conversion") });
             }
         }
         return true;
@@ -778,7 +775,7 @@ const PullState = struct {
         const self: *PullState = @ptrCast(@alignCast(ctx));
         const func = "common_pull_file";
         self.out.write(data) catch {
-            tc.log.err("%s: error writing to file: %s\n", .{ func, mod.common.zs(self.a, self.path_tmp) catch "" });
+            tools_common.log.err("%s: error writing to file: %s\n", .{ func, mod.common.zs(self.a, self.path_tmp) catch "" });
             return false;
         };
         const p = self.p;
@@ -813,14 +810,14 @@ fn stoull(s: []const u8) !usize {
 ///
 /// Return: false, having logged why, when the request did not complete or
 /// the file did not close cleanly.
-fn commonPullFile(a: Allocator, cli: *HttpClient, resolve_path: []const u8, path_tmp: []const u8, supports_ranges: bool, p: *Progress, callback: ?*const Callback) Allocator.Error!bool {
+fn commonPullFile(a: std.mem.Allocator, cli: *HttpClient, resolve_path: []const u8, path_tmp: []const u8, supports_ranges: bool, p: *Progress, callback: ?*const Callback) std.mem.Allocator.Error!bool {
     const func = "common_pull_file";
     const io = stdlib.file.defaultIo();
     const z = try a.dupeSentinel(u8, path_tmp, 0);
     // `std::ofstream(path_tmp, std::ios::binary | std::ios::app)`, written
     // through: its buffer only delays the same bytes
     const out = stdlib.file.Out.append(io, path_tmp) catch {
-        tc.log.err("%s: error opening local file for writing: %s\n", .{ func, z.ptr });
+        tools_common.log.err("%s: error opening local file for writing: %s\n", .{ func, z.ptr });
         return false;
     };
     var state: PullState = .{ .a = a, .out = out, .path_tmp = path_tmp, .p = p, .callback = callback };
@@ -828,7 +825,7 @@ fn commonPullFile(a: Allocator, cli: *HttpClient, resolve_path: []const u8, path
         state.out.close(io);
     };
 
-    var headers: Headers = .{};
+    var headers: mod.httplib.detail.Headers = .{};
     if (supports_ranges and p.downloaded > 0) {
         _ = try headers.emplace(a, "Range", try std.fmt.allocPrint(a, "bytes={d}-", .{p.downloaded}));
     }
@@ -836,13 +833,13 @@ fn commonPullFile(a: Allocator, cli: *HttpClient, resolve_path: []const u8, path
     const res = cli.getStream(a, resolve_path, &headers, &state, PullState.onResponse, PullState.onData);
 
     if (res.res == null) {
-        tc.log.err("%s: download failed: %s (status: %d)\n", .{ func, (try mod.common.zs(a, errorToString(res.err))), @as(c_int, -1) });
+        tools_common.log.err("%s: download failed: %s (status: %d)\n", .{ func, (try mod.common.zs(a, mod.httplib.client.errorToString(res.err))), @as(c_int, -1) });
         return false;
     }
 
     state.open = false;
     if (!state.out.closeChecked(io)) {
-        tc.log.err("%s: error closing file: %s\n", .{ func, z.ptr });
+        tools_common.log.err("%s: error closing file: %s\n", .{ func, z.ptr });
         return false;
     }
 
@@ -851,7 +848,7 @@ fn commonPullFile(a: Allocator, cli: *HttpClient, resolve_path: []const u8, path
 
 /// What `common_download_file_single_online`'s lambdas capture.
 const OnlineState = struct {
-    a: Allocator,
+    a: std.mem.Allocator,
     url: []const u8,
     opts: *const Opts,
     path: []const u8,
@@ -883,7 +880,7 @@ const OnlineState = struct {
         const self: *OnlineState = @ptrCast(@alignCast(ctx.?));
         if (!self.waited) {
             const name = mod.common.zs(self.a, urlGetFilename(self.url)) catch "";
-            tc.log.inf("%s: file '%s' is being downloaded by another process, waiting...\n", .{ @as([*:0]const u8, "operator()"), name });
+            tools_common.log.inf("%s: file '%s' is being downloaded by another process, waiting...\n", .{ @as([*:0]const u8, "operator()"), name });
             self.waited = true;
         }
         if (self.opts.callback) |cb| return !cb.is_cancelled(cb.ctx);
@@ -901,7 +898,7 @@ const OnlineState = struct {
 /// - `alt_path`: an additional path treated as present in the cache.
 ///
 /// Return: the HEAD's status, 304 for a cached file, or -1.
-fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opts: *const Opts, skip_etag: bool, lock_path: []const u8, alt_path: []const u8) Error!c_int {
+fn downloadFileSingleOnline(a: std.mem.Allocator, url: []const u8, path: []const u8, opts: *const Opts, skip_etag: bool, lock_path: []const u8, alt_path: []const u8) common_chat.exception.Error!c_int {
     const func = "common_download_file_single_online";
     const max_attempts = 3;
     const retry_delay_seconds = 2;
@@ -921,7 +918,7 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
     var st: OnlineState = .{ .a = a, .url = url, .opts = opts, .path = path, .alt_path = alt_path, .lock = &lock, .p = &p };
 
     if (skip_etag and st.cacheHit()) {
-        tc.log.dbg("%s: using cached file: %s\n", .{ func, try mod.common.zs(a, path) });
+        tools_common.log.dbg("%s: using cached file: %s\n", .{ func, try mod.common.zs(a, path) });
         return st.finish(304); // 304 Not Modified - fake cached response
     }
 
@@ -934,7 +931,7 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
     const file_exists = st.cacheHit();
 
     if (file_exists and skip_etag) {
-        tc.log.dbg("%s: using cached file: %s\n", .{ func, try mod.common.zs(a, path) });
+        tools_common.log.dbg("%s: using cached file: %s\n", .{ func, try mod.common.zs(a, path) });
         return st.finish(304); // 304 Not Modified - fake cached response
     }
 
@@ -942,7 +939,7 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
     defer cli.deinit();
     const parts = cli.parts;
 
-    var headers: Headers = .{};
+    var headers: mod.httplib.detail.Headers = .{};
     for (opts.headers) |h| {
         _ = try headers.emplace(a, h[0], h[1]);
     }
@@ -958,14 +955,14 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
     if (file_exists) {
         last_etag = try readEtag(a, path);
     } else {
-        tc.log.dbg("%s: no previous model file found %s\n", .{ func, try mod.common.zs(a, path) });
+        tools_common.log.dbg("%s: no previous model file found %s\n", .{ func, try mod.common.zs(a, path) });
     }
 
     const head = cli.head(a, parts.path);
     if (head.res == null or head.res.?.status < 200 or head.res.?.status >= 300) {
-        tc.log.trc("%s: HEAD failed, status: %d\n", .{ func, if (head.res != null) head.res.?.status else @as(c_int, -1) });
+        tools_common.log.trc("%s: HEAD failed, status: %d\n", .{ func, if (head.res != null) head.res.?.status else @as(c_int, -1) });
         if (file_exists) {
-            tc.log.trc("%s: using cached file (HEAD failed): %s\n", .{ func, try mod.common.zs(a, path) });
+            tools_common.log.trc("%s: using cached file (HEAD failed): %s\n", .{ func, try mod.common.zs(a, path) });
             return st.finish(304); // 304 Not Modified - fake cached response
         }
         return st.finish(if (head.res != null) head.res.?.status else -1);
@@ -981,7 +978,7 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
         if (stoull(hres.getHeaderValue("Content-Length"))) |v| {
             p.total = v;
         } else |_| {
-            tc.log.wrn("%s: invalid Content-Length in HEAD response: %s\n", .{ func, @as([*:0]const u8, "stoull: no conversion") });
+            tools_common.log.wrn("%s: invalid Content-Length in HEAD response: %s\n", .{ func, @as([*:0]const u8, "stoull: no conversion") });
         }
     }
 
@@ -992,16 +989,16 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
 
     if (file_exists) {
         if (etag.len == 0) {
-            tc.log.dbg("%s: using cached file (no server etag): %s\n", .{ func, try mod.common.zs(a, path) });
+            tools_common.log.dbg("%s: using cached file (no server etag): %s\n", .{ func, try mod.common.zs(a, path) });
             return st.finish(304); // 304 Not Modified - fake cached response
         }
         if (last_etag.len != 0 and std.mem.eql(u8, last_etag, etag)) {
-            tc.log.dbg("%s: using cached file (same etag): %s\n", .{ func, try mod.common.zs(a, path) });
+            tools_common.log.dbg("%s: using cached file (same etag): %s\n", .{ func, try mod.common.zs(a, path) });
             return st.finish(304); // 304 Not Modified - fake cached response
         }
         // pass this point, the file exists but is different from the server version, so we need to redownload it
         if (stdlib.fs.remove(path) != 0) {
-            tc.log.err("%s: unable to delete file: %s\n", .{ func, try mod.common.zs(a, path) });
+            tools_common.log.err("%s: unable to delete file: %s\n", .{ func, try mod.common.zs(a, path) });
             return st.finish(-1);
         }
     }
@@ -1015,9 +1012,9 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
 
     if (!skip_etag and etag.len != 0) {
         if (stdlib.fs.exists(path_temporary) and !std.mem.eql(u8, try readEtag(a, path_temporary), etag)) {
-            tc.log.wrn("%s: partial file does not match the server etag, discarding it: %s\n", .{ func, try mod.common.zs(a, path_temporary) });
+            tools_common.log.wrn("%s: partial file does not match the server etag, discarding it: %s\n", .{ func, try mod.common.zs(a, path_temporary) });
             if (stdlib.fs.remove(path_temporary) != 0) {
-                tc.log.err("%s: unable to delete file: %s\n", .{ func, try mod.common.zs(a, path_temporary) });
+                tools_common.log.err("%s: unable to delete file: %s\n", .{ func, try mod.common.zs(a, path_temporary) });
                 return st.finish(-1);
             }
         }
@@ -1036,7 +1033,7 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
             break;
         };
         if (i != 0) {
-            tc.log.wrn("%s: retrying after %d seconds...\n", .{ func, delay });
+            tools_common.log.wrn("%s: retrying after %d seconds...\n", .{ func, delay });
             stdlib.clock.sleepMs(@as(u64, @intCast(@max(delay, 0))) * 1000);
             delay *= retry_delay_seconds;
         }
@@ -1047,18 +1044,18 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
             if (supports_ranges) {
                 existing_size = @intCast(stdlib.fs.fileSize(path_temporary) orelse 0);
             } else if (stdlib.fs.remove(path_temporary) != 0) {
-                tc.log.err("%s: unable to delete file: %s\n", .{ func, try mod.common.zs(a, path_temporary) });
+                tools_common.log.err("%s: unable to delete file: %s\n", .{ func, try mod.common.zs(a, path_temporary) });
                 break;
             }
         }
 
         p.downloaded = existing_size;
 
-        tc.log.dbg("%s: downloading from %s to %s (etag:%s)...\n", .{ func, try mod.common.zs(a, try commonHttpShowMaskedUrl(a, &parts)), try mod.common.zs(a, path_temporary), try mod.common.zs(a, etag) });
+        tools_common.log.dbg("%s: downloading from %s to %s (etag:%s)...\n", .{ func, try mod.common.zs(a, try commonHttpShowMaskedUrl(a, &parts)), try mod.common.zs(a, path_temporary), try mod.common.zs(a, etag) });
 
         if (try commonPullFile(a, &cli, parts.path, path_temporary, supports_ranges, &p, opts.callback)) {
             if (stdlib.fs.rename(path_temporary, path) != 0) {
-                tc.log.err("%s: unable to rename file: %s to %s\n", .{ func, try mod.common.zs(a, path_temporary), try mod.common.zs(a, path) });
+                tools_common.log.err("%s: unable to rename file: %s to %s\n", .{ func, try mod.common.zs(a, path_temporary), try mod.common.zs(a, path) });
                 break;
             }
             if (etag.len != 0 and !skip_etag) {
@@ -1072,7 +1069,7 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
 
     // a stopped download keeps path_temporary, so the next attempt resumes from it
     if (!success) {
-        tc.log.err("%s: download failed after %d attempts\n", .{ func, @as(c_int, max_attempts) });
+        tools_common.log.err("%s: download failed after %d attempts\n", .{ func, @as(c_int, max_attempts) });
     }
 
     return st.finish(if (success) hres.status else -1);
@@ -1080,7 +1077,7 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
 
 /// The content receiver of `common_remote_get_content`.
 const ContentState = struct {
-    a: Allocator,
+    a: std.mem.Allocator,
     buf: std.ArrayList(u8) = .empty,
     max_size: c_long,
 
@@ -1091,7 +1088,7 @@ const ContentState = struct {
             self.buf.items.len <= @as(usize, @intCast(self.max_size));
     }
 
-    fn onResponse(_: *anyopaque, _: *const Response) bool {
+    fn onResponse(_: *anyopaque, _: *const mod.httplib.client.Response) bool {
         return true;
     }
 };
@@ -1100,7 +1097,7 @@ const ContentState = struct {
 /// status and body, cut off past `max_size`. With `resolve_host`, each hop
 /// connects to the address it returns and redirects are followed here, at
 /// most five, so that every hop is checked.
-pub fn remoteGetContent(a: Allocator, url_in: []const u8, params: *const RemoteParams) Error!struct { status: c_long, body: []u8 } {
+pub fn remoteGetContent(a: std.mem.Allocator, url_in: []const u8, params: *const RemoteParams) common_chat.exception.Error!struct { status: c_long, body: []u8 } {
     const max_redirects = 5;
     var url = url_in;
     var n_redirects: c_int = 0;
@@ -1109,7 +1106,7 @@ pub fn remoteGetContent(a: Allocator, url_in: []const u8, params: *const RemoteP
         defer cli.deinit();
         const parts = cli.parts;
 
-        var headers: Headers = .{};
+        var headers: mod.httplib.detail.Headers = .{};
         for (params.headers) |h| {
             _ = try headers.emplace(a, h[0], h[1]);
         }
@@ -1131,13 +1128,13 @@ pub fn remoteGetContent(a: Allocator, url_in: []const u8, params: *const RemoteP
         const res = cli.getStream(a, parts.path, &headers, &state, null, ContentState.onData);
 
         if (res.res == null) {
-            return mod.common.throw(error.RuntimeError, "error: cannot make GET request", .{});
+            return common_chat.exception.throw(error.RuntimeError, "error: cannot make GET request", .{});
         }
         const r = res.res.?;
 
         if (params.resolve_host != null and r.status >= 300 and r.status < 400 and r.hasHeader("Location")) {
             if (n_redirects >= max_redirects) {
-                return mod.common.throw(error.RuntimeError, "error: too many redirects", .{});
+                return common_chat.exception.throw(error.RuntimeError, "error: too many redirects", .{});
             }
             url = try commonHttpResolveLocation(a, url, r.getHeaderValue("Location"));
             continue;
@@ -1151,7 +1148,7 @@ pub fn remoteGetContent(a: Allocator, url_in: []const u8, params: *const RemoteP
 /// file, or the cached copy when offline.
 ///
 /// Return: an HTTP status, 304 for a cached file, or -1.
-pub fn downloadFileSingle(a: Allocator, url: []const u8, path: []const u8, opts: *const Opts, skip_etag: bool, lock_path: []const u8, alt_path: []const u8) Error!c_int {
+pub fn downloadFileSingle(a: std.mem.Allocator, url: []const u8, path: []const u8, opts: *const Opts, skip_etag: bool, lock_path: []const u8, alt_path: []const u8) common_chat.exception.Error!c_int {
     const func = "common_download_file_single";
     if (!opts.offline) {
         var tty_cb_state: ProgressBar = .{};
@@ -1165,11 +1162,11 @@ pub fn downloadFileSingle(a: Allocator, url: []const u8, path: []const u8, opts:
     }
 
     if (!stdlib.fs.exists(path)) {
-        tc.log.err("%s: required file is not available in cache (offline mode): %s\n", .{ func, try mod.common.zs(a, path) });
+        tools_common.log.err("%s: required file is not available in cache (offline mode): %s\n", .{ func, try mod.common.zs(a, path) });
         return -1;
     }
 
-    tc.log.dbg("%s: using cached file (offline mode): %s\n", .{ func, try mod.common.zs(a, path) });
+    tools_common.log.dbg("%s: using cached file (offline mode): %s\n", .{ func, try mod.common.zs(a, path) });
 
     // notify the callback that the file was cached
     if (opts.callback) |cb| {
@@ -1193,7 +1190,7 @@ const SplitInfo = struct {
 
 /// Ports `get_gguf_split_info` (download.cpp:556 @b1b770d90): a `.gguf`
 /// path's stem, split index and count, and its quant tag in upper case.
-fn getGgufSplitInfo(a: Allocator, path: []const u8) Error!SplitInfo {
+fn getGgufSplitInfo(a: std.mem.Allocator, path: []const u8) common_chat.exception.Error!SplitInfo {
     var re_split = llama.regex.Regex.compileWith("^(.+)-([0-9]{5})-of-([0-9]{5})$", .{ .icase = true }) catch |err| switch (err) {
         error.Range, error.Collate, error.Ctype, error.Escape, error.Backref, error.Brack, error.Paren, error.Brace, error.BadBrace, error.BadRepeat, error.Complexity, error.Parse => unreachable,
     };
@@ -1228,14 +1225,14 @@ fn getGgufSplitInfo(a: Allocator, path: []const u8) Error!SplitInfo {
 
 /// `std::stoi`, its throw as `std::invalid_argument` or `std::out_of_range`
 /// (both caught as `std::exception`).
-fn stoiThrow(a: Allocator, s: []const u8) Error!c_int {
+fn stoiThrow(a: std.mem.Allocator, s: []const u8) common_chat.exception.Error!c_int {
     const z = try a.dupeSentinel(u8, s, 0);
-    return tc.arg.stoi(z) catch return mod.common.throw(error.InvalidArgument, "{s}", .{tc.arg.what()});
+    return tools_common.arg.stoi(z) catch return common_chat.exception.throw(error.InvalidArgument, "{s}", .{tools_common.arg.what()});
 }
 
 /// Ports `extract_quant_bits` (download.cpp:587 @b1b770d90): Q4_0 -> 4,
 /// F16 -> 16, NVFP4 -> 4, Q8_K_M -> 8, etc.
-fn extractQuantBits(a: Allocator, filename: []const u8) Error!c_int {
+fn extractQuantBits(a: std.mem.Allocator, filename: []const u8) common_chat.exception.Error!c_int {
     const split = try getGgufSplitInfo(a, filename);
 
     const pos = std.mem.indexOfAny(u8, split.tag, "0123456789") orelse return 0;
@@ -1245,7 +1242,7 @@ fn extractQuantBits(a: Allocator, filename: []const u8) Error!c_int {
 
 /// Ports `get_split_files` (download.cpp:598 @b1b770d90): every shard of the
 /// split `file` belongs to.
-fn getSplitFiles(a: Allocator, files: []const mod.hf_cache.HfFile, file: *const mod.hf_cache.HfFile) Error![]mod.hf_cache.HfFile {
+fn getSplitFiles(a: std.mem.Allocator, files: []const mod.hf_cache.HfFile, file: *const mod.hf_cache.HfFile) common_chat.exception.Error![]mod.hf_cache.HfFile {
     const split = try getGgufSplitInfo(a, file.path);
 
     if (split.count <= 1) {
@@ -1269,7 +1266,7 @@ fn getSplitFiles(a: Allocator, files: []const mod.hf_cache.HfFile, file: *const 
 /// preferring deeper shared directory prefix with the model, then exact
 /// `tag` match, then closest quantization to the tag when given, or to the
 /// model otherwise.
-fn findBestSibling(a: Allocator, files: []const mod.hf_cache.HfFile, model: []const u8, keyword: []const u8, tag: []const u8) Error!mod.hf_cache.HfFile {
+fn findBestSibling(a: std.mem.Allocator, files: []const mod.hf_cache.HfFile, model: []const u8, keyword: []const u8, tag: []const u8) common_chat.exception.Error!mod.hf_cache.HfFile {
     var best: mod.hf_cache.HfFile = .{};
     var best_depth: usize = 0;
     var best_diff: c_int = 0;
@@ -1360,7 +1357,7 @@ fn optsAddAllSidecars(opts: *Opts) void {
 
 /// Ports `common_download_plan_sidecars` (download.cpp:704 @b1b770d90): the
 /// sidecar kinds `plan` resolves a file for.
-pub fn planSidecars(a: Allocator, plan: *const HfPlan) Allocator.Error![]const []const u8 {
+pub fn planSidecars(a: std.mem.Allocator, plan: *const HfPlan) std.mem.Allocator.Error![]const []const u8 {
     var out: std.ArrayList([]const u8) = .empty;
     inline for (sidecars) |sc| {
         if (@field(plan, sc.file).path.len != 0) try out.append(a, sc.name);
@@ -1372,10 +1369,10 @@ pub fn planSidecars(a: Allocator, plan: *const HfPlan) Allocator.Error![]const [
 /// partials the download of `plan` writes, for the files not in the cache
 /// yet: a file in the cache resolves to its snapshot entry, a file still to
 /// download to its blob.
-pub fn planPartials(a: Allocator, plan: *const HfPlan) Allocator.Error![]Partial {
+pub fn planPartials(a: std.mem.Allocator, plan: *const HfPlan) std.mem.Allocator.Error![]Partial {
     var out: std.ArrayList(Partial) = .empty;
     const Add = struct {
-        fn f(ar: Allocator, list: *std.ArrayList(Partial), kind: []const u8, file: *const mod.hf_cache.HfFile) Allocator.Error!void {
+        fn f(ar: std.mem.Allocator, list: *std.ArrayList(Partial), kind: []const u8, file: *const mod.hf_cache.HfFile) std.mem.Allocator.Error!void {
             if (file.local_path.len != 0 and !std.mem.eql(u8, file.local_path, file.final_path)) {
                 try list.append(ar, .{ .kind = kind, .path = try std.mem.concat(ar, u8, &.{ file.local_path, partial_suffix }) });
             }
@@ -1412,8 +1409,8 @@ fn ggufFilenameIsModel(filepath: []const u8) bool {
 
 /// `std::regex_search(text, std::regex(pattern, std::regex::icase))`; a
 /// pattern that does not compile throws the `regex_error`.
-fn icaseSearch(pattern: []const u8, text: []const u8) Error!bool {
-    var re = llama.regex.Regex.compileWith(pattern, .{ .icase = true }) catch |e| return mod.common.throw(error.RuntimeError, "{s}", .{llama.regex.errorText(e)});
+fn icaseSearch(pattern: []const u8, text: []const u8) common_chat.exception.Error!bool {
+    var re = llama.regex.Regex.compileWith(pattern, .{ .icase = true }) catch |e| return common_chat.exception.throw(error.RuntimeError, "{s}", .{llama.regex.errorText(e)});
     defer re.deinit();
     var m = llama.regex.Match.init();
     defer m.deinit();
@@ -1424,7 +1421,7 @@ fn icaseSearch(pattern: []const u8, text: []const u8) Error!bool {
 /// file whose name carries the tag (by default Q4_K_M, then Q8_0) as a
 /// whole token, so that ":F16" does not match a BF16 file; the first shard
 /// of a split; with no tag, any model file.
-fn findBestModel(a: Allocator, files: []const mod.hf_cache.HfFile, tag: []const u8) Error!mod.hf_cache.HfFile {
+fn findBestModel(a: std.mem.Allocator, files: []const mod.hf_cache.HfFile, tag: []const u8) common_chat.exception.Error!mod.hf_cache.HfFile {
     var tags: []const []const u8 = undefined;
 
     if (tag.len != 0) {
@@ -1466,11 +1463,11 @@ fn findBestModel(a: Allocator, files: []const mod.hf_cache.HfFile, tag: []const 
 }
 
 /// Ports `list_available_gguf_files` (download.cpp:797 @b1b770d90).
-fn listAvailableGgufFiles(a: Allocator, files: []const mod.hf_cache.HfFile) Allocator.Error!void {
-    tc.log.inf("Available GGUF files:\n", .{});
+fn listAvailableGgufFiles(a: std.mem.Allocator, files: []const mod.hf_cache.HfFile) std.mem.Allocator.Error!void {
+    tools_common.log.inf("Available GGUF files:\n", .{});
     for (files) |f| {
         if (std.mem.endsWith(u8, f.path, ".gguf")) {
-            tc.log.inf(" - %s\n", .{try mod.common.zs(a, f.path)});
+            tools_common.log.inf(" - %s\n", .{try mod.common.zs(a, f.path)});
         }
     }
 }
@@ -1478,7 +1475,7 @@ fn listAvailableGgufFiles(a: Allocator, files: []const mod.hf_cache.HfFile) Allo
 /// Ports `common_download_get_hf_plan` (download.cpp:806 @b1b770d90): which
 /// files of a repository to fetch -- its `preset.ini` alone, or the model
 /// (every shard) and the sidecars asked for.
-pub fn getHfPlan(a: Allocator, model: *const tc.params.Model, opts: *const Opts) Error!HfPlan {
+pub fn getHfPlan(a: std.mem.Allocator, model: *const tools_common.params.Model, opts: *const Opts) common_chat.exception.Error!HfPlan {
     const func = "common_download_get_hf_plan";
     var plan: HfPlan = .{};
     var all: []mod.hf_cache.HfFile = &.{};
@@ -1513,7 +1510,7 @@ pub fn getHfPlan(a: Allocator, model: *const tc.params.Model, opts: *const Opts)
             }
         }
         if (primary.path.len == 0) {
-            tc.log.err("%s: file '%s' not found in repository\n", .{ func, try mod.common.zs(a, model.hf_file) });
+            tools_common.log.err("%s: file '%s' not found in repository\n", .{ func, try mod.common.zs(a, model.hf_file) });
             try listAvailableGgufFiles(a, all);
             return plan;
         }
@@ -1525,7 +1522,7 @@ pub fn getHfPlan(a: Allocator, model: *const tc.params.Model, opts: *const Opts)
             if (sc.draft and @field(opts, sc.opt)) want_draft = true;
         }
         if (primary.path.len == 0 and !want_draft) {
-            tc.log.err("%s: no GGUF files found in repository %s\n", .{ func, try mod.common.zs(a, repo) });
+            tools_common.log.err("%s: no GGUF files found in repository %s\n", .{ func, try mod.common.zs(a, repo) });
             try listAvailableGgufFiles(a, all);
             return plan;
         }
@@ -1552,7 +1549,7 @@ pub fn getHfPlan(a: Allocator, model: *const tc.params.Model, opts: *const Opts)
         if (sc.draft and @field(plan, sc.file).local_path.len != 0) has_draft = true;
     }
     if (primary.path.len == 0 and !has_draft) {
-        tc.log.err("%s: no GGUF files found in repository %s\n", .{ func, try mod.common.zs(a, repo) });
+        tools_common.log.err("%s: no GGUF files found in repository %s\n", .{ func, try mod.common.zs(a, repo) });
         try listAvailableGgufFiles(a, all);
     }
 
@@ -1572,7 +1569,7 @@ const TaskThread = struct {
         const t = self.task;
         self.status = downloadFileSingle(arena.allocator(), t.url, t.local_path, &t.opts, t.is_hf, t.lock_path, t.alt_path) catch |e| {
             self.err = e;
-            self.what = std.heap.c_allocator.dupe(u8, mod.common.what(e)) catch "";
+            self.what = std.heap.c_allocator.dupe(u8, common_chat.exception.what(e)) catch "";
             return;
         };
     }
@@ -1580,7 +1577,7 @@ const TaskThread = struct {
 
 /// Ports `common_download_run_tasks` (download.cpp:885 @b1b770d90): every
 /// task at once, then each result in order; the first failure throws.
-pub fn runTasks(a: Allocator, tasks: []const Task) Error!void {
+pub fn runTasks(a: std.mem.Allocator, tasks: []const Task) common_chat.exception.Error!void {
     const jobs = try a.alloc(TaskThread, tasks.len);
     const threads = try a.alloc(?std.Thread, tasks.len);
     for (tasks, 0..) |*task, i| {
@@ -1589,7 +1586,7 @@ pub fn runTasks(a: Allocator, tasks: []const Task) Error!void {
         if (threads[i] == null) jobs[i].run();
     }
 
-    var failed: ?Error = null;
+    var failed: ?common_chat.exception.Error = null;
     for (jobs, 0..) |*job, i| {
         if (threads[i]) |t| t.join();
         if (failed != null) continue;
@@ -1599,15 +1596,15 @@ pub fn runTasks(a: Allocator, tasks: []const Task) Error!void {
             failed = switch (e) {
                 error.OutOfMemory => error.OutOfMemory,
                 error.JsonError => error.JsonError,
-                error.InvalidArgument => mod.common.throw(error.InvalidArgument, "{s}", .{job.what}),
-                else => mod.common.throw(error.RuntimeError, "{s}", .{job.what}),
+                error.InvalidArgument => common_chat.exception.throw(error.InvalidArgument, "{s}", .{job.what}),
+                else => common_chat.exception.throw(error.RuntimeError, "{s}", .{job.what}),
             };
             continue;
         }
         const status = job.status;
         const is_ok = isHttpStatusOk(status);
         if (!is_ok) {
-            failed = mod.common.throw(error.RuntimeError, "Download '{s}' failed with status code: {d}", .{ url, status });
+            failed = common_chat.exception.throw(error.RuntimeError, "Download '{s}' failed with status code: {d}", .{ url, status });
         }
     }
     if (failed) |e| return e;
@@ -1615,7 +1612,7 @@ pub fn runTasks(a: Allocator, tasks: []const Task) Error!void {
 
 /// Ports `common_download_get_all_parts` (download.cpp:905 @b1b770d90):
 /// every shard's URL of a split GGUF, or the URL alone.
-pub fn getAllParts(a: Allocator, url: []const u8) Error![]const []const u8 {
+pub fn getAllParts(a: std.mem.Allocator, url: []const u8) common_chat.exception.Error![]const []const u8 {
     const split = try getGgufSplitInfo(a, url);
 
     if (split.count <= 1) {
@@ -1638,20 +1635,20 @@ pub fn getAllParts(a: Allocator, url: []const u8) Error![]const []const u8 {
 //
 
 /// Ports `common_docker_get_token` (download.cpp:924 @b1b770d90).
-fn dockerGetToken(a: Allocator, repo: []const u8) Error![]const u8 {
+fn dockerGetToken(a: std.mem.Allocator, repo: []const u8) common_chat.exception.Error![]const u8 {
     const url = try std.mem.concat(a, u8, &.{ "https://auth.docker.io/token?service=registry.docker.io&scope=repository:", repo, ":pull" });
 
     const params: RemoteParams = .{};
     const res = try remoteGetContent(a, url, &params);
 
     if (res.status != 200) {
-        return mod.common.throw(error.RuntimeError, "Failed to get Docker registry token, HTTP code: {d}", .{res.status});
+        return common_chat.exception.throw(error.RuntimeError, "Failed to get Docker registry token, HTTP code: {d}", .{res.status});
     }
 
     var response = try json.parse(a, res.body);
 
     if (!response.contains("token")) {
-        return mod.common.throw(error.RuntimeError, "Docker registry token response missing 'token' field", .{});
+        return common_chat.exception.throw(error.RuntimeError, "Docker registry token response missing 'token' field", .{});
     }
 
     return (try response.index(a, "token")).get([]const u8);
@@ -1661,7 +1658,7 @@ fn dockerGetToken(a: Allocator, repo: []const u8) Error![]const u8 {
 /// Docker model's GGUF layer downloaded to the cache.
 ///
 /// Return: the local path.
-pub fn dockerResolveModel(a: Allocator, docker: []const u8) Error![]const u8 {
+pub fn dockerResolveModel(a: std.mem.Allocator, docker: []const u8) common_chat.exception.Error![]const u8 {
     const func = "common_docker_resolve_model";
     // Parse ai/smollm2:135M-Q4_0
     var repo: []const u8 = undefined;
@@ -1679,16 +1676,16 @@ pub fn dockerResolveModel(a: Allocator, docker: []const u8) Error![]const u8 {
         repo = try std.mem.concat(a, u8, &.{ "ai/", repo });
     }
 
-    tc.log.inf("%s: Downloading Docker Model: %s:%s\n", .{ func, try mod.common.zs(a, repo), try mod.common.zs(a, tag) });
+    tools_common.log.inf("%s: Downloading Docker Model: %s:%s\n", .{ func, try mod.common.zs(a, repo), try mod.common.zs(a, tag) });
     return dockerResolveImpl(a, repo, tag) catch |e| {
         if (e != error.OutOfMemory) {
-            tc.log.err("%s: Docker Model download failed: %s\n", .{ func, try mod.common.zs(a, mod.common.what(e)) });
+            tools_common.log.err("%s: Docker Model download failed: %s\n", .{ func, try mod.common.zs(a, common_chat.exception.what(e)) });
         }
         return e;
     };
 }
 
-fn dockerResolveImpl(a: Allocator, repo: []const u8, tag: []const u8) Error![]const u8 {
+fn dockerResolveImpl(a: std.mem.Allocator, repo: []const u8, tag: []const u8) common_chat.exception.Error![]const u8 {
     const func = "common_docker_resolve_model";
     const token = try dockerGetToken(a, repo); // Get authentication token
 
@@ -1703,7 +1700,7 @@ fn dockerResolveImpl(a: Allocator, repo: []const u8, tag: []const u8) Error![]co
     const manifest_params: RemoteParams = .{ .headers = &manifest_headers };
     const manifest_res = try remoteGetContent(a, manifest_url, &manifest_params);
     if (manifest_res.status != 200) {
-        return mod.common.throw(error.RuntimeError, "Failed to get Docker manifest, HTTP code: {d}", .{manifest_res.status});
+        return common_chat.exception.throw(error.RuntimeError, "Failed to get Docker manifest, HTTP code: {d}", .{manifest_res.status});
     }
 
     var manifest = try json.parse(a, manifest_res.body);
@@ -1723,12 +1720,12 @@ fn dockerResolveImpl(a: Allocator, repo: []const u8, tag: []const u8) Error![]co
     }
 
     if (gguf_digest.len == 0) {
-        return mod.common.throw(error.RuntimeError, "No GGUF layer found in Docker manifest", .{});
+        return common_chat.exception.throw(error.RuntimeError, "No GGUF layer found in Docker manifest", .{});
     }
 
     // Validate & normalize digest
     gguf_digest = try validateOciDigest(a, gguf_digest);
-    tc.log.dbg("%s: Using validated digest: %s\n", .{ func, try mod.common.zs(a, gguf_digest) });
+    tools_common.log.dbg("%s: Using validated digest: %s\n", .{ func, try mod.common.zs(a, gguf_digest) });
 
     // Prepare local filename
     var model_filename = try a.dupe(u8, repo);
@@ -1740,16 +1737,16 @@ fn dockerResolveImpl(a: Allocator, repo: []const u8, tag: []const u8) Error![]co
     const opts: Opts = .{ .bearer_token = token };
     const http_status = try downloadFileSingle(a, blob_url, local_path, &opts, false, "", "");
     if (!isHttpStatusOk(http_status)) {
-        return mod.common.throw(error.RuntimeError, "Failed to download Docker Model", .{});
+        return common_chat.exception.throw(error.RuntimeError, "Failed to download Docker Model", .{});
     }
 
-    tc.log.inf("%s: Downloaded Docker Model to: %s\n", .{ func, try mod.common.zs(a, local_path) });
+    tools_common.log.inf("%s: Downloaded Docker Model to: %s\n", .{ func, try mod.common.zs(a, local_path) });
     return local_path;
 }
 
 /// The `validate_oci_digest` (download.cpp:965 @b1b770d90) lambda of
 /// `common_docker_resolve_model`: `sha256:` and 64 hex digits, lower-cased.
-fn validateOciDigest(a: Allocator, digest: []const u8) Error![]const u8 {
+fn validateOciDigest(a: std.mem.Allocator, digest: []const u8) common_chat.exception.Error![]const u8 {
     var re = llama.regex.Regex.compile("^sha256:([a-fA-F0-9]{64})$") catch |err| switch (err) {
         error.Range, error.Collate, error.Ctype, error.Escape, error.Backref, error.Brack, error.Paren, error.Brace, error.BadBrace, error.BadRepeat, error.Complexity, error.Parse => unreachable,
     };
@@ -1757,7 +1754,7 @@ fn validateOciDigest(a: Allocator, digest: []const u8) Error![]const u8 {
     var m = llama.regex.Match.init();
     defer m.deinit();
     if (!re.match(digest, &m)) {
-        return mod.common.throw(error.RuntimeError, "Invalid OCI digest format received in manifest: {s}", .{digest});
+        return common_chat.exception.throw(error.RuntimeError, "Invalid OCI digest format received in manifest: {s}", .{digest});
     }
     // normalize hex to lowercase
     const normalized = try a.dupe(u8, digest);
@@ -1773,7 +1770,7 @@ fn isListedModel(split: *const SplitInfo) bool {
 
 /// Ports `common_list_cached_models` (download.cpp:1048 @b1b770d90): each
 /// cached repository and tag with a first shard that is a model.
-pub fn listCachedModels(a: Allocator) Error![]CachedModelInfo {
+pub fn listCachedModels(a: std.mem.Allocator) common_chat.exception.Error![]CachedModelInfo {
     var seen: std.StringHashMapUnmanaged(void) = .empty;
     var result: std.ArrayList(CachedModelInfo) = .empty;
 
@@ -1796,7 +1793,7 @@ pub fn listCachedModels(a: Allocator) Error![]CachedModelInfo {
 
 /// Ports `common_download_resolve_path` (download.cpp:1067 @b1b770d90): the
 /// cached file a repository resolves to, without the network.
-pub fn resolvePath(a: Allocator, hf_repo_with_tag: []const u8, hf_file: []const u8) Error![]const u8 {
+pub fn resolvePath(a: std.mem.Allocator, hf_repo_with_tag: []const u8, hf_file: []const u8) common_chat.exception.Error![]const u8 {
     const repo, const tag = try splitRepoTag(a, hf_repo_with_tag);
 
     const files = try mod.hf_cache.getCachedFiles(a, repo);
@@ -1819,7 +1816,7 @@ pub fn resolvePath(a: Allocator, hf_repo_with_tag: []const u8, hf_file: []const 
 /// Ports `files_in_use` (download.cpp:1089 @b1b770d90): the files `-hf`
 /// loads from the cache, the model with every sidecar, for each cached tag of
 /// `repo_id` other than `tag`.
-fn filesInUse(a: Allocator, repo_id: []const u8, tag: []const u8) Error!std.StringHashMapUnmanaged(void) {
+fn filesInUse(a: std.mem.Allocator, repo_id: []const u8, tag: []const u8) common_chat.exception.Error!std.StringHashMapUnmanaged(void) {
     var opts: Opts = .{};
     opts.offline = true;
     optsAddAllSidecars(&opts);
@@ -1833,7 +1830,7 @@ fn filesInUse(a: Allocator, repo_id: []const u8, tag: []const u8) Error!std.Stri
             continue;
         }
 
-        var model: tc.params.Model = .{};
+        var model: tools_common.params.Model = .{};
         model.hf_repo = try std.mem.concat(a, u8, &.{ repo_id, ":", split.tag });
 
         const plan = try getHfPlan(a, &model, &opts);
@@ -1857,7 +1854,7 @@ fn filesInUse(a: Allocator, repo_id: []const u8, tag: []const u8) Error!std.Stri
 /// loads.
 ///
 /// Return: whether anything was removed.
-pub fn remove(a: Allocator, hf_repo_with_tag: []const u8) Error!bool {
+pub fn remove(a: std.mem.Allocator, hf_repo_with_tag: []const u8) common_chat.exception.Error!bool {
     const repo_id, const tag = try splitRepoTag(a, hf_repo_with_tag);
 
     if (tag.len == 0) {
@@ -1892,7 +1889,7 @@ pub fn remove(a: Allocator, hf_repo_with_tag: []const u8) Error!bool {
 
 /// Ports `remove_snapshot_entries` (download.cpp:1163 @b1b770d90): snapshot
 /// entries of `repo_id`, then the blobs no remaining entry references.
-fn removeSnapshotEntries(a: Allocator, repo_id: []const u8, to_remove: []const []const u8) Error!bool {
+fn removeSnapshotEntries(a: std.mem.Allocator, repo_id: []const u8, to_remove: []const []const u8) common_chat.exception.Error!bool {
     const func = "remove_snapshot_entries";
 
     // resolve blob paths from symlinks before deleting snapshot entries
@@ -1909,7 +1906,7 @@ fn removeSnapshotEntries(a: Allocator, repo_id: []const u8, to_remove: []const [
     for (to_remove) |p| {
         const ec = stdlib.fs.removeIfExists(p);
         if (ec != 0) {
-            tc.log.wrn("%s: failed to remove %s: %s\n", .{ func, try mod.common.zs(a, p), stdlib.errno.strerror(ec) });
+            tools_common.log.wrn("%s: failed to remove %s: %s\n", .{ func, try mod.common.zs(a, p), stdlib.errno.strerror(ec) });
         }
     }
 
@@ -1933,7 +1930,7 @@ fn removeSnapshotEntries(a: Allocator, repo_id: []const u8, to_remove: []const [
         if (!still_referenced.contains(blob)) {
             const ec = stdlib.fs.removeIfExists(blob);
             if (ec != 0) {
-                tc.log.wrn("%s: failed to remove blob %s: %s\n", .{ func, try mod.common.zs(a, blob), stdlib.errno.strerror(ec) });
+                tools_common.log.wrn("%s: failed to remove blob %s: %s\n", .{ func, try mod.common.zs(a, blob), stdlib.errno.strerror(ec) });
             }
         }
     }
@@ -1947,8 +1944,8 @@ fn removeSnapshotEntries(a: Allocator, repo_id: []const u8, to_remove: []const [
 /// file another tag shares goes for every tag that resolves it.
 ///
 /// Return: true if anything was removed.
-pub fn removeSidecars(a: Allocator, hf_repo_with_tag: []const u8, opts: *const Opts) Error!bool {
-    var model: tc.params.Model = .{};
+pub fn removeSidecars(a: std.mem.Allocator, hf_repo_with_tag: []const u8, opts: *const Opts) common_chat.exception.Error!bool {
+    var model: tools_common.params.Model = .{};
     model.hf_repo = hf_repo_with_tag;
 
     var cached = opts.*;
@@ -1976,7 +1973,7 @@ pub fn removeSidecars(a: Allocator, hf_repo_with_tag: []const u8, opts: *const O
 
 /// Ports `mmproj_examples` (arg.cpp:37 @b1b770d90): the programs that
 /// download a model's projector.
-const mmproj_examples = [_]tc.params.Example{ .mtmd, .server, .cli, .tts };
+const mmproj_examples = [_]tools_common.params.Example{ .mtmd, .server, .cli, .tts };
 
 /// Ports `common_models_handler` (arg.h:140 @b1b770d90).
 pub const ModelsHandler = struct {
@@ -1987,7 +1984,7 @@ pub const ModelsHandler = struct {
 
 /// Ports `get_default_local_path` (arg.cpp:329 @b1b770d90): a URL's last
 /// path element, in the cache.
-fn getDefaultLocalPath(a: Allocator, url: []const u8) Error![]const u8 {
+fn getDefaultLocalPath(a: std.mem.Allocator, url: []const u8) common_chat.exception.Error![]const u8 {
     var f = (try stdlib.strings.split(a, url, '#')).items[0];
     f = (try stdlib.strings.split(a, f, '?')).items[0];
     const sp = (try stdlib.strings.split(a, f, '/')).items;
@@ -1995,12 +1992,12 @@ fn getDefaultLocalPath(a: Allocator, url: []const u8) Error![]const u8 {
 }
 
 /// Ports `spec_types_is_default` (arg.cpp:335 @b1b770d90).
-fn specTypesIsDefault(params: *const tc.params.Params) bool {
+fn specTypesIsDefault(params: *const tools_common.params.Params) bool {
     const t = params.speculative.types.items;
     return t.len == 1 and t[0] == .none;
 }
 
-fn hasSpecType(params: *const tc.params.Params, t: tc.params.SpeculativeType) bool {
+fn hasSpecType(params: *const tools_common.params.Params, t: tools_common.params.SpeculativeType) bool {
     for (params.speculative.types.items) |x| if (x == t) return true;
     return false;
 }
@@ -2008,7 +2005,7 @@ fn hasSpecType(params: *const tc.params.Params, t: tc.params.SpeculativeType) bo
 /// Ports `common_models_handler_init` (arg.cpp:339 @b1b770d90): the
 /// download options and, for a repository, its plan -- which reaches the
 /// hub, but downloads nothing.
-pub fn modelsHandlerInit(a: Allocator, params: *const tc.params.Params, curr_ex: tc.params.Example) Error!ModelsHandler {
+pub fn modelsHandlerInit(a: std.mem.Allocator, params: *const tools_common.params.Params, curr_ex: tools_common.params.Example) common_chat.exception.Error!ModelsHandler {
     var plan: HfPlan = .{};
     var plan_spec: HfPlan = .{};
     var opts: Opts = .{};
@@ -2066,7 +2063,7 @@ pub fn modelsHandlerIsPresetRepo(handler: *const ModelsHandler) bool {
 /// Ports `download_opts_for_url` (arg.cpp:404 @b1b770d90): `opts` without
 /// its bearer token unless `url` is on the model endpoint's scheme, host
 /// and port and the token is a Hugging Face one (`hf_`).
-fn downloadOptsForUrl(a: Allocator, opts: *const Opts, url: []const u8) Opts {
+fn downloadOptsForUrl(a: std.mem.Allocator, opts: *const Opts, url: []const u8) Opts {
     var result = opts.*;
     blk: {
         const hf = commonHttpParseUrl(a, commonGetModelEndpoint(a) catch break :blk) catch break :blk;
@@ -2086,7 +2083,7 @@ fn downloadOptsForUrl(a: Allocator, opts: *const Opts, url: []const u8) Opts {
 
 /// Ports `build_url_tasks` (arg.cpp:422 @b1b770d90): one task per shard of
 /// a URL, under `-m`'s directory when given, else the cache.
-fn buildUrlTasks(a: Allocator, model: *const tc.params.Model, opts_in: Opts) Error![]Task {
+fn buildUrlTasks(a: std.mem.Allocator, model: *const tools_common.params.Model, opts_in: Opts) common_chat.exception.Error![]Task {
     const opts = downloadOptsForUrl(a, &opts_in, model.url);
     const parts = try getAllParts(a, model.url);
     var tasks: std.ArrayList(Task) = .empty;
@@ -2122,14 +2119,14 @@ fn buildUrlTasks(a: Allocator, model: *const tc.params.Model, opts_in: Opts) Err
 
 /// What a task's `on_done` lambda in `common_models_handler_apply` captured.
 const Done = struct {
-    a: Allocator,
-    params: *tc.params.Params,
+    a: std.mem.Allocator,
+    params: *tools_common.params.Params,
     file: ?*const mod.hf_cache.HfFile = null,
     kind: enum { model_path, finalize_only, model_primary, spec_sidecar, plan_sidecar, mmproj, preset } = .finalize_only,
     /// for `model_path`: the first part's path
     first_path: []const u8 = "",
     /// for `model_primary`: the model whose path it sets
-    target: ?*tc.params.Model = null,
+    target: ?*tools_common.params.Model = null,
     /// `callback`, which the `finalize` lambda captures.
     callback: ?*const Callback = null,
 
@@ -2143,7 +2140,7 @@ const Done = struct {
     }
 
     /// The `finalize` lambda (arg.cpp:472 @b1b770d90).
-    fn finalize(self: *Done) Error![]const u8 {
+    fn finalize(self: *Done) common_chat.exception.Error![]const u8 {
         return mod.hf_cache.finalizeFile(self.a, self.file.?, .{ .ctx = self, .func = keepWaiting });
     }
 
@@ -2184,7 +2181,7 @@ const Done = struct {
     }
 };
 
-fn makeOnDone(a: Allocator, d: Done) Allocator.Error!OnDone {
+fn makeOnDone(a: std.mem.Allocator, d: Done) std.mem.Allocator.Error!OnDone {
     const p = try a.create(Done);
     p.* = d;
     return .{ .ctx = p, .func = Done.call };
@@ -2196,7 +2193,7 @@ fn makeOnDone(a: Allocator, d: Done) Allocator.Error!OnDone {
 ///
 /// Parameters:
 /// - `a`: owns the paths `params` is given; must outlive `params`' use.
-pub fn modelsHandlerApply(a: Allocator, handler: *ModelsHandler, params: *tc.params.Params, callback: ?*const Callback) Error!void {
+pub fn modelsHandlerApply(a: std.mem.Allocator, handler: *ModelsHandler, params: *tools_common.params.Params, callback: ?*const Callback) common_chat.exception.Error!void {
     var tasks: std.ArrayList(Task) = .empty;
 
     const plan = &handler.plan;
@@ -2206,7 +2203,7 @@ pub fn modelsHandlerApply(a: Allocator, handler: *ModelsHandler, params: *tc.par
     opts.callback = callback;
 
     // handle plain "url" if needed
-    for ([_]*tc.params.Model{ &params.model, &params.mmproj, &params.speculative.draft.mparams }) |model| {
+    for ([_]*tools_common.params.Model{ &params.model, &params.mmproj, &params.speculative.draft.mparams }) |model| {
         if (model.url.len != 0) {
             if (model.path.len == 0) {
                 model.path = try getDefaultLocalPath(a, model.url);
@@ -2271,7 +2268,7 @@ pub fn modelsHandlerApply(a: Allocator, handler: *ModelsHandler, params: *tc.par
     // note: reads only the first split - sharded drafts need an explicit --spec-type
     if (specTypesIsDefault(params) and params.speculative.draft.mparams.path.len != 0) {
         const z = try a.dupeSentinel(u8, params.speculative.draft.mparams.path, 0);
-        const types_gguf = tc.speculative.typesFromGguf(a, z) catch |e| return mapAny(e);
+        const types_gguf = tools_common.speculative.typesFromGguf(a, z) catch |e| return mapAny(e);
         if (types_gguf.len != 0) {
             params.speculative.types.clearRetainingCapacity();
             try params.speculative.types.appendSlice(params.arena, types_gguf);
@@ -2326,7 +2323,7 @@ pub fn modelsHandlerApply(a: Allocator, handler: *ModelsHandler, params: *tc.par
         var unique_tasks_vec: std.ArrayList(Task) = .empty;
         var it = unique_tasks.iterator();
         while (it.next()) |e| {
-            tc.log.dbg("download task: %s -> %s\n", .{ try mod.common.zs(a, e.value.*.url), try mod.common.zs(a, e.value.*.local_path) });
+            tools_common.log.dbg("download task: %s -> %s\n", .{ try mod.common.zs(a, e.value.*.url), try mod.common.zs(a, e.value.*.local_path) });
             try unique_tasks_vec.append(a, e.value.*.*);
         }
         try runTasks(a, unique_tasks_vec.items);
@@ -2338,26 +2335,26 @@ pub fn modelsHandlerApply(a: Allocator, handler: *ModelsHandler, params: *tc.par
     }
 }
 
-fn setSpecTypes(params: *tc.params.Params, t: tc.params.SpeculativeType) Allocator.Error!void {
+fn setSpecTypes(params: *tools_common.params.Params, t: tools_common.params.SpeculativeType) std.mem.Allocator.Error!void {
     params.speculative.types.clearRetainingCapacity();
     try params.speculative.types.append(params.arena, t);
 }
 
-fn mapAny(e: anyerror) Error {
+fn mapAny(e: anyerror) common_chat.exception.Error {
     return switch (e) {
         error.OutOfMemory => error.OutOfMemory,
         error.JsonError => error.JsonError,
         error.InvalidArgument => error.InvalidArgument,
         error.RuntimeError => error.RuntimeError,
-        error.Throw => mod.common.throw(error.RuntimeError, "{s}", .{tc.arg.what()}),
-        else => mod.common.throw(error.RuntimeError, "{s}", .{@errorName(e)}),
+        error.Throw => common_chat.exception.throw(error.RuntimeError, "{s}", .{tools_common.arg.what()}),
+        else => common_chat.exception.throw(error.RuntimeError, "{s}", .{@errorName(e)}),
     };
 }
 
 /// The `add_tasks` (arg.cpp:526 @b1b770d90) lambda of
 /// `common_models_handler_apply`: every shard, the primary one setting
 /// `model`'s path.
-fn addTasks(a: Allocator, tasks: *std.ArrayList(Task), opts: Opts, params: *tc.params.Params, model_files: []mod.hf_cache.HfFile, primary: *const mod.hf_cache.HfFile, model: *tc.params.Model, callback: ?*const Callback) Error!void {
+fn addTasks(a: std.mem.Allocator, tasks: *std.ArrayList(Task), opts: Opts, params: *tools_common.params.Params, model_files: []mod.hf_cache.HfFile, primary: *const mod.hf_cache.HfFile, model: *tools_common.params.Model, callback: ?*const Callback) common_chat.exception.Error!void {
     for (model_files) |*model_file| {
         const is_primary = std.mem.eql(u8, model_file.path, primary.path);
         try tasks.append(a, try Task.fromHf(a, model_file, opts, try makeOnDone(a, .{
@@ -2376,17 +2373,12 @@ fn addTasks(a: Allocator, tasks: *std.ArrayList(Task), opts: Opts, params: *tc.p
 // The HTTP client the downloader drives: cpp-httplib's `Client`, as
 // `common_http_client` configures it.
 
-pub const Headers = mod.httplib.client.HeadersMap;
-pub const Response = mod.httplib.client.Response;
-pub const ErrorCode = mod.httplib.client.ErrorCode;
-pub const errorToString = mod.httplib.client.errorToString;
-
 /// The pair `common_http_client` returns: the client and the parsed URL.
 pub const HttpClient = struct {
     parts: HttpUrl,
     cli: mod.httplib.client.Client,
 
-    fn init(a: Allocator, parts: HttpUrl) Error!HttpClient {
+    fn init(a: std.mem.Allocator, parts: HttpUrl) common_chat.exception.Error!HttpClient {
         // `httplib::Client cli(scheme + "://" + host + ":" + port)`
         return .{ .parts = parts, .cli = try mod.httplib.client.Client.init(a, parts.host, parts.port) };
     }
@@ -2417,7 +2409,7 @@ pub const HttpClient = struct {
         try self.cli.setDirectHostnameAddrMap(host, addr);
     }
 
-    fn setDefaultHeaders(self: *HttpClient, headers: Headers) void {
+    fn setDefaultHeaders(self: *HttpClient, headers: mod.httplib.detail.Headers) void {
         self.cli.setDefaultHeaders(headers);
     }
 
@@ -2430,23 +2422,23 @@ pub const HttpClient = struct {
     }
 
     /// `cli.Get(path, headers)`: the whole body.
-    pub fn get(self: *HttpClient, a: Allocator, path: []const u8, headers: *const Headers) mod.httplib.client.Result {
+    pub fn get(self: *HttpClient, a: std.mem.Allocator, path: []const u8, headers: *const mod.httplib.detail.Headers) mod.httplib.client.Result {
         return self.cli.get(a, path, headers);
     }
 
     /// `cli.Head(path)`.
-    pub fn head(self: *HttpClient, a: Allocator, path: []const u8) mod.httplib.client.Result {
+    pub fn head(self: *HttpClient, a: std.mem.Allocator, path: []const u8) mod.httplib.client.Result {
         return self.cli.head(a, path);
     }
 
     /// `cli.Get(path, headers, response_handler, content_receiver)`.
     pub fn getStream(
         self: *HttpClient,
-        a: Allocator,
+        a: std.mem.Allocator,
         path: []const u8,
-        headers: *const Headers,
+        headers: *const mod.httplib.detail.Headers,
         ctx: *anyopaque,
-        on_response: ?*const fn (ctx: *anyopaque, r: *const Response) bool,
+        on_response: ?*const fn (ctx: *anyopaque, r: *const mod.httplib.client.Response) bool,
         on_data: *const fn (ctx: *anyopaque, data: []const u8) bool,
     ) mod.httplib.client.Result {
         return self.cli.getStream(a, path, headers, ctx, on_response, on_data);

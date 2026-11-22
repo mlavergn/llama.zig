@@ -14,7 +14,7 @@ const std = @import("std");
 const llama = @import("../module.zig");
 
 /// Ports `llama_ftype_name` (llama-model-loader.cpp:34 @b1b770d90).
-pub fn llama_ftype_name(ftype: llama.impl.c.enum_llama_ftype) callconv(.c) [*c]const u8 {
+pub fn llama_ftype_name(ftype: llama.impl.llama_c.enum_llama_ftype) callconv(.c) [*c]const u8 {
     return llama.loader.ftypeName(ftype).ptr;
 }
 

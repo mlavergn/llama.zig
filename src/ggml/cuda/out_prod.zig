@@ -31,9 +31,9 @@ fn u(x: i64) u64 {
 }
 
 /// Ports `ggml_cuda_out_prod` (out-prod.cu:27 @b1b770d90).
-pub fn outProd(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+pub fn outProd(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
     const ne00 = src0.ne[0];
     const ne01 = src0.ne[1];
@@ -56,9 +56,9 @@ pub fn outProd(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) vo
     const nb2 = dst.nb[2];
     const nb3 = dst.nb[3];
 
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type  == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type  == GGML_TYPE_F32");
 
     ggml.impl.assert(ne01 == ne11, "ne01 == ne11");
     ggml.impl.assert(ne0 == ne00, "ne0 == ne00");
@@ -83,7 +83,7 @@ pub fn outProd(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) vo
     const lda: i64 = @bitCast(nb01 / @sizeOf(f32));
     const ldc: i64 = @bitCast(nb1 / @sizeOf(f32));
 
-    const src1_T = ggml.impl.c.ggml_is_transposed(src1);
+    const src1_T = ggml.impl.ggml_c.ggml_is_transposed(src1);
     const src1_cublas_op: ggml.cuda.common.cu.cublasOperation_t = if (src1_T) ggml.cuda.common.cu.CUBLAS_OP_N else ggml.cuda.common.cu.CUBLAS_OP_T;
     const ldb: i64 = @bitCast((if (src1_T) nb10 else nb11) / @sizeOf(f32));
     ggml.impl.assert((if (src1_T) nb11 else nb10) == @sizeOf(f32), "(src1_T ?        nb11 :        nb10) == sizeof(float)");

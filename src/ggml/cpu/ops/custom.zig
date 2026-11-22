@@ -37,7 +37,7 @@ const ggml = @import("../../module.zig");
 
 /// `memcpy(&p, dst->op_params, sizeof(p))`: the four custom-op parameter
 /// structs share one layout, so one read serves them all.
-fn customParams(dst: *const ggml.impl.c.ggml_tensor) ggml.impl.CustomOpParams {
+fn customParams(dst: *const ggml.impl.ggml_c.ggml_tensor) ggml.impl.CustomOpParams {
     var p: ggml.impl.CustomOpParams = undefined;
     @memcpy(std.mem.asBytes(&p), std.mem.asBytes(&dst.op_params)[0..@sizeOf(ggml.impl.CustomOpParams)]);
     return p;
@@ -47,42 +47,42 @@ fn customParams(dst: *const ggml.impl.c.ggml_tensor) ggml.impl.CustomOpParams {
 // The user-callback ops
 
 /// Ports `ggml_compute_forward_map_custom1` (ops.cpp:11833 @b1b770d90).
-pub export fn ggml_compute_forward_map_custom1(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+pub fn ggml_compute_forward_map_custom1(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
     const a = dst.src[0];
 
     const p = customParams(dst);
-    const fun: ggml.impl.c.ggml_custom1_op_t = @ptrCast(@alignCast(p.fun));
+    const fun: ggml.impl.ggml_c.ggml_custom1_op_t = @ptrCast(@alignCast(p.fun));
 
     fun.?(dst, a, params.ith, params.nth, p.userdata);
 }
 
 /// Ports `ggml_compute_forward_map_custom2` (ops.cpp:11847 @b1b770d90).
-pub export fn ggml_compute_forward_map_custom2(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+pub fn ggml_compute_forward_map_custom2(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
     const a = dst.src[0];
     const b = dst.src[1];
 
     const p = customParams(dst);
-    const fun: ggml.impl.c.ggml_custom2_op_t = @ptrCast(@alignCast(p.fun));
+    const fun: ggml.impl.ggml_c.ggml_custom2_op_t = @ptrCast(@alignCast(p.fun));
 
     fun.?(dst, a, b, params.ith, params.nth, p.userdata);
 }
 
 /// Ports `ggml_compute_forward_map_custom3` (ops.cpp:11862 @b1b770d90).
-pub export fn ggml_compute_forward_map_custom3(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+pub fn ggml_compute_forward_map_custom3(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
     const a = dst.src[0];
     const b = dst.src[1];
     const cc = dst.src[2];
 
     const p = customParams(dst);
-    const fun: ggml.impl.c.ggml_custom3_op_t = @ptrCast(@alignCast(p.fun));
+    const fun: ggml.impl.ggml_c.ggml_custom3_op_t = @ptrCast(@alignCast(p.fun));
 
     fun.?(dst, a, b, cc, params.ith, params.nth, p.userdata);
 }
 
 /// Ports `ggml_compute_forward_custom` (ops.cpp:11878 @b1b770d90).
-pub export fn ggml_compute_forward_custom(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+pub fn ggml_compute_forward_custom(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
     const p = customParams(dst);
-    const fun: ggml.impl.c.ggml_custom_op_t = @ptrCast(@alignCast(p.fun));
+    const fun: ggml.impl.ggml_c.ggml_custom_op_t = @ptrCast(@alignCast(p.fun));
 
     fun.?(dst, params.ith, params.nth, p.userdata);
 }
@@ -91,21 +91,21 @@ pub export fn ggml_compute_forward_custom(params: *const ggml.cpu.defs.ComputePa
 // cross_entropy_loss
 
 /// Ports `ggml_compute_forward_cross_entropy_loss_f32` (ops.cpp:11890 @b1b770d90).
-fn crossEntropyLossF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+fn crossEntropyLossF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
-    ggml.impl.assert(src0.nb[0] == ggml.impl.c.ggml_type_size(src0.type), "src0->nb[0] == ggml_type_size(src0->type)");
-    ggml.impl.assert(src1.nb[0] == ggml.impl.c.ggml_type_size(src1.type), "src1->nb[0] == ggml_type_size(src1->type)");
-    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0, src1), "ggml_are_same_shape(src0, src1)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_scalar(dst), "ggml_is_scalar(dst)");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.nb[0] == ggml.impl.ggml_c.ggml_type_size(src0.type), "src0->nb[0] == ggml_type_size(src0->type)");
+    ggml.impl.assert(src1.nb[0] == ggml.impl.ggml_c.ggml_type_size(src1.type), "src1->nb[0] == ggml_type_size(src1->type)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, src1), "ggml_are_same_shape(src0, src1)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_scalar(dst), "ggml_is_scalar(dst)");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
 
     // TODO: handle transposed/permuted matrices
     const nc = src0.ne[0];
-    const nr: i64 = @intCast(ggml.impl.c.ggml_nrows(src0));
+    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src0));
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
@@ -159,11 +159,11 @@ fn crossEntropyLossF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.im
 }
 
 /// Ports `ggml_compute_forward_cross_entropy_loss` (ops.cpp:11966 @b1b770d90).
-pub export fn ggml_compute_forward_cross_entropy_loss(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_cross_entropy_loss(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => crossEntropyLossF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => crossEntropyLossF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -173,23 +173,23 @@ pub export fn ggml_compute_forward_cross_entropy_loss(params: *const ggml.cpu.de
 
 /// Ports `ggml_compute_forward_cross_entropy_loss_back_f32`
 /// (ops.cpp:11986 @b1b770d90).
-fn crossEntropyLossBackF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const grad = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]); // gradient of forward pass output
-    const src0f = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]); // src0 of forward pass
-    const src1f = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]); // src1 of forward pass
+fn crossEntropyLossBackF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const grad = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]); // gradient of forward pass output
+    const src0f = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]); // src0 of forward pass
+    const src1f = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]); // src1 of forward pass
 
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(src0f), "ggml_is_contiguous(src0f)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(src1f), "ggml_is_contiguous(src1f)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(grad), "ggml_is_contiguous(grad)");
-    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0f, src1f) and ggml.impl.c.ggml_are_same_shape(src0f, dst), "ggml_are_same_shape(src0f, src1f) && ggml_are_same_shape(src0f, dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0f), "ggml_is_contiguous(src0f)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src1f), "ggml_is_contiguous(src1f)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(grad), "ggml_is_contiguous(grad)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0f, src1f) and ggml.impl.ggml_c.ggml_are_same_shape(src0f, dst), "ggml_are_same_shape(src0f, src1f) && ggml_are_same_shape(src0f, dst)");
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
     // TODO: handle transposed/permuted matrices
     const nc = src0f.ne[0];
-    const nr: i64 = @intCast(ggml.impl.c.ggml_nrows(src0f));
+    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src0f));
 
     // rows per thread
     const dr = @divTrunc(nr + nth - 1, nth);
@@ -231,11 +231,11 @@ fn crossEntropyLossBackF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggm
 
 /// Ports `ggml_compute_forward_cross_entropy_loss_back`
 /// (ops.cpp:12049 @b1b770d90).
-pub export fn ggml_compute_forward_cross_entropy_loss_back(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_cross_entropy_loss_back(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => crossEntropyLossBackF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => crossEntropyLossBackF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -246,22 +246,22 @@ pub export fn ggml_compute_forward_cross_entropy_loss_back(params: *const ggml.c
 /// Ports `ggml_compute_forward_opt_step_adamw_f32` (ops.cpp:12067 @b1b770d90).
 ///
 /// The C counts rows in `int`; `i64` here holds the same values.
-fn optStepAdamwF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src0_grad = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const src0_grad_m = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
-    const src0_grad_v = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[3]);
-    const adamw_params = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[4]);
+fn optStepAdamwF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src0_grad = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const src0_grad_m = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]);
+    const src0_grad_v = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[3]);
+    const adamw_params = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[4]);
 
-    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0, src0_grad), "ggml_are_same_shape(src0, src0_grad)");
-    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0, src0_grad_m), "ggml_are_same_shape(src0, src0_grad_m)");
-    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0, src0_grad_v), "ggml_are_same_shape(src0, src0_grad_v)");
-    ggml.impl.assert(ggml.impl.c.ggml_nelements(adamw_params) == 7, "ggml_nelements(adamw_params) == 7");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, src0_grad), "ggml_are_same_shape(src0, src0_grad)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, src0_grad_m), "ggml_are_same_shape(src0, src0_grad_m)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, src0_grad_v), "ggml_are_same_shape(src0, src0_grad_v)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_nelements(adamw_params) == 7, "ggml_nelements(adamw_params) == 7");
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const nr: i64 = @intCast(ggml.impl.c.ggml_nrows(src0));
+    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src0));
 
     const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
     ggml.impl.assert(l.nb00 == @sizeOf(f32), "nb00 == sizeof(float)");
@@ -273,7 +273,7 @@ fn optStepAdamwF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c
     const ir0 = dr * ith;
     const ir1 = @min(ir0 + dr, nr);
 
-    const adamw_params_ptr: [*]const f32 = ggml.impl.c.ggml_get_data_f32(adamw_params);
+    const adamw_params_ptr: [*]const f32 = ggml.impl.ggml_c.ggml_get_data_f32(adamw_params);
 
     const alpha = adamw_params_ptr[0];
     const beta1 = adamw_params_ptr[1];
@@ -327,11 +327,11 @@ fn optStepAdamwF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c
 }
 
 /// Ports `ggml_compute_forward_opt_step_adamw` (ops.cpp:12134 @b1b770d90).
-pub export fn ggml_compute_forward_opt_step_adamw(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_opt_step_adamw(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => optStepAdamwF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => optStepAdamwF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -340,18 +340,18 @@ pub export fn ggml_compute_forward_opt_step_adamw(params: *const ggml.cpu.defs.C
 // opt_step_sgd
 
 /// Ports `ggml_compute_forward_opt_step_sgd_f32` (ops.cpp:12152 @b1b770d90).
-fn optStepSgdF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src0_grad = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const sgd_params = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
+fn optStepSgdF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src0_grad = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const sgd_params = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]);
 
-    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0, src0_grad), "ggml_are_same_shape(src0, src0_grad)");
-    ggml.impl.assert(ggml.impl.c.ggml_nelements(sgd_params) == 2, "ggml_nelements(sgd_params) == 2");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, src0_grad), "ggml_are_same_shape(src0, src0_grad)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_nelements(sgd_params) == 2, "ggml_nelements(sgd_params) == 2");
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const nr: i64 = @intCast(ggml.impl.c.ggml_nrows(src0));
+    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src0));
 
     const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
     ggml.impl.assert(l.nb00 == @sizeOf(f32), "nb00 == sizeof(float)");
@@ -364,7 +364,7 @@ fn optStepSgdF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.g
     const ir1 = @min(ir0 + dr, nr);
 
     // using adamw param subset we care about - alpha, wd - could have a separate struct
-    const sgd_params_ptr: [*]const f32 = ggml.impl.c.ggml_get_data_f32(sgd_params);
+    const sgd_params_ptr: [*]const f32 = ggml.impl.ggml_c.ggml_get_data_f32(sgd_params);
     const alpha = sgd_params_ptr[0];
     // Fused as in adamw's `keep`.
     const keep = @mulAdd(f32, -alpha, sgd_params_ptr[1], 1.0);
@@ -392,11 +392,11 @@ fn optStepSgdF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.g
 }
 
 /// Ports `ggml_compute_forward_opt_step_sgd` (ops.cpp:12196 @b1b770d90).
-pub export fn ggml_compute_forward_opt_step_sgd(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_opt_step_sgd(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => optStepSgdF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => optStepSgdF32(params, dst),
         else => ggml.impl.abort("fatal error - sgd is F32 only"),
     }
 }
@@ -406,15 +406,15 @@ pub export fn ggml_compute_forward_opt_step_sgd(params: *const ggml.cpu.defs.Com
 
 /// Ports `ggml_compute_forward_solve_tri_f32` (ops.cpp:10932 @b1b770d90):
 /// forward substitution, one right-hand-side column per work unit.
-fn solveTriF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]); // A (lower triangular)
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]); // B (RHS)
+fn solveTriF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]); // A (lower triangular)
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]); // B (RHS)
 
     const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type  == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type  == GGML_TYPE_F32");
 
     ggml.impl.assert(l.ne00 == l.ne01, "ne00 == ne01"); // A must be square
     ggml.impl.assert(l.ne0 == l.ne10, "ne0  == ne10"); // solution cols == B cols
@@ -475,11 +475,11 @@ fn solveTriF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggm
 }
 
 /// Ports `ggml_compute_forward_solve_tri` (ops.cpp:10991 @b1b770d90).
-pub export fn ggml_compute_forward_solve_tri(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+pub fn ggml_compute_forward_solve_tri(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    if (src0.type == ggml.impl.c.GGML_TYPE_F32 and src1.type == ggml.impl.c.GGML_TYPE_F32) {
+    if (src0.type == ggml.impl.ggml_c.GGML_TYPE_F32 and src1.type == ggml.impl.ggml_c.GGML_TYPE_F32) {
         solveTriF32(params, dst);
     } else {
         ggml.impl.abort("fatal error");
@@ -494,7 +494,7 @@ test {
 }
 
 test "the custom-op parameters read back the layout ggml.c writes" {
-    var t: ggml.impl.c.ggml_tensor = std.mem.zeroes(ggml.impl.c.ggml_tensor);
+    var t: ggml.impl.ggml_c.ggml_tensor = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
     var userdata: u8 = 0;
     ggml.impl.setOpParamsValue(&t, ggml.impl.CustomOpParams{
         .fun = @ptrFromInt(0x1000),

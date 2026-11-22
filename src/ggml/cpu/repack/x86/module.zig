@@ -34,14 +34,6 @@ pub const q2_k = @import("q2_k.zig");
 pub const common = @import("common.zig");
 pub const wide = @import("wide.zig");
 
-comptime {
-    _ = fallback;
-    _ = quantize;
-    _ = q4_b32;
-    _ = q4_k;
-    _ = q2_k;
-}
-
 // -----------------------------------------------------------------------------
 // Unit Tests
 

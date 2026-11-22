@@ -29,17 +29,13 @@
 //!   SCHEMA_DIFF_STATS=1   lists every distinct error and warning seen
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const win_child = @import("win_child.zig");
 const json = @import("json");
-const schema = json.schema;
-const s2g = json.schema_to_grammar;
 
 extern fn ref_schema_run(prog: [*]const u8, len: usize, out_len: *usize) [*]u8;
 extern fn ref_schema_upstream(out_len: *usize) [*]u8;
-
-const gpa = std.heap.smp_allocator;
 
 const OP_CASE: u8 = 0;
 const OP_J2G: u8 = 1;
@@ -61,14 +57,14 @@ const Prog = struct {
     buf: std.ArrayList(u8) = .empty,
 
     fn u8_(self: *Prog, v: u8) void {
-        self.buf.append(gpa, v) catch oom();
+        self.buf.append(std.heap.smp_allocator, v) catch oom();
     }
     fn u32_(self: *Prog, v: u32) void {
-        self.buf.appendSlice(gpa, std.mem.asBytes(&v)) catch oom();
+        self.buf.appendSlice(std.heap.smp_allocator, std.mem.asBytes(&v)) catch oom();
     }
     fn str(self: *Prog, s: []const u8) void {
         self.u32_(@intCast(s.len));
-        self.buf.appendSlice(gpa, s) catch oom();
+        self.buf.appendSlice(std.heap.smp_allocator, s) catch oom();
     }
 };
 
@@ -87,10 +83,10 @@ fn beginCase(p: *Prog) void {
 }
 
 fn addCase(label: []const u8, input: []const u8, p: *Prog) void {
-    cases.append(gpa, .{
+    cases.append(std.heap.smp_allocator, .{
         .label = label,
-        .input = gpa.dupe(u8, input) catch oom(),
-        .prog = p.buf.toOwnedSlice(gpa) catch oom(),
+        .input = std.heap.smp_allocator.dupe(u8, input) catch oom(),
+        .prog = p.buf.toOwnedSlice(std.heap.smp_allocator) catch oom(),
     }) catch oom();
 }
 
@@ -170,16 +166,16 @@ const Reader = struct {
 const Records = std.ArrayList([]u8);
 
 fn rec(out: *Records, parts: []const []const u8) void {
-    out.append(gpa, std.mem.concat(gpa, u8, parts) catch oom()) catch oom();
+    out.append(std.heap.smp_allocator, std.mem.concat(std.heap.smp_allocator, u8, parts) catch oom()) catch oom();
 }
 
 var warning_buf: std.ArrayList(u8) = .empty;
 
 fn captureWarning(line: []const u8) void {
-    warning_buf.appendSlice(gpa, line) catch oom();
+    warning_buf.appendSlice(std.heap.smp_allocator, line) catch oom();
 }
 
-fn guardText(err: schema.Error) []const u8 {
+fn guardText(err: json.schema.Error) []const u8 {
     return switch (err) {
         error.InvalidArgument => "IA:",
         error.RuntimeError => "RE:",
@@ -188,78 +184,78 @@ fn guardText(err: schema.Error) []const u8 {
     };
 }
 
-fn guardResult(out: *Records, res: schema.Error![]u8) void {
+fn guardResult(out: *Records, res: json.schema.Error![]u8) void {
     if (res) |g| {
-        defer gpa.free(g);
+        defer std.heap.smp_allocator.free(g);
         rec(out, &.{ "G:", g });
-    } else |e| rec(out, &.{ guardText(e), schema.what() });
+    } else |e| rec(out, &.{ guardText(e), json.schema.what() });
 }
 
 /// `children` in harness/schema_ref.cpp.
-fn children(n: *const schema.Node, buf: *std.ArrayList(*const schema.Node)) void {
+fn children(n: *const json.schema.Node, buf: *std.ArrayList(*const json.schema.Node)) void {
     buf.clearRetainingCapacity();
     switch (n.*) {
-        .any_of, .all_of, .tuple => |kids| for (kids) |k| buf.append(gpa, k) catch oom(),
-        .array => |arr| buf.append(gpa, arr.items) catch oom(),
+        .any_of, .all_of, .tuple => |kids| for (kids) |k| buf.append(std.heap.smp_allocator, k) catch oom(),
+        .array => |arr| buf.append(std.heap.smp_allocator, arr.items) catch oom(),
         .object => |obj| {
-            for (obj.properties) |p| buf.append(gpa, p.schema) catch oom();
-            if (obj.additional_properties) |ap| buf.append(gpa, ap) catch oom();
+            for (obj.properties) |p| buf.append(std.heap.smp_allocator, p.schema) catch oom();
+            if (obj.additional_properties) |ap| buf.append(std.heap.smp_allocator, ap) catch oom();
         },
         else => {},
     }
 }
 
 /// `describe` in harness/schema_ref.cpp.
-fn describe(n: *const schema.Node, depth: usize, out: *std.ArrayList(u8)) void {
+fn describe(n: *const json.schema.Node, depth: usize, out: *std.ArrayList(u8)) void {
     const w = struct {
         fn s(o: *std.ArrayList(u8), t: []const u8) void {
-            o.appendSlice(gpa, t) catch oom();
+            o.appendSlice(std.heap.smp_allocator, t) catch oom();
         }
         fn f(o: *std.ArrayList(u8), comptime fmt: []const u8, args: anytype) void {
-            o.print(gpa, fmt, args) catch oom();
+            o.print(std.heap.smp_allocator, fmt, args) catch oom();
         }
     };
-    out.appendNTimes(gpa, ' ', depth) catch oom();
-    w.s(out, schema.kindName(n.kind()));
+    out.appendNTimes(std.heap.smp_allocator, ' ', depth) catch oom();
+    w.s(out, json.schema.kindName(n.kind()));
     // a $ref chain past COMMON_RECURSIVE_LIMIT throws out of both questions
     if (n.valueTypes()) |types| {
         w.s(out, " types=");
         for (0..7) |ti| {
-            const t: schema.ValueType = @fromBackingInt(@intCast(ti));
+            const t: json.schema.ValueType = @fromBackingInt(@intCast(ti));
             if (types.has(t)) {
-                w.s(out, schema.typeName(t));
+                w.s(out, json.schema.typeName(t));
                 w.s(out, ",");
             }
         }
         w.f(out, " empty={d}", .{@intFromBool(types.empty())});
     } else |_| {
         w.s(out, " types!");
-        w.s(out, schema.what());
+        w.s(out, json.schema.what());
     }
     if (n.mayBeString()) |str| {
         w.f(out, " str={d}", .{@intFromBool(str)});
     } else |_| {
         w.s(out, " str!");
-        w.s(out, schema.what());
+        w.s(out, json.schema.what());
     }
     switch (n.*) {
         .ref => |r| {
             w.s(out, " ref=");
             w.s(out, r.ref);
             w.s(out, " target=");
-            w.s(out, if (r.target) |t| schema.kindName(t.kind()) else "null");
+            w.s(out, if (r.target) |t| json.schema.kindName(t.kind()) else "null");
         },
         .@"const" => |*v| {
-            const d = json.dumpSafe(gpa, v, -1) catch oom();
-            defer gpa.free(d);
+            const d = json.dumpSafe(std.heap.smp_allocator, v, -1) catch oom();
+            defer std.heap.smp_allocator.free(d);
             w.s(out, " value=");
             w.s(out, d);
         },
         .@"enum" => |vs| {
             w.s(out, " values=");
             for (vs) |*v| {
-                const d = json.dumpSafe(gpa, v, -1) catch oom();
-                defer gpa.free(d);
+                const d = json.dumpSafe(std.heap.smp_allocator, v, -1) catch oom();
+                defer std.heap.smp_allocator.free(d);
                 w.s(out, d);
                 w.s(out, ",");
             }
@@ -281,16 +277,16 @@ fn describe(n: *const schema.Node, depth: usize, out: *std.ArrayList(u8)) void {
         else => {},
     }
     w.s(out, "\n");
-    var kids: std.ArrayList(*const schema.Node) = .empty;
-    defer kids.deinit(gpa);
+    var kids: std.ArrayList(*const json.schema.Node) = .empty;
+    defer kids.deinit(std.heap.smp_allocator);
     children(n, &kids);
     for (kids.items) |k| describe(k, depth + 1, out);
 }
 
-fn select(root: *const schema.Node, path: []const u32) *const schema.Node {
+fn select(root: *const json.schema.Node, path: []const u32) *const json.schema.Node {
     var s = root;
-    var kids: std.ArrayList(*const schema.Node) = .empty;
-    defer kids.deinit(gpa);
+    var kids: std.ArrayList(*const json.schema.Node) = .empty;
+    defer kids.deinit(std.heap.smp_allocator);
     for (path) |k| {
         children(s, &kids);
         if (kids.items.len == 0) break;
@@ -301,18 +297,18 @@ fn select(root: *const schema.Node, path: []const u32) *const schema.Node {
 
 const BuildCtx = struct {
     steps: []const Step,
-    doc: ?*const schema.Document,
+    doc: ?*const json.schema.Document,
     names: *std.ArrayList([]u8),
 
-    fn run(self: *const BuildCtx, b: *s2g.GrammarBuilder) schema.Error!void {
+    fn run(self: *const BuildCtx, b: *json.schema_to_grammar.GrammarBuilder) json.schema.Error!void {
         for (self.steps) |s| switch (s) {
             .rule => |r| {
                 const n = try b.addRule(r.name, r.rule);
-                self.names.append(gpa, gpa.dupe(u8, n) catch oom()) catch oom();
+                self.names.append(std.heap.smp_allocator, std.heap.smp_allocator.dupe(u8, n) catch oom()) catch oom();
             },
             .schema => |sc| if (self.doc) |d| {
                 const n = try b.addSchema(sc.name, select(d.root, sc.path));
-                self.names.append(gpa, gpa.dupe(u8, n) catch oom()) catch oom();
+                self.names.append(std.heap.smp_allocator, std.heap.smp_allocator.dupe(u8, n) catch oom()) catch oom();
             },
         };
     }
@@ -324,57 +320,57 @@ fn runPort(prog: []const u8, out: *Records) void {
         switch (r.u8_()) {
             OP_CASE => {
                 const id = r.u32_();
-                out.append(gpa, std.fmt.allocPrint(gpa, "#{d}", .{id}) catch oom()) catch oom();
+                out.append(std.heap.smp_allocator, std.fmt.allocPrint(std.heap.smp_allocator, "#{d}", .{id}) catch oom()) catch oom();
             },
             OP_J2G => {
                 const text = r.str();
                 const force = r.u8_() != 0;
-                var v = json.parse(gpa, text) catch |e| switch (e) {
+                var v = json.parse(std.heap.smp_allocator, text) catch |e| switch (e) {
                     error.JsonError => {
                         rec(out, &.{ "P:", json.what() });
                         continue;
                     },
                     error.OutOfMemory => oom(),
                 };
-                defer v.deinit(gpa);
+                defer v.deinit(std.heap.smp_allocator);
                 warning_buf.clearRetainingCapacity();
-                guardResult(out, s2g.jsonSchemaToGrammar(gpa, &v, force));
+                guardResult(out, json.schema_to_grammar.jsonSchemaToGrammar(std.heap.smp_allocator, &v, force));
                 rec(out, &.{ "W:", warning_buf.items });
             },
             OP_DOC => {
                 const text = r.str();
-                var v = json.parse(gpa, text) catch |e| switch (e) {
+                var v = json.parse(std.heap.smp_allocator, text) catch |e| switch (e) {
                     error.JsonError => {
                         rec(out, &.{ "P:", json.what() });
                         continue;
                     },
                     error.OutOfMemory => oom(),
                 };
-                defer v.deinit(gpa);
-                var doc = schema.fromJsonSchema(gpa, &v) catch |e| {
-                    rec(out, &.{ guardText(e), schema.what() });
+                defer v.deinit(std.heap.smp_allocator);
+                var doc = json.schema.fromJsonSchema(std.heap.smp_allocator, &v) catch |e| {
+                    rec(out, &.{ guardText(e), json.schema.what() });
                     continue;
                 };
                 defer doc.deinit();
                 var tree: std.ArrayList(u8) = .empty;
-                defer tree.deinit(gpa);
+                defer tree.deinit(std.heap.smp_allocator);
                 describe(doc.root, 0, &tree);
                 for (doc.refs) |e| {
-                    tree.print(gpa, "refs[{s}]={s}\n", .{ e.key, schema.kindName(e.node.kind()) }) catch oom();
+                    tree.print(std.heap.smp_allocator, "refs[{s}]={s}\n", .{ e.key, json.schema.kindName(e.node.kind()) }) catch oom();
                 }
                 rec(out, &.{ "G:", tree.items });
                 warning_buf.clearRetainingCapacity();
-                guardResult(out, s2g.documentToGrammar(gpa, &doc));
+                guardResult(out, json.schema_to_grammar.documentToGrammar(std.heap.smp_allocator, &doc));
                 rec(out, &.{ "W:", warning_buf.items });
             },
             OP_BUILD => {
                 const text = r.str();
                 const dotall = r.u8_() != 0;
                 const n = r.u32_();
-                const steps = gpa.alloc(Step, n) catch oom();
+                const steps = std.heap.smp_allocator.alloc(Step, n) catch oom();
                 defer {
-                    for (steps) |s| if (s == .schema) gpa.free(s.schema.path);
-                    gpa.free(steps);
+                    for (steps) |s| if (s == .schema) std.heap.smp_allocator.free(s.schema.path);
+                    std.heap.smp_allocator.free(steps);
                 }
                 for (steps) |*s| {
                     const kind = r.u8_();
@@ -382,45 +378,45 @@ fn runPort(prog: []const u8, out: *Records) void {
                     if (kind == STEP_RULE) {
                         s.* = .{ .rule = .{ .name = name, .rule = r.str() } };
                     } else {
-                        const path = gpa.alloc(u32, r.u32_()) catch oom();
+                        const path = std.heap.smp_allocator.alloc(u32, r.u32_()) catch oom();
                         for (path) |*k| k.* = r.u32_();
                         s.* = .{ .schema = .{ .name = name, .path = path } };
                     }
                 }
                 var v: json.Value = .null;
-                defer v.deinit(gpa);
-                var doc: ?schema.Document = null;
+                defer v.deinit(std.heap.smp_allocator);
+                var doc: ?json.schema.Document = null;
                 defer if (doc) |*d| d.deinit();
                 if (text.len != 0) {
-                    v = json.parse(gpa, text) catch |e| switch (e) {
+                    v = json.parse(std.heap.smp_allocator, text) catch |e| switch (e) {
                         error.JsonError => {
                             rec(out, &.{ "JE:", json.what() });
                             continue;
                         },
                         error.OutOfMemory => oom(),
                     };
-                    doc = schema.fromJsonSchema(gpa, &v) catch |e| {
-                        rec(out, &.{ guardText(e), schema.what() });
+                    doc = json.schema.fromJsonSchema(std.heap.smp_allocator, &v) catch |e| {
+                        rec(out, &.{ guardText(e), json.schema.what() });
                         continue;
                     };
                     rec(out, &.{"G:"});
                 }
                 var names: std.ArrayList([]u8) = .empty;
                 defer {
-                    for (names.items) |x| gpa.free(x);
-                    names.deinit(gpa);
+                    for (names.items) |x| std.heap.smp_allocator.free(x);
+                    names.deinit(std.heap.smp_allocator);
                 }
                 const ctx: BuildCtx = .{ .steps = steps, .doc = if (doc) |*d| d else null, .names = &names };
                 warning_buf.clearRetainingCapacity();
-                const res = s2g.buildGrammar(gpa, .{ .dotall = dotall }, &ctx, BuildCtx.run);
+                const res = json.schema_to_grammar.buildGrammar(std.heap.smp_allocator, .{ .dotall = dotall }, &ctx, BuildCtx.run);
                 for (names.items) |x| rec(out, &.{ "S:", x });
                 guardResult(out, res);
                 rec(out, &.{ "W:", warning_buf.items });
             },
             OP_LIT => {
                 const s = r.str();
-                const g = s2g.gbnfFormatLiteral(gpa, s) catch oom();
-                defer gpa.free(g);
+                const g = json.schema_to_grammar.gbnfFormatLiteral(std.heap.smp_allocator, s) catch oom();
+                defer std.heap.smp_allocator.free(g);
                 rec(out, &.{g});
             },
             else => unreachable,
@@ -435,7 +431,7 @@ fn splitRecords(buf: []const u8, out: *Records) void {
     var i: usize = 0;
     while (i < buf.len) {
         const n = std.mem.readInt(u32, buf[i..][0..4], .little);
-        out.append(gpa, gpa.dupe(u8, buf[i + 4 ..][0..n]) catch oom()) catch oom();
+        out.append(std.heap.smp_allocator, std.heap.smp_allocator.dupe(u8, buf[i + 4 ..][0..n]) catch oom()) catch oom();
         i += 4 + n;
     }
 }
@@ -445,39 +441,39 @@ fn splitRecords(buf: []const u8, out: *Records) void {
 fn runRefForked(prog: []const u8, out: *Records) bool {
     if (comptime builtin.os.tag == .windows) {
         var buf: std.ArrayList(u8) = .empty;
-        defer buf.deinit(gpa);
+        defer buf.deinit(std.heap.smp_allocator);
         if (!win_child.run("schema", prog, &buf, 0)) return false;
         splitRecords(buf.items, out);
         return true;
     }
     var fds: [2]c_int = undefined;
-    if (libc.pipe(&fds) != 0) oom();
-    const pid = libc.fork();
+    if (std.c.pipe(&fds) != 0) oom();
+    const pid = std.c.fork();
     if (pid < 0) oom();
     if (pid == 0) {
-        _ = libc.close(fds[0]);
+        _ = std.c.close(fds[0]);
         var len: usize = 0;
         const p = ref_schema_run(prog.ptr, prog.len, &len);
         var off: usize = 0;
         while (off < len) {
-            const k = libc.write(fds[1], p + off, len - off);
-            if (k <= 0) libc._exit(3);
+            const k = std.c.write(fds[1], p + off, len - off);
+            if (k <= 0) std.c._exit(3);
             off += @intCast(k);
         }
-        libc._exit(0);
+        std.c._exit(0);
     }
-    _ = libc.close(fds[1]);
+    _ = std.c.close(fds[1]);
     var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(gpa);
+    defer buf.deinit(std.heap.smp_allocator);
     var chunk: [65536]u8 = undefined;
     while (true) {
-        const k = libc.read(fds[0], &chunk, chunk.len);
+        const k = std.c.read(fds[0], &chunk, chunk.len);
         if (k <= 0) break;
-        buf.appendSlice(gpa, chunk[0..@intCast(k)]) catch oom();
+        buf.appendSlice(std.heap.smp_allocator, chunk[0..@intCast(k)]) catch oom();
     }
-    _ = libc.close(fds[0]);
+    _ = std.c.close(fds[0]);
     var status: c_int = 0;
-    _ = libc.waitpid(pid, &status, 0);
+    _ = std.c.waitpid(pid, &status, 0);
     if (status != 0) return false;
     splitRecords(buf.items, out);
     return true;
@@ -507,11 +503,11 @@ fn pick(comptime T: type, xs: []const T) T {
 const Text = std.ArrayList(u8);
 
 fn put(t: *Text, s: []const u8) void {
-    t.appendSlice(gpa, s) catch oom();
+    t.appendSlice(std.heap.smp_allocator, s) catch oom();
 }
 
 fn putf(t: *Text, comptime fmt: []const u8, args: anytype) void {
-    t.print(gpa, fmt, args) catch oom();
+    t.print(std.heap.smp_allocator, fmt, args) catch oom();
 }
 
 /// A JSON string literal of `s`, which must be valid UTF-8.
@@ -521,7 +517,7 @@ fn putStr(t: *Text, s: []const u8) void {
         '"' => put(t, "\\\""),
         '\\' => put(t, "\\\\"),
         0...0x1f => putf(t, "\\u{x:0>4}", .{c}),
-        else => t.append(gpa, c) catch oom(),
+        else => t.append(std.heap.smp_allocator, c) catch oom(),
     };
     put(t, "\"");
 }
@@ -694,7 +690,7 @@ fn genSchema(t: *Text, depth: usize) void {
             4 => {
                 put(t, "{\"type\":\"string\",\"pattern\":");
                 var p: Text = .empty;
-                defer p.deinit(gpa);
+                defer p.deinit(std.heap.smp_allocator);
                 genPattern(&p);
                 putStr(t, p.items);
                 put(t, "}");
@@ -808,7 +804,7 @@ fn genSchema(t: *Text, depth: usize) void {
                 key(t, &first, "pattern");
                 if (chance(95)) {
                     var p: Text = .empty;
-                    defer p.deinit(gpa);
+                    defer p.deinit(std.heap.smp_allocator);
                     genPattern(&p);
                     putStr(t, p.items);
                 } else put(t, "5");
@@ -912,26 +908,26 @@ fn mutate(v: *json.Value, depth: usize) void {
             switch (below(4)) {
                 0 => if (n != 0) {
                     const k = m.members.items[below(n)].key;
-                    const kk = gpa.dupe(u8, k) catch oom();
-                    defer gpa.free(kk);
-                    _ = m.erase(gpa, kk);
+                    const kk = std.heap.smp_allocator.dupe(u8, k) catch oom();
+                    defer std.heap.smp_allocator.free(kk);
+                    _ = m.erase(std.heap.smp_allocator, kk);
                 },
                 1 => if (n != 0) {
                     var t: Text = .empty;
-                    defer t.deinit(gpa);
+                    defer t.deinit(std.heap.smp_allocator);
                     putValue(&t, 0);
-                    const nv = json.parse(gpa, t.items) catch unreachable;
+                    const nv = json.parse(std.heap.smp_allocator, t.items) catch unreachable;
                     var slot = &m.members.items[below(n)].value;
-                    slot.deinit(gpa);
+                    slot.deinit(std.heap.smp_allocator);
                     slot.* = nv;
                 },
                 else => {
                     var t: Text = .empty;
-                    defer t.deinit(gpa);
+                    defer t.deinit(std.heap.smp_allocator);
                     const kw = pick([]const u8, &.{ "type", "minimum", "maximum", "pattern", "format", "required", "additionalProperties", "items", "enum", "const", "$ref", "allOf", "anyOf", "minItems", "maxLength", "exclusiveMinimum" });
                     if (std.mem.eql(u8, kw, "$ref")) putStr(&t, pick([]const u8, &ref_targets)) else if (chance(50)) genSchema(&t, 3) else putValue(&t, 0);
-                    const nv = json.parse(gpa, t.items) catch unreachable;
-                    v.set(gpa, kw, nv) catch oom();
+                    const nv = json.parse(std.heap.smp_allocator, t.items) catch unreachable;
+                    v.set(std.heap.smp_allocator, kw, nv) catch oom();
                 },
             }
         },
@@ -940,20 +936,20 @@ fn mutate(v: *json.Value, depth: usize) void {
                 mutate(&a.items[below(a.items.len)], depth + 1);
             } else if (a.items.len != 0 and chance(50)) {
                 var x = a.orderedRemove(below(a.items.len));
-                x.deinit(gpa);
+                x.deinit(std.heap.smp_allocator);
             } else {
                 var t: Text = .empty;
-                defer t.deinit(gpa);
+                defer t.deinit(std.heap.smp_allocator);
                 genSchema(&t, 3);
-                a.append(gpa, json.parse(gpa, t.items) catch unreachable) catch oom();
+                a.append(std.heap.smp_allocator, json.parse(std.heap.smp_allocator, t.items) catch unreachable) catch oom();
             }
         },
         else => {
             var t: Text = .empty;
-            defer t.deinit(gpa);
+            defer t.deinit(std.heap.smp_allocator);
             genSchema(&t, 3);
-            v.deinit(gpa);
-            v.* = json.parse(gpa, t.items) catch unreachable;
+            v.deinit(std.heap.smp_allocator);
+            v.* = json.parse(std.heap.smp_allocator, t.items) catch unreachable;
         },
     }
 }
@@ -973,14 +969,14 @@ fn genBuild(texts: []const []const u8) void {
         break :blk t.items;
     };
     var steps: std.ArrayList(Step) = .empty;
-    defer steps.deinit(gpa);
+    defer steps.deinit(std.heap.smp_allocator);
     for (0..1 + below(6)) |_| {
         if (chance(50)) {
-            steps.append(gpa, .{ .rule = .{ .name = pick([]const u8, &rule_names), .rule = pick([]const u8, &rule_bodies) } }) catch oom();
+            steps.append(std.heap.smp_allocator, .{ .rule = .{ .name = pick([]const u8, &rule_names), .rule = pick([]const u8, &rule_bodies) } }) catch oom();
         } else {
-            const path = gpa.alloc(u32, below(4)) catch oom();
+            const path = std.heap.smp_allocator.alloc(u32, below(4)) catch oom();
             for (path) |*k| k.* = rnd().int(u32) % 8;
-            steps.append(gpa, .{ .schema = .{ .name = pick([]const u8, &rule_names), .path = path } }) catch oom();
+            steps.append(std.heap.smp_allocator, .{ .schema = .{ .name = pick([]const u8, &rule_names), .path = path } }) catch oom();
         }
     }
     buildCase("build", text, chance(50), steps.items);
@@ -1034,7 +1030,7 @@ fn refChainVisit(n: usize) []const u8 {
 /// The recursion limits, on either side of each.
 fn depthCases() void {
     for ([_]usize{ 126, 127, 128, 129, 400 }) |n| {
-        const label = std.fmt.allocPrint(gpa, "depth-{d}", .{n}) catch oom();
+        const label = std.fmt.allocPrint(std.heap.smp_allocator, "depth-{d}", .{n}) catch oom();
         schemaCase(label, nested("{\"type\": \"array\", \"items\": ", "{\"type\": \"string\"}", "}", n));
         schemaCase(label, nested("{\"anyOf\": [", "{\"type\": \"string\"}", "]}", n));
         schemaCase(label, nested("{\"type\": \"object\", \"properties\": {\"k\": ", "{\"type\": \"string\"}", "}}", n));
@@ -1045,7 +1041,7 @@ fn depthCases() void {
         // one level of the name's trie per char
         var t: Text = .empty;
         put(&t, "{\"type\": \"object\", \"properties\": {\"");
-        t.appendNTimes(gpa, 'a', n) catch oom();
+        t.appendNTimes(std.heap.smp_allocator, 'a', n) catch oom();
         put(&t, "\": {\"type\": \"string\"}}, \"additionalProperties\": true}");
         schemaCase(label, t.items);
 
@@ -1217,14 +1213,14 @@ pub fn main(init: std.process.Init) !void {
     const seed = envUsize("SCHEMA_DIFF_SEED", 1);
     const scale = envUsize("SCHEMA_DIFF_SCALE", 1);
     prng = std.Random.DefaultPrng.init(seed);
-    s2g.warning_sink = captureWarning;
+    json.schema_to_grammar.warning_sink = captureWarning;
 
     // upstream's cases, from the test itself
     var upstream_texts: std.ArrayList([]const u8) = .empty;
     {
         var len: usize = 0;
         const p = ref_schema_upstream(&len);
-        defer libc.free(p);
+        defer std.c.free(p);
         var recs: Records = .empty;
         splitRecords(p[0..len], &recs);
         var k: usize = 0;
@@ -1235,7 +1231,7 @@ pub fn main(init: std.process.Init) !void {
                 mismatches += 1;
             }
             schemaCase(recs.items[k], recs.items[k + 1]);
-            upstream_texts.append(gpa, recs.items[k + 1]) catch oom();
+            upstream_texts.append(std.heap.smp_allocator, recs.items[k + 1]) catch oom();
         }
         if (mismatches != 0 or upstream_texts.items.len == 0) {
             std.debug.print("FAIL: {d} upstream cases, {d} not reproduced by the reference\n", .{ upstream_texts.items.len, mismatches });
@@ -1256,12 +1252,12 @@ pub fn main(init: std.process.Init) !void {
     // upstream's cases, mutated
     for (upstream_texts.items) |text| {
         for (0..80 * scale) |_| {
-            var v = json.parse(gpa, text) catch continue;
-            defer v.deinit(gpa);
+            var v = json.parse(std.heap.smp_allocator, text) catch continue;
+            defer v.deinit(std.heap.smp_allocator);
             for (0..1 + below(3)) |_| mutate(&v, 0);
-            const out = json.dump(gpa, &v, -1) catch oom();
+            const out = json.dump(std.heap.smp_allocator, &v, -1) catch oom();
             schemaCase("mutated", out);
-            gpa.free(out);
+            std.heap.smp_allocator.free(out);
         }
     }
 
@@ -1270,7 +1266,7 @@ pub fn main(init: std.process.Init) !void {
         var t: Text = .empty;
         genSchema(&t, 0);
         schemaCase("random", t.items);
-        t.deinit(gpa);
+        t.deinit(std.heap.smp_allocator);
     }
 
     // integer bounds
@@ -1293,7 +1289,7 @@ pub fn main(init: std.process.Init) !void {
         }
         put(&t, "}");
         schemaCase("integer", t.items);
-        t.deinit(gpa);
+        t.deinit(std.heap.smp_allocator);
     }
 
     // patterns
@@ -1309,8 +1305,8 @@ pub fn main(init: std.process.Init) !void {
             // the dot under both settings
             buildCase("pattern-build", t.items, chance(50), &.{.{ .schema = .{ .name = "p", .path = &.{} } }});
         }
-        t.deinit(gpa);
-        p.deinit(gpa);
+        t.deinit(std.heap.smp_allocator);
+        p.deinit(std.heap.smp_allocator);
     }
 
     // literals, every byte
@@ -1342,15 +1338,15 @@ pub fn main(init: std.process.Init) !void {
     var start: usize = 0;
     while (start < cases.items.len) : (start += batch) {
         const end = @min(start + batch, cases.items.len);
-        var ref_by_case = gpa.alloc(?Records, end - start) catch oom();
-        defer gpa.free(ref_by_case);
+        var ref_by_case = std.heap.smp_allocator.alloc(?Records, end - start) catch oom();
+        defer std.heap.smp_allocator.free(ref_by_case);
         @memset(ref_by_case, null);
 
         var prog: std.ArrayList(u8) = .empty;
-        defer prog.deinit(gpa);
+        defer prog.deinit(std.heap.smp_allocator);
         for (cases.items[start..end]) |c| {
             if (filter) |f| if (std.mem.indexOf(u8, c.label, f) == null) continue;
-            prog.appendSlice(gpa, c.prog) catch oom();
+            prog.appendSlice(std.heap.smp_allocator, c.prog) catch oom();
         }
         var all: Records = .empty;
         if (runRefForked(prog.items, &all)) {
@@ -1361,7 +1357,7 @@ pub fn main(init: std.process.Init) !void {
                     cur = id - start;
                     ref_by_case[cur.?] = .empty;
                 }
-                ref_by_case[cur.?].?.append(gpa, r) catch oom();
+                ref_by_case[cur.?].?.append(std.heap.smp_allocator, r) catch oom();
             }
         } else {
             // a case killed the reference: one child per case
@@ -1397,7 +1393,7 @@ pub fn main(init: std.process.Init) !void {
                     n_errors += 1;
                     if (want_stats) {
                         const key = a[0..@min(a.len, 90)];
-                        const gop = stats.getOrPut(gpa, gpa.dupe(u8, key) catch oom()) catch oom();
+                        const gop = stats.getOrPut(std.heap.smp_allocator, std.heap.smp_allocator.dupe(u8, key) catch oom()) catch oom();
                         if (!gop.found_existing) gop.value_ptr.* = 0;
                         gop.value_ptr.* += 1;
                     }
@@ -1419,11 +1415,11 @@ pub fn main(init: std.process.Init) !void {
                     }
                 }
             }
-            for (port.items) |x| gpa.free(x);
-            port.deinit(gpa);
+            for (port.items) |x| std.heap.smp_allocator.free(x);
+            port.deinit(std.heap.smp_allocator);
         }
-        for (all.items) |x| gpa.free(x);
-        all.deinit(gpa);
+        for (all.items) |x| std.heap.smp_allocator.free(x);
+        all.deinit(std.heap.smp_allocator);
     }
 
     if (want_stats) {

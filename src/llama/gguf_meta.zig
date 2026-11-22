@@ -33,11 +33,11 @@ pub fn cString(p: [*c]const u8) []const u8 {
 
 /// The metadata of one GGUF file, with the caller's overrides.
 pub const Meta = struct {
-    ctx: *const mod.impl.c.gguf_context,
+    ctx: *const mod.impl.llama_c.gguf_context,
     /// The architecture whose name `%s` keys take.
     arch: mod.arch_table.Arch,
     /// `kv_overrides`, keyed by the override's key.
-    overrides: std.StringHashMapUnmanaged(mod.impl.c.llama_model_kv_override) = .empty,
+    overrides: std.StringHashMapUnmanaged(mod.impl.llama_c.llama_model_kv_override) = .empty,
 
     /// Ports the override half of `llama_model_loader`'s constructor
     /// (llama-model-loader.cpp:537 @b1b770d90): every override up to the
@@ -50,7 +50,7 @@ pub const Meta = struct {
     /// - `overrides`: the caller's list, or null.
     ///
     /// Return: the reader; free it with `deinit`.
-    pub fn init(ctx: *const mod.impl.c.gguf_context, which: mod.arch_table.Arch, overrides: ?[*]const mod.impl.c.llama_model_kv_override) Meta {
+    pub fn init(ctx: *const mod.impl.llama_c.gguf_context, which: mod.arch_table.Arch, overrides: ?[*]const mod.impl.llama_c.llama_model_kv_override) Meta {
         var m: Meta = .{ .ctx = ctx, .arch = which };
         if (overrides) |list| {
             var i: usize = 0;
@@ -91,7 +91,7 @@ pub const Meta = struct {
         if (key.len > mod.arch.max_name) return -1;
         @memcpy(zbuf[0..key.len], key);
         zbuf[key.len] = 0;
-        return mod.impl.c.gguf_find_key(self.ctx, &zbuf);
+        return mod.impl.llama_c.gguf_find_key(self.ctx, &zbuf);
     }
 
     /// Ports `llama_model_loader`'s `get_key` (llama-model-loader.cpp:424
@@ -134,7 +134,7 @@ pub const Meta = struct {
     ///
     /// Return: the pooling type, or `error.Thrown`.
     pub fn getPoolingType(self: *const Meta, kv: mod.arch_table.Kv, required: bool, exc: *mod.impl.Exception) mod.impl.Thrown!c_int {
-        const v = (try self.getKey(u32, kv, required, exc)) orelse return mod.impl.c.LLAMA_POOLING_TYPE_UNSPECIFIED;
+        const v = (try self.getKey(u32, kv, required, exc)) orelse return mod.impl.llama_c.LLAMA_POOLING_TYPE_UNSPECIFIED;
         return @bitCast(v);
     }
 
@@ -169,25 +169,25 @@ pub const Meta = struct {
     /// Return: whether the key was read, or `error.Thrown`.
     pub fn getArrInto(self: *const Meta, comptime T: type, key: []const u8, result: []T, required: bool, exc: *mod.impl.Exception) mod.impl.Thrown!bool {
         const k = self.findNamed(key);
-        if (k < 0 or mod.impl.c.gguf_get_kv_type(self.ctx, k) != mod.impl.c.GGUF_TYPE_ARRAY) {
+        if (k < 0 or mod.impl.llama_c.gguf_get_kv_type(self.ctx, k) != mod.impl.llama_c.GGUF_TYPE_ARRAY) {
             if (required) return exc.throw(.runtime_error, "array key not found in model: {s}", .{key});
             return false;
         }
         const info = try arrayInfo(self.ctx, k, exc);
         const type_ok = switch (info.gt) {
-            mod.impl.c.GGUF_TYPE_BOOL, mod.impl.c.GGUF_TYPE_UINT32, mod.impl.c.GGUF_TYPE_INT32 => isInt32(T),
-            mod.impl.c.GGUF_TYPE_UINT64 => T == u64,
-            mod.impl.c.GGUF_TYPE_FLOAT32 => T == f32,
-            mod.impl.c.GGUF_TYPE_STRING => false,
+            mod.impl.llama_c.GGUF_TYPE_BOOL, mod.impl.llama_c.GGUF_TYPE_UINT32, mod.impl.llama_c.GGUF_TYPE_INT32 => isInt32(T),
+            mod.impl.llama_c.GGUF_TYPE_UINT64 => T == u64,
+            mod.impl.llama_c.GGUF_TYPE_FLOAT32 => T == f32,
+            mod.impl.llama_c.GGUF_TYPE_STRING => false,
             else => return exc.throw(.runtime_error, "{s} is not a string/float32/uint32/int32/uint64 array", .{key}),
         };
-        if (!type_ok) return exc.throw(.runtime_error, "{s} has wrong array element type {s}", .{ key, cString(mod.impl.c.gguf_type_name(info.gt)) });
+        if (!type_ok) return exc.throw(.runtime_error, "{s} has wrong array element type {s}", .{ key, cString(mod.impl.llama_c.gguf_type_name(info.gt)) });
         if (info.length > result.len) {
             return exc.throw(.runtime_error, "array length {d} for key {s} exceeds max {d}", .{
                 @as(u32, @truncate(info.length)), key, @as(u32, @truncate(result.len)),
             });
         }
-        if (info.gt == mod.impl.c.GGUF_TYPE_BOOL) {
+        if (info.gt == mod.impl.llama_c.GGUF_TYPE_BOOL) {
             const values: [*]const i8 = @ptrCast(info.data.?);
             for (result[0..info.length], values[0..info.length]) |*r, x| r.* = @intFromBool(x != 0);
         } else {
@@ -220,22 +220,22 @@ pub const Meta = struct {
         const n = self.name(kv);
         const key = n.slice();
         const k = self.findNamed(key);
-        if (k < 0 or mod.impl.c.gguf_get_kv_type(self.ctx, k) != mod.impl.c.GGUF_TYPE_ARRAY) {
+        if (k < 0 or mod.impl.llama_c.gguf_get_kv_type(self.ctx, k) != mod.impl.llama_c.GGUF_TYPE_ARRAY) {
             if (required) return exc.throw(.runtime_error, "array key not found in model: {s}", .{key});
             return null;
         }
         const info = try arrayInfo(self.ctx, k, exc);
         const type_ok = switch (info.gt) {
-            mod.impl.c.GGUF_TYPE_UINT32, mod.impl.c.GGUF_TYPE_INT32 => T != []const u8 and isInt32(T),
-            mod.impl.c.GGUF_TYPE_UINT64 => T == u64,
-            mod.impl.c.GGUF_TYPE_FLOAT32 => T == f32,
-            mod.impl.c.GGUF_TYPE_STRING => T == []const u8,
+            mod.impl.llama_c.GGUF_TYPE_UINT32, mod.impl.llama_c.GGUF_TYPE_INT32 => T != []const u8 and isInt32(T),
+            mod.impl.llama_c.GGUF_TYPE_UINT64 => T == u64,
+            mod.impl.llama_c.GGUF_TYPE_FLOAT32 => T == f32,
+            mod.impl.llama_c.GGUF_TYPE_STRING => T == []const u8,
             else => return exc.throw(.runtime_error, "{s} is not a string/float32/uint32/int32/uint64 array", .{key}),
         };
-        if (!type_ok) return exc.throw(.runtime_error, "{s} has wrong array element type {s}", .{ key, cString(mod.impl.c.gguf_type_name(info.gt)) });
+        if (!type_ok) return exc.throw(.runtime_error, "{s} has wrong array element type {s}", .{ key, cString(mod.impl.llama_c.gguf_type_name(info.gt)) });
         const out = std.heap.c_allocator.alloc(T, info.length) catch mod.impl.abort("gguf_meta", 0, "out of memory");
         if (T == []const u8) {
-            for (out, 0..) |*r, i| r.* = cString(mod.impl.c.gguf_get_arr_str(self.ctx, k, i));
+            for (out, 0..) |*r, i| r.* = cString(mod.impl.llama_c.gguf_get_arr_str(self.ctx, k, i));
         } else {
             const values: [*]align(1) const T = @ptrCast(info.data.?);
             for (out, values[0..info.length]) |*r, x| r.* = x;
@@ -267,7 +267,7 @@ pub const Meta = struct {
         if (n > result.len) {
             return exc.throw(.runtime_error, "n > N_MAX: {d} > {d} for key {s}", .{ n, @as(u32, @truncate(result.len)), key });
         }
-        if (mod.impl.c.gguf_get_kv_type(self.ctx, k) == mod.impl.c.GGUF_TYPE_ARRAY) {
+        if (mod.impl.llama_c.gguf_get_kv_type(self.ctx, k) == mod.impl.llama_c.GGUF_TYPE_ARRAY) {
             const info = try arrayInfo(self.ctx, k, exc);
             if (n != info.length) {
                 return exc.throw(.runtime_error, "key {s} has wrong array length; expected {d}, got {d}", .{
@@ -295,7 +295,7 @@ pub const Meta = struct {
             if (required) return exc.throw(.runtime_error, "key not found in model: {s}", .{key});
             return null;
         }
-        if (mod.impl.c.gguf_get_kv_type(self.ctx, id) == mod.impl.c.GGUF_TYPE_ARRAY) {
+        if (mod.impl.llama_c.gguf_get_kv_type(self.ctx, id) == mod.impl.llama_c.GGUF_TYPE_ARRAY) {
             if (required) return exc.throw(.runtime_error, "expected scalar, found array for key: {s}", .{key});
             return null;
         }
@@ -309,20 +309,20 @@ fn isInt32(comptime T: type) bool {
 
 /// Ports `GGUFMeta`'s `ArrayInfo` (llama-model-loader.cpp:142 @b1b770d90).
 const ArrayInfo = struct {
-    gt: mod.impl.c.enum_gguf_type,
+    gt: mod.impl.llama_c.enum_gguf_type,
     length: usize,
     data: ?*const anyopaque,
 };
 
 /// `GGUFMeta::GKV<ArrayInfo>::get_kv`: the array's element type, length and
 /// data, or a throw when the key is not an array.
-fn arrayInfo(ctx: *const mod.impl.c.gguf_context, k: i64, exc: *mod.impl.Exception) mod.impl.Thrown!ArrayInfo {
-    try checkType(ctx, k, mod.impl.c.GGUF_TYPE_ARRAY, exc);
-    const arr_type = mod.impl.c.gguf_get_arr_type(ctx, k);
+fn arrayInfo(ctx: *const mod.impl.llama_c.gguf_context, k: i64, exc: *mod.impl.Exception) mod.impl.Thrown!ArrayInfo {
+    try checkType(ctx, k, mod.impl.llama_c.GGUF_TYPE_ARRAY, exc);
+    const arr_type = mod.impl.llama_c.gguf_get_arr_type(ctx, k);
     return .{
         .gt = arr_type,
-        .length = mod.impl.c.gguf_get_arr_n(ctx, k),
-        .data = if (arr_type == mod.impl.c.GGUF_TYPE_STRING) null else mod.impl.c.gguf_get_arr_data(ctx, k),
+        .length = mod.impl.llama_c.gguf_get_arr_n(ctx, k),
+        .data = if (arr_type == mod.impl.llama_c.GGUF_TYPE_STRING) null else mod.impl.llama_c.gguf_get_arr_data(ctx, k),
     };
 }
 
@@ -331,59 +331,59 @@ fn Stored(comptime T: type) type {
     return if (T == c_int) i32 else T;
 }
 
-fn ggufType(comptime T: type) mod.impl.c.enum_gguf_type {
+fn ggufType(comptime T: type) mod.impl.llama_c.enum_gguf_type {
     return switch (Stored(T)) {
-        bool => mod.impl.c.GGUF_TYPE_BOOL,
-        u8 => mod.impl.c.GGUF_TYPE_UINT8,
-        u16 => mod.impl.c.GGUF_TYPE_UINT16,
-        u32 => mod.impl.c.GGUF_TYPE_UINT32,
-        u64 => mod.impl.c.GGUF_TYPE_UINT64,
-        i8 => mod.impl.c.GGUF_TYPE_INT8,
-        i16 => mod.impl.c.GGUF_TYPE_INT16,
-        i32 => mod.impl.c.GGUF_TYPE_INT32,
-        i64 => mod.impl.c.GGUF_TYPE_INT64,
-        f32 => mod.impl.c.GGUF_TYPE_FLOAT32,
-        f64 => mod.impl.c.GGUF_TYPE_FLOAT64,
-        []const u8 => mod.impl.c.GGUF_TYPE_STRING,
+        bool => mod.impl.llama_c.GGUF_TYPE_BOOL,
+        u8 => mod.impl.llama_c.GGUF_TYPE_UINT8,
+        u16 => mod.impl.llama_c.GGUF_TYPE_UINT16,
+        u32 => mod.impl.llama_c.GGUF_TYPE_UINT32,
+        u64 => mod.impl.llama_c.GGUF_TYPE_UINT64,
+        i8 => mod.impl.llama_c.GGUF_TYPE_INT8,
+        i16 => mod.impl.llama_c.GGUF_TYPE_INT16,
+        i32 => mod.impl.llama_c.GGUF_TYPE_INT32,
+        i64 => mod.impl.llama_c.GGUF_TYPE_INT64,
+        f32 => mod.impl.llama_c.GGUF_TYPE_FLOAT32,
+        f64 => mod.impl.llama_c.GGUF_TYPE_FLOAT64,
+        []const u8 => mod.impl.llama_c.GGUF_TYPE_STRING,
         else => @compileError("unsupported metadata type"),
     };
 }
 
-fn checkType(ctx: *const mod.impl.c.gguf_context, k: i64, want: mod.impl.c.enum_gguf_type, exc: *mod.impl.Exception) mod.impl.Thrown!void {
-    const kt = mod.impl.c.gguf_get_kv_type(ctx, k);
+fn checkType(ctx: *const mod.impl.llama_c.gguf_context, k: i64, want: mod.impl.llama_c.enum_gguf_type, exc: *mod.impl.Exception) mod.impl.Thrown!void {
+    const kt = mod.impl.llama_c.gguf_get_kv_type(ctx, k);
     if (kt != want) {
         return exc.throw(.runtime_error, "key {s} has wrong type {s} but expected type {s}", .{
-            cString(mod.impl.c.gguf_get_key(ctx, k)), cString(mod.impl.c.gguf_type_name(kt)), cString(mod.impl.c.gguf_type_name(want)),
+            cString(mod.impl.llama_c.gguf_get_key(ctx, k)), cString(mod.impl.llama_c.gguf_type_name(kt)), cString(mod.impl.llama_c.gguf_type_name(want)),
         });
     }
 }
 
 /// Ports `GGUFMeta::GKV<T>`'s `get_kv` (llama-model-loader.cpp:166 @b1b770d90).
-fn getKv(ctx: *const mod.impl.c.gguf_context, comptime T: type, k: i64, exc: *mod.impl.Exception) mod.impl.Thrown!T {
+fn getKv(ctx: *const mod.impl.llama_c.gguf_context, comptime T: type, k: i64, exc: *mod.impl.Exception) mod.impl.Thrown!T {
     try checkType(ctx, k, ggufType(T), exc);
     return switch (Stored(T)) {
-        bool => mod.impl.c.gguf_get_val_bool(ctx, k),
-        u8 => mod.impl.c.gguf_get_val_u8(ctx, k),
-        u16 => mod.impl.c.gguf_get_val_u16(ctx, k),
-        u32 => mod.impl.c.gguf_get_val_u32(ctx, k),
-        u64 => mod.impl.c.gguf_get_val_u64(ctx, k),
-        i8 => mod.impl.c.gguf_get_val_i8(ctx, k),
-        i16 => mod.impl.c.gguf_get_val_i16(ctx, k),
-        i32 => mod.impl.c.gguf_get_val_i32(ctx, k),
-        i64 => mod.impl.c.gguf_get_val_i64(ctx, k),
-        f32 => mod.impl.c.gguf_get_val_f32(ctx, k),
-        f64 => mod.impl.c.gguf_get_val_f64(ctx, k),
-        []const u8 => cString(mod.impl.c.gguf_get_val_str(ctx, k)),
+        bool => mod.impl.llama_c.gguf_get_val_bool(ctx, k),
+        u8 => mod.impl.llama_c.gguf_get_val_u8(ctx, k),
+        u16 => mod.impl.llama_c.gguf_get_val_u16(ctx, k),
+        u32 => mod.impl.llama_c.gguf_get_val_u32(ctx, k),
+        u64 => mod.impl.llama_c.gguf_get_val_u64(ctx, k),
+        i8 => mod.impl.llama_c.gguf_get_val_i8(ctx, k),
+        i16 => mod.impl.llama_c.gguf_get_val_i16(ctx, k),
+        i32 => mod.impl.llama_c.gguf_get_val_i32(ctx, k),
+        i64 => mod.impl.llama_c.gguf_get_val_i64(ctx, k),
+        f32 => mod.impl.llama_c.gguf_get_val_f32(ctx, k),
+        f64 => mod.impl.llama_c.gguf_get_val_f64(ctx, k),
+        []const u8 => cString(mod.impl.llama_c.gguf_get_val_str(ctx, k)),
         else => unreachable,
     };
 }
 
-fn overrideTypeStr(ty: mod.impl.c.enum_llama_model_kv_override_type) [:0]const u8 {
+fn overrideTypeStr(ty: mod.impl.llama_c.enum_llama_model_kv_override_type) [:0]const u8 {
     return switch (ty) {
-        mod.impl.c.LLAMA_KV_OVERRIDE_TYPE_BOOL => "bool",
-        mod.impl.c.LLAMA_KV_OVERRIDE_TYPE_INT => "int",
-        mod.impl.c.LLAMA_KV_OVERRIDE_TYPE_FLOAT => "float",
-        mod.impl.c.LLAMA_KV_OVERRIDE_TYPE_STR => "str",
+        mod.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_BOOL => "bool",
+        mod.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_INT => "int",
+        mod.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_FLOAT => "float",
+        mod.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_STR => "str",
         else => "unknown",
     };
 }
@@ -391,15 +391,15 @@ fn overrideTypeStr(ty: mod.impl.c.enum_llama_model_kv_override_type) [:0]const u
 /// Ports `GGUFMeta::GKV`'s `validate_override` (llama-model-loader.cpp:186
 /// @b1b770d90): an override of the expected type is logged and taken; one
 /// of another type is warned about and ignored.
-fn validateOverride(expected: mod.impl.c.enum_llama_model_kv_override_type, ovrd: ?*const mod.impl.c.llama_model_kv_override) bool {
+fn validateOverride(expected: mod.impl.llama_c.enum_llama_model_kv_override_type, ovrd: ?*const mod.impl.llama_c.llama_model_kv_override) bool {
     const o = ovrd orelse return false;
     if (o.tag == expected) {
         mod.impl.logInfo("%s: Using metadata override (%5s) '%s' = ", .{ "validate_override", overrideTypeStr(o.tag).ptr, &o.key });
         switch (o.tag) {
-            mod.impl.c.LLAMA_KV_OVERRIDE_TYPE_BOOL => mod.impl.logInfo("%s\n", .{@as([*:0]const u8, if (o.unnamed_0.val_bool) "true" else "false")}),
-            mod.impl.c.LLAMA_KV_OVERRIDE_TYPE_INT => mod.impl.logInfo("%lld\n", .{@as(c_longlong, o.unnamed_0.val_i64)}),
-            mod.impl.c.LLAMA_KV_OVERRIDE_TYPE_FLOAT => mod.impl.logInfo("%.6f\n", .{o.unnamed_0.val_f64}),
-            mod.impl.c.LLAMA_KV_OVERRIDE_TYPE_STR => mod.impl.logInfo("%s\n", .{&o.unnamed_0.val_str}),
+            mod.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_BOOL => mod.impl.logInfo("%s\n", .{@as([*:0]const u8, if (o.unnamed_0.val_bool) "true" else "false")}),
+            mod.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_INT => mod.impl.logInfo("%lld\n", .{@as(c_longlong, o.unnamed_0.val_i64)}),
+            mod.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_FLOAT => mod.impl.logInfo("%.6f\n", .{o.unnamed_0.val_f64}),
+            mod.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_STR => mod.impl.logInfo("%s\n", .{&o.unnamed_0.val_str}),
             else => {},
         }
         return true;
@@ -415,14 +415,14 @@ fn validateOverride(expected: mod.impl.c.enum_llama_model_kv_override_type, ovrd
 /// `try_override` (llama-model-loader.cpp:219, 229, 239, 249 @b1b770d90).
 /// An integer override is the `int64_t` narrowed to `T` and a float one the
 /// `double` rounded to `T`, as the C++'s assignments convert them.
-fn tryOverride(comptime T: type, ovrd: ?*const mod.impl.c.llama_model_kv_override) ?T {
+fn tryOverride(comptime T: type, ovrd: ?*const mod.impl.llama_c.llama_model_kv_override) ?T {
     switch (T) {
-        bool => if (validateOverride(mod.impl.c.LLAMA_KV_OVERRIDE_TYPE_BOOL, ovrd)) return ovrd.?.unnamed_0.val_bool,
-        []const u8 => if (validateOverride(mod.impl.c.LLAMA_KV_OVERRIDE_TYPE_STR, ovrd)) return cString(&ovrd.?.unnamed_0.val_str),
-        f32, f64 => if (validateOverride(mod.impl.c.LLAMA_KV_OVERRIDE_TYPE_FLOAT, ovrd)) return @floatCast(ovrd.?.unnamed_0.val_f64),
+        bool => if (validateOverride(mod.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_BOOL, ovrd)) return ovrd.?.unnamed_0.val_bool,
+        []const u8 => if (validateOverride(mod.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_STR, ovrd)) return cString(&ovrd.?.unnamed_0.val_str),
+        f32, f64 => if (validateOverride(mod.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_FLOAT, ovrd)) return @floatCast(ovrd.?.unnamed_0.val_f64),
         else => {
             const U = @Int(.unsigned, @bitSizeOf(T));
-            if (validateOverride(mod.impl.c.LLAMA_KV_OVERRIDE_TYPE_INT, ovrd)) {
+            if (validateOverride(mod.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_INT, ovrd)) {
                 return @bitCast(@as(U, @truncate(@as(u64, @bitCast(ovrd.?.unnamed_0.val_i64)))));
             }
         },

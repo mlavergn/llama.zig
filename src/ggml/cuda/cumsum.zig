@@ -130,15 +130,15 @@ fn cumsumCuda(
 }
 
 /// Ports `ggml_cuda_op_cumsum` (cumsum.cu:267 @b1b770d90).
-pub fn opCumsum(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn opCumsum(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
     const stream = ctx.stream();
 
     ggml.impl.assert(src0.type == dst.type, "src0->type == dst->type");
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => {
+        ggml.impl.ggml_c.GGML_TYPE_F32 => {
             const nb = struct {
-                fn f(t: *const ggml.impl.c.ggml_tensor, i: usize) i64 {
+                fn f(t: *const ggml.impl.ggml_c.ggml_tensor, i: usize) i64 {
                     return @bitCast(@as(u64, t.nb[i]));
                 }
             }.f;

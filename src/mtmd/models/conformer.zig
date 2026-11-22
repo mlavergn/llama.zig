@@ -9,11 +9,12 @@
 //! began at.
 
 const std = @import("std");
+const llama = @import("llama");
 const mtmd = @import("../module.zig");
 
 /// Ports `build` (conformer.cpp:3 @b1b770d90), a member of
 /// `mtmd_graph_conformer`.
-pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*llama.impl.llama_c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
     const model = g.model;
@@ -26,58 +27,58 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     const n_pos_embd = @divTrunc(@divTrunc(@divTrunc(n_frames + 1, 2) + 1, 2) + 1, 2) * 2 - 1;
     mtmd.impl.ggmlAssert(model.position_embeddings == null or mtmd.graph.ne(model.position_embeddings, 1) >= n_pos, "conformer.cpp", 7, "!model.position_embeddings || model.position_embeddings->ne[1] >= n_pos");
 
-    const pos_emb = mtmd.impl.c.ggml_new_tensor_2d(ctx0, mtmd.impl.c.GGML_TYPE_F32, 512, n_pos_embd);
-    _ = mtmd.impl.c.ggml_set_name(pos_emb, "pos_emb");
-    mtmd.impl.c.ggml_set_input(pos_emb);
-    mtmd.impl.c.ggml_build_forward_expand(g.gf, pos_emb);
+    const pos_emb = llama.impl.llama_c.ggml_new_tensor_2d(ctx0, llama.impl.llama_c.GGML_TYPE_F32, 512, n_pos_embd);
+    _ = llama.impl.llama_c.ggml_set_name(pos_emb, "pos_emb");
+    llama.impl.llama_c.ggml_set_input(pos_emb);
+    llama.impl.llama_c.ggml_build_forward_expand(g.gf, pos_emb);
 
     const inp = g.buildInpRaw(1);
 
-    var cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, inp));
+    var cur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, inp));
 
     // pre encode, conv subsampling
     {
         // layer.0 - conv2d
-        cur = mtmd.impl.c.ggml_conv_2d(ctx0, model.pre_encode_conv_X_w[0], cur, 2, 2, 1, 1, 1, 1);
-        cur = mtmd.impl.c.ggml_add(ctx0, cur, model.pre_encode_conv_X_b[0]);
+        cur = llama.impl.llama_c.ggml_conv_2d(ctx0, model.pre_encode_conv_X_w[0], cur, 2, 2, 1, 1, 1, 1);
+        cur = llama.impl.llama_c.ggml_add(ctx0, cur, model.pre_encode_conv_X_b[0]);
         g.cb(cur, "conformer.pre_encode.conv.{}", 0);
 
         // layer.1 - relu
-        cur = mtmd.impl.c.ggml_relu_inplace(ctx0, cur);
+        cur = llama.impl.llama_c.ggml_relu_inplace(ctx0, cur);
 
         // layer.2 conv2d dw
-        cur = mtmd.impl.c.ggml_conv_2d_dw_direct(ctx0, model.pre_encode_conv_X_w[2], cur, 2, 2, 1, 1, 1, 1);
-        cur = mtmd.impl.c.ggml_add(ctx0, cur, model.pre_encode_conv_X_b[2]);
+        cur = llama.impl.llama_c.ggml_conv_2d_dw_direct(ctx0, model.pre_encode_conv_X_w[2], cur, 2, 2, 1, 1, 1, 1);
+        cur = llama.impl.llama_c.ggml_add(ctx0, cur, model.pre_encode_conv_X_b[2]);
         g.cb(cur, "conformer.pre_encode.conv.{}", 2);
 
         // layer.3 conv2d
-        cur = mtmd.impl.c.ggml_conv_2d_direct(ctx0, model.pre_encode_conv_X_w[3], cur, 1, 1, 0, 0, 1, 1);
-        cur = mtmd.impl.c.ggml_add(ctx0, cur, model.pre_encode_conv_X_b[3]);
+        cur = llama.impl.llama_c.ggml_conv_2d_direct(ctx0, model.pre_encode_conv_X_w[3], cur, 1, 1, 0, 0, 1, 1);
+        cur = llama.impl.llama_c.ggml_add(ctx0, cur, model.pre_encode_conv_X_b[3]);
         g.cb(cur, "conformer.pre_encode.conv.{}", 3);
 
         // layer.4 - relu
-        cur = mtmd.impl.c.ggml_relu_inplace(ctx0, cur);
+        cur = llama.impl.llama_c.ggml_relu_inplace(ctx0, cur);
 
         // layer.5 conv2d dw
-        cur = mtmd.impl.c.ggml_conv_2d_dw_direct(ctx0, model.pre_encode_conv_X_w[5], cur, 2, 2, 1, 1, 1, 1);
-        cur = mtmd.impl.c.ggml_add(ctx0, cur, model.pre_encode_conv_X_b[5]);
+        cur = llama.impl.llama_c.ggml_conv_2d_dw_direct(ctx0, model.pre_encode_conv_X_w[5], cur, 2, 2, 1, 1, 1, 1);
+        cur = llama.impl.llama_c.ggml_add(ctx0, cur, model.pre_encode_conv_X_b[5]);
         g.cb(cur, "conformer.pre_encode.conv.{}", 5);
 
         // layer.6 conv2d
-        cur = mtmd.impl.c.ggml_conv_2d_direct(ctx0, model.pre_encode_conv_X_w[6], cur, 1, 1, 0, 0, 1, 1);
-        cur = mtmd.impl.c.ggml_add(ctx0, cur, model.pre_encode_conv_X_b[6]);
+        cur = llama.impl.llama_c.ggml_conv_2d_direct(ctx0, model.pre_encode_conv_X_w[6], cur, 1, 1, 0, 0, 1, 1);
+        cur = llama.impl.llama_c.ggml_add(ctx0, cur, model.pre_encode_conv_X_b[6]);
         g.cb(cur, "conformer.pre_encode.conv.{}", 6);
 
         // layer.7 - relu
-        cur = mtmd.impl.c.ggml_relu_inplace(ctx0, cur);
+        cur = llama.impl.llama_c.ggml_relu_inplace(ctx0, cur);
 
         // flatten channel and frequency axis
-        cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, cur, 0, 2, 1, 3));
-        cur = mtmd.impl.c.ggml_reshape_2d(ctx0, cur, mtmd.graph.ne(cur, 0) * mtmd.graph.ne(cur, 1), mtmd.graph.ne(cur, 2));
+        cur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_permute(ctx0, cur, 0, 2, 1, 3));
+        cur = llama.impl.llama_c.ggml_reshape_2d(ctx0, cur, mtmd.graph.ne(cur, 0) * mtmd.graph.ne(cur, 1), mtmd.graph.ne(cur, 2));
 
         // calculate out
         cur = g.buildMm(model.pre_encode_out_w, cur);
-        cur = mtmd.impl.c.ggml_add(ctx0, cur, model.pre_encode_out_b);
+        cur = llama.impl.llama_c.ggml_add(ctx0, cur, model.pre_encode_out_b);
         g.cb(cur, "conformer.pre_encode.out", -1);
     }
 
@@ -101,7 +102,7 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
         cur = g.buildFfn(cur, layer.ff_up_w, layer.ff_up_b, null, null, layer.ff_down_w, layer.ff_down_b, .silu, il);
         g.cb(cur, "conformer.layers.{}.feed_forward1.linear2", il);
 
-        residual = mtmd.impl.c.ggml_add(ctx0, residual, mtmd.impl.c.ggml_scale(ctx0, cur, fc_factor));
+        residual = llama.impl.llama_c.ggml_add(ctx0, residual, llama.impl.llama_c.ggml_scale(ctx0, cur, fc_factor));
 
         // self-attention
         {
@@ -109,67 +110,67 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
             g.cb(cur, "conformer.layers.{}.norm_self_att", il);
 
             var Qcur = g.buildMm(layer.q_w, cur);
-            Qcur = mtmd.impl.c.ggml_add(ctx0, Qcur, layer.q_b);
-            Qcur = mtmd.impl.c.ggml_reshape_3d(ctx0, Qcur, d_head, n_head, mtmd.graph.ne(Qcur, 1));
-            var Q_bias_u = mtmd.impl.c.ggml_add(ctx0, Qcur, layer.pos_bias_u);
-            Q_bias_u = mtmd.impl.c.ggml_permute(ctx0, Q_bias_u, 0, 2, 1, 3);
-            var Q_bias_v = mtmd.impl.c.ggml_add(ctx0, Qcur, layer.pos_bias_v);
-            Q_bias_v = mtmd.impl.c.ggml_permute(ctx0, Q_bias_v, 0, 2, 1, 3);
+            Qcur = llama.impl.llama_c.ggml_add(ctx0, Qcur, layer.q_b);
+            Qcur = llama.impl.llama_c.ggml_reshape_3d(ctx0, Qcur, d_head, n_head, mtmd.graph.ne(Qcur, 1));
+            var Q_bias_u = llama.impl.llama_c.ggml_add(ctx0, Qcur, layer.pos_bias_u);
+            Q_bias_u = llama.impl.llama_c.ggml_permute(ctx0, Q_bias_u, 0, 2, 1, 3);
+            var Q_bias_v = llama.impl.llama_c.ggml_add(ctx0, Qcur, layer.pos_bias_v);
+            Q_bias_v = llama.impl.llama_c.ggml_permute(ctx0, Q_bias_v, 0, 2, 1, 3);
 
             // TODO @ngxson : some cont can/should be removed when ggml_mul_mat support these cases
             var Kcur = g.buildMm(layer.k_w, cur);
-            Kcur = mtmd.impl.c.ggml_add(ctx0, Kcur, layer.k_b);
-            Kcur = mtmd.impl.c.ggml_reshape_3d(ctx0, Kcur, d_head, n_head, mtmd.graph.ne(Kcur, 1));
-            Kcur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, Kcur, 0, 2, 1, 3));
+            Kcur = llama.impl.llama_c.ggml_add(ctx0, Kcur, layer.k_b);
+            Kcur = llama.impl.llama_c.ggml_reshape_3d(ctx0, Kcur, d_head, n_head, mtmd.graph.ne(Kcur, 1));
+            Kcur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_permute(ctx0, Kcur, 0, 2, 1, 3));
 
             var Vcur = g.buildMm(layer.v_w, cur);
-            Vcur = mtmd.impl.c.ggml_add(ctx0, Vcur, layer.v_b);
-            Vcur = mtmd.impl.c.ggml_reshape_3d(ctx0, Vcur, d_head, n_head, mtmd.graph.ne(Vcur, 1));
-            Vcur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, Vcur, 1, 2, 0, 3));
+            Vcur = llama.impl.llama_c.ggml_add(ctx0, Vcur, layer.v_b);
+            Vcur = llama.impl.llama_c.ggml_reshape_3d(ctx0, Vcur, d_head, n_head, mtmd.graph.ne(Vcur, 1));
+            Vcur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_permute(ctx0, Vcur, 1, 2, 0, 3));
 
             // build_attn won't fit due to matrix_ac and matrix_bd separation
-            var matrix_ac = mtmd.impl.c.ggml_mul_mat(ctx0, Q_bias_u, Kcur);
-            matrix_ac = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, matrix_ac, 1, 0, 2, 3));
+            var matrix_ac = llama.impl.llama_c.ggml_mul_mat(ctx0, Q_bias_u, Kcur);
+            matrix_ac = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_permute(ctx0, matrix_ac, 1, 0, 2, 3));
             g.cb(matrix_ac, "conformer.layers.{}.self_attn.id3", il);
 
             var p = g.buildMm(layer.linear_pos_w, pos_emb);
             g.cb(p, "conformer.layers.{}.self_attn.linear_pos", il);
-            p = mtmd.impl.c.ggml_reshape_3d(ctx0, p, d_head, n_head, mtmd.graph.ne(p, 1));
-            p = mtmd.impl.c.ggml_permute(ctx0, p, 0, 2, 1, 3);
+            p = llama.impl.llama_c.ggml_reshape_3d(ctx0, p, d_head, n_head, mtmd.graph.ne(p, 1));
+            p = llama.impl.llama_c.ggml_permute(ctx0, p, 0, 2, 1, 3);
 
-            var matrix_bd = mtmd.impl.c.ggml_mul_mat(ctx0, Q_bias_v, p);
-            matrix_bd = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, matrix_bd, 1, 0, 2, 3));
+            var matrix_bd = llama.impl.llama_c.ggml_mul_mat(ctx0, Q_bias_v, p);
+            matrix_bd = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_permute(ctx0, matrix_bd, 1, 0, 2, 3));
 
             // rel shift
             {
                 const pos_len = mtmd.graph.ne(matrix_bd, 0);
                 const q_len = mtmd.graph.ne(matrix_bd, 1);
                 const h = mtmd.graph.ne(matrix_bd, 2);
-                matrix_bd = mtmd.impl.c.ggml_pad_ext(ctx0, matrix_bd, 1, 0, 0, 0, 0, 0, 0, 0);
-                matrix_bd = mtmd.impl.c.ggml_reshape_3d(ctx0, matrix_bd, q_len, pos_len + 1, h);
-                matrix_bd = mtmd.impl.c.ggml_view_3d(ctx0, matrix_bd, q_len, pos_len, h, mtmd.graph.nb(matrix_bd, 1), mtmd.graph.nb(matrix_bd, 2), mtmd.graph.nb(matrix_bd, 0) * @as(usize, @intCast(q_len)));
-                matrix_bd = mtmd.impl.c.ggml_cont_3d(ctx0, matrix_bd, pos_len, q_len, h);
+                matrix_bd = llama.impl.llama_c.ggml_pad_ext(ctx0, matrix_bd, 1, 0, 0, 0, 0, 0, 0, 0);
+                matrix_bd = llama.impl.llama_c.ggml_reshape_3d(ctx0, matrix_bd, q_len, pos_len + 1, h);
+                matrix_bd = llama.impl.llama_c.ggml_view_3d(ctx0, matrix_bd, q_len, pos_len, h, mtmd.graph.nb(matrix_bd, 1), mtmd.graph.nb(matrix_bd, 2), mtmd.graph.nb(matrix_bd, 0) * @as(usize, @intCast(q_len)));
+                matrix_bd = llama.impl.llama_c.ggml_cont_3d(ctx0, matrix_bd, pos_len, q_len, h);
             }
 
-            matrix_bd = mtmd.impl.c.ggml_view_3d(ctx0, matrix_bd, mtmd.graph.ne(matrix_ac, 0), mtmd.graph.ne(matrix_bd, 1), mtmd.graph.ne(matrix_bd, 2), mtmd.graph.nb(matrix_bd, 1), mtmd.graph.nb(matrix_bd, 2), 0);
-            var scores = mtmd.impl.c.ggml_add(ctx0, matrix_ac, matrix_bd);
+            matrix_bd = llama.impl.llama_c.ggml_view_3d(ctx0, matrix_bd, mtmd.graph.ne(matrix_ac, 0), mtmd.graph.ne(matrix_bd, 1), mtmd.graph.ne(matrix_bd, 2), mtmd.graph.nb(matrix_bd, 1), mtmd.graph.nb(matrix_bd, 2), 0);
+            var scores = llama.impl.llama_c.ggml_add(ctx0, matrix_ac, matrix_bd);
             // std::sqrt of an int is the double overload: the quotient is a double, rounded once to float
-            scores = mtmd.impl.c.ggml_scale(ctx0, scores, @floatCast(1.0 / @sqrt(@as(f64, @floatFromInt(d_head)))));
+            scores = llama.impl.llama_c.ggml_scale(ctx0, scores, @floatCast(1.0 / @sqrt(@as(f64, @floatFromInt(d_head)))));
             g.cb(scores, "conformer.layers.{}.self_attn.id0", il);
 
-            const attn = mtmd.impl.c.ggml_soft_max(ctx0, scores);
-            var x = mtmd.impl.c.ggml_mul_mat(ctx0, attn, Vcur);
-            x = mtmd.impl.c.ggml_permute(ctx0, x, 2, 0, 1, 3);
-            x = mtmd.impl.c.ggml_cont_2d(ctx0, x, mtmd.graph.ne(x, 0) * mtmd.graph.ne(x, 1), mtmd.graph.ne(x, 2));
+            const attn = llama.impl.llama_c.ggml_soft_max(ctx0, scores);
+            var x = llama.impl.llama_c.ggml_mul_mat(ctx0, attn, Vcur);
+            x = llama.impl.llama_c.ggml_permute(ctx0, x, 2, 0, 1, 3);
+            x = llama.impl.llama_c.ggml_cont_2d(ctx0, x, mtmd.graph.ne(x, 0) * mtmd.graph.ne(x, 1), mtmd.graph.ne(x, 2));
 
             var out = g.buildMm(layer.o_w, x);
-            out = mtmd.impl.c.ggml_add(ctx0, out, layer.o_b);
+            out = llama.impl.llama_c.ggml_add(ctx0, out, layer.o_b);
             g.cb(out, "conformer.layers.{}.self_attn.linear_out", il);
 
             cur = out;
         }
 
-        residual = mtmd.impl.c.ggml_add(ctx0, residual, cur);
+        residual = llama.impl.llama_c.ggml_add(ctx0, residual, cur);
         cur = g.buildNorm(residual, layer.norm_conv_w, layer.norm_conv_b, .normal, 1e-5, il);
         g.cb(cur, "conformer.layers.{}.norm_conv", il);
 
@@ -177,36 +178,36 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
         {
             var x = cur;
             x = g.buildMm(layer.conv_pw1_w, x);
-            x = mtmd.impl.c.ggml_add(ctx0, x, layer.conv_pw1_b);
+            x = llama.impl.llama_c.ggml_add(ctx0, x, layer.conv_pw1_b);
             g.cb(x, "conformer.layers.{}.conv.pointwise_conv1", il);
 
             // ggml_glu doesn't support sigmoid
             // TODO @ngxson : support this ops in ggml
             {
                 const d = @divTrunc(mtmd.graph.ne(x, 0), 2);
-                const gate = mtmd.impl.c.ggml_sigmoid(ctx0, mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_view_2d(ctx0, x, d, mtmd.graph.ne(x, 1), mtmd.graph.nb(x, 1), @as(usize, @intCast(d)) * mtmd.graph.nb(x, 0))));
-                x = mtmd.impl.c.ggml_mul(ctx0, mtmd.impl.c.ggml_view_2d(ctx0, x, d, mtmd.graph.ne(x, 1), mtmd.graph.nb(x, 1), 0), gate);
-                x = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, x));
+                const gate = llama.impl.llama_c.ggml_sigmoid(ctx0, llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_view_2d(ctx0, x, d, mtmd.graph.ne(x, 1), mtmd.graph.nb(x, 1), @as(usize, @intCast(d)) * mtmd.graph.nb(x, 0))));
+                x = llama.impl.llama_c.ggml_mul(ctx0, llama.impl.llama_c.ggml_view_2d(ctx0, x, d, mtmd.graph.ne(x, 1), mtmd.graph.nb(x, 1), 0), gate);
+                x = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, x));
             }
 
             // use ggml_ssm_conv for f32 precision
-            x = mtmd.impl.c.ggml_pad(ctx0, x, 4, 0, 0, 0);
-            x = mtmd.impl.c.ggml_roll(ctx0, x, 4, 0, 0, 0);
-            x = mtmd.impl.c.ggml_pad(ctx0, x, 4, 0, 0, 0);
-            x = mtmd.impl.c.ggml_ssm_conv(ctx0, x, layer.conv_dw_w);
-            x = mtmd.impl.c.ggml_add(ctx0, x, layer.conv_dw_b);
+            x = llama.impl.llama_c.ggml_pad(ctx0, x, 4, 0, 0, 0);
+            x = llama.impl.llama_c.ggml_roll(ctx0, x, 4, 0, 0, 0);
+            x = llama.impl.llama_c.ggml_pad(ctx0, x, 4, 0, 0, 0);
+            x = llama.impl.llama_c.ggml_ssm_conv(ctx0, x, layer.conv_dw_w);
+            x = llama.impl.llama_c.ggml_add(ctx0, x, layer.conv_dw_b);
 
-            x = mtmd.impl.c.ggml_add(ctx0, mtmd.impl.c.ggml_mul(ctx0, x, layer.conv_norm_w), layer.conv_norm_b);
-            x = mtmd.impl.c.ggml_silu(ctx0, x);
+            x = llama.impl.llama_c.ggml_add(ctx0, llama.impl.llama_c.ggml_mul(ctx0, x, layer.conv_norm_w), layer.conv_norm_b);
+            x = llama.impl.llama_c.ggml_silu(ctx0, x);
 
             // pointwise_conv2
             x = g.buildMm(layer.conv_pw2_w, x);
-            x = mtmd.impl.c.ggml_add(ctx0, x, layer.conv_pw2_b);
+            x = llama.impl.llama_c.ggml_add(ctx0, x, layer.conv_pw2_b);
 
             cur = x;
         }
 
-        residual = mtmd.impl.c.ggml_add(ctx0, residual, cur);
+        residual = llama.impl.llama_c.ggml_add(ctx0, residual, cur);
 
         cur = g.buildNorm(residual, layer.ff_norm_1_w, layer.ff_norm_1_b, .normal, 1e-5, il);
         g.cb(cur, "conformer.layers.{}.norm_feed_forward2", il);
@@ -214,7 +215,7 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
         cur = g.buildFfn(cur, layer.ff_up_1_w, layer.ff_up_1_b, null, null, layer.ff_down_1_w, layer.ff_down_1_b, .silu, il); // TODO(tarek): read activation for ffn from hparams
         g.cb(cur, "conformer.layers.{}.feed_forward2.linear2", il);
 
-        residual = mtmd.impl.c.ggml_add(ctx0, residual, mtmd.impl.c.ggml_scale(ctx0, cur, fc_factor));
+        residual = llama.impl.llama_c.ggml_add(ctx0, residual, llama.impl.llama_c.ggml_scale(ctx0, cur, fc_factor));
         g.cb(residual, "conformer.layers.{}.conv.id", il);
 
         cur = g.buildNorm(residual, layer.ln_2_w, layer.ln_2_b, .normal, 1e-5, il);
@@ -230,12 +231,12 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     if (model.mm_4_w != null) {
         var x = g.buildNorm(cur, model.mm_4_w, model.mm_4_b, .normal, 1e-5, -1);
         x = g.buildFfn(x, model.mm_5_w, model.mm_5_b, null, null, model.mm_6_w, model.mm_6_b, .gelu_erf, -1);
-        cur = mtmd.impl.c.ggml_add(ctx0, cur, x);
+        cur = llama.impl.llama_c.ggml_add(ctx0, cur, x);
     }
 
     g.cb(cur, "projected", -1);
 
-    mtmd.impl.c.ggml_build_forward_expand(g.gf, cur);
+    llama.impl.llama_c.ggml_build_forward_expand(g.gf, cur);
 
     return g.gf;
 }

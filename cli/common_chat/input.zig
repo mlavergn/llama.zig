@@ -22,8 +22,6 @@
 const std = @import("std");
 const mod = @import("module.zig");
 
-const Allocator = std.mem.Allocator;
-
 /// `LLAMA_TOKEN_NULL`.
 pub const token_null: i32 = -1;
 
@@ -31,12 +29,12 @@ pub const token_null: i32 = -1;
 /// entry per byte of `text`, the token that begins there or
 /// `token_null`.
 pub const Input = struct {
-    gpa: Allocator,
+    gpa: std.mem.Allocator,
     text: std.ArrayList(u8) = .empty,
     tokens: std.ArrayList(i32) = .empty,
 
     /// `common_chat_input()`: empty.
-    pub fn init(gpa: Allocator) Input {
+    pub fn init(gpa: std.mem.Allocator) Input {
         return .{ .gpa = gpa };
     }
 
@@ -44,7 +42,7 @@ pub const Input = struct {
     /// from text: plain text, with no tokens.
     ///
     /// Return: owned by `gpa`; release with `deinit`.
-    pub fn fromText(gpa: Allocator, text: []const u8) mod.exception.Error!Input {
+    pub fn fromText(gpa: std.mem.Allocator, text: []const u8) mod.exception.Error!Input {
         var self: Input = .init(gpa);
         errdefer self.deinit();
         try self.text.appendSlice(gpa, text);
@@ -61,7 +59,7 @@ pub const Input = struct {
     /// The C++ copy.
     ///
     /// Return: owned by `gpa`.
-    pub fn clone(self: *const Input, gpa: Allocator) mod.exception.Error!Input {
+    pub fn clone(self: *const Input, gpa: std.mem.Allocator) mod.exception.Error!Input {
         var out: Input = .init(gpa);
         errdefer out.deinit();
         try out.text.appendSlice(gpa, self.text.items);
@@ -111,7 +109,7 @@ pub const Input = struct {
     /// - `n`: `std::string::npos` (`util.npos`) for the rest.
     ///
     /// Return: owned by `gpa`.
-    pub fn substr(self: *const Input, gpa: Allocator, pos: usize, n: usize) mod.exception.Error!Input {
+    pub fn substr(self: *const Input, gpa: std.mem.Allocator, pos: usize, n: usize) mod.exception.Error!Input {
         const text = try mod.util.substr(self.text.items, pos, n);
         var out: Input = .init(gpa);
         errdefer out.deinit();
@@ -156,7 +154,7 @@ const VocabPtr = @typeInfo(@TypeOf(@import("llama").api.vocab.llama_tokenize)).@
 /// Return: owned by `gpa`. `error.RuntimeError` when the count overflows
 /// `int32_t`, or when libllama throws (a vocabulary with no byte token for a
 /// byte of the text), with its `what()`.
-pub fn commonTokenize(gpa: Allocator, vocab: *const anyopaque, text: []const u8, add_special: bool, parse_special: bool) mod.exception.Error![]i32 {
+pub fn commonTokenize(gpa: std.mem.Allocator, vocab: *const anyopaque, text: []const u8, add_special: bool, parse_special: bool) mod.exception.Error![]i32 {
     const api = @import("llama").api;
     const v = vocabPtr(vocab);
     // upper limit for the number of tokens
@@ -192,7 +190,7 @@ pub fn commonTokenize(gpa: Allocator, vocab: *const anyopaque, text: []const u8,
 ///   has; only passed through to libllama's port.
 ///
 /// Return: owned by `gpa`.
-pub fn tokenize(gpa: Allocator, vocab: *const anyopaque, text: []const u8) mod.exception.Error!Input {
+pub fn tokenize(gpa: std.mem.Allocator, vocab: *const anyopaque, text: []const u8) mod.exception.Error!Input {
     const api = @import("llama").api;
     const v = vocabPtr(vocab);
 

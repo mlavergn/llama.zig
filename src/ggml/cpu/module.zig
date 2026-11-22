@@ -63,38 +63,6 @@ pub const vec_golden_generic = @import("vec_golden_generic.zig");
 
 pub const vec_golden = @import("vec_golden.zig");
 
-comptime {
-    // Ported translation units export C symbols that nothing in Zig
-    // references, so they need forcing into the compilation or the archive
-    // ships without them and the link fails with symbols the C++ still wants.
-    _ = defs;
-    _ = traits;
-    _ = convert;
-    _ = features;
-    _ = tensor;
-    _ = mulmat;
-    _ = forward;
-    _ = plan;
-    _ = threading;
-    // ggml-cpu/quants.c, split across src/ggml/cpu/quants/:
-    _ = quants;
-    _ = binary_ops;
-    _ = unary_ops;
-    _ = vec;
-    _ = tiled;
-    _ = tiled_kernel;
-    // ggml-cpu/ops.cpp, split by op family across src/ggml/cpu/ops/:
-    _ = ops;
-    // The vtable cluster, which moves as one unit -- ggml-cpu/traits.cpp,
-    // ggml-cpu.cpp, repack.cpp and arch/arm/repack.cpp. See
-    // `repack/module.zig` for why a partial swap reads as success.
-    _ = extra;
-    _ = cpu_backend;
-    _ = repack;
-    // Not a port: the golden check for vec.cpp's float dot products.
-    _ = vec_testing;
-}
-
 // -----------------------------------------------------------------------------
 // Unit Tests
 

@@ -31,20 +31,20 @@ pub fn sumRowsF32Cuda(x: ?*const anyopaque, dst: ?*anyopaque, ncols: c_int, nrow
 /// Ports `ggml_cuda_op_sum_rows` (sumrows.cu:19 @b1b770d90). A source with
 /// contiguous rows but gaps between them takes the strided kernel, which
 /// reads each row through `nb[1..3]`.
-pub fn opSumRows(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn opSumRows(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
     const src0_d: ?*const anyopaque = src0.data;
     const dst_d: ?*anyopaque = dst.data;
     const stream = ctx.stream();
 
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F32");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous_rows(src0), "ggml_is_contiguous_rows(src0)");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(src0), "ggml_is_contiguous_rows(src0)");
 
     const ncols: i64 = src0.ne[0];
-    const nrows: i64 = ggml.impl.c.ggml_nrows(src0);
+    const nrows: i64 = ggml.impl.ggml_c.ggml_nrows(src0);
 
-    if (ggml.impl.c.ggml_is_contiguous(src0)) {
+    if (ggml.impl.ggml_c.ggml_is_contiguous(src0)) {
         sumRowsF32Cuda(src0_d, dst_d, @truncate(ncols), @truncate(nrows), stream);
         return;
     }

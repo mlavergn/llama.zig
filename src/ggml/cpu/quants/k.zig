@@ -65,7 +65,7 @@ fn unpackScalesMins(packed_scales: *const [12]u8) [4]u32 {
 /// Two-bit weights with a four-bit scale and a four-bit minimum per group of
 /// sixteen. The minima are handled in one pass up front against `q8_K`'s
 /// per-group sums, which is what `bsums` exists for.
-pub export fn ggml_vec_dot_q2_K_q8_K_generic(
+pub fn ggml_vec_dot_q2_K_q8_K_generic(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -74,14 +74,14 @@ pub export fn ggml_vec_dot_q2_K_q8_K_generic(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
+) callconv(.c) void {
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
     const x = as(ggml.quants.blocks.Q2_K, vx);
     const y = as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb = @divTrunc(n, ggml.impl.c.QK_K);
+    const nb = @divTrunc(n, ggml.impl.ggml_c.QK_K);
 
     var sumf: f32 = 0;
 
@@ -101,7 +101,7 @@ pub export fn ggml_vec_dot_q2_K_q8_K_generic(
         var q2: usize = 0; // offset into x[i].qs
         var q8: usize = 0; // offset into y[i].qs
 
-        for (0..ggml.impl.c.QK_K / 128) |_| {
+        for (0..ggml.impl.ggml_c.QK_K / 128) |_| {
             // `u8`, not `u3`: the C's `shift += 2` runs one more time than it
             // is used, ending at 8, which a `u3` cannot hold. Narrowed at each
             // use instead, where the value is always 0, 2, 4 or 6.
@@ -142,7 +142,7 @@ pub export fn ggml_vec_dot_q2_K_q8_K_generic(
 /// the right ones, which is easy to misread -- hence the struct.
 const Scratch = struct {
     /// The unpacked weights of one super-block, in signed form.
-    aux8: [ggml.impl.c.QK_K]i8 = undefined,
+    aux8: [ggml.impl.ggml_c.QK_K]i8 = undefined,
     /// Eight products at a time, so the scale multiply stays 32-bit.
     aux16: [8]i16 = undefined,
     /// Eight scaled accumulators, reset per super-block.
@@ -178,7 +178,7 @@ const Scratch = struct {
 /// Three-bit weights: two bits in `qs` and an inverted high bit in `hmask`,
 /// so a clear mask bit subtracts 4. Scales are six-bit, biased by 32, packed
 /// across twelve bytes in a different layout from `q4_K`'s.
-pub export fn ggml_vec_dot_q3_K_q8_K_generic(
+pub fn ggml_vec_dot_q3_K_q8_K_generic(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -187,8 +187,8 @@ pub export fn ggml_vec_dot_q3_K_q8_K_generic(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
+) callconv(.c) void {
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
@@ -198,7 +198,7 @@ pub export fn ggml_vec_dot_q3_K_q8_K_generic(
     const x = as(ggml.quants.blocks.Q3_K, vx);
     const y = as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb = @divTrunc(n, ggml.impl.c.QK_K);
+    const nb = @divTrunc(n, ggml.impl.ggml_c.QK_K);
 
     var sc: Scratch = .{};
     var auxs: [4]u32 = undefined;
@@ -215,7 +215,7 @@ pub export fn ggml_vec_dot_q3_K_q8_K_generic(
         var m: u8 = 1;
 
         var j: usize = 0;
-        while (j < ggml.impl.c.QK_K) : (j += 128) {
+        while (j < ggml.impl.ggml_c.QK_K) : (j += 128) {
             inline for (0..4) |half| {
                 const shift: u3 = half * 2;
                 for (0..32) |l| sc.aux8[a + l] = @intCast((x[i].qs[q3 + l] >> shift) & 3);
@@ -240,7 +240,7 @@ pub export fn ggml_vec_dot_q3_K_q8_K_generic(
         const scales: *const [16]i8 = @ptrCast(&auxs);
 
         var q8: usize = 0;
-        for (0..ggml.impl.c.QK_K / 16) |sj| {
+        for (0..ggml.impl.ggml_c.QK_K / 16) |sj| {
             const scale: i32 = @as(i32, scales[sj]) - 32;
             sc.accumulate(scale, y[i].qs[q8..], sc.aux8[a..]);
             q8 += 8;
@@ -273,7 +273,7 @@ inline fn dotQ4Q5K(
     const x = as(Block, vx);
     const y = as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb = @divTrunc(n, ggml.impl.c.QK_K);
+    const nb = @divTrunc(n, ggml.impl.ggml_c.QK_K);
 
     var sc: Scratch = .{};
 
@@ -285,7 +285,7 @@ inline fn dotQ4Q5K(
         var q4: usize = 0;
         var m: u8 = 1;
 
-        for (0..ggml.impl.c.QK_K / 64) |_| {
+        for (0..ggml.impl.ggml_c.QK_K / 64) |_| {
             for (0..32) |l| sc.aux8[a + l] = @bitCast(x[i].qs[q4 + l] & 0xF);
             if (Block == ggml.quants.blocks.Q5_K) {
                 for (0..32) |l| sc.aux8[a + l] += if (x[i].qh[l] & m != 0) 16 else 0;
@@ -308,12 +308,12 @@ inline fn dotQ4Q5K(
         const mins = scales[8..];
 
         var sumi: i32 = 0;
-        for (0..ggml.impl.c.QK_K / 16) |j| sumi += @as(i32, y[i].bsums[j]) * mins[j / 2];
+        for (0..ggml.impl.ggml_c.QK_K / 16) |j| sumi += @as(i32, y[i].bsums[j]) * mins[j / 2];
 
         a = 0;
         var is: usize = 0;
         var q8: usize = 0;
-        for (0..ggml.impl.c.QK_K / 32) |_| {
+        for (0..ggml.impl.ggml_c.QK_K / 32) |_| {
             const scale: i32 = scales[is];
             is += 1;
             for (0..4) |_| {
@@ -332,7 +332,7 @@ inline fn dotQ4Q5K(
 }
 
 /// Ports `ggml_vec_dot_q4_K_q8_K_generic` (ggml-cpu/quants.c:744 @b1b770d90).
-pub export fn ggml_vec_dot_q4_K_q8_K_generic(
+pub fn ggml_vec_dot_q4_K_q8_K_generic(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -341,8 +341,8 @@ pub export fn ggml_vec_dot_q4_K_q8_K_generic(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
+) callconv(.c) void {
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
@@ -350,7 +350,7 @@ pub export fn ggml_vec_dot_q4_K_q8_K_generic(
 }
 
 /// Ports `ggml_vec_dot_q5_K_q8_K_generic` (ggml-cpu/quants.c:819 @b1b770d90).
-pub export fn ggml_vec_dot_q5_K_q8_K_generic(
+pub fn ggml_vec_dot_q5_K_q8_K_generic(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -359,8 +359,8 @@ pub export fn ggml_vec_dot_q5_K_q8_K_generic(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
+) callconv(.c) void {
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
@@ -371,7 +371,7 @@ pub export fn ggml_vec_dot_q5_K_q8_K_generic(
 ///
 /// Six-bit weights biased by 32: four bits in `ql` and two in `qh`. The scales
 /// are already signed bytes, so there is no unpacking and no minimum.
-pub export fn ggml_vec_dot_q6_K_q8_K_generic(
+pub fn ggml_vec_dot_q6_K_q8_K_generic(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -380,15 +380,15 @@ pub export fn ggml_vec_dot_q6_K_q8_K_generic(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
+) callconv(.c) void {
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
     const x = as(ggml.quants.blocks.Q6_K, vx);
     const y = as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb = @divTrunc(n, ggml.impl.c.QK_K);
+    const nb = @divTrunc(n, ggml.impl.ggml_c.QK_K);
 
     var sc: Scratch = .{};
 
@@ -402,7 +402,7 @@ pub export fn ggml_vec_dot_q6_K_q8_K_generic(
         var qh: usize = 0;
 
         var j: usize = 0;
-        while (j < ggml.impl.c.QK_K) : (j += 128) {
+        while (j < ggml.impl.ggml_c.QK_K) : (j += 128) {
             for (0..32) |l| {
                 const h = x[i].qh[qh + l];
                 sc.aux8[a + l + 0] = @as(i8, @bitCast((x[i].ql[q4 + l + 0] & 0xF) | (((h >> 0) & 3) << 4))) -% 32;
@@ -418,7 +418,7 @@ pub export fn ggml_vec_dot_q6_K_q8_K_generic(
         a = 0;
         var is: usize = 0;
         var q8: usize = 0;
-        for (0..ggml.impl.c.QK_K / 16) |_| {
+        for (0..ggml.impl.ggml_c.QK_K / 16) |_| {
             const scale: i32 = x[i].scales[is];
             is += 1;
             sc.accumulate(scale, y[i].qs[q8..], sc.aux8[a..]);
@@ -443,23 +443,23 @@ test {
 }
 
 test "q2_K dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q2_K_q8_K_generic, ggml.impl.c.GGML_TYPE_Q2_K, ggml.impl.c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.q2_K);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q2_K_q8_K_generic, ggml.impl.ggml_c.GGML_TYPE_Q2_K, ggml.impl.ggml_c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.q2_K);
 }
 
 test "q3_K dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q3_K_q8_K_generic, ggml.impl.c.GGML_TYPE_Q3_K, ggml.impl.c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.q3_K);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q3_K_q8_K_generic, ggml.impl.ggml_c.GGML_TYPE_Q3_K, ggml.impl.ggml_c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.q3_K);
 }
 
 test "q4_K dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q4_K_q8_K_generic, ggml.impl.c.GGML_TYPE_Q4_K, ggml.impl.c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.q4_K);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q4_K_q8_K_generic, ggml.impl.ggml_c.GGML_TYPE_Q4_K, ggml.impl.ggml_c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.q4_K);
 }
 
 test "q5_K dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q5_K_q8_K_generic, ggml.impl.c.GGML_TYPE_Q5_K, ggml.impl.c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.q5_K);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q5_K_q8_K_generic, ggml.impl.ggml_c.GGML_TYPE_Q5_K, ggml.impl.ggml_c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.q5_K);
 }
 
 test "q6_K dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q6_K_q8_K_generic, ggml.impl.c.GGML_TYPE_Q6_K, ggml.impl.c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.q6_K);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q6_K_q8_K_generic, ggml.impl.ggml_c.GGML_TYPE_Q6_K, ggml.impl.ggml_c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.q6_K);
 }
 
 test "the shared scale unpacking splits eight scales and eight mins" {

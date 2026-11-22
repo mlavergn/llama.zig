@@ -17,17 +17,17 @@
 //! # The engine
 //!
 //! Upstream renders through its own `common/jinja`; this renders through
-//! `zigjinja`, set up as `cli/chat.zig` sets it up -- both block options on,
+//! `jinja`, set up as `cli/chat.zig` sets it up -- both block options on,
 //! `upstreamOutput` as the finalizer, the AST path -- which is what `make
 //! jinja-diff` holds to upstream, and with every bound string marked input,
-//! as `global_from_json(ctx, json, true)` marks it: zigjinja follows
+//! as `global_from_json(ctx, json, true)` marks it: jinja follows
 //! llama.cpp's builtins for a marked string, so marking is part of getting
 //! the same text, not only of trusting it. The marks reach the result as
 //! `common_chat_prompt`'s parts, as upstream's do.
 //!
 //! An empty string is a part of its own wherever upstream keeps one -- an
 //! empty input string between template text, an empty `bos_token` before
-//! message text -- since zigjinja's rendered text carries empty runs too
+//! message text -- since jinja's rendered text carries empty runs too
 //! (`provenance.empty_template`); the add-BOS and add-EOS trims see them
 //! when they come first or last. None, undefined, a dict and an empty list
 //! output no part, as upstream gathers none for them.
@@ -39,14 +39,12 @@
 //!
 //! A render that fails is `error.RuntimeError` with `what()` beginning
 //! `jinja_failure_prefix`: upstream's text there is its own engine's
-//! message, which zigjinja does not reproduce.
+//! message, which jinja does not reproduce.
 
 const std = @import("std");
 const mod = @import("module.zig");
 const json = @import("json");
 const jinja = @import("zigjinja");
-
-const Allocator = std.mem.Allocator;
 
 /// What a failed render's `what()` begins with; see the file's header.
 pub const jinja_failure_prefix = "jinja: ";
@@ -85,7 +83,7 @@ pub const GenerationParams = struct {
 
     /// A copy whose JSON is `a`'s, as the C++ copy constructor makes one.
     /// The strings and the message are shared.
-    pub fn clone(self: *const GenerationParams, a: Allocator) mod.exception.Error!GenerationParams {
+    pub fn clone(self: *const GenerationParams, a: std.mem.Allocator) mod.exception.Error!GenerationParams {
         var c = self.*;
         c.messages = try self.messages.clone(a);
         c.tools = try self.tools.clone(a);
@@ -104,7 +102,7 @@ pub const GenerationParams = struct {
 /// template-detection `find` reads.
 ///
 /// Return: owned by `a`.
-pub fn normalizeSource(a: Allocator, source: []const u8) mod.exception.Error![]u8 {
+pub fn normalizeSource(a: std.mem.Allocator, source: []const u8) mod.exception.Error![]u8 {
     var out: std.ArrayList(u8) = .empty;
     try out.ensureTotalCapacity(a, source.len);
     var i: usize = 0;
@@ -122,15 +120,15 @@ pub fn normalizeSource(a: Allocator, source: []const u8) mod.exception.Error![]u
 /// Ports `common_chat_params_init_fn` (chat.h:32 @b1b770d90): builds the
 /// prompt and parser for a template that has a dedicated handler (see
 /// `parsers/`).
-pub const ParamsInitFn = *const fn (a: Allocator, tmpl: *const Template, inputs: *const GenerationParams) mod.exception.Error!mod.params.ChatParams;
+pub const ParamsInitFn = *const fn (a: std.mem.Allocator, tmpl: *const Template, inputs: *const GenerationParams) mod.exception.Error!mod.params.ChatParams;
 
 /// Ports `common_chat_template` (chat.h:60 @b1b770d90): a template's source
 /// parsed, its BOS and EOS spellings, the capabilities `caps_get` reads off
 /// it, and how it is applied -- a dedicated handler, or the differential
 /// analysis run once here.
 pub const Template = struct {
-    gpa: Allocator,
-    /// The source as given, which zigjinja renders.
+    gpa: std.mem.Allocator,
+    /// The source as given, which jinja renders.
     raw: []u8,
     /// `source()`: the lexer's normalised source.
     src: []u8,
@@ -154,9 +152,9 @@ pub const Template = struct {
     /// `apply` to report, so a bad template still loads.
     ///
     /// Return: owned by `gpa`; release with `deinit`. `error.RuntimeError`
-    /// when the source does not parse, its `what()` zigjinja's rather than
+    /// when the source does not parse, its `what()` jinja's rather than
     /// upstream's.
-    pub fn init(gpa: Allocator, text: []const u8, bos_token: []const u8, eos_token: []const u8) mod.exception.Error!Template {
+    pub fn init(gpa: std.mem.Allocator, text: []const u8, bos_token: []const u8, eos_token: []const u8) mod.exception.Error!Template {
         var self: Template = .{
             .gpa = gpa,
             .raw = try gpa.dupe(u8, text),
@@ -173,7 +171,7 @@ pub const Template = struct {
         self.caps = try mod.caps.capsGet(&self);
         // LOG_INF("%s: caps:\n%s\n", __func__, this->caps.to_string().c_str());
 
-        self.params_init = @import("templates.zig").detectParamsInit(self.src);
+        self.params_init = mod.templates.detectParamsInit(self.src);
         if (self.params_init != null) return self;
 
         // The analysis depends only on the template, so run it once here instead of on every apply.
@@ -231,7 +229,7 @@ pub const Template = struct {
 };
 
 /// Whether `source` parses, as `jinja`'s `parse_from_tokens` decides.
-fn checkParses(gpa: Allocator, text: []const u8) mod.exception.Error!void {
+fn checkParses(gpa: std.mem.Allocator, text: []const u8) mod.exception.Error!void {
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
@@ -242,7 +240,7 @@ fn checkParses(gpa: Allocator, text: []const u8) mod.exception.Error!void {
     env.trim_blocks = true;
     env.lstrip_blocks = true;
     // the parse itself follows llama.cpp's grammar: unary `+`/`-` nest and
-    // bind tighter than a filter (zigjinja, `Parser.llama_cpp_semantics`)
+    // bind tighter than a filter (jinja, `Parser.llama_cpp_semantics`)
     env.llama_cpp_semantics = true;
     _ = env.fromString(text, "chat") catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
@@ -254,15 +252,15 @@ fn checkParses(gpa: Allocator, text: []const u8) mod.exception.Error!void {
 // Rendering
 
 /// An allocator that never gives memory back, so no address is reused
-/// while a usage-statistics record keys on addresses (`zigjinja/src/stats.zig`).
+/// while a usage-statistics record keys on addresses (`jinja/src/stats.zig`).
 const NoFree = struct {
-    child: Allocator,
+    child: std.mem.Allocator,
 
-    fn allocator(self: *NoFree) Allocator {
+    fn allocator(self: *NoFree) std.mem.Allocator {
         return .{ .ptr = self, .vtable = &vtable };
     }
 
-    const vtable: Allocator.VTable = .{ .alloc = alloc, .resize = resize, .remap = remap, .free = free };
+    const vtable: std.mem.Allocator.VTable = .{ .alloc = alloc, .resize = resize, .remap = remap, .free = free };
 
     fn alloc(ctx: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
         const self: *NoFree = @ptrCast(@alignCast(ctx));
@@ -283,8 +281,8 @@ const NoFree = struct {
 /// Upstream's rendering of a non-string `{{ }}` value; `cli/chat.zig`'s
 /// `upstreamOutput`, which `make jinja-diff` holds to
 /// `gather_string_parts_recursive` (runtime.h:740 @b1b770d90); its depth
-/// limit is zigjinja's, which fails the render where a finalizer cannot.
-fn upstreamOutput(allocator: Allocator, val: jinja.Value) jinja.Value {
+/// limit is jinja's, which fails the render where a finalizer cannot.
+fn upstreamOutput(allocator: std.mem.Allocator, val: jinja.Value) jinja.Value {
     return switch (val) {
         .boolean => |b| .{ .string = if (b) "True" else "False" },
         // nothing, not even an empty part: llama.cpp gathers no part for them
@@ -297,13 +295,13 @@ fn upstreamOutput(allocator: Allocator, val: jinja.Value) jinja.Value {
 }
 
 /// An empty string that outputs no part at all, where an unmarked empty
-/// string outputs an empty template part (zigjinja's `empty_template`).
+/// string outputs an empty template part (jinja's `empty_template`).
 fn noPart() []const u8 {
     const record = jinja.provenance.active orelse return "";
     return record.mark("", &.{}) catch "";
 }
 
-fn gatherList(allocator: Allocator, val: jinja.Value) !jinja.Value {
+fn gatherList(allocator: std.mem.Allocator, val: jinja.Value) !jinja.Value {
     var pieces: std.ArrayList([]const u8) = .empty;
     try gather(allocator, val, &pieces);
     // a list of nothing gathers no part; an empty string in it is one
@@ -314,7 +312,7 @@ fn gatherList(allocator: Allocator, val: jinja.Value) !jinja.Value {
     return .{ .string = try std.mem.concat(allocator, u8, pieces.items) };
 }
 
-fn gather(allocator: Allocator, val: jinja.Value, pieces: *std.ArrayList([]const u8)) !void {
+fn gather(allocator: std.mem.Allocator, val: jinja.Value, pieces: *std.ArrayList([]const u8)) !void {
     switch (val) {
         .list => |list| for (list.items.items) |item| try gather(allocator, item, pieces),
         .string => |str| try pieces.append(allocator, str),
@@ -339,7 +337,7 @@ pub const Render = struct {
     /// - `keep_addresses`: never free during the render, for a statistics record.
     ///
     /// Return: release with `deinit`. Pinned: take its address only after it is in place.
-    pub fn init(self: *Render, gpa: Allocator, keep_addresses: bool) void {
+    pub fn init(self: *Render, gpa: std.mem.Allocator, keep_addresses: bool) void {
         self.arena_state = std.heap.ArenaAllocator.init(gpa);
         self.no_free = .{ .child = self.arena_state.allocator() };
         const a = if (keep_addresses) self.no_free.allocator() else self.arena_state.allocator();
@@ -353,12 +351,12 @@ pub const Render = struct {
     }
 
     /// The allocator every value of this render comes from.
-    pub fn alloc(self: *Render) Allocator {
+    pub fn alloc(self: *Render) std.mem.Allocator {
         return self.vars.allocator;
     }
 
     /// `ctx.set_val(name, v)`. A variable named "" is not bound: no
-    /// template can name it, and zigjinja spells the missing `else` of
+    /// template can name it, and jinja spells the missing `else` of
     /// `a if b` as a lookup of that name -- so a `chat_template_kwargs`
     /// member "" (a request whose kwargs are a string has one) would
     /// otherwise fill every such branch.
@@ -420,7 +418,7 @@ pub const Render = struct {
     ///
     /// Return: the text, owned by `out`. `error.RuntimeError` with
     /// `jinja_failure_prefix` when the template fails or raises.
-    pub fn run(self: *Render, tmpl: *const Template, out: Allocator) mod.exception.Error![]u8 {
+    pub fn run(self: *Render, tmpl: *const Template, out: std.mem.Allocator) mod.exception.Error![]u8 {
         return out.dupe(u8, try self.render(tmpl));
     }
 
@@ -429,7 +427,7 @@ pub const Render = struct {
     /// parts of one kind joined.
     ///
     /// Return: the prompt, its list and texts owned by `out`.
-    pub fn runPrompt(self: *Render, tmpl: *const Template, out: Allocator) mod.exception.Error!mod.prompt.Prompt {
+    pub fn runPrompt(self: *Render, tmpl: *const Template, out: std.mem.Allocator) mod.exception.Error!mod.prompt.Prompt {
         const text = try self.render(tmpl);
         var result: mod.prompt.Prompt = .{};
         // text with no mark in it: one template part, or none when empty
@@ -494,7 +492,7 @@ fn failure(e: anyerror) mod.exception.Error {
 
 /// `cli/chat.zig`'s `sanitize`: the provenance sentinels removed from text
 /// about to be bound, so it cannot open or close an input run.
-fn sanitize(a: Allocator, text: []const u8) mod.exception.Error![]const u8 {
+fn sanitize(a: std.mem.Allocator, text: []const u8) mod.exception.Error![]const u8 {
     const sentinels = &jinja.provenance.sentinels;
     if (std.mem.findAny(u8, text, sentinels) == null) return text;
     var out: std.ArrayList(u8) = .empty;
@@ -542,7 +540,7 @@ const month_abbrev = [_][]const u8{ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "J
 /// given, `%b %d %Y` and `%d %b %Y`, in the C locale and local time.
 ///
 /// Return: owned by `a`.
-pub fn formatTime(a: Allocator, t: i64, comptime day_first: bool) mod.exception.Error![]u8 {
+pub fn formatTime(a: std.mem.Allocator, t: i64, comptime day_first: bool) mod.exception.Error![]u8 {
     const local = t + jinja.localtime.LocalTime.utcOffset(a, t);
     const secs: std.time.epoch.EpochSeconds = .{ .secs = @intCast(@max(local, 0)) };
     const year_day = secs.getEpochDay().calculateYearDay();
@@ -559,7 +557,7 @@ pub fn formatTime(a: Allocator, t: i64, comptime day_first: bool) mod.exception.
 /// `datetime` and `date_string`, today's date two ways.
 ///
 /// Return: an object owned by `a`.
-pub fn extraContext(a: Allocator) mod.exception.Error!json.Value {
+pub fn extraContext(a: std.mem.Allocator) mod.exception.Error!json.Value {
     var ctx = json.Value.emptyObject();
     const t = now();
     try ctx.set(a, "datetime", try json.Value.from(a, try formatTime(a, t, false)));
@@ -582,7 +580,7 @@ pub fn extraContext(a: Allocator) mod.exception.Error!json.Value {
 ///
 /// Return: the text, split into template and input parts.
 pub fn directApplyImpl(
-    a: Allocator,
+    a: std.mem.Allocator,
     tmpl: *const Template,
     inputs: *const GenerationParams,
     messages_override: ?*const json.Value,
@@ -648,7 +646,7 @@ pub fn directApplyImpl(
 }
 
 /// Ports `common_chat_template_direct_apply` (chat.cpp:1150 @b1b770d90).
-pub fn directApply(a: Allocator, tmpl: *const Template, inputs: *const GenerationParams) mod.exception.Error!mod.prompt.Prompt {
+pub fn directApply(a: std.mem.Allocator, tmpl: *const Template, inputs: *const GenerationParams) mod.exception.Error!mod.prompt.Prompt {
     return directApplyImpl(a, tmpl, inputs, null, null, null);
 }
 
@@ -658,7 +656,7 @@ pub fn directApply(a: Allocator, tmpl: *const Template, inputs: *const Generatio
 ///
 /// Return: owned by `a`.
 pub fn generationPromptImpl(
-    a: Allocator,
+    a: std.mem.Allocator,
     tmpl: *const Template,
     inputs: *const GenerationParams,
     messages_override: ?*const json.Value,
@@ -678,7 +676,7 @@ pub fn generationPromptImpl(
 }
 
 /// Ports `common_chat_template_generation_prompt` (chat.cpp:1178 @b1b770d90).
-pub fn generationPrompt(a: Allocator, tmpl: *const Template, inputs: *const GenerationParams) mod.exception.Error![]const u8 {
+pub fn generationPrompt(a: std.mem.Allocator, tmpl: *const Template, inputs: *const GenerationParams) mod.exception.Error![]const u8 {
     return generationPromptImpl(a, tmpl, inputs, null, null, null);
 }
 

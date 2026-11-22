@@ -11,15 +11,11 @@
 //! `defer`s below free them in the reverse order the destructors run.
 
 const std = @import("std");
+const mtmd = @import("mtmd");
+const llama = @import("llama");
 const stdlib = @import("stdlib");
-const tc = @import("tools_common");
-const chat = @import("common_chat");
-
-comptime {
-    // libllama and libmtmd, compiled in (see `build/tools.zig`).
-    _ = @import("llama").lib;
-    _ = @import("mtmd").lib;
-}
+const tools_common = @import("tools_common");
+const common_chat = @import("common_chat");
 
 /// Ports `tts_timings` (tts.cpp:20 @b1b770d90): a progress line every two
 /// seconds.
@@ -28,47 +24,47 @@ const Timings = struct {
     t_last_us: i64,
 
     fn init() Timings {
-        const t = tc.c.ggml_time_us();
+        const t = llama.impl.llama_c.ggml_time_us();
         return .{ .t_start_us = t, .t_last_us = t };
     }
 
     /// `report` (tts.cpp:24 @b1b770d90), a member of `tts_timings`.
     fn report(self: *Timings, n_frames: c_int) void {
-        const t_now_us = tc.c.ggml_time_us();
+        const t_now_us = llama.impl.llama_c.ggml_time_us();
         if (t_now_us - self.t_last_us < 2000000) return;
         self.t_last_us = t_now_us;
         const t_elapsed_s = @as(f64, @floatFromInt(t_now_us - self.t_start_us)) / 1e6;
         const fps = if (t_elapsed_s > 0) @as(f64, @floatFromInt(n_frames)) / t_elapsed_s else 0.0;
-        tc.log.inf("frames generated: %d, speed: %.2f frames/s\n", .{ n_frames, fps });
+        tools_common.log.inf("frames generated: %d, speed: %.2f frames/s\n", .{ n_frames, fps });
     }
 };
 
 /// Ports `print_usage` (tts.cpp:36 @b1b770d90).
 fn printUsage(argv: []const [:0]const u8) void {
-    tc.log.out("\nexample usage:\n", .{});
-    tc.log.out("\n    %s -m backbone.gguf -mm mmproj.gguf -p \"text to speak\" -o output.wav", .{argv[0].ptr});
-    tc.log.out("\n    %s -hf user/model -p \"text to speak\" -o output.wav\n", .{argv[0].ptr});
-    tc.log.out("\nnote: --tts-lang, --tts-voice and --tts-speaker-file may not be supported in all models", .{});
-    tc.log.out("\n      use -n to limit the output length", .{});
-    tc.log.out("\n      see tts/README.md for per-model usage notes", .{});
-    tc.log.out("\n\n", .{});
+    tools_common.log.out("\nexample usage:\n", .{});
+    tools_common.log.out("\n    %s -m backbone.gguf -mm mmproj.gguf -p \"text to speak\" -o output.wav", .{argv[0].ptr});
+    tools_common.log.out("\n    %s -hf user/model -p \"text to speak\" -o output.wav\n", .{argv[0].ptr});
+    tools_common.log.out("\nnote: --tts-lang, --tts-voice and --tts-speaker-file may not be supported in all models", .{});
+    tools_common.log.out("\n      use -n to limit the output length", .{});
+    tools_common.log.out("\n      see tts/README.md for per-model usage notes", .{});
+    tools_common.log.out("\n\n", .{});
 }
 
 fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
-    var params = try tc.params.Params.init(a);
+    var params = try tools_common.params.Params.init(a);
 
-    tc.common.init();
+    tools_common.common.init();
 
-    if (!try tc.arg.parse(argv, &params, .tts, printUsage)) return 1;
+    if (!try tools_common.arg.parse(argv, &params, .tts, printUsage)) return 1;
 
-    tc.c.mtmd_helper_log_set(tc.common.defaultLogCallback, null);
+    mtmd.helper.mtmd_helper_log_set(tools_common.common.defaultLogCallback, null);
 
     if (params.prompt.len == 0) {
-        tc.log.err("no prompt provided, use -p \"text\"\n", .{});
+        tools_common.log.err("no prompt provided, use -p \"text\"\n", .{});
         return 1;
     }
     if (params.mmproj.path.len == 0) {
-        tc.log.err("no mmproj provided, use --mmproj\n", .{});
+        tools_common.log.err("no mmproj provided, use --mmproj\n", .{});
         return 1;
     }
 
@@ -78,34 +74,34 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     // always enable embd, so that we can pass hidden states to the audio generation helper
     params.embedding = true;
 
-    tc.c.llama_backend_init();
-    tc.c.llama_numa_init(params.numa);
+    llama.api.llama.llama_backend_init();
+    llama.api.llama.llama_numa_init(params.numa);
 
     //
     // load backbone model and mmproj
     //
 
-    var llama_init = try tc.init.initFromParams(init.gpa, &params, false);
+    var llama_init = try tools_common.init.initFromParams(init.gpa, &params, false);
     defer llama_init.deinit();
     const model = llama_init.model;
     const lctx = llama_init.context;
     const smpl = llama_init.sampler(0);
     if (model == null or lctx == null) {
-        tc.log.err("failed to init model/context\n", .{});
+        tools_common.log.err("failed to init model/context\n", .{});
         return 1;
     }
 
     const mmproj_path = try a.dupeSentinel(u8, params.mmproj.path, 0);
-    var mtmd_params = tc.c.mtmd_context_params_default();
+    var mtmd_params = mtmd.mtmd.mtmd_context_params_default();
     mtmd_params.use_gpu = params.mmproj_use_gpu;
     mtmd_params.device = params.mmproj_device;
-    const mctx = tc.c.mtmd_init_from_file(mmproj_path.ptr, model, mtmd_params) orelse {
-        tc.log.err("failed to load mmproj %s\n", .{mmproj_path.ptr});
+    const mctx = mtmd.mtmd.mtmd_init_from_file(mmproj_path.ptr, model, mtmd_params) orelse {
+        tools_common.log.err("failed to load mmproj %s\n", .{mmproj_path.ptr});
         return 1;
     };
-    defer tc.c.mtmd_free(mctx);
-    if (tc.c.mtmd_gen_audio_get_info(mctx).type == tc.c.MTMD_GEN_AUDIO_TYPE_NONE) {
-        tc.log.err("mmproj does not support audio generation\n", .{});
+    defer mtmd.mtmd.mtmd_free(mctx);
+    if (mtmd.mtmd.mtmd_gen_audio_get_info(mctx).type == mtmd.mtmd.GenAudioType.none) {
+        tools_common.log.err("mmproj does not support audio generation\n", .{});
         return 1;
     }
 
@@ -113,54 +109,54 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     // stage 0: process speaker reference file, if any
     //
 
-    var speaker_bitmap: ?*tc.c.mtmd_bitmap = null;
-    defer if (speaker_bitmap) |bm| tc.c.mtmd_bitmap_free(bm);
+    var speaker_bitmap: ?*mtmd.mtmd.Bitmap = null;
+    defer if (speaker_bitmap) |bm| mtmd.mtmd.mtmd_bitmap_free(bm);
     if (params.tts_speaker_file.len != 0) {
         const speaker_file = try a.dupeSentinel(u8, params.tts_speaker_file, 0);
-        const wrapper = tc.c.mtmd_helper_bitmap_init_from_file(mctx, speaker_file.ptr, false, tc.c.mtmd_helper_init_opt_default());
+        const wrapper = mtmd.helper.mtmd_helper_bitmap_init_from_file(mctx, speaker_file.ptr, false, mtmd.helper.mtmd_helper_init_opt_default());
         if (wrapper.bitmap == null) {
-            tc.log.err("failed to load speaker file %s\n", .{speaker_file.ptr});
+            tools_common.log.err("failed to load speaker file %s\n", .{speaker_file.ptr});
             return 1;
         }
         speaker_bitmap = wrapper.bitmap;
     }
 
     // a model with predefined voices needs one, the first by default; other models name the voice in the prompt
-    if (tc.c.mtmd_gen_audio_get_info(mctx).n_voices > 0 and (params.tts_voice.len != 0 or speaker_bitmap == null)) {
+    if (mtmd.mtmd.mtmd_gen_audio_get_info(mctx).n_voices > 0 and (params.tts_voice.len != 0 or speaker_bitmap == null)) {
         if (speaker_bitmap != null) {
-            tc.log.err("--tts-voice and --tts-speaker-file cannot be used together\n", .{});
+            tools_common.log.err("--tts-voice and --tts-speaker-file cannot be used together\n", .{});
             return 1;
         }
         if (params.tts_voice.len == 0) {
-            params.tts_voice = std.mem.span(tc.c.mtmd_gen_audio_voice_name(mctx, 0));
-            tc.log.wrn("no --tts-voice given, speaking with \"%s\"\n", .{tc.c.mtmd_gen_audio_voice_name(mctx, 0)});
+            params.tts_voice = std.mem.span(mtmd.mtmd.mtmd_gen_audio_voice_name(mctx, 0).?);
+            tools_common.log.wrn("no --tts-voice given, speaking with \"%s\"\n", .{mtmd.mtmd.mtmd_gen_audio_voice_name(mctx, 0)});
         }
         const voice_name = try a.dupeSentinel(u8, params.tts_voice, 0);
-        speaker_bitmap = tc.c.mtmd_gen_audio_get_voice(mctx, voice_name.ptr);
+        speaker_bitmap = mtmd.mtmd.mtmd_gen_audio_get_voice(mctx, voice_name.ptr);
         if (speaker_bitmap == null) {
-            tc.log.err("unknown voice \"%s\", the model has:", .{voice_name.ptr});
+            tools_common.log.err("unknown voice \"%s\", the model has:", .{voice_name.ptr});
             var i: i32 = 0;
             while (true) : (i += 1) {
-                const name = tc.c.mtmd_gen_audio_voice_name(mctx, i);
+                const name = mtmd.mtmd.mtmd_gen_audio_voice_name(mctx, i);
                 if (name == null) break;
-                tc.log.out(" %s", .{name});
+                tools_common.log.out(" %s", .{name});
             }
-            tc.log.out("\n", .{});
+            tools_common.log.out("\n", .{});
             return 1;
         }
     }
 
     // a model with a "tts" chat template (e.g. LFM3-Audio) speaks the prompt rendered from it
-    var info = try chat.templates.modelInfo(a, @ptrCast(model.?));
-    var tmpls = try chat.templates.init(a, &info, "", "", "");
-    var prompt_str = try chat.templates.getTtsPrompt(a, &tmpls, params.prompt, params.tts_lang, params.tts_voice);
+    var info = try common_chat.templates.modelInfo(a, @ptrCast(model.?));
+    var tmpls = try common_chat.templates.init(a, &info, "", "", "");
+    var prompt_str = try common_chat.templates.getTtsPrompt(a, &tmpls, params.prompt, params.tts_lang, params.tts_voice);
     if (prompt_str.len == 0) prompt_str = params.prompt;
 
-    const gen = tc.c.mtmd_helper_gen_audio_init(lctx, mctx);
-    defer tc.c.mtmd_helper_gen_audio_free(gen);
+    const gen = mtmd.helper_gen.mtmd_helper_gen_audio_init(lctx, mctx);
+    defer mtmd.helper_gen.mtmd_helper_gen_audio_free(gen);
     const prompt = try a.dupeSentinel(u8, prompt_str, 0);
     const lang = try a.dupeSentinel(u8, params.tts_lang, 0);
-    var inp = tc.c.mtmd_helper_gen_audio_inp_default();
+    var inp = mtmd.helper_gen.mtmd_helper_gen_audio_inp_default();
     inp.seq_id = 0;
     inp.prompt = prompt.ptr;
     inp.prompt_len = prompt.len;
@@ -170,7 +166,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     inp.top_p = params.sampling.top_p;
     inp.seed = params.sampling.seed;
     // without --temp the audio frames keep the model default, not the CLI default
-    if ((params.sampling.user_sampling_config & tc.params.SamplingConfig.temp) != 0) {
+    if ((params.sampling.user_sampling_config & tools_common.params.SamplingConfig.temp) != 0) {
         inp.temp = params.sampling.temp;
     }
 
@@ -178,17 +174,17 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     // stage 1: process prompt via backbone model, generate semantic representation
     //
 
-    if (tc.c.mtmd_helper_gen_audio_set_input(gen, &inp) != 0) {
-        tc.log.err("set_input failed\n", .{});
+    if (mtmd.helper_gen.mtmd_helper_gen_audio_set_input(gen, &inp) != 0) {
+        tools_common.log.err("set_input failed\n", .{});
         return 1;
     }
 
-    const t_prompt_start_us = tc.c.ggml_time_us();
+    const t_prompt_start_us = llama.impl.llama_c.ggml_time_us();
 
     while (true) {
-        const ret = tc.c.mtmd_helper_gen_audio_step_prompt(gen, params.n_batch);
+        const ret = mtmd.helper_gen.mtmd_helper_gen_audio_step_prompt(gen, params.n_batch);
         if (ret < 0) {
-            tc.log.err("prompt processing failed\n", .{});
+            tools_common.log.err("prompt processing failed\n", .{});
             return 1;
         }
         if (ret == 0) break;
@@ -196,7 +192,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
 
     // note: some pipelines ignore this token and use the hidden state instead
     const Sample = struct {
-        fn semanticCode(s: ?*tc.sampling.Sampler, ctx: ?*tc.c.llama_context) !tc.c.llama_token {
+        fn semanticCode(s: ?*tools_common.sampling.Sampler, ctx: ?*llama.impl.llama_c.llama_context) !llama.impl.llama_c.llama_token {
             const t = try s.?.sample(ctx, -1, false);
             s.?.accept(t, true);
             return t;
@@ -206,10 +202,10 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     const max_new: c_int = if (params.n_predict > 0) params.n_predict else 512;
     var n_frames: c_int = 0;
     var sampled = try Sample.semanticCode(smpl, lctx);
-    var h_state: ?[*]const f32 = tc.c.llama_get_embeddings_ith(lctx, -1);
+    var h_state: ?[*]const f32 = llama.api.context.llama_get_embeddings_ith(lctx, -1).?;
 
     var timings = Timings.init();
-    const t_gen_start_us = tc.c.ggml_time_us();
+    const t_gen_start_us = llama.impl.llama_c.ggml_time_us();
 
     var stop = false;
     while (!stop and n_frames < max_new) {
@@ -217,8 +213,8 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
 
         // stage 2+3: semantic --> acoustic details --> audio waveform
         //            step_gen() runs both stages and returns new h_state for next step
-        if (tc.c.mtmd_helper_gen_audio_step_gen(gen, sampled, h_state, &h_next, &stop) != 0) {
-            tc.log.err("step_gen failed at frame %d\n", .{n_frames});
+        if (mtmd.helper_gen.mtmd_helper_gen_audio_step_gen(gen, sampled, h_state, &h_next, &stop) != 0) {
+            tools_common.log.err("step_gen failed at frame %d\n", .{n_frames});
             return 1;
         }
         if (h_next == null) break; // stopped without generating a frame
@@ -228,36 +224,36 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
         sampled = try Sample.semanticCode(smpl, lctx);
         timings.report(n_frames);
     }
-    const t_gen_s = @as(f64, @floatFromInt(tc.c.ggml_time_us() - t_gen_start_us)) / 1e6;
+    const t_gen_s = @as(f64, @floatFromInt(llama.impl.llama_c.ggml_time_us() - t_gen_start_us)) / 1e6;
 
     var sample_rate: i32 = 0;
     var data: [*c]const u8 = null;
     var data_len: usize = 0;
     var n_samples: i64 = 0;
-    const t_wav_start_us = tc.c.ggml_time_us();
-    if (tc.c.mtmd_helper_gen_audio_get_output(gen, &sample_rate, &data, &data_len, &n_samples) != 0) {
-        tc.log.err("get_output failed\n", .{});
+    const t_wav_start_us = llama.impl.llama_c.ggml_time_us();
+    if (mtmd.helper_gen.mtmd_helper_gen_audio_get_output(gen, &sample_rate, &data, &data_len, &n_samples) != 0) {
+        tools_common.log.err("get_output failed\n", .{});
         return 1;
     }
-    const t_wav_s = @as(f64, @floatFromInt(tc.c.ggml_time_us() - t_wav_start_us)) / 1e6;
+    const t_wav_s = @as(f64, @floatFromInt(llama.impl.llama_c.ggml_time_us() - t_wav_start_us)) / 1e6;
 
-    tc.log.inf("generated %d frames, %zu bytes of WAV audio (%d Hz)\n", .{ n_frames, data_len, sample_rate });
+    tools_common.log.inf("generated %d frames, %zu bytes of WAV audio (%d Hz)\n", .{ n_frames, data_len, sample_rate });
 
     const t_prompt_s = @as(f64, @floatFromInt(t_gen_start_us - t_prompt_start_us)) / 1e6;
     const t_total_s = t_prompt_s + t_gen_s + t_wav_s;
     const audio_s = if (sample_rate > 0) @as(f64, @floatFromInt(n_samples)) / @as(f64, @floatFromInt(sample_rate)) else 0.0;
-    tc.log.inf("timings: prompt eval %.2fs + generation %.2fs + vocoder %.2fs = total %.2fs\n", .{ t_prompt_s, t_gen_s, t_wav_s, t_total_s });
-    tc.log.inf("         output audio = %.2fs (audio time = %.2fx process time)\n", .{ audio_s, if (t_total_s > 0) audio_s / t_total_s else 0.0 });
+    tools_common.log.inf("timings: prompt eval %.2fs + generation %.2fs + vocoder %.2fs = total %.2fs\n", .{ t_prompt_s, t_gen_s, t_wav_s, t_total_s });
+    tools_common.log.inf("         output audio = %.2fs (audio time = %.2fx process time)\n", .{ audio_s, if (t_total_s > 0) audio_s / t_total_s else 0.0 });
     const out_file = try a.dupeSentinel(u8, params.out_file, 0);
     var f = stdlib.file.Out.create(init.io, out_file) catch {
-        tc.log.err("failed to open %s\n", .{out_file.ptr});
+        tools_common.log.err("failed to open %s\n", .{out_file.ptr});
         return 1;
     };
     f.write(data[0..data_len]) catch {};
     f.close(init.io);
-    tc.log.inf("wrote %s\n", .{out_file.ptr});
+    tools_common.log.inf("wrote %s\n", .{out_file.ptr});
 
-    tc.c.llama_backend_free();
+    llama.api.llama.llama_backend_free();
     return 0;
 }
 

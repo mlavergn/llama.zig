@@ -106,9 +106,6 @@ pub const k = if (is_darwin) struct {
     pub const sun_path_len: usize = 108;
 };
 
-/// `struct addrinfo`, std's per-OS layout.
-pub const AddrInfo = std.c.addrinfo;
-
 /// `struct sockaddr_storage`: 128 bytes; the family is a byte after the
 /// length on Darwin and a `u16` on Linux.
 const SockaddrStorage = extern struct {
@@ -137,7 +134,7 @@ pub fn ignoreSigpipe() void {
 
 /// Ports `set_socket_opt_impl` (httplib.cpp:515 @b1b770d90).
 fn setSocketOptImpl(sock: Socket, level: c_int, optname: c_int, optval: *const anyopaque, optlen: u32) bool {
-    return stdlib.libc.setsockopt(sock, level, @intCast(optname), optval, optlen) == 0;
+    return std.c.setsockopt(sock, level, @intCast(optname), optval, optlen) == 0;
 }
 
 /// Ports `set_socket_opt_time` (httplib.cpp:526 @b1b770d90).
@@ -153,12 +150,12 @@ pub fn setSocketOpt(sock: Socket, level: c_int, optname: c_int, optval: c_int) b
 
 /// Ports `close_socket` (httplib.cpp:1795 @b1b770d90).
 pub fn closeSocket(sock: Socket) c_int {
-    return stdlib.libc.close(sock);
+    return std.c.close(sock);
 }
 
 /// Ports `shutdown_socket` (httplib.cpp:2118 @b1b770d90).
 pub fn shutdownSocket(sock: Socket) c_int {
-    return stdlib.libc.shutdown(sock, k.SHUT_RDWR);
+    return std.c.shutdown(sock, k.SHUT_RDWR);
 }
 
 /// Ports `read_socket` (httplib.cpp:1830 @b1b770d90), with `handle_EINTR`
@@ -166,7 +163,7 @@ pub fn shutdownSocket(sock: Socket) c_int {
 /// interrupted.
 pub fn readSocket(sock: Socket, ptr: [*]u8, size: usize, flags: c_int) isize {
     while (true) {
-        const res = stdlib.libc.recv(sock, ptr, size, flags);
+        const res = std.c.recv(sock, ptr, size, flags);
         if (res < 0 and errno() == k.EINTR) {
             stdlib.clock.sleepUs(1);
             continue;
@@ -178,7 +175,7 @@ pub fn readSocket(sock: Socket, ptr: [*]u8, size: usize, flags: c_int) isize {
 /// Ports `send_socket` (httplib.cpp:1842 @b1b770d90), under `handle_EINTR`.
 pub fn sendSocket(sock: Socket, ptr: [*]const u8, size: usize, flags: c_int) isize {
     while (true) {
-        const res = stdlib.libc.send(sock, ptr, size, @bitCast(flags));
+        const res = std.c.send(sock, ptr, size, @bitCast(flags));
         if (res < 0 and errno() == k.EINTR) {
             stdlib.clock.sleepUs(1);
             continue;
@@ -193,7 +190,7 @@ fn selectImpl(sock: Socket, events: c_short, sec: i64, usec: i64) isize {
     var pfd: std.c.pollfd = .{ .fd = sock, .events = events, .revents = 0 };
     const timeout: c_int = if (sec < 0) -1 else @intCast(sec * 1000 + @divTrunc(usec, 1000));
     while (true) {
-        const res = stdlib.libc.poll((&pfd)[0..1], 1, timeout);
+        const res = std.c.poll((&pfd)[0..1], 1, timeout);
         if (res < 0 and errno() == k.EINTR) {
             stdlib.clock.sleepUs(1);
             continue;
@@ -265,14 +262,14 @@ pub fn isAcceptTransientError() bool {
 /// `SOCK_CLOEXEC`, or `accept4` with it.
 pub fn acceptSocket(sock: Socket) Socket {
     if (k.SOCK_CLOEXEC) |cloexec| return std.c.accept4(sock, null, null, @intCast(cloexec));
-    return stdlib.libc.accept(sock, null, null);
+    return std.c.accept(sock, null, null);
 }
 
 /// Ports `drain_and_close_socket` (httplib.cpp:2131 @b1b770d90): half-close,
 /// read off what the peer still sends for up to 100 ms or 1 MiB, then shut
 /// down and close, so the peer sees a FIN rather than a reset.
 pub fn drainAndCloseSocket(sock: Socket) void {
-    _ = stdlib.libc.shutdown(sock, k.SHUT_WR);
+    _ = std.c.shutdown(sock, k.SHUT_WR);
     var buf: [mod.detail.recv_bufsiz]u8 = undefined;
     var total: usize = 0;
     const deadline = stdlib.clock.steadyUs() + 100 * 1000;
@@ -294,7 +291,7 @@ fn getIpAndPort(a: std.mem.Allocator, addr: *const SockaddrStorage, addr_len: u3
     if (fam != k.AF_INET and fam != k.AF_INET6) return false;
     port.* = addr.port();
     var ipstr: [k.NI_MAXHOST]u8 = @splat(0);
-    if (@backingInt(stdlib.libc.getnameinfo(@ptrCast(addr), addr_len, &ipstr, ipstr.len, null, 0, .{ .NUMERICHOST = true })) != 0) return false;
+    if (@backingInt(std.c.getnameinfo(@ptrCast(addr), addr_len, &ipstr, ipstr.len, null, 0, .{ .NUMERICHOST = true })) != 0) return false;
     ip.* = try a.dupe(u8, std.mem.sliceTo(&ipstr, 0));
     return true;
 }
@@ -321,19 +318,19 @@ pub fn isIpAddress(a: std.mem.Allocator, host: []const u8) error{OutOfMemory}!bo
 ///   hostname: the name or literal to resolve.
 ///   addrs: appended to.
 pub fn hostedAt(a: std.mem.Allocator, hostname: []const u8, addrs: *std.ArrayList([]const u8)) error{OutOfMemory}!void {
-    var hints: AddrInfo = std.mem.zeroes(AddrInfo);
+    var hints: std.c.addrinfo = std.mem.zeroes(std.c.addrinfo);
     hints.family = k.AF_UNSPEC;
     hints.socktype = k.SOCK_STREAM;
     hints.protocol = 0;
 
     const hz = try a.dupeSentinel(u8, hostname, 0);
     defer a.free(hz);
-    var result: ?*AddrInfo = null;
-    if (@backingInt(stdlib.libc.getaddrinfo(hz.ptr, null, &hints, &result)) != 0) {
+    var result: ?*std.c.addrinfo = null;
+    if (@backingInt(std.c.getaddrinfo(hz.ptr, null, &hints, &result)) != 0) {
         if (builtin.os.tag == .linux and !builtin.abi.isAndroid()) _ = stdlib.libc.__res_init();
         return;
     }
-    defer if (result) |r| stdlib.libc.freeaddrinfo(r);
+    defer if (result) |r| std.c.freeaddrinfo(r);
 
     var rp = result;
     while (rp) |ai| : (rp = ai.next) {
@@ -350,7 +347,7 @@ pub fn hostedAt(a: std.mem.Allocator, hostname: []const u8, addrs: *std.ArrayLis
 pub fn getLocalIpAndPort(a: std.mem.Allocator, sock: Socket, ip: *[]const u8, port: *c_int) error{OutOfMemory}!void {
     var addr: SockaddrStorage = .{};
     var len: u32 = @sizeOf(SockaddrStorage);
-    if (stdlib.libc.getsockname(sock, @ptrCast(&addr), &len) == 0) _ = try getIpAndPort(a, &addr, len, ip, port);
+    if (std.c.getsockname(sock, @ptrCast(&addr), &len) == 0) _ = try getIpAndPort(a, &addr, len, ip, port);
 }
 
 /// Ports `get_remote_ip_and_port` (httplib.cpp:2864 @b1b770d90). A Unix
@@ -359,7 +356,7 @@ pub fn getLocalIpAndPort(a: std.mem.Allocator, sock: Socket, ip: *[]const u8, po
 pub fn getRemoteIpAndPort(a: std.mem.Allocator, sock: Socket, ip: *[]const u8, port: *c_int) error{OutOfMemory}!void {
     var addr: SockaddrStorage = .{};
     var len: u32 = @sizeOf(SockaddrStorage);
-    if (stdlib.libc.getpeername(sock, @ptrCast(&addr), &len) == 0) {
+    if (std.c.getpeername(sock, @ptrCast(&addr), &len) == 0) {
         if (addr.family() == k.AF_UNIX) return;
         _ = try getIpAndPort(a, &addr, len, ip, port);
     }
@@ -414,7 +411,7 @@ pub fn createSocket(
     socket_options: ?SocketOptions,
     bind_or_connect: BindOrConnect,
 ) Socket {
-    var hints: AddrInfo = std.mem.zeroes(AddrInfo);
+    var hints: std.c.addrinfo = std.mem.zeroes(std.c.addrinfo);
     hints.socktype = k.SOCK_STREAM;
     hints.protocol = 0; // IPPROTO_IP
     var node: ?[*:0]const u8 = null;
@@ -432,7 +429,7 @@ pub fn createSocket(
     if (hints.family == k.AF_UNIX) {
         const addrlen = host.len;
         if (addrlen > k.sun_path_len) return invalid_socket;
-        var sock = stdlib.libc.socket(@intCast(hints.family), @intCast(hints.socktype | (k.SOCK_CLOEXEC orelse 0)), @intCast(hints.protocol));
+        var sock = std.c.socket(@intCast(hints.family), @intCast(hints.socktype | (k.SOCK_CLOEXEC orelse 0)), @intCast(hints.protocol));
         if (sock != invalid_socket) {
             // sockaddr_un: Darwin leads with a length byte
             var addr: [2 + k.sun_path_len]u8 align(8) = @splat(0);
@@ -443,7 +440,7 @@ pub fn createSocket(
             }
             unescapeAbstractNamespaceUnixDomain(addr[2..], host);
             const len: u32 = @intCast(2 + addrlen);
-            if (k.SOCK_CLOEXEC == null) _ = stdlib.libc.fcntl(sock, k.F_SETFD, k.FD_CLOEXEC);
+            if (k.SOCK_CLOEXEC == null) _ = std.c.fcntl(sock, k.F_SETFD, k.FD_CLOEXEC);
             if (socket_options) |so| so.call(sock);
             var dummy = false;
             if (!bind_or_connect.func(bind_or_connect.ctx, sock, &addr, len, &dummy)) {
@@ -460,16 +457,16 @@ pub fn createSocket(
     }).len;
     const service: [:0]const u8 = service_buf[0..service_len :0];
 
-    var result: ?*AddrInfo = null;
-    if (@backingInt(stdlib.libc.getaddrinfo(node, service.ptr, &hints, &result)) != 0) return invalid_socket;
-    defer if (result) |r| stdlib.libc.freeaddrinfo(r);
+    var result: ?*std.c.addrinfo = null;
+    if (@backingInt(std.c.getaddrinfo(node, service.ptr, &hints, &result)) != 0) return invalid_socket;
+    defer if (result) |r| std.c.freeaddrinfo(r);
 
     var rp = result;
     while (rp) |ai| : (rp = ai.next) {
-        const sock = stdlib.libc.socket(@intCast(ai.family), @intCast(ai.socktype | (k.SOCK_CLOEXEC orelse 0)), @intCast(ai.protocol));
+        const sock = std.c.socket(@intCast(ai.family), @intCast(ai.socktype | (k.SOCK_CLOEXEC orelse 0)), @intCast(ai.protocol));
         if (sock == invalid_socket) continue;
         if (k.SOCK_CLOEXEC == null) {
-            if (stdlib.libc.fcntl(sock, k.F_SETFD, k.FD_CLOEXEC) == -1) {
+            if (std.c.fcntl(sock, k.F_SETFD, k.FD_CLOEXEC) == -1) {
                 _ = closeSocket(sock);
                 continue;
             }
@@ -487,8 +484,8 @@ pub fn createSocket(
 
 /// `::bind` then `::listen`, as `create_server_socket`'s lambda does.
 pub fn bindAndListen(sock: Socket, addr: ?*const anyopaque, addrlen: u32, backlog: c_uint) error{ Bind, Listen }!void {
-    if (stdlib.libc.bind(sock, @ptrCast(@alignCast(addr)), addrlen) != 0) return error.Bind;
-    if (stdlib.libc.listen(sock, backlog) != 0) return error.Listen;
+    if (std.c.bind(sock, @ptrCast(@alignCast(addr)), addrlen) != 0) return error.Bind;
+    if (std.c.listen(sock, backlog) != 0) return error.Listen;
 }
 
 /// The port a bound socket listens on, as `bind_internal` reads it.
@@ -497,7 +494,7 @@ pub fn bindAndListen(sock: Socket, addr: ?*const anyopaque, addrlen: u32, backlo
 pub fn boundPort(sock: Socket) error{ GetSockName, UnsupportedAddressFamily }!c_int {
     var addr: SockaddrStorage = .{};
     var len: u32 = @sizeOf(SockaddrStorage);
-    if (stdlib.libc.getsockname(sock, @ptrCast(&addr), &len) == -1) return error.GetSockName;
+    if (std.c.getsockname(sock, @ptrCast(&addr), &len) == -1) return error.GetSockName;
     const fam = addr.family();
     if (fam == k.AF_INET or fam == k.AF_INET6) return addr.port();
     return error.UnsupportedAddressFamily;

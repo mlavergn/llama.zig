@@ -406,33 +406,33 @@ inline fn tableLut(table: *const [16]i8) ggml.cpu.quants.arch.avx2.m256i {
 }
 
 /// Ports `ggml_gemv_q4_0_8x8_q8_0` (arch/x86/repack.cpp:1448 @b1b770d90).
-pub export fn ggml_gemv_q4_0_8x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemv_q4_0_8x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     gemvLut(ggml.cpu.repack.blocks.block_q4_0x8, n, s, bs, vx, vy, nr, nc, q4_0Lut());
 }
 
 /// Ports `ggml_gemv_iq4_nl_8x8_q8_0` (arch/x86/repack.cpp:1687 @b1b770d90).
-pub export fn ggml_gemv_iq4_nl_8x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
-    gemvLut(ggml.cpu.repack.blocks.block_iq4_nlx8, n, s, bs, vx, vy, nr, nc, tableLut(&ggml.impl.c.kvalues_iq4nl));
+pub fn ggml_gemv_iq4_nl_8x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+    gemvLut(ggml.cpu.repack.blocks.block_iq4_nlx8, n, s, bs, vx, vy, nr, nc, tableLut(&ggml.impl.ggml_c.kvalues_iq4nl));
 }
 
 /// Ports `ggml_gemv_mxfp4_8x8_q8_0` (arch/x86/repack.cpp:1700 @b1b770d90).
-pub export fn ggml_gemv_mxfp4_8x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
-    gemvLut(ggml.cpu.repack.blocks.block_mxfp4x8, n, s, bs, vx, vy, nr, nc, tableLut(&ggml.impl.c.kvalues_mxfp4));
+pub fn ggml_gemv_mxfp4_8x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+    gemvLut(ggml.cpu.repack.blocks.block_mxfp4x8, n, s, bs, vx, vy, nr, nc, tableLut(&ggml.impl.ggml_c.kvalues_mxfp4));
 }
 
 /// Ports `ggml_gemm_q4_0_8x8_q8_0` (arch/x86/repack.cpp:2026 @b1b770d90).
-pub export fn ggml_gemm_q4_0_8x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemm_q4_0_8x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     gemmLut(ggml.cpu.repack.blocks.block_q4_0x8, n, s, bs, vx, vy, nr, nc, q4_0Lut());
 }
 
 /// Ports `ggml_gemm_iq4_nl_8x8_q8_0` (arch/x86/repack.cpp:3496 @b1b770d90).
-pub export fn ggml_gemm_iq4_nl_8x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
-    gemmLut(ggml.cpu.repack.blocks.block_iq4_nlx8, n, s, bs, vx, vy, nr, nc, tableLut(&ggml.impl.c.kvalues_iq4nl));
+pub fn ggml_gemm_iq4_nl_8x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+    gemmLut(ggml.cpu.repack.blocks.block_iq4_nlx8, n, s, bs, vx, vy, nr, nc, tableLut(&ggml.impl.ggml_c.kvalues_iq4nl));
 }
 
 /// Ports `ggml_gemm_mxfp4_8x8_q8_0` (arch/x86/repack.cpp:3511 @b1b770d90).
-pub export fn ggml_gemm_mxfp4_8x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
-    gemmLut(ggml.cpu.repack.blocks.block_mxfp4x8, n, s, bs, vx, vy, nr, nc, tableLut(&ggml.impl.c.kvalues_mxfp4));
+pub fn ggml_gemm_mxfp4_8x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+    gemmLut(ggml.cpu.repack.blocks.block_mxfp4x8, n, s, bs, vx, vy, nr, nc, tableLut(&ggml.impl.ggml_c.kvalues_mxfp4));
 }
 
 // -----------------------------------------------------------------------------

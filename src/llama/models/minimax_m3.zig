@@ -113,15 +113,15 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
 /// reads, and the bias that forces the local blocks.
 const InpMsa = struct {
     /// F32 `[nblk, n_tokens]`: the local-force bias, over position blocks.
-    bias: ?*llama.impl.c.ggml_tensor = null,
+    bias: ?*llama.impl.llama_c.ggml_tensor = null,
     /// F32 `[n_ps, n_tokens]`: 0/-inf visibility, by position.
-    pos_mask: ?*llama.impl.c.ggml_tensor = null,
+    pos_mask: ?*llama.impl.llama_c.ggml_tensor = null,
     /// I32 `[n_ps, ns]`: position to cell, a `get_rows` index.
-    pos_slot_i: ?*llama.impl.c.ggml_tensor = null,
+    pos_slot_i: ?*llama.impl.llama_c.ggml_tensor = null,
     /// F32 `[n_ps, ns]`: position to cell as gatherable values, at decode.
-    pos_slot_f: ?*llama.impl.c.ggml_tensor = null,
+    pos_slot_f: ?*llama.impl.llama_c.ggml_tensor = null,
     /// I32 `[n_kv, ns]`: cell to position block, for a batch.
-    cell_blk: ?*llama.impl.c.ggml_tensor = null,
+    cell_blk: ?*llama.impl.llama_c.ggml_tensor = null,
 
     mctx: *const llama.kv_cache_msa.MsaContext,
 
@@ -154,7 +154,7 @@ const InpMsa = struct {
                     }
                 }
             }
-            llama.impl.c.ggml_backend_tensor_set(bias, data.ptr, 0, data.len * @sizeOf(f32));
+            llama.impl.llama_c.ggml_backend_tensor_set(bias, data.ptr, 0, data.len * @sizeOf(f32));
         }
     }
 
@@ -212,7 +212,7 @@ const InpMsa = struct {
 /// - `q_cur`: `[D, HQ, T]`.
 /// - `k`, `v`: `[D, n_keys, 1, C]`.
 /// - `mask`: `[n_keys, R, 1, C]`, F16 and contiguous.
-fn buildAttnMsaFa(b: *const llama.graph.Builder, q_cur: *llama.impl.c.ggml_tensor, k: *llama.impl.c.ggml_tensor, v: *llama.impl.c.ggml_tensor, mask: *llama.impl.c.ggml_tensor, Gp: i64, kq_scale: f32, il: c_int) *llama.impl.c.ggml_tensor {
+fn buildAttnMsaFa(b: *const llama.graph.Builder, q_cur: *llama.impl.llama_c.ggml_tensor, k: *llama.impl.llama_c.ggml_tensor, v: *llama.impl.llama_c.ggml_tensor, mask: *llama.impl.llama_c.ggml_tensor, Gp: i64, kq_scale: f32, il: c_int) *llama.impl.llama_c.ggml_tensor {
     const ctx = b.ctx0;
 
     const D = q_cur.ne[0];
@@ -221,25 +221,25 @@ fn buildAttnMsaFa(b: *const llama.graph.Builder, q_cur: *llama.impl.c.ggml_tenso
     const C = k.ne[3];
     const R = @divTrunc(HQ * T, Gp * C);
     llama.impl.assert(Gp * C * R == HQ * T, "models/minimax-m3.cpp", 188, "Gp*C*R == HQ*T");
-    llama.impl.assert(mask.type == llama.impl.c.GGML_TYPE_F16, "models/minimax-m3.cpp", 189, "mask->type == GGML_TYPE_F16");
+    llama.impl.assert(mask.type == llama.impl.llama_c.GGML_TYPE_F16, "models/minimax-m3.cpp", 189, "mask->type == GGML_TYPE_F16");
 
     // [D, HQ, T] -> [D, Gp, C, R] -> [D, R, Gp, C]
     // batch  (C = HKV,    R = T): channel = group
     // decode (C = HKV*ns, R = 1): channel = (group, stream), group innermost
-    var q: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_4d(ctx, q_cur, D, Gp, C, R);
-    q = llama.impl.c.ggml_permute(ctx, q, 0, 2, 3, 1);
+    var q: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_reshape_4d(ctx, q_cur, D, Gp, C, R);
+    q = llama.impl.llama_c.ggml_permute(ctx, q, 0, 2, 3, 1);
 
-    var o: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_flash_attn_ext(ctx, q, k, v, mask, kq_scale, b.hparams.f_max_alibi_bias, 0.0);
-    _ = llama.impl.c.ggml_prec_set_acc(o, llama.impl.c.GGML_PREC_F32);
+    var o: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_flash_attn_ext(ctx, q, k, v, mask, kq_scale, b.hparams.f_max_alibi_bias, 0.0);
+    _ = llama.impl.llama_c.ggml_prec_set_acc(o, llama.impl.llama_c.GGML_PREC_F32);
     b.cb(o, "msa_fattn", il);
 
     // [D, Gp, R, C] -> [D, Gp, C, R] -> [n_embd, T]
-    o = llama.impl.c.ggml_permute(ctx, o, 0, 1, 3, 2);
-    if (!llama.impl.c.ggml_is_contiguous(o)) {
+    o = llama.impl.llama_c.ggml_permute(ctx, o, 0, 1, 3, 2);
+    if (!llama.impl.llama_c.ggml_is_contiguous(o)) {
         // A no-op layout at decode (R == 1), a copy for a batch.
-        o = llama.impl.c.ggml_cont(ctx, o);
+        o = llama.impl.llama_c.ggml_cont(ctx, o);
     }
-    return llama.impl.c.ggml_reshape_2d(ctx, o, D * HQ, T);
+    return llama.impl.llama_c.ggml_reshape_2d(ctx, o, D * HQ, T);
 }
 
 /// Whether the warning that MSA is off without flash attention has been
@@ -296,7 +296,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 
     // The per-graph MSA state, shared by every sparse layer.
     var msa: ?*InpMsa = null;
-    var msa_mf: ?*llama.impl.c.ggml_tensor = null; // an F32 copy of the FA mask, for the final mask add
+    var msa_mf: ?*llama.impl.llama_c.ggml_tensor = null; // an F32 copy of the FA mask, for the final mask add
     var n_kv: i64 = 0;
     var n_ps: i64 = 0;
     var nblk: i64 = 0;
@@ -315,7 +315,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         n_kv = msa_kqm.ne[0];
         n_tps = msa_kqm.ne[1]; // tokens per stream
         ns = msa_kqm.ne[3]; // streams in this ubatch
-        llama.impl.assert(msa_kqm.type == llama.impl.c.GGML_TYPE_F16, "models/minimax-m3.cpp", 269, "msa_kqm->type == GGML_TYPE_F16 && \"MSA requires the FA (f16) mask\"");
+        llama.impl.assert(msa_kqm.type == llama.impl.llama_c.GGML_TYPE_F16, "models/minimax-m3.cpp", 269, "msa_kqm->type == GGML_TYPE_F16 && \"MSA requires the FA (f16) mask\"");
         llama.impl.assert(n_tps * ns == n_tokens, "models/minimax-m3.cpp", 270, "n_tps*ns == n_tokens");
 
         // The position axis covers every position in the cache, padded to
@@ -328,23 +328,23 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         inp.* = .{ .mctx = mctx_msa, .blk = blk, .local = local };
 
         // Stream-grouped tokens.
-        inp.bias = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_F32, nblk, n_tokens);
-        llama.impl.c.ggml_set_input(inp.bias);
+        inp.bias = llama.impl.llama_c.ggml_new_tensor_2d(ctx, llama.impl.llama_c.GGML_TYPE_F32, nblk, n_tokens);
+        llama.impl.llama_c.ggml_set_input(inp.bias);
 
-        inp.pos_mask = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_F32, n_ps, n_tokens);
-        llama.impl.c.ggml_set_input(inp.pos_mask);
+        inp.pos_mask = llama.impl.llama_c.ggml_new_tensor_2d(ctx, llama.impl.llama_c.GGML_TYPE_F32, n_ps, n_tokens);
+        llama.impl.llama_c.ggml_set_input(inp.pos_mask);
 
-        inp.pos_slot_i = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_I32, n_ps, ns);
-        llama.impl.c.ggml_set_input(inp.pos_slot_i);
+        inp.pos_slot_i = llama.impl.llama_c.ggml_new_tensor_2d(ctx, llama.impl.llama_c.GGML_TYPE_I32, n_ps, ns);
+        llama.impl.llama_c.ggml_set_input(inp.pos_slot_i);
 
         if (msa_decode) {
-            inp.pos_slot_f = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_F32, n_ps, ns);
-            llama.impl.c.ggml_set_input(inp.pos_slot_f);
+            inp.pos_slot_f = llama.impl.llama_c.ggml_new_tensor_2d(ctx, llama.impl.llama_c.GGML_TYPE_F32, n_ps, ns);
+            llama.impl.llama_c.ggml_set_input(inp.pos_slot_f);
         } else {
-            inp.cell_blk = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_I32, n_kv, ns);
-            llama.impl.c.ggml_set_input(inp.cell_blk);
+            inp.cell_blk = llama.impl.llama_c.ggml_new_tensor_2d(ctx, llama.impl.llama_c.GGML_TYPE_I32, n_kv, ns);
+            llama.impl.llama_c.ggml_set_input(inp.cell_blk);
 
-            msa_mf = llama.impl.c.ggml_cast(ctx, msa_kqm, llama.impl.c.GGML_TYPE_F32);
+            msa_mf = llama.impl.llama_c.ggml_cast(ctx, msa_kqm, llama.impl.llama_c.GGML_TYPE_F32);
         }
 
         msa = b.res.addInput(InpMsa, inp);
@@ -356,7 +356,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
         var inpSA = inpL;
-        var cur: *llama.impl.c.ggml_tensor = undefined;
+        var cur: *llama.impl.llama_c.ggml_tensor = undefined;
 
         // Self-attention.
         {
@@ -393,8 +393,8 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
                 // The index branch: project, norm, partial RoPE, cache.
                 var iq = b.buildLoraMm(layer.index_q_proj.?, cur, null);
                 var ik = b.buildLoraMm(layer.index_k_proj.?, cur, null);
-                iq = llama.impl.c.ggml_reshape_3d(ctx, iq, n_idx_dim, Hd, n_tokens);
-                ik = llama.impl.c.ggml_reshape_3d(ctx, ik, n_idx_dim, 1, n_tokens);
+                iq = llama.impl.llama_c.ggml_reshape_3d(ctx, iq, n_idx_dim, Hd, n_tokens);
+                ik = llama.impl.llama_c.ggml_reshape_3d(ctx, ik, n_idx_dim, 1, n_tokens);
                 iq = b.buildNorm(iq, layer.index_q_norm, null, .rms, il); // the +1 is baked in
                 ik = b.buildNorm(ik, layer.index_k_norm, null, .rms, il);
                 iq = b.buildRope(iq, inp_pos, il);
@@ -403,7 +403,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
                 const mctx_msa_l = b.mctx.?.cast(llama.kv_cache_msa.MsaContext);
                 const mctx_cur = mctx_msa_l.getBase();
                 const mctx_idx = mctx_msa_l.getIdx();
-                llama.impl.c.ggml_build_forward_expand(b.gf, mctx_idx.cpyK(ctx, ik, inp_attn.getKIdxsIdx(), il));
+                llama.impl.llama_c.ggml_build_forward_expand(b.gf, mctx_idx.cpyK(ctx, ik, inp_attn.getKIdxsIdx(), il));
                 const ik_kv = mctx_idx.getK(ctx, il);
 
                 if (inp_attn.base.self_k_rot[@intCast(il)]) |r| {
@@ -415,11 +415,11 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
                 }
 
                 // The main branch: store K and V, take the cache views.
-                llama.impl.c.ggml_build_forward_expand(b.gf, Qcur);
-                llama.impl.c.ggml_build_forward_expand(b.gf, Kcur);
-                llama.impl.c.ggml_build_forward_expand(b.gf, Vcur);
-                llama.impl.c.ggml_build_forward_expand(b.gf, mctx_cur.cpyK(ctx, Kcur, inp_attn.base.getKIdxs(), il));
-                llama.impl.c.ggml_build_forward_expand(b.gf, mctx_cur.cpyV(ctx, Vcur, inp_attn.base.getVIdxs(), il));
+                llama.impl.llama_c.ggml_build_forward_expand(b.gf, Qcur);
+                llama.impl.llama_c.ggml_build_forward_expand(b.gf, Kcur);
+                llama.impl.llama_c.ggml_build_forward_expand(b.gf, Vcur);
+                llama.impl.llama_c.ggml_build_forward_expand(b.gf, mctx_cur.cpyK(ctx, Kcur, inp_attn.base.getKIdxs(), il));
+                llama.impl.llama_c.ggml_build_forward_expand(b.gf, mctx_cur.cpyV(ctx, Vcur, inp_attn.base.getVIdxs(), il));
                 const k = mctx_cur.getK(ctx, il);
                 const v = mctx_cur.getV(ctx, il);
                 llama.impl.assert(!(v.nb[1] > v.nb[2]), "models/minimax-m3.cpp", 369, "!(v->nb[1] > v->nb[2]) && \"MSA assumes v_trans=false (FA on)\"");
@@ -439,130 +439,130 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
                     // Decode: top-k and gather batched over the streams,
                     // then one grouped flash attention.
                     // Gather the indexer keys through the position-to-cell map.
-                    const ik3: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, ik_kv, n_idx_dim, n_kv, ns, ik_kv.nb[2], ik_kv.nb[3], 0);
-                    const ikp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_get_rows(ctx, ik3, m.pos_slot_i); // [n_idx_dim, n_ps, ns]
-                    const iq4: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_4d(ctx, iq, n_idx_dim, Hd, 1, ns);
-                    var sc: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, llama.impl.c.ggml_reshape_4d(ctx, ikp, n_idx_dim, n_ps, 1, ns), iq4);
+                    const ik3: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, ik_kv, n_idx_dim, n_kv, ns, ik_kv.nb[2], ik_kv.nb[3], 0);
+                    const ikp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_get_rows(ctx, ik3, m.pos_slot_i); // [n_idx_dim, n_ps, ns]
+                    const iq4: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_reshape_4d(ctx, iq, n_idx_dim, Hd, 1, ns);
+                    var sc: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_mul_mat(ctx, llama.impl.llama_c.ggml_reshape_4d(ctx, ikp, n_idx_dim, n_ps, 1, ns), iq4);
                     // The reference computes the indexer scores in F32:
                     // https://github.com/huggingface/transformers/blob/0f53828e83f2212060233d2ea552cc76617b8712/src/transformers/models/minimax_m3_vl/modeling_minimax_m3_vl.py#L562
-                    _ = llama.impl.c.ggml_prec_set_acc(sc, llama.impl.c.GGML_PREC_F32);
+                    _ = llama.impl.llama_c.ggml_prec_set_acc(sc, llama.impl.llama_c.GGML_PREC_F32);
                     // Unmapped positions come out -inf, so they can never
                     // rank into the top-k.
-                    sc = llama.impl.c.ggml_add_inplace(ctx, sc, llama.impl.c.ggml_reshape_4d(ctx, m.pos_mask, n_ps, 1, 1, ns));
-                    const bs: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_pool_2d(ctx, sc, llama.impl.c.GGML_OP_POOL_MAX, blk, 1, blk, 1, 0, 0);
+                    sc = llama.impl.llama_c.ggml_add_inplace(ctx, sc, llama.impl.llama_c.ggml_reshape_4d(ctx, m.pos_mask, n_ps, 1, 1, ns));
+                    const bs: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_pool_2d(ctx, sc, llama.impl.llama_c.GGML_OP_POOL_MAX, blk, 1, blk, 1, 0, 0);
                     b.cb(bs, "msa_bs", il);
 
-                    const bsf: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, bs, llama.impl.c.ggml_reshape_4d(ctx, m.bias, nblk, 1, 1, ns));
-                    const idx: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_top_k(ctx, bsf, K); // position blocks
+                    const bsf: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, bs, llama.impl.llama_c.ggml_reshape_4d(ctx, m.bias, nblk, 1, 1, ns));
+                    const idx: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_top_k(ctx, bsf, K); // position blocks
 
                     // position index: tj[t,k,h,s] = blk*idx[k,h,s] + t   (positions, the mask gather)
                     // cell index:     cs[t,k,h,s] = pos_slot[tj]         (position to cell)
                     // row index:      tr[t,k,h,s] = cs*HKV + h           (per-stream K/V gather)
-                    var a: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_scale(ctx, llama.impl.c.ggml_cast(ctx, idx, llama.impl.c.GGML_TYPE_F32), @floatFromInt(blk));
-                    a = llama.impl.c.ggml_reshape_4d(ctx, a, 1, K64, Hd, ns);
-                    const tj_rep: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_repeat_4d(ctx, a, blk64, K64, Hd, ns);
-                    const tj: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, tj_rep, llama.impl.c.ggml_reshape_3d(ctx, llama.impl.c.ggml_arange(ctx, 0.0, @floatFromInt(blk), 1.0), blk64, 1, 1));
+                    var a: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_scale(ctx, llama.impl.llama_c.ggml_cast(ctx, idx, llama.impl.llama_c.GGML_TYPE_F32), @floatFromInt(blk));
+                    a = llama.impl.llama_c.ggml_reshape_4d(ctx, a, 1, K64, Hd, ns);
+                    const tj_rep: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_repeat_4d(ctx, a, blk64, K64, Hd, ns);
+                    const tj: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, tj_rep, llama.impl.llama_c.ggml_reshape_3d(ctx, llama.impl.llama_c.ggml_arange(ctx, 0.0, @floatFromInt(blk), 1.0), blk64, 1, 1));
 
-                    const tokj: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cast(ctx, llama.impl.c.ggml_reshape_2d(ctx, tj, blk64 * K64 * Hd, ns), llama.impl.c.GGML_TYPE_I32);
+                    const tokj: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_cast(ctx, llama.impl.llama_c.ggml_reshape_2d(ctx, tj, blk64 * K64 * Hd, ns), llama.impl.llama_c.GGML_TYPE_I32);
 
-                    var cs: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_get_rows(ctx, llama.impl.c.ggml_reshape_3d(ctx, m.pos_slot_f, 1, n_ps, ns), tokj); // [1, blk*K*Hd, ns]
-                    cs = llama.impl.c.ggml_reshape_4d(ctx, cs, blk64, K64, Hd, ns);
+                    var cs: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_get_rows(ctx, llama.impl.llama_c.ggml_reshape_3d(ctx, m.pos_slot_f, 1, n_ps, ns), tokj); // [1, blk*K*Hd, ns]
+                    cs = llama.impl.llama_c.ggml_reshape_4d(ctx, cs, blk64, K64, Hd, ns);
 
-                    const cs_scaled: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_scale(ctx, cs, @floatFromInt(HKV));
-                    const tr: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cs_scaled, llama.impl.c.ggml_reshape_3d(ctx, llama.impl.c.ggml_arange(ctx, 0.0, @floatFromInt(HKV), 1.0), 1, 1, Hd));
+                    const cs_scaled: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_scale(ctx, cs, @floatFromInt(HKV));
+                    const tr: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cs_scaled, llama.impl.llama_c.ggml_reshape_3d(ctx, llama.impl.llama_c.ggml_arange(ctx, 0.0, @floatFromInt(HKV), 1.0), 1, 1, Hd));
 
-                    const tokr: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cast(ctx, llama.impl.c.ggml_reshape_2d(ctx, tr, blk64 * K64 * Hd, ns), llama.impl.c.GGML_TYPE_I32);
+                    const tokr: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_cast(ctx, llama.impl.llama_c.ggml_reshape_2d(ctx, tr, blk64 * K64 * Hd, ns), llama.impl.llama_c.GGML_TYPE_I32);
 
-                    const k3: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, k, D, HKV * n_kv, ns, k.nb[1], k.nb[3], 0);
-                    const v3: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, v, D, HKV * n_kv, ns, v.nb[1], v.nb[3], 0);
-                    const mp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_3d(ctx, m.pos_mask, 1, n_ps, ns);
+                    const k3: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, k, D, HKV * n_kv, ns, k.nb[1], k.nb[3], 0);
+                    const v3: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, v, D, HKV * n_kv, ns, v.nb[1], v.nb[3], 0);
+                    const mp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_reshape_3d(ctx, m.pos_mask, 1, n_ps, ns);
 
-                    const kg: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_get_rows(ctx, k3, tokr);
-                    const vg: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_get_rows(ctx, v3, tokr);
-                    const mg: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_get_rows(ctx, mp, tokj);
+                    const kg: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_get_rows(ctx, k3, tokr);
+                    const vg: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_get_rows(ctx, v3, tokr);
+                    const mg: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_get_rows(ctx, mp, tokj);
 
                     // Fold (group, stream) onto the FA channel dimension.
-                    const kt: llama.impl.c.enum_ggml_type = if (llama.impl.c.ggml_is_quantized(k.type)) llama.impl.c.GGML_TYPE_F16 else k.type;
-                    const vt: llama.impl.c.enum_ggml_type = if (llama.impl.c.ggml_is_quantized(v.type)) llama.impl.c.GGML_TYPE_F16 else v.type;
-                    var kfa: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_4d(ctx, kg, D, blk64 * K64, 1, Hd * ns);
-                    var vfa: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_4d(ctx, vg, D, blk64 * K64, 1, Hd * ns);
-                    if (kfa.type != kt) kfa = llama.impl.c.ggml_cast(ctx, kfa, kt);
-                    if (vfa.type != vt) vfa = llama.impl.c.ggml_cast(ctx, vfa, vt);
+                    const kt: llama.impl.llama_c.enum_ggml_type = if (llama.impl.llama_c.ggml_is_quantized(k.type)) llama.impl.llama_c.GGML_TYPE_F16 else k.type;
+                    const vt: llama.impl.llama_c.enum_ggml_type = if (llama.impl.llama_c.ggml_is_quantized(v.type)) llama.impl.llama_c.GGML_TYPE_F16 else v.type;
+                    var kfa: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_reshape_4d(ctx, kg, D, blk64 * K64, 1, Hd * ns);
+                    var vfa: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_reshape_4d(ctx, vg, D, blk64 * K64, 1, Hd * ns);
+                    if (kfa.type != kt) kfa = llama.impl.llama_c.ggml_cast(ctx, kfa, kt);
+                    if (vfa.type != vt) vfa = llama.impl.llama_c.ggml_cast(ctx, vfa, vt);
                     // The FA mask must be F16.
-                    const mfa: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cast(ctx, llama.impl.c.ggml_reshape_4d(ctx, mg, blk64 * K64, 1, 1, Hd * ns), llama.impl.c.GGML_TYPE_F16);
+                    const mfa: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_cast(ctx, llama.impl.llama_c.ggml_reshape_4d(ctx, mg, blk64 * K64, 1, 1, Hd * ns), llama.impl.llama_c.GGML_TYPE_F16);
 
                     cur = buildAttnMsaFa(b, Qcur, kfa, vfa, mfa, Gp, kq_scale, il);
                 } else {
                     // A batch: a loop over the streams.
-                    const outs = std.heap.c_allocator.alloc(*llama.impl.c.ggml_tensor, @intCast(ns)) catch llama.impl.abort("models/minimax-m3.cpp", 443, "out of memory");
+                    const outs = std.heap.c_allocator.alloc(*llama.impl.llama_c.ggml_tensor, @intCast(ns)) catch llama.impl.abort("models/minimax-m3.cpp", 443, "out of memory");
                     defer std.heap.c_allocator.free(outs);
                     const mf = msa_mf.?;
                     var st: i64 = 0;
                     while (st < ns) : (st += 1) {
                         const stu: u64 = @intCast(st);
                         const tps: u64 = @intCast(n_tps);
-                        const iq_s: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, iq, n_idx_dim, Hd, n_tps, iq.nb[1], iq.nb[2], stu * tps * iq.nb[2]);
-                        const ik_s: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, ik_kv, n_idx_dim, n_kv, ik_kv.nb[2], stu * ik_kv.nb[3]);
-                        const psl_s: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_1d(ctx, m.pos_slot_i, n_ps, stu * m.pos_slot_i.?.nb[1]);
-                        const pm_s: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, m.pos_mask, n_ps, 1, n_tps, m.pos_mask.?.nb[1], m.pos_mask.?.nb[1], stu * tps * m.pos_mask.?.nb[1]);
-                        const cb_s: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_1d(ctx, m.cell_blk, n_kv, stu * m.cell_blk.?.nb[1]);
-                        const mf_s: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, mf, n_kv, n_tps, 1, mf.nb[1], mf.nb[3], stu * mf.nb[3]);
-                        const bias_s: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, m.bias, nblk, 1, n_tps, m.bias.?.nb[1], m.bias.?.nb[1], stu * tps * m.bias.?.nb[1]);
-                        const q_s: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, Qcur, D, b.n_head, n_tps, Qcur.nb[1], Qcur.nb[2], stu * tps * Qcur.nb[2]);
-                        const k_s: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_4d(ctx, k, D, HKV, n_kv, 1, k.nb[1], k.nb[2], k.nb[3], stu * k.nb[3]);
-                        const v_s: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_4d(ctx, v, D, HKV, n_kv, 1, v.nb[1], v.nb[2], v.nb[3], stu * v.nb[3]);
+                        const iq_s: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, iq, n_idx_dim, Hd, n_tps, iq.nb[1], iq.nb[2], stu * tps * iq.nb[2]);
+                        const ik_s: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_2d(ctx, ik_kv, n_idx_dim, n_kv, ik_kv.nb[2], stu * ik_kv.nb[3]);
+                        const psl_s: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_1d(ctx, m.pos_slot_i, n_ps, stu * m.pos_slot_i.?.nb[1]);
+                        const pm_s: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, m.pos_mask, n_ps, 1, n_tps, m.pos_mask.?.nb[1], m.pos_mask.?.nb[1], stu * tps * m.pos_mask.?.nb[1]);
+                        const cb_s: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_1d(ctx, m.cell_blk, n_kv, stu * m.cell_blk.?.nb[1]);
+                        const mf_s: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, mf, n_kv, n_tps, 1, mf.nb[1], mf.nb[3], stu * mf.nb[3]);
+                        const bias_s: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, m.bias, nblk, 1, n_tps, m.bias.?.nb[1], m.bias.?.nb[1], stu * tps * m.bias.?.nb[1]);
+                        const q_s: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, Qcur, D, b.n_head, n_tps, Qcur.nb[1], Qcur.nb[2], stu * tps * Qcur.nb[2]);
+                        const k_s: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_4d(ctx, k, D, HKV, n_kv, 1, k.nb[1], k.nb[2], k.nb[3], stu * k.nb[3]);
+                        const v_s: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_4d(ctx, v, D, HKV, n_kv, 1, v.nb[1], v.nb[2], v.nb[3], stu * v.nb[3]);
 
                         // Block scores: the indexer keys are gathered
                         // through the position-to-cell map first. They are
                         // unscaled; only the top-k order matters.
-                        const ikp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_get_rows(ctx, ik_s, psl_s); // [n_idx_dim, n_ps]
-                        var sc: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, ikp, llama.impl.c.ggml_reshape_2d(ctx, iq_s, n_idx_dim, Hd * n_tps));
+                        const ikp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_get_rows(ctx, ik_s, psl_s); // [n_idx_dim, n_ps]
+                        var sc: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_mul_mat(ctx, ikp, llama.impl.llama_c.ggml_reshape_2d(ctx, iq_s, n_idx_dim, Hd * n_tps));
                         // The reference computes the indexer scores in F32:
                         // https://github.com/huggingface/transformers/blob/0f53828e83f2212060233d2ea552cc76617b8712/src/transformers/models/minimax_m3_vl/modeling_minimax_m3_vl.py#L562
-                        _ = llama.impl.c.ggml_prec_set_acc(sc, llama.impl.c.GGML_PREC_F32);
-                        sc = llama.impl.c.ggml_reshape_3d(ctx, sc, n_ps, Hd, n_tps);
+                        _ = llama.impl.llama_c.ggml_prec_set_acc(sc, llama.impl.llama_c.GGML_PREC_F32);
+                        sc = llama.impl.llama_c.ggml_reshape_3d(ctx, sc, n_ps, Hd, n_tps);
                         // Unmapped positions (holes, padding, empty cells) come out -inf.
-                        sc = llama.impl.c.ggml_add_inplace(ctx, sc, pm_s);
-                        const bs: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_pool_2d(ctx, sc, llama.impl.c.GGML_OP_POOL_MAX, blk, 1, blk, 1, 0, 0);
+                        sc = llama.impl.llama_c.ggml_add_inplace(ctx, sc, pm_s);
+                        const bs: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_pool_2d(ctx, sc, llama.impl.llama_c.GGML_OP_POOL_MAX, blk, 1, blk, 1, 0, 0);
                         b.cb(bs, "msa_bs", il);
 
                         // Bias the scores so the locally forced blocks always rank first.
-                        const bsf: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, bs, bias_s); // [nblk, Hd, n_tps]
+                        const bsf: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, bs, bias_s); // [nblk, Hd, n_tps]
                         b.cb(bsf, "msa_bsf", il);
 
-                        const idx: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_top_k(ctx, bsf, K); // [K, Hd, n_tps] i32
+                        const idx: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_top_k(ctx, bsf, K); // [K, Hd, n_tps] i32
 
-                        var ninf: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cast(ctx, llama.impl.c.ggml_scale_bias(ctx, bias_s, 0.0, -1e30), llama.impl.c.GGML_TYPE_F16); // [nblk, 1, n_tps]
-                        ninf = llama.impl.c.ggml_repeat_4d(ctx, ninf, nblk, Hd, n_tps, 1);
-                        const zero: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_scale(ctx, llama.impl.c.ggml_cast(ctx, idx, llama.impl.c.GGML_TYPE_F32), 0.0);
-                        const bm_dst: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_3d(ctx, ninf, 1, nblk, Hd * n_tps);
-                        const bm_src: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_3d(ctx, zero, 1, K64, Hd * n_tps);
-                        var bm: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_set_rows(ctx, bm_dst, bm_src, llama.impl.c.ggml_reshape_2d(ctx, idx, K64, Hd * n_tps));
-                        bm = llama.impl.c.ggml_reshape_3d(ctx, bm, nblk, Hd, n_tps);
-                        bm = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_permute(ctx, bm, 0, 2, 1, 3)); // [nblk, n_tps, Hd]
+                        var ninf: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_cast(ctx, llama.impl.llama_c.ggml_scale_bias(ctx, bias_s, 0.0, -1e30), llama.impl.llama_c.GGML_TYPE_F16); // [nblk, 1, n_tps]
+                        ninf = llama.impl.llama_c.ggml_repeat_4d(ctx, ninf, nblk, Hd, n_tps, 1);
+                        const zero: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_scale(ctx, llama.impl.llama_c.ggml_cast(ctx, idx, llama.impl.llama_c.GGML_TYPE_F32), 0.0);
+                        const bm_dst: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_reshape_3d(ctx, ninf, 1, nblk, Hd * n_tps);
+                        const bm_src: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_reshape_3d(ctx, zero, 1, K64, Hd * n_tps);
+                        var bm: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_set_rows(ctx, bm_dst, bm_src, llama.impl.llama_c.ggml_reshape_2d(ctx, idx, K64, Hd * n_tps));
+                        bm = llama.impl.llama_c.ggml_reshape_3d(ctx, bm, nblk, Hd, n_tps);
+                        bm = llama.impl.llama_c.ggml_cont(ctx, llama.impl.llama_c.ggml_permute(ctx, bm, 0, 2, 1, 3)); // [nblk, n_tps, Hd]
                         b.cb(bm, "msa_block_mask", il);
 
                         // Expand blocks to cells through the cell-to-block
                         // map, then combine with the causal mask; empty
                         // cells are masked by the causal mask.
-                        const bm2: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_transpose(ctx, llama.impl.c.ggml_reshape_2d(ctx, bm, nblk, n_tps * Hd))); // [n_tps*Hd, nblk]
-                        const bmc: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_get_rows(ctx, bm2, cb_s); // [n_tps*Hd, n_kv] F32
-                        var bmx: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_transpose(ctx, bmc));
-                        bmx = llama.impl.c.ggml_reshape_3d(ctx, bmx, n_kv, n_tps, Hd);
-                        var mask4: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add_inplace(ctx, bmx, mf_s);
-                        mask4 = llama.impl.c.ggml_cast(ctx, llama.impl.c.ggml_reshape_4d(ctx, mask4, n_kv, n_tps, 1, Hd), llama.impl.c.GGML_TYPE_F16);
+                        const bm2: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_cont(ctx, llama.impl.llama_c.ggml_transpose(ctx, llama.impl.llama_c.ggml_reshape_2d(ctx, bm, nblk, n_tps * Hd))); // [n_tps*Hd, nblk]
+                        const bmc: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_get_rows(ctx, bm2, cb_s); // [n_tps*Hd, n_kv] F32
+                        var bmx: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_cont(ctx, llama.impl.llama_c.ggml_transpose(ctx, bmc));
+                        bmx = llama.impl.llama_c.ggml_reshape_3d(ctx, bmx, n_kv, n_tps, Hd);
+                        var mask4: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add_inplace(ctx, bmx, mf_s);
+                        mask4 = llama.impl.llama_c.ggml_cast(ctx, llama.impl.llama_c.ggml_reshape_4d(ctx, mask4, n_kv, n_tps, 1, Hd), llama.impl.llama_c.GGML_TYPE_F16);
                         b.cb(mask4, "msa_mask4", il);
 
                         // The cache views, with the groups on ne[3].
-                        const kfa: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_permute(ctx, k_s, 0, 3, 1, 2);
-                        const vfa: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_permute(ctx, v_s, 0, 3, 1, 2);
+                        const kfa: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_permute(ctx, k_s, 0, 3, 1, 2);
+                        const vfa: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_permute(ctx, v_s, 0, 3, 1, 2);
 
                         outs[@intCast(st)] = buildAttnMsaFa(b, q_s, kfa, vfa, mask4, Gp, kq_scale, il);
                     }
                     cur = outs[0];
                     st = 1;
                     while (st < ns) : (st += 1) {
-                        cur = llama.impl.c.ggml_concat(ctx, cur, outs[@intCast(st)], 1);
+                        cur = llama.impl.llama_c.ggml_concat(ctx, cur, outs[@intCast(st)], 1);
                     }
                 }
                 if (inp_attn.base.self_v_rot[@intCast(il)]) |r| {
@@ -576,11 +576,11 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         }
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -614,11 +614,11 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             const ffn_shexp = b.buildFfn(cur, layer.ffn_up_shexp, null, layer.ffn_up_shexp_s, layer.ffn_gate_shexp, null, layer.ffn_gate_shexp_s, layer.ffn_down_shexp, null, layer.ffn_down_shexp_s, null, .swiglu_oai_moe, .par, il);
             b.cb(ffn_shexp, "ffn_shexp", il);
 
-            cur = llama.impl.c.ggml_add(ctx, moe_out, ffn_shexp);
+            cur = llama.impl.llama_c.ggml_add(ctx, moe_out, ffn_shexp);
             b.cb(cur, "ffn_out", il);
         }
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

@@ -50,7 +50,7 @@ export var ggml_critical_section_mutex: stdlib.sync.Mutex = .{};
 /// Ports `ggml_critical_section_start` (ggml-threading.cpp:6 @b1b770d90).
 ///
 /// Return: nothing. Blocks until the lock is held.
-export fn ggml_critical_section_start() callconv(.c) void {
+pub fn ggml_critical_section_start() callconv(.c) void {
     // `std::mutex::lock` throws on error; a C ABI has nowhere to put that, and
     // the only documented failures here (deadlock, invalid mutex) are bugs
     // rather than conditions. The C++ would terminate; this returns having not
@@ -61,7 +61,7 @@ export fn ggml_critical_section_start() callconv(.c) void {
 /// Ports `ggml_critical_section_end` (ggml-threading.cpp:10 @b1b770d90).
 ///
 /// Return: nothing.
-export fn ggml_critical_section_end() callconv(.c) void {
+pub fn ggml_critical_section_end() callconv(.c) void {
     ggml_critical_section_mutex.unlock();
 }
 

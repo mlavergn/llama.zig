@@ -136,7 +136,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 
     const inp_out_ids = b.buildInpOutIds();
 
-    var cur: *llama.impl.c.ggml_tensor = undefined;
+    var cur: *llama.impl.llama_c.ggml_tensor = undefined;
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
@@ -155,11 +155,11 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             cur = b.buildAttn(inp_hybrid.getAttn(), layer.wo, null, layer.wo_s, qkv.q, qkv.k, qkv.v, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
         }
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpL = llama.impl.llama_c.ggml_get_rows(ctx, inpL, inp_out_ids);
         }
         // The residual. The C++ names `cur` here, not `ffn_inp`.
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, inpL, cur);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, inpL, cur);
         b.cb(cur, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -187,7 +187,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             b.cb(cur, "ffn_moe_out", il);
         }
         // The residual.
-        cur = llama.impl.c.ggml_add(ctx, ffn_inp, cur);
+        cur = llama.impl.llama_c.ggml_add(ctx, ffn_inp, cur);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

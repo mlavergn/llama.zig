@@ -92,7 +92,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 
     llama.impl.assert(n_embd_head == hp.nEmbdHeadV(0), "models/maple.cpp", 70, "n_embd_head == hparams.n_embd_head_v()");
 
-    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.llama_c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
     const inp_pos = b.buildInpPos();
     const inp_attn = b.buildAttnInpKvIswa();
     const inp_out_ids = b.buildInpOutIds();
@@ -129,11 +129,11 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 
         if (il == b.n_layer - 1) {
             // Skip computing the output of unused tokens.
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -155,7 +155,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         }, il);
         b.cb(cur, "ffn_moe_out", il);
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
 

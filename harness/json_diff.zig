@@ -44,8 +44,6 @@ const json = @import("json");
 
 extern fn ref_json_run(prog: [*]const u8, len: usize, out: *[*]u8) usize;
 
-const Value = json.Value;
-
 const Op = enum(u8) {
     parse = 0,
     parse_nt,
@@ -201,7 +199,7 @@ fn show(o: *Out, x: anytype) void {
 
 /// `float_ub` of the reference: a float an integer `static_cast` cannot
 /// hold, compared only on AArch64.
-fn floatUb(v: *const Value, comptime T: type) bool {
+fn floatUb(v: *const json.Value, comptime T: type) bool {
     if (builtin.cpu.arch == .aarch64) return false;
     if (v.* != .number_float) return false;
     const d = v.number_float;
@@ -210,12 +208,12 @@ fn floatUb(v: *const Value, comptime T: type) bool {
     return !(d > lo - 1.0 and d < hi + 1.0);
 }
 
-fn getInt(o: *Out, v: *const Value, comptime T: type) json.Error!void {
+fn getInt(o: *Out, v: *const json.Value, comptime T: type) json.Error!void {
     if (floatUb(v, T)) return o.add("ub");
     show(o, try v.get(T));
 }
 
-fn getVec(o: *Out, v: *const Value, comptime T: type) json.Error!void {
+fn getVec(o: *Out, v: *const json.Value, comptime T: type) json.Error!void {
     const xs = try v.getSlice(o.gpa, T);
     defer o.gpa.free(xs);
     o.add("[");
@@ -226,14 +224,14 @@ fn getVec(o: *Out, v: *const Value, comptime T: type) json.Error!void {
     o.add("]");
 }
 
-fn anyUb(v: *const Value, comptime T: type) bool {
+fn anyUb(v: *const json.Value, comptime T: type) bool {
     var tmp = v.*;
     var it = tmp.items();
     while (it.next()) |item| if (floatUb(item.value, T)) return true;
     return false;
 }
 
-fn lessEntry(_: void, a: Value.MapEntry(usize), b: Value.MapEntry(usize)) bool {
+fn lessEntry(_: void, a: json.Value.MapEntry(usize), b: json.Value.MapEntry(usize)) bool {
     return switch (std.mem.order(u8, a.key, b.key)) {
         .lt => true,
         .gt => false,
@@ -241,7 +239,7 @@ fn lessEntry(_: void, a: Value.MapEntry(usize), b: Value.MapEntry(usize)) bool {
     };
 }
 
-fn doGet(o: *Out, v: *const Value, t: u8) json.Error!void {
+fn doGet(o: *Out, v: *const json.Value, t: u8) json.Error!void {
     switch (t) {
         0 => show(o, try v.get(bool)),
         1 => try getInt(o, v, c_int),
@@ -277,7 +275,7 @@ fn doGet(o: *Out, v: *const Value, t: u8) json.Error!void {
             if (v.* == .object and anyUb(v, u64)) return o.add("ub");
             const es = try v.getMap(o.gpa, usize);
             defer o.gpa.free(es);
-            std.mem.sort(Value.MapEntry(usize), es, {}, lessEntry);
+            std.mem.sort(json.Value.MapEntry(usize), es, {}, lessEntry);
             o.add("{");
             for (es) |e| {
                 o.add(e.key);
@@ -294,11 +292,11 @@ fn doGet(o: *Out, v: *const Value, t: u8) json.Error!void {
     }
 }
 
-fn dumpSafeInto(o: *Out, v: *const Value) void {
+fn dumpSafeInto(o: *Out, v: *const json.Value) void {
     json.dumpTo(&o.buf, o.gpa, v, .{ .error_handler = .replace }) catch oom();
 }
 
-fn doValue(o: *Out, v: *const Value, key: []const u8, t: u8) json.Error!void {
+fn doValue(o: *Out, v: *const json.Value, key: []const u8, t: u8) json.Error!void {
     switch (t) {
         0 => show(o, try v.value(key, bool, false)),
         1 => show(o, try v.value(key, c_int, -7)),
@@ -313,10 +311,10 @@ fn doValue(o: *Out, v: *const Value, key: []const u8, t: u8) json.Error!void {
             if (v.contains(key)) {
                 dumpSafeInto(o, try v.at(key));
             } else {
-                var def = Value.emptyArray();
+                var def = json.Value.emptyArray();
                 defer def.deinit(o.gpa);
-                try def.pushBack(o.gpa, try Value.from(o.gpa, 1));
-                try def.pushBack(o.gpa, try Value.from(o.gpa, "x"));
+                try def.pushBack(o.gpa, try json.Value.from(o.gpa, 1));
+                try def.pushBack(o.gpa, try json.Value.from(o.gpa, "x"));
                 dumpSafeInto(o, &def);
             }
         },
@@ -324,7 +322,7 @@ fn doValue(o: *Out, v: *const Value, key: []const u8, t: u8) json.Error!void {
     }
 }
 
-fn query(o: *Out, v: *const Value) void {
+fn query(o: *Out, v: *const json.Value) void {
     o.add(if (v.isNull()) "N" else "-");
     o.add(if (v.isObject()) "O" else "-");
     o.add(if (v.isArray()) "A" else "-");
@@ -346,13 +344,13 @@ fn handlerOf(h: u8) json.ErrorHandler {
     };
 }
 
-fn emptyContainer(v: *const Value) bool {
+fn emptyContainer(v: *const json.Value) bool {
     return (v.isArray() or v.isObject()) and v.empty();
 }
 
 /// One operation on the port; the record is opened by the caller and an
 /// error is turned into `E:` there.
-fn step(o: *Out, R: *[8]Value, in: *Reader, op: Op) json.Error!void {
+fn step(o: *Out, R: *[8]json.Value, in: *Reader, op: Op) json.Error!void {
     const a = o.gpa;
     switch (op) {
         .parse => {
@@ -374,40 +372,40 @@ fn step(o: *Out, R: *[8]Value, in: *Reader, op: Op) json.Error!void {
         },
         .set_bool => {
             const r = in.u8_();
-            R[r].assign(a, try Value.from(a, in.u8_() != 0));
+            R[r].assign(a, try json.Value.from(a, in.u8_() != 0));
             o.add("ok");
         },
         .set_int => {
             const r = in.u8_();
-            R[r].assign(a, try Value.from(a, @as(i64, @bitCast(in.u64_()))));
+            R[r].assign(a, try json.Value.from(a, @as(i64, @bitCast(in.u64_()))));
             o.add("ok");
         },
         .set_uint => {
             const r = in.u8_();
-            R[r].assign(a, try Value.from(a, in.u64_()));
+            R[r].assign(a, try json.Value.from(a, in.u64_()));
             o.add("ok");
         },
         .set_double => {
             const r = in.u8_();
-            R[r].assign(a, try Value.from(a, @as(f64, @bitCast(in.u64_()))));
+            R[r].assign(a, try json.Value.from(a, @as(f64, @bitCast(in.u64_()))));
             o.add("ok");
         },
         .set_float => {
             const r = in.u8_();
-            R[r].assign(a, try Value.from(a, @as(f32, @bitCast(in.u32_()))));
+            R[r].assign(a, try json.Value.from(a, @as(f32, @bitCast(in.u32_()))));
             o.add("ok");
         },
         .set_string => {
             const r = in.u8_();
-            R[r].assign(a, try Value.from(a, in.str()));
+            R[r].assign(a, try json.Value.from(a, in.str()));
             o.add("ok");
         },
         .set_array => {
-            R[in.u8_()].assign(a, Value.emptyArray());
+            R[in.u8_()].assign(a, json.Value.emptyArray());
             o.add("ok");
         },
         .set_object => {
-            R[in.u8_()].assign(a, Value.emptyObject());
+            R[in.u8_()].assign(a, json.Value.emptyObject());
             o.add("ok");
         },
         .dump, .dump_safe => {
@@ -521,7 +519,7 @@ fn step(o: *Out, R: *[8]Value, in: *Reader, op: Op) json.Error!void {
             const r = in.u8_();
             const k = in.str();
             const s = in.u8_();
-            var obj = Value.emptyObject();
+            var obj = json.Value.emptyObject();
             try obj.set(a, k, try R[s].clone(a));
             try R[r].pushBack(a, obj);
             o.add("ok");
@@ -558,7 +556,7 @@ fn step(o: *Out, R: *[8]Value, in: *Reader, op: Op) json.Error!void {
             const v = &R[r];
             const n = v.size();
             for (0..n) |i| {
-                const elem: *const Value = switch (v.*) {
+                const elem: *const json.Value = switch (v.*) {
                     .object => |*m| &m.members.items[i].value,
                     .array => |*arr| &arr.items[i],
                     else => v,
@@ -589,7 +587,7 @@ fn step(o: *Out, R: *[8]Value, in: *Reader, op: Op) json.Error!void {
 
 fn zigRun(gpa: std.mem.Allocator, prog: []const u8) []u8 {
     var o: Out = .{ .gpa = gpa };
-    var R: [8]Value = @splat(.null);
+    var R: [8]json.Value = @splat(.null);
     defer for (&R) |*v| v.deinit(gpa);
     var in: Reader = .{ .p = prog };
     while (in.i < prog.len) {

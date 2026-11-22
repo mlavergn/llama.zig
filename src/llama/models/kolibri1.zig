@@ -100,7 +100,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
     llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/kolibri1.cpp", 71, "n_embd_head == hparams.n_embd_head_k()");
 
-    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.llama_c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
     const inp_pos = b.buildInpPos();
 
     const inp_attn = b.buildAttnInpKvIswa();
@@ -143,11 +143,11 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         b.cb(cur, "attn_post_norm", il);
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            residual = llama.impl.c.ggml_get_rows(ctx, residual, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            residual = llama.impl.llama_c.ggml_get_rows(ctx, residual, inp_out_ids);
         }
 
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, residual);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, residual);
         b.cb(ffn_inp, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -158,10 +158,10 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         const logits = b.buildLoraMm(layer.ffn_gate_inp.?, cur, null);
         b.cb(logits, "ffn_moe_logits", il);
 
-        const selection: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, logits, layer.ffn_exp_probs_b);
+        const selection: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, logits, layer.ffn_exp_probs_b);
         b.cb(selection, "ffn_moe_logits_biased", il);
 
-        const selected: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_argsort_top_k(ctx, selection, @intCast(b.n_expert_used));
+        const selected: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_argsort_top_k(ctx, selection, @intCast(b.n_expert_used));
         b.cb(selected, "ffn_moe_topk", il);
 
         const moe_out = b.buildMoeFfn(cur, .{
@@ -183,9 +183,9 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         const shared = b.buildFfn(cur, layer.ffn_up_shexp, null, null, layer.ffn_gate_shexp, null, null, layer.ffn_down_shexp, null, null, null, .silu, .par, il);
         b.cb(shared, "ffn_shexp_out", il);
 
-        cur = llama.impl.c.ggml_add(ctx, moe_out, shared);
+        cur = llama.impl.llama_c.ggml_add(ctx, moe_out, shared);
         cur = b.buildNorm(cur, layer.ffn_post_norm, null, .rms, il);
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
 
         inpL = b.buildCvec(cur, il);
         b.cb(inpL, "l_out", il);

@@ -16,86 +16,82 @@
 //! has no randomness, and is what `scripts/tools-diff` compares on bytes.
 
 const std = @import("std");
+const llama = @import("llama");
 const stdlib = @import("stdlib");
-const tc = @import("tools_common");
+const tools_common = @import("tools_common");
 const backends = @import("backends");
 
-comptime {
-    // libllama, compiled in (see `build/tools.zig`).
-    _ = @import("llama").lib;
-}
-
 /// Ports `tokens_to_str` (cvector-generator.cpp:36 @b1b770d90).
-fn tokensToStr(a: std.mem.Allocator, vocab: ?*const tc.c.llama_vocab, tokens: []const tc.c.llama_token) ![:0]u8 {
+fn tokensToStr(a: std.mem.Allocator, vocab: ?*const llama.impl.llama_c.llama_vocab, tokens: []const llama.impl.llama_c.llama_token) ![:0]u8 {
     var ret: std.ArrayList(u8) = .empty;
-    for (tokens) |t| try ret.appendSlice(a, try tc.common.tokenToPiece(a, vocab, t, true));
+    for (tokens) |t| try ret.appendSlice(a, try tools_common.common.tokenToPiece(a, vocab, t, true));
     return a.dupeSentinel(u8, ret.items, 0);
 }
 
 /// Ports `print_usage` (cvector-generator.cpp:45 @b1b770d90).
 fn printUsage(argv: []const [:0]const u8) void {
     const e = argv[0].ptr;
-    tc.io.printf("\nexample usage:\n", .{});
-    tc.io.printf("\n    CPU only:   %s -m ./llama-3.Q4_K_M.gguf\n", .{e});
-    tc.io.printf("\n    with GPU:   %s -m ./llama-3.Q4_K_M.gguf -ngl 99\n", .{e});
-    tc.io.printf("\n    advanced:   %s -m ./llama-3.Q4_K_M.gguf -ngl 99 --pca-iter 2000 --pca-batch 100\n", .{e});
-    tc.io.printf("\n    using mean: %s -m ./llama-3.Q4_K_M.gguf --method mean\n", .{e});
-    tc.io.printf("\n", .{});
+    tools_common.io.printf("\nexample usage:\n", .{});
+    tools_common.io.printf("\n    CPU only:   %s -m ./llama-3.Q4_K_M.gguf\n", .{e});
+    tools_common.io.printf("\n    with GPU:   %s -m ./llama-3.Q4_K_M.gguf -ngl 99\n", .{e});
+    tools_common.io.printf("\n    advanced:   %s -m ./llama-3.Q4_K_M.gguf -ngl 99 --pca-iter 2000 --pca-batch 100\n", .{e});
+    tools_common.io.printf("\n    using mean: %s -m ./llama-3.Q4_K_M.gguf --method mean\n", .{e});
+    tools_common.io.printf("\n", .{});
 }
 
 /// `DEBUG_POS` (pca.hpp:19 @b1b770d90).
 const debug_pos = 5;
 
 /// Ports `print_debug_tensor` (pca.hpp:21 @b1b770d90).
-fn printDebugTensor(t: *tc.c.ggml_tensor) void {
+fn printDebugTensor(t: *llama.impl.llama_c.ggml_tensor) void {
     const func = "print_debug_tensor";
-    tc.io.printf("%s: %s (%s): [%d, %d]\n", .{ func, @as([*:0]const u8, @ptrCast(&t.name)), tc.c.ggml_type_name(t.type), @as(c_int, @intCast(t.ne[0])), @as(c_int, @intCast(t.ne[1])) });
-    tc.io.printf("%s: %s[0] = [", .{ func, @as([*:0]const u8, @ptrCast(&t.name)) });
+    tools_common.io.printf("%s: %s (%s): [%d, %d]\n", .{ func, @as([*:0]const u8, @ptrCast(&t.name)), llama.impl.llama_c.ggml_type_name(t.type), @as(c_int, @intCast(t.ne[0])), @as(c_int, @intCast(t.ne[1])) });
+    tools_common.io.printf("%s: %s[0] = [", .{ func, @as([*:0]const u8, @ptrCast(&t.name)) });
     var i: c_int = 0;
-    while (i <= debug_pos) : (i += 1) tc.io.printf(" %f,", .{@as(f64, tc.c.ggml_get_f32_nd(t, i, 0, 0, 0))});
-    tc.io.printf(" ... ]\n", .{});
+    while (i <= debug_pos) : (i += 1) tools_common.io.printf(" %f,", .{@as(f64, llama.impl.llama_c.ggml_get_f32_nd(t, i, 0, 0, 0))});
+    tools_common.io.printf(" ... ]\n", .{});
 }
 
 /// Mirrors `callback_data` (cvector-generator.cpp:58 @b1b770d90).
 const CallbackData = struct {
     a: std.mem.Allocator,
-    ctx_ggml: ?*tc.c.ggml_context = null, // holds v_pos, v_neg, v_diff_filtered
+    ctx_ggml: ?*llama.impl.llama_c.ggml_context = null, // holds v_pos, v_neg, v_diff_filtered
 
     n_layers: c_int = 0,
     n_tokens: c_int = 0,
     is_eval_pos: bool = true,
 
     // each element of the vector correspond to one layer
-    v_pos: std.ArrayList(*tc.c.ggml_tensor) = .empty, // vector of matrices of size [n_embd, n_tokens]
-    v_neg: std.ArrayList(*tc.c.ggml_tensor) = .empty, // vector of matrices of size [n_embd, n_tokens]
-    v_diff_filtered: std.ArrayList(*tc.c.ggml_tensor) = .empty, // vector of matrices of size [n_embd, n_nonzero_rows]
+    v_pos: std.ArrayList(*llama.impl.llama_c.ggml_tensor) = .empty, // vector of matrices of size [n_embd, n_tokens]
+    v_neg: std.ArrayList(*llama.impl.llama_c.ggml_tensor) = .empty, // vector of matrices of size [n_embd, n_tokens]
+    v_diff_filtered: std.ArrayList(*llama.impl.llama_c.ggml_tensor) = .empty, // vector of matrices of size [n_embd, n_nonzero_rows]
 
     /// Ports `save_tensor_for_layer` (cvector-generator.cpp:71 @b1b770d90), a member of `callback_data`.
-    fn saveTensorForLayer(self: *CallbackData, t: *tc.c.ggml_tensor) !void {
-        tc.ggml.ggmlAssert(t.type == tc.c.GGML_TYPE_F32, "cvector-generator.cpp", 72, "t->type == GGML_TYPE_F32");
+    fn saveTensorForLayer(self: *CallbackData, t: *llama.impl.llama_c.ggml_tensor) !void {
+        tools_common.ggml.ggmlAssert(t.type == llama.impl.llama_c.GGML_TYPE_F32, "cvector-generator.cpp", 72, "t->type == GGML_TYPE_F32");
 
         if (self.ctx_ggml == null) {
             // alloc a new ctx_ggml if needed
-            const params_ggml: tc.c.ggml_init_params = .{ .mem_size = tc.c.ggml_tensor_overhead() * @as(usize, @intCast(self.n_layers)) * 3, .mem_buffer = null, .no_alloc = true };
-            self.ctx_ggml = tc.c.ggml_init(params_ggml);
+            const params_ggml: llama.impl.llama_c.ggml_init_params = .{ .mem_size = llama.impl.llama_c.ggml_tensor_overhead() * @as(usize, @intCast(self.n_layers)) * 3, .mem_buffer = null, .no_alloc = true };
+            self.ctx_ggml = llama.impl.llama_c.ggml_init(params_ggml);
         }
 
         // copy tensor data
-        const n_bytes = tc.c.ggml_nbytes(t);
-        const t_layer = tc.c.ggml_new_tensor_2d(self.ctx_ggml, t.type, t.ne[0], t.ne[1]);
-        t_layer.*.data = stdlib.libc.malloc(n_bytes);
-        tc.c.ggml_backend_tensor_get(t, t_layer.*.data, 0, n_bytes);
-        _ = tc.c.ggml_set_name(t_layer, tc.c.ggml_get_name(t));
+        const n_bytes = llama.impl.llama_c.ggml_nbytes(t);
+        const t_layer = llama.impl.llama_c.ggml_new_tensor_2d(self.ctx_ggml, t.type, t.ne[0], t.ne[1]);
+        t_layer.*.data = std.c.malloc(n_bytes);
+        llama.impl.llama_c.ggml_backend_tensor_get(t, t_layer.*.data, 0, n_bytes);
+        _ = llama.impl.llama_c.ggml_set_name(t_layer, llama.impl.llama_c.ggml_get_name(t));
 
         if (self.is_eval_pos) try self.v_pos.append(self.a, t_layer) else try self.v_neg.append(self.a, t_layer);
     }
 
     /// Ports `calc_diff` (cvector-generator.cpp:102 @b1b770d90), a member of `callback_data`.
-    fn calcDiff(self: *CallbackData) ![]*tc.c.ggml_tensor {
+    fn calcDiff(self: *CallbackData) ![]*llama.impl.llama_c.ggml_tensor {
         for (self.v_pos.items, 0..) |vp, il| {
             const a: [*]f32 = @ptrCast(@alignCast(vp.data));
             const b: [*]const f32 = @ptrCast(@alignCast(self.v_neg.items[il].data));
-            const n_elem: usize = @intCast(tc.c.ggml_nelements(vp));
+            const n_elem: usize = @intCast(llama.impl.llama_c.ggml_nelements(vp));
             for (0..n_elem) |j| a[j] -= b[j];
             try self.v_diff_filtered.append(self.a, self.filterNonzeroRows(vp));
         }
@@ -106,7 +102,7 @@ const CallbackData = struct {
     ///
     /// A row is all zeros unless an element is **greater than** `eps`: a row
     /// of negative numbers counts as zero, as the C counts it.
-    fn filterNonzeroRows(self: *CallbackData, a: *tc.c.ggml_tensor) *tc.c.ggml_tensor {
+    fn filterNonzeroRows(self: *CallbackData, a: *llama.impl.llama_c.ggml_tensor) *llama.impl.llama_c.ggml_tensor {
         const eps: f32 = 1e-6;
         var rows_to_copy: std.ArrayList(c_int) = .empty; // the idx of non-zero cols
         var i_row: c_int = 0;
@@ -115,7 +111,7 @@ const CallbackData = struct {
             var all_zero = true;
             var col: c_int = 0;
             while (col < n_cols) : (col += 1) {
-                if (tc.c.ggml_get_f32_nd(a, col, i_row, 0, 0) > eps) {
+                if (llama.impl.llama_c.ggml_get_f32_nd(a, col, i_row, 0, 0) > eps) {
                     all_zero = false;
                     break;
                 }
@@ -126,12 +122,12 @@ const CallbackData = struct {
         // get "n_nonzero_rows" for the output "diff_filtered"
         const n_nonzero_rows: c_int = @intCast(rows_to_copy.items.len);
         const n_embd: c_int = @intCast(a.ne[0]);
-        tc.ggml.ggmlAssert(n_nonzero_rows > 0, "cvector-generator.cpp", 141, "n_nonzero_rows > 0");
+        tools_common.ggml.ggmlAssert(n_nonzero_rows > 0, "cvector-generator.cpp", 141, "n_nonzero_rows > 0");
 
         // diff_filtered: [n_embd, n_nonzero_rows]
-        const diff_filtered = tc.c.ggml_new_tensor_2d(self.ctx_ggml, tc.c.GGML_TYPE_F32, n_embd, n_nonzero_rows);
-        _ = tc.c.ggml_format_name(diff_filtered, "diff_filtered_%s", @as([*:0]const u8, @ptrCast(&a.name)));
-        diff_filtered.*.data = stdlib.libc.malloc(tc.c.ggml_nbytes(diff_filtered));
+        const diff_filtered = llama.impl.llama_c.ggml_new_tensor_2d(self.ctx_ggml, llama.impl.llama_c.GGML_TYPE_F32, n_embd, n_nonzero_rows);
+        _ = llama.impl.llama_c.ggml_format_name(diff_filtered, "diff_filtered_%s", @as([*:0]const u8, @ptrCast(&a.name)));
+        diff_filtered.*.data = std.c.malloc(llama.impl.llama_c.ggml_nbytes(diff_filtered));
 
         // copy non-zero rows
         var dest_row: c_int = 0;
@@ -139,8 +135,8 @@ const CallbackData = struct {
             const src_row = rows_to_copy.items[@intCast(dest_row)];
             var i: c_int = 0;
             while (i < n_embd) : (i += 1) {
-                const src_elem = tc.c.ggml_get_f32_nd(a, i, src_row, 0, 0);
-                tc.c.ggml_set_f32_nd(diff_filtered, i, dest_row, 0, 0, src_elem);
+                const src_elem = llama.impl.llama_c.ggml_get_f32_nd(a, i, src_row, 0, 0);
+                llama.impl.llama_c.ggml_set_f32_nd(diff_filtered, i, dest_row, 0, 0, src_elem);
             }
         }
         return diff_filtered;
@@ -148,13 +144,13 @@ const CallbackData = struct {
 
     /// Ports `reset` (cvector-generator.cpp:164 @b1b770d90), a member of `callback_data`.
     fn reset(self: *CallbackData) void {
-        for (self.v_pos.items) |p| stdlib.libc.free(p.data);
-        for (self.v_neg.items) |p| stdlib.libc.free(p.data);
-        for (self.v_diff_filtered.items) |p| stdlib.libc.free(p.data);
+        for (self.v_pos.items) |p| std.c.free(p.data);
+        for (self.v_neg.items) |p| std.c.free(p.data);
+        for (self.v_diff_filtered.items) |p| std.c.free(p.data);
         self.v_pos.clearRetainingCapacity();
         self.v_neg.clearRetainingCapacity();
         self.v_diff_filtered.clearRetainingCapacity();
-        if (self.ctx_ggml) |ctx| tc.c.ggml_free(ctx);
+        if (self.ctx_ggml) |ctx| llama.impl.llama_c.ggml_free(ctx);
         self.ctx_ggml = null;
     }
 };
@@ -162,7 +158,7 @@ const CallbackData = struct {
 /// Mirrors `train_context` (cvector-generator.cpp:182 @b1b770d90).
 const TrainContext = struct {
     a: std.mem.Allocator,
-    ctx_ggml: ?*tc.c.ggml_context,
+    ctx_ggml: ?*llama.impl.llama_c.ggml_context,
     n_embd: c_int,
     n_layers: c_int,
 
@@ -170,50 +166,50 @@ const TrainContext = struct {
     positive_entries: std.ArrayList([]const u8) = .empty,
     negative_entries: std.ArrayList([]const u8) = .empty,
 
-    v_diff: std.ArrayList(*tc.c.ggml_tensor) = .empty, // vector of matrices of size [m, n_embd]
-    v_final: std.ArrayList(*tc.c.ggml_tensor) = .empty, // vector of vectors of size [n_embd] to be written to file
+    v_diff: std.ArrayList(*llama.impl.llama_c.ggml_tensor) = .empty, // vector of matrices of size [m, n_embd]
+    v_final: std.ArrayList(*llama.impl.llama_c.ggml_tensor) = .empty, // vector of vectors of size [n_embd] to be written to file
 
     v_diff_tmp: std.ArrayList(std.ArrayList(u8)) = .empty,
 
     fn init(a: std.mem.Allocator, n_embd: c_int, n_layers: c_int) !TrainContext {
-        const params_ggml: tc.c.ggml_init_params = .{ .mem_size = tc.c.ggml_tensor_overhead() * @as(usize, @intCast(n_layers - 1)) * 2, .mem_buffer = null, .no_alloc = true };
-        var self: TrainContext = .{ .a = a, .ctx_ggml = tc.c.ggml_init(params_ggml), .n_embd = n_embd, .n_layers = n_layers };
+        const params_ggml: llama.impl.llama_c.ggml_init_params = .{ .mem_size = llama.impl.llama_c.ggml_tensor_overhead() * @as(usize, @intCast(n_layers - 1)) * 2, .mem_buffer = null, .no_alloc = true };
+        var self: TrainContext = .{ .a = a, .ctx_ggml = llama.impl.llama_c.ggml_init(params_ggml), .n_embd = n_embd, .n_layers = n_layers };
         var il: c_int = 0;
         while (il < n_layers - 1) : (il += 1) {
             try self.v_diff_tmp.append(a, .empty);
-            const t = tc.c.ggml_new_tensor_1d(self.ctx_ggml, tc.c.GGML_TYPE_F32, n_embd);
-            t.*.data = stdlib.libc.malloc(tc.c.ggml_nbytes(t));
+            const t = llama.impl.llama_c.ggml_new_tensor_1d(self.ctx_ggml, llama.impl.llama_c.GGML_TYPE_F32, n_embd);
+            t.*.data = std.c.malloc(llama.impl.llama_c.ggml_nbytes(t));
             try self.v_final.append(a, t);
         }
         return self;
     }
 
     /// Ports `concat_diff_tmp` (cvector-generator.cpp:220 @b1b770d90), a member of `train_context`.
-    fn concatDiffTmp(self: *TrainContext, diff_filtered: []const *tc.c.ggml_tensor) !void {
-        tc.ggml.ggmlAssert(@as(c_int, @intCast(diff_filtered.len)) == self.n_layers - 1, "cvector-generator.cpp", 221, "(int) diff_filtered.size() == n_layers - 1");
+    fn concatDiffTmp(self: *TrainContext, diff_filtered: []const *llama.impl.llama_c.ggml_tensor) !void {
+        tools_common.ggml.ggmlAssert(@as(c_int, @intCast(diff_filtered.len)) == self.n_layers - 1, "cvector-generator.cpp", 221, "(int) diff_filtered.size() == n_layers - 1");
         for (0..@intCast(self.n_layers - 1)) |il| {
             const t = diff_filtered[il];
             const bytes: [*]const u8 = @ptrCast(t.data);
-            try self.v_diff_tmp.items[il].appendSlice(self.a, bytes[0..tc.c.ggml_nbytes(t)]);
+            try self.v_diff_tmp.items[il].appendSlice(self.a, bytes[0..llama.impl.llama_c.ggml_nbytes(t)]);
         }
     }
 
     /// Ports `build_v_diff` (cvector-generator.cpp:233 @b1b770d90), a member of `train_context`.
     fn buildVDiff(self: *TrainContext, transpose: bool) !void {
-        tc.io.printf("build_v_diff\n", .{});
+        tools_common.io.printf("build_v_diff\n", .{});
         var il: c_int = 0;
         while (il < self.n_layers - 1) : (il += 1) {
             const diff_tmp = &self.v_diff_tmp.items[@intCast(il)];
             const n_elem: c_int = @intCast(diff_tmp.items.len / @sizeOf(f32));
-            tc.ggml.ggmlAssert(@rem(n_elem, self.n_embd) == 0, "cvector-generator.cpp", 238, "n_elem % n_embd == 0");
+            tools_common.ggml.ggmlAssert(@rem(n_elem, self.n_embd) == 0, "cvector-generator.cpp", 238, "n_elem % n_embd == 0");
             const n_rows = @divTrunc(n_elem, self.n_embd);
             const diff = if (transpose)
-                tc.c.ggml_new_tensor_2d(self.ctx_ggml, tc.c.GGML_TYPE_F32, n_rows, self.n_embd)
+                llama.impl.llama_c.ggml_new_tensor_2d(self.ctx_ggml, llama.impl.llama_c.GGML_TYPE_F32, n_rows, self.n_embd)
             else
-                tc.c.ggml_new_tensor_2d(self.ctx_ggml, tc.c.GGML_TYPE_F32, self.n_embd, n_rows);
+                llama.impl.llama_c.ggml_new_tensor_2d(self.ctx_ggml, llama.impl.llama_c.GGML_TYPE_F32, self.n_embd, n_rows);
             const name = try std.fmt.allocPrintSentinel(self.a, "diff_{d}", .{il}, 0);
-            _ = tc.c.ggml_set_name(diff, name.ptr);
-            diff.*.data = stdlib.libc.malloc(tc.c.ggml_nbytes(diff));
+            _ = llama.impl.llama_c.ggml_set_name(diff, name.ptr);
+            diff.*.data = std.c.malloc(llama.impl.llama_c.ggml_nbytes(diff));
             if (transpose) {
                 // copy data & transpose
                 const arr: [*]const f32 = @ptrCast(@alignCast(diff_tmp.items.ptr));
@@ -222,13 +218,13 @@ const TrainContext = struct {
                     var ic: c_int = 0;
                     while (ic < self.n_embd) : (ic += 1) {
                         const f = arr[@intCast(ir * self.n_embd + ic)];
-                        tc.c.ggml_set_f32_nd(diff, ir, ic, 0, 0, f);
+                        llama.impl.llama_c.ggml_set_f32_nd(diff, ir, ic, 0, 0, f);
                     }
                 }
             } else {
                 // only copy
                 const dst: [*]u8 = @ptrCast(diff.*.data);
-                @memcpy(dst[0..tc.c.ggml_nbytes(diff)], diff_tmp.items[0..tc.c.ggml_nbytes(diff)]);
+                @memcpy(dst[0..llama.impl.llama_c.ggml_nbytes(diff)], diff_tmp.items[0..llama.impl.llama_c.ggml_nbytes(diff)]);
             }
             try self.v_diff.append(self.a, diff);
             printDebugTensor(diff);
@@ -240,17 +236,17 @@ const TrainContext = struct {
 
 /// Mirrors `tokenized_prompt` (cvector-generator.cpp:273 @b1b770d90).
 const TokenizedPrompt = struct {
-    tokens_pos: []tc.c.llama_token,
-    tokens_neg: []tc.c.llama_token,
+    tokens_pos: []llama.impl.llama_c.llama_token,
+    tokens_neg: []llama.impl.llama_c.llama_token,
     max_seq_len: usize,
 
-    fn init(a: std.mem.Allocator, ctx: ?*tc.c.llama_context, pos: []const u8, neg: []const u8) !TokenizedPrompt {
-        const model = tc.c.llama_get_model(ctx);
-        const vocab = tc.c.llama_model_get_vocab(model);
-        const add_bos = tc.c.llama_vocab_get_add_bos(vocab);
+    fn init(a: std.mem.Allocator, ctx: ?*llama.impl.llama_c.llama_context, pos: []const u8, neg: []const u8) !TokenizedPrompt {
+        const model = llama.api.context.llama_get_model(ctx);
+        const vocab = llama.api.model.llama_model_get_vocab(model);
+        const add_bos = llama.api.vocab.llama_vocab_get_add_bos(vocab);
         var self: TokenizedPrompt = .{
-            .tokens_pos = try tc.common.tokenize(a, vocab, pos, add_bos, true),
-            .tokens_neg = try tc.common.tokenize(a, vocab, neg, add_bos, true),
+            .tokens_pos = try tools_common.common.tokenize(a, vocab, pos, add_bos, true),
+            .tokens_neg = try tools_common.common.tokenize(a, vocab, neg, add_bos, true),
             .max_seq_len = 0,
         };
         self.max_seq_len = @max(self.tokens_pos.len, self.tokens_neg.len);
@@ -260,11 +256,11 @@ const TokenizedPrompt = struct {
     }
 
     /// Ports `padding_seq` (cvector-generator.cpp:289 @b1b770d90), a member of `tokenized_prompt`.
-    fn paddingSeq(a: std.mem.Allocator, vocab: ?*const tc.c.llama_vocab, tokens: []tc.c.llama_token, len: usize) ![]tc.c.llama_token {
+    fn paddingSeq(a: std.mem.Allocator, vocab: ?*const llama.impl.llama_c.llama_vocab, tokens: []llama.impl.llama_c.llama_token, len: usize) ![]llama.impl.llama_c.llama_token {
         // TODO: customize padding token
-        const pad_tokens = try tc.common.tokenize(a, vocab, " ", false, false);
+        const pad_tokens = try tools_common.common.tokenize(a, vocab, " ", false, false);
         const pad_tok = pad_tokens[pad_tokens.len - 1];
-        var out: std.ArrayList(tc.c.llama_token) = .empty;
+        var out: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
         try out.appendSlice(a, tokens);
         while (out.items.len < len) try out.append(a, pad_tok);
         return out.items;
@@ -276,7 +272,7 @@ fn loadPromptFile(a: std.mem.Allocator, std_io: std.Io, path: []const u8, skip_e
     var output: std.ArrayList([]const u8) = .empty;
     const z = try a.dupeSentinel(u8, path, 0);
     const content = stdlib.file.readText(std_io, a, z) catch {
-        tc.io.eprintf("error: unable to open file: %s\n", .{z.ptr});
+        tools_common.io.eprintf("error: unable to open file: %s\n", .{z.ptr});
         stdlib.stdio.exit(1);
     };
     var lines = std.mem.splitScalar(u8, content, '\n');
@@ -286,13 +282,13 @@ fn loadPromptFile(a: std.mem.Allocator, std_io: std.Io, path: []const u8, skip_e
         // `std::getline` yields no last empty line after a final '\n'
         if (line.len == 0 and consumed > content.len) break;
         const is_skip = skip_empty_lines and line.len == 0;
-        if (!is_skip) try output.append(a, try tc.arg.processEscapes(a, line));
+        if (!is_skip) try output.append(a, try tools_common.arg.processEscapes(a, line));
     }
     return output;
 }
 
 /// Ports `cb_eval` (cvector-generator.cpp:329 @b1b770d90).
-fn cbEval(t: [*c]tc.c.ggml_tensor, ask: bool, user_data: ?*anyopaque) callconv(.c) bool {
+fn cbEval(t: [*c]llama.impl.llama_c.ggml_tensor, ask: bool, user_data: ?*anyopaque) callconv(.c) bool {
     const cb_data: *CallbackData = @ptrCast(@alignCast(user_data.?));
     const is_l_out = std.mem.startsWith(u8, std.mem.sliceTo(&t.*.name, 0), "l_out");
 
@@ -306,51 +302,51 @@ fn cbEval(t: [*c]tc.c.ggml_tensor, ask: bool, user_data: ?*anyopaque) callconv(.
 }
 
 /// Ports `get_hidden_layers` (cvector-generator.cpp:347 @b1b770d90).
-fn getHiddenLayers(ctx: ?*tc.c.llama_context, tokens: []tc.c.llama_token) bool {
-    tc.c.llama_memory_clear(tc.c.llama_get_memory(ctx), true);
-    var batch = tc.common.batchGetOne(std.heap.c_allocator, ctx, tokens);
+fn getHiddenLayers(ctx: ?*llama.impl.llama_c.llama_context, tokens: []llama.impl.llama_c.llama_token) bool {
+    llama.api.context.llama_memory_clear(llama.api.context.llama_get_memory(ctx), true);
+    var batch = tools_common.common.batchGetOne(std.heap.c_allocator, ctx, tokens);
     defer batch.deinit();
-    if (tc.c.llama_process(ctx, tc.c.LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) {
-        tc.io.eprintf("%s : failed to eval\n", .{"get_hidden_layers"});
+    if (llama.api.context.llama_process(ctx, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) {
+        tools_common.io.eprintf("%s : failed to eval\n", .{"get_hidden_layers"});
         return false;
     }
     return true;
 }
 
 /// Ports `export_gguf` (cvector-generator.cpp:357 @b1b770d90).
-fn exportGguf(a: std.mem.Allocator, v_ctrl: []const *tc.c.ggml_tensor, fname: []const u8, model_hint: [*:0]const u8) !void {
+fn exportGguf(a: std.mem.Allocator, v_ctrl: []const *llama.impl.llama_c.ggml_tensor, fname: []const u8, model_hint: [*:0]const u8) !void {
     const func = "export_gguf";
-    const ctx = tc.c.gguf_init_empty();
+    const ctx = llama.impl.llama_c.gguf_init_empty();
 
     const arch = "controlvector";
-    tc.c.gguf_set_val_str(ctx, "general.architecture", arch);
-    tc.c.gguf_set_val_str(ctx, arch ++ ".model_hint", model_hint);
-    tc.c.gguf_set_val_i32(ctx, arch ++ ".layer_count", @intCast(v_ctrl.len));
+    llama.impl.llama_c.gguf_set_val_str(ctx, "general.architecture", arch);
+    llama.impl.llama_c.gguf_set_val_str(ctx, arch ++ ".model_hint", model_hint);
+    llama.impl.llama_c.gguf_set_val_i32(ctx, arch ++ ".layer_count", @intCast(v_ctrl.len));
 
     for (v_ctrl) |t| {
-        tc.c.gguf_add_tensor(ctx, t);
+        llama.impl.llama_c.gguf_add_tensor(ctx, t);
         printDebugTensor(t);
-        tc.io.printf("Added tensor: %s\n", .{@as([*:0]const u8, @ptrCast(&t.name))});
+        tools_common.io.printf("Added tensor: %s\n", .{@as([*:0]const u8, @ptrCast(&t.name))});
     }
 
-    tc.io.printf("%s: writing file...\n", .{func});
+    tools_common.io.printf("%s: writing file...\n", .{func});
     const z = try a.dupeSentinel(u8, fname, 0);
-    _ = tc.c.gguf_write_to_file(ctx, z.ptr, false);
-    tc.io.printf("%s: wrote file '%s'\n", .{ func, z.ptr });
-    tc.c.gguf_free(ctx);
+    _ = llama.impl.llama_c.gguf_write_to_file(ctx, z.ptr, false);
+    tools_common.io.printf("%s: wrote file '%s'\n", .{ func, z.ptr });
+    llama.impl.llama_c.gguf_free(ctx);
 }
 
 /// Ports `prepare_entries` (cvector-generator.cpp:381 @b1b770d90).
-fn prepareEntries(a: std.mem.Allocator, std_io: std.Io, params: *tc.params.Params, ctx_train: *TrainContext) !c_int {
+fn prepareEntries(a: std.mem.Allocator, std_io: std.Io, params: *tools_common.params.Params, ctx_train: *TrainContext) !c_int {
     // load prompts
     const positive_prompts = try loadPromptFile(a, std_io, params.cvector_positive_file, true);
     const negative_prompts = try loadPromptFile(a, std_io, params.cvector_negative_file, true);
     if (positive_prompts.items.len != negative_prompts.items.len) {
-        tc.io.eprintf("number of positive and negative prompts must be equal\n", .{});
+        tools_common.io.eprintf("number of positive and negative prompts must be equal\n", .{});
         return 1;
     }
     if (positive_prompts.items.len == 0) {
-        tc.io.eprintf("must provide at least one prompt pair\n", .{});
+        tools_common.io.eprintf("must provide at least one prompt pair\n", .{});
         return 1;
     }
     ctx_train.positive_entries = positive_prompts;
@@ -400,55 +396,55 @@ const PcaParams = struct {
 
 /// Mirrors `pca_result` (pca.hpp:46 @b1b770d90), a member of `PCA`.
 const PcaResult = struct {
-    calculated_square: ?*tc.c.ggml_tensor = null,
-    eigenvectors: std.ArrayList(?*tc.c.ggml_tensor) = .empty,
+    calculated_square: ?*llama.impl.llama_c.ggml_tensor = null,
+    eigenvectors: std.ArrayList(?*llama.impl.llama_c.ggml_tensor) = .empty,
     distances: std.ArrayList(f32) = .empty,
 };
 
-extern fn ggml_backend_cuda_init(device: c_int) tc.c.ggml_backend_t;
+extern fn ggml_backend_cuda_init(device: c_int) llama.impl.llama_c.ggml_backend_t;
 
 /// Mirrors `pca_model` (pca.hpp:52 @b1b770d90), a member of `PCA`: CUDA where ggml has
 /// it, the CPU otherwise -- upstream leaves Metal commented out.
 const PcaModel = struct {
-    backend: tc.c.ggml_backend_t = null,
-    buffer: tc.c.ggml_backend_buffer_t = null,
-    ctx: ?*tc.c.ggml_context = null,
-    dev_input: *tc.c.ggml_tensor = undefined,
-    dev_square: *tc.c.ggml_tensor = undefined,
-    dev_eigenvector: *tc.c.ggml_tensor = undefined,
+    backend: llama.impl.llama_c.ggml_backend_t = null,
+    buffer: llama.impl.llama_c.ggml_backend_buffer_t = null,
+    ctx: ?*llama.impl.llama_c.ggml_context = null,
+    dev_input: *llama.impl.llama_c.ggml_tensor = undefined,
+    dev_square: *llama.impl.llama_c.ggml_tensor = undefined,
+    dev_eigenvector: *llama.impl.llama_c.ggml_tensor = undefined,
 
-    fn init(a: std.mem.Allocator, t_input: *tc.c.ggml_tensor) !PcaModel {
+    fn init(a: std.mem.Allocator, t_input: *llama.impl.llama_c.ggml_tensor) !PcaModel {
         var self: PcaModel = .{};
         if (comptime backends.cuda) {
-            tc.io.eprintf("%s: using CUDA backend\n", .{"pca_model"});
+            tools_common.io.eprintf("%s: using CUDA backend\n", .{"pca_model"});
             self.backend = ggml_backend_cuda_init(0); // init device 0
-            if (self.backend == null) tc.io.eprintf("%s: ggml_backend_cuda_init() failed\n", .{"pca_model"});
+            if (self.backend == null) tools_common.io.eprintf("%s: ggml_backend_cuda_init() failed\n", .{"pca_model"});
         }
         // Metal stays off, as upstream's TODO leaves it
 
         // if there aren't GPU Backends fallback to CPU backend
-        if (self.backend == null) self.backend = tc.c.ggml_backend_cpu_init();
+        if (self.backend == null) self.backend = llama.impl.llama_c.ggml_backend_cpu_init();
 
         const num_tensors = 4;
-        const params: tc.c.ggml_init_params = .{ .mem_size = tc.c.ggml_tensor_overhead() * num_tensors, .mem_buffer = null, .no_alloc = true };
-        self.ctx = tc.c.ggml_init(params);
+        const params: llama.impl.llama_c.ggml_init_params = .{ .mem_size = llama.impl.llama_c.ggml_tensor_overhead() * num_tensors, .mem_buffer = null, .no_alloc = true };
+        self.ctx = llama.impl.llama_c.ggml_init(params);
 
         const n_samples = t_input.ne[0];
         const n_embd = t_input.ne[1];
 
-        self.dev_input = tc.c.ggml_new_tensor_2d(self.ctx, tc.c.GGML_TYPE_F32, n_samples, n_embd);
-        self.dev_square = tc.c.ggml_new_tensor_2d(self.ctx, tc.c.GGML_TYPE_F32, n_embd, n_embd);
-        self.dev_eigenvector = tc.c.ggml_new_tensor_1d(self.ctx, tc.c.GGML_TYPE_F32, n_embd);
+        self.dev_input = llama.impl.llama_c.ggml_new_tensor_2d(self.ctx, llama.impl.llama_c.GGML_TYPE_F32, n_samples, n_embd);
+        self.dev_square = llama.impl.llama_c.ggml_new_tensor_2d(self.ctx, llama.impl.llama_c.GGML_TYPE_F32, n_embd, n_embd);
+        self.dev_eigenvector = llama.impl.llama_c.ggml_new_tensor_1d(self.ctx, llama.impl.llama_c.GGML_TYPE_F32, n_embd);
 
-        _ = tc.c.ggml_set_name(self.dev_input, "dev_input");
-        _ = tc.c.ggml_set_name(self.dev_square, "dev_square");
-        _ = tc.c.ggml_set_name(self.dev_eigenvector, "dev_eigenvector");
-        self.buffer = tc.c.ggml_backend_alloc_ctx_tensors(self.ctx, self.backend);
-        tc.c.ggml_backend_tensor_set(self.dev_input, t_input.data, 0, tc.c.ggml_nbytes(t_input));
+        _ = llama.impl.llama_c.ggml_set_name(self.dev_input, "dev_input");
+        _ = llama.impl.llama_c.ggml_set_name(self.dev_square, "dev_square");
+        _ = llama.impl.llama_c.ggml_set_name(self.dev_eigenvector, "dev_eigenvector");
+        self.buffer = llama.impl.llama_c.ggml_backend_alloc_ctx_tensors(self.ctx, self.backend);
+        llama.impl.llama_c.ggml_backend_tensor_set(self.dev_input, t_input.data, 0, llama.impl.llama_c.ggml_nbytes(t_input));
 
         // initialize eigenvector to random normalized vector
         {
-            const n: usize = @intCast(tc.c.ggml_nelements(self.dev_eigenvector));
+            const n: usize = @intCast(llama.impl.llama_c.ggml_nelements(self.dev_eigenvector));
             const random_vec = try a.alloc(f32, n);
             var generator = MinstdRand.init(@truncate(@as(u64, @bitCast(stdlib.clock.timeSeconds()))));
             var sum_sqr: f32 = 0.0; // for normalizing random_vec
@@ -460,15 +456,15 @@ const PcaModel = struct {
             // normalize it
             const random_vec_norm = @sqrt(sum_sqr);
             for (random_vec) |*v| v.* /= random_vec_norm;
-            tc.c.ggml_backend_tensor_set(self.dev_eigenvector, random_vec.ptr, 0, tc.c.ggml_nbytes(self.dev_eigenvector));
+            llama.impl.llama_c.ggml_backend_tensor_set(self.dev_eigenvector, random_vec.ptr, 0, llama.impl.llama_c.ggml_nbytes(self.dev_eigenvector));
         }
         return self;
     }
 
     fn deinit(self: *PcaModel) void {
-        tc.c.ggml_free(self.ctx);
-        tc.c.ggml_backend_buffer_free(self.buffer);
-        tc.c.ggml_backend_free(self.backend);
+        llama.impl.llama_c.ggml_free(self.ctx);
+        llama.impl.llama_c.ggml_backend_buffer_free(self.buffer);
+        llama.impl.llama_c.ggml_backend_free(self.backend);
     }
 };
 
@@ -476,49 +472,49 @@ const PcaModel = struct {
 var piter_buf: ?[]u8 = null;
 
 /// Ports `build_graph_piter` (pca.hpp:134 @b1b770d90), a member of `PCA`.
-fn buildGraphPiter(params: *const PcaParams, model: *const PcaModel, calc_square: bool) !*tc.c.ggml_cgraph {
-    tc.ggml.ggmlAssert(params.n_batch > 0, "pca.hpp", 138, "params.n_batch > 0");
-    const buf_size = tc.c.ggml_tensor_overhead() * tc.c.GGML_DEFAULT_GRAPH_SIZE + tc.c.ggml_graph_overhead();
+fn buildGraphPiter(params: *const PcaParams, model: *const PcaModel, calc_square: bool) !*llama.impl.llama_c.ggml_cgraph {
+    tools_common.ggml.ggmlAssert(params.n_batch > 0, "pca.hpp", 138, "params.n_batch > 0");
+    const buf_size = llama.impl.llama_c.ggml_tensor_overhead() * llama.impl.llama_c.GGML_DEFAULT_GRAPH_SIZE + llama.impl.llama_c.ggml_graph_overhead();
     if (piter_buf == null) piter_buf = try std.heap.c_allocator.alloc(u8, buf_size);
 
-    const params0: tc.c.ggml_init_params = .{ .mem_size = buf_size, .mem_buffer = piter_buf.?.ptr, .no_alloc = true };
+    const params0: llama.impl.llama_c.ggml_init_params = .{ .mem_size = buf_size, .mem_buffer = piter_buf.?.ptr, .no_alloc = true };
     // create a temporally context to build the graph
-    const ctx0 = tc.c.ggml_init(params0);
-    const gf = tc.c.ggml_new_graph(ctx0);
+    const ctx0 = llama.impl.llama_c.ggml_init(params0);
+    const gf = llama.impl.llama_c.ggml_new_graph(ctx0);
 
     // turn v_diff_original into square matrix if needed
-    var tmp_square: ?*tc.c.ggml_tensor = null;
+    var tmp_square: ?*llama.impl.llama_c.ggml_tensor = null;
     if (calc_square) {
-        tmp_square = tc.c.ggml_mul_mat(ctx0, model.dev_input, model.dev_input);
-        _ = tc.c.ggml_set_name(tmp_square, "tmp_square");
+        tmp_square = llama.impl.llama_c.ggml_mul_mat(ctx0, model.dev_input, model.dev_input);
+        _ = llama.impl.llama_c.ggml_set_name(tmp_square, "tmp_square");
     }
 
-    var old_eigen: ?*tc.c.ggml_tensor = model.dev_eigenvector;
+    var old_eigen: ?*llama.impl.llama_c.ggml_tensor = model.dev_eigenvector;
     const input_square = if (calc_square) tmp_square else model.dev_square;
 
     var i: c_int = 0;
     while (i < params.n_batch) : (i += 1) {
         // b_tensor = square * eigenvector^T
-        var b_tensor = tc.c.ggml_mul_mat(ctx0, input_square, old_eigen);
-        _ = tc.c.ggml_set_name(b_tensor, "b_tensor");
+        var b_tensor = llama.impl.llama_c.ggml_mul_mat(ctx0, input_square, old_eigen);
+        _ = llama.impl.llama_c.ggml_set_name(b_tensor, "b_tensor");
 
         // normalize
-        b_tensor = tc.c.ggml_div_inplace(ctx0, b_tensor, tc.c.ggml_sqrt_inplace(ctx0, tc.c.ggml_sum_rows(ctx0, tc.c.ggml_sqr(ctx0, b_tensor))));
-        _ = tc.c.ggml_format_name(b_tensor, "b_tensor_norm_%d", i);
+        b_tensor = llama.impl.llama_c.ggml_div_inplace(ctx0, b_tensor, llama.impl.llama_c.ggml_sqrt_inplace(ctx0, llama.impl.llama_c.ggml_sum_rows(ctx0, llama.impl.llama_c.ggml_sqr(ctx0, b_tensor))));
+        _ = llama.impl.llama_c.ggml_format_name(b_tensor, "b_tensor_norm_%d", i);
 
         // calculate distance(new eigenvector - old eigenvector)
-        const new_sub_old = tc.c.ggml_add(ctx0, old_eigen, tc.c.ggml_scale(ctx0, b_tensor, -1));
-        const distance = tc.c.ggml_sqrt_inplace(ctx0, tc.c.ggml_sum_rows(ctx0, tc.c.ggml_sqr_inplace(ctx0, new_sub_old)));
-        _ = tc.c.ggml_format_name(distance, "distance_%d", i);
+        const new_sub_old = llama.impl.llama_c.ggml_add(ctx0, old_eigen, llama.impl.llama_c.ggml_scale(ctx0, b_tensor, -1));
+        const distance = llama.impl.llama_c.ggml_sqrt_inplace(ctx0, llama.impl.llama_c.ggml_sum_rows(ctx0, llama.impl.llama_c.ggml_sqr_inplace(ctx0, new_sub_old)));
+        _ = llama.impl.llama_c.ggml_format_name(distance, "distance_%d", i);
 
         old_eigen = b_tensor;
 
         // build operations nodes
-        tc.c.ggml_build_forward_expand(gf, distance);
+        llama.impl.llama_c.ggml_build_forward_expand(gf, distance);
     }
 
     // delete the temporally context used to build the graph
-    tc.c.ggml_free(ctx0);
+    llama.impl.llama_c.ggml_free(ctx0);
     return gf.?;
 }
 
@@ -536,14 +532,14 @@ fn extractI(prefix: []const u8, str: []const u8) c_int {
 }
 
 /// Ports `compute_piter` (pca.hpp:194 @b1b770d90), a member of `PCA`.
-fn computePiter(a: std.mem.Allocator, params: *const PcaParams, model: *const PcaModel, gf: *tc.c.ggml_cgraph, allocr: tc.c.ggml_gallocr_t, result: *PcaResult) !tc.c.ggml_status {
+fn computePiter(a: std.mem.Allocator, params: *const PcaParams, model: *const PcaModel, gf: *llama.impl.llama_c.ggml_cgraph, allocr: llama.impl.llama_c.ggml_gallocr_t, result: *PcaResult) !llama.impl.llama_c.ggml_status {
     // allocate tensors
-    _ = tc.c.ggml_gallocr_alloc_graph(allocr, gf);
+    _ = llama.impl.llama_c.ggml_gallocr_alloc_graph(allocr, gf);
 
-    if (tc.c.ggml_backend_is_cpu(model.backend)) tc.c.ggml_backend_cpu_set_n_threads(model.backend, params.n_threads);
+    if (llama.impl.llama_c.ggml_backend_is_cpu(model.backend)) llama.impl.llama_c.ggml_backend_cpu_set_n_threads(model.backend, params.n_threads);
 
-    const res = tc.c.ggml_backend_graph_compute(model.backend, gf);
-    if (res == tc.c.GGML_STATUS_SUCCESS) {
+    const res = llama.impl.llama_c.ggml_backend_graph_compute(model.backend, gf);
+    if (res == llama.impl.llama_c.GGML_STATUS_SUCCESS) {
         result.calculated_square = null;
         result.eigenvectors.clearRetainingCapacity();
         result.distances.clearRetainingCapacity();
@@ -551,8 +547,8 @@ fn computePiter(a: std.mem.Allocator, params: *const PcaParams, model: *const Pc
         try result.distances.appendNTimes(a, 0, @intCast(params.n_batch));
         // get output nodes
         var i: c_int = 0;
-        while (i < tc.c.ggml_graph_n_nodes(gf)) : (i += 1) {
-            const node = tc.c.ggml_graph_node(gf, i);
+        while (i < llama.impl.llama_c.ggml_graph_n_nodes(gf)) : (i += 1) {
+            const node = llama.impl.llama_c.ggml_graph_node(gf, i);
             const name = std.mem.sliceTo(&node.*.name, 0);
             // find b_tensor (without copying data from device)
             var iter = extractI("b_tensor_norm_", name);
@@ -561,7 +557,7 @@ fn computePiter(a: std.mem.Allocator, params: *const PcaParams, model: *const Pc
             iter = extractI("distance_", name);
             if (iter > -1) {
                 var d: f32 = 0;
-                tc.c.ggml_backend_tensor_get(node, &d, 0, @sizeOf(f32));
+                llama.impl.llama_c.ggml_backend_tensor_get(node, &d, 0, @sizeOf(f32));
                 result.distances.items[@intCast(iter)] = d;
             }
             // find tmp_square if it exists (without copying data from device)
@@ -572,13 +568,13 @@ fn computePiter(a: std.mem.Allocator, params: *const PcaParams, model: *const Pc
 }
 
 /// Ports `power_iteration` (pca.hpp:245 @b1b770d90), a member of `PCA`.
-fn powerIteration(a: std.mem.Allocator, params: *const PcaParams, input: *tc.c.ggml_tensor, output: *tc.c.ggml_tensor) !void {
+fn powerIteration(a: std.mem.Allocator, params: *const PcaParams, input: *llama.impl.llama_c.ggml_tensor, output: *llama.impl.llama_c.ggml_tensor) !void {
     var model = try PcaModel.init(a, input);
     defer model.deinit();
 
-    const allocr = tc.c.ggml_gallocr_new(tc.c.ggml_backend_get_default_buffer_type(model.backend));
+    const allocr = llama.impl.llama_c.ggml_gallocr_new(llama.impl.llama_c.ggml_backend_get_default_buffer_type(model.backend));
     var result: PcaResult = .{};
-    var last_eigenvector: ?*tc.c.ggml_tensor = null;
+    var last_eigenvector: ?*llama.impl.llama_c.ggml_tensor = null;
 
     const n_iters = @divTrunc(params.n_iterations, params.n_batch); // more batch, fewer iterations
     var iter: c_int = 0;
@@ -594,74 +590,74 @@ fn powerIteration(a: std.mem.Allocator, params: *const PcaParams, input: *tc.c.g
 
         if (calc_square) {
             // copy and store the square matrix if needed
-            tc.ggml.ggmlAssert(result.calculated_square != null, "pca.hpp", 272, "result.calculated_square != NULL");
-            tc.c.ggml_backend_tensor_copy(result.calculated_square, model.dev_square);
+            tools_common.ggml.ggmlAssert(result.calculated_square != null, "pca.hpp", 272, "result.calculated_square != NULL");
+            llama.impl.llama_c.ggml_backend_tensor_copy(result.calculated_square, model.dev_square);
         }
 
         // copy last eigen vector and store as input for next iteration
-        tc.ggml.ggmlAssert(last_eigenvector != null, "pca.hpp", 278, "last_eigenvector != NULL");
-        tc.c.ggml_backend_tensor_copy(last_eigenvector, model.dev_eigenvector);
+        tools_common.ggml.ggmlAssert(last_eigenvector != null, "pca.hpp", 278, "last_eigenvector != NULL");
+        llama.impl.llama_c.ggml_backend_tensor_copy(last_eigenvector, model.dev_eigenvector);
 
-        tc.io.printf("%s: layer %d/%d, iteration: %d / total: %d (batch = %d) ...\n", .{ "power_iteration", params.i_layer + 1, params.n_layers, iter + 1, n_iters, params.n_batch });
+        tools_common.io.printf("%s: layer %d/%d, iteration: %d / total: %d (batch = %d) ...\n", .{ "power_iteration", params.i_layer + 1, params.n_layers, iter + 1, n_iters, params.n_batch });
     }
 
     // get output tensor
-    tc.ggml.ggmlAssert(last_eigenvector != null, "pca.hpp", 287, "last_eigenvector");
-    tc.c.ggml_backend_tensor_get(last_eigenvector, output.data, 0, tc.c.ggml_nbytes(last_eigenvector));
-    tc.c.ggml_gallocr_free(allocr);
+    tools_common.ggml.ggmlAssert(last_eigenvector != null, "pca.hpp", 287, "last_eigenvector");
+    llama.impl.llama_c.ggml_backend_tensor_get(last_eigenvector, output.data, 0, llama.impl.llama_c.ggml_nbytes(last_eigenvector));
+    llama.impl.llama_c.ggml_gallocr_free(allocr);
 }
 
 /// Ports `run_pca` (pca.hpp:296 @b1b770d90), a member of `PCA`.
-fn runPca(a: std.mem.Allocator, params: *PcaParams, v_input: []const *tc.c.ggml_tensor, v_output: []const *tc.c.ggml_tensor) !void {
-    tc.io.printf("%s: Running PCA...\n", .{"run_pca"});
+fn runPca(a: std.mem.Allocator, params: *PcaParams, v_input: []const *llama.impl.llama_c.ggml_tensor, v_output: []const *llama.impl.llama_c.ggml_tensor) !void {
+    tools_common.io.printf("%s: Running PCA...\n", .{"run_pca"});
     for (v_input, 0..) |inp, il| {
         // prepare output vector
         const ctrl_out = v_output[il];
-        _ = tc.c.ggml_format_name(ctrl_out, "direction.%zu", il + 1);
+        _ = llama.impl.llama_c.ggml_format_name(ctrl_out, "direction.%zu", il + 1);
 
         // run power_iteration
         params.i_layer = @intCast(il);
         params.n_layers = @intCast(v_input.len);
         try powerIteration(a, params, inp, ctrl_out);
-        tc.io.printf("%s: Done layer %d / %d\n", .{ "run_pca", @as(c_int, @intCast(il + 1)), @as(c_int, @intCast(v_input.len)) });
+        tools_common.io.printf("%s: Done layer %d / %d\n", .{ "run_pca", @as(c_int, @intCast(il + 1)), @as(c_int, @intCast(v_input.len)) });
     }
 }
 
 /// Ports `run` (mean.hpp:11 @b1b770d90), a member of `mean`.
-fn runMean(v_input: []const *tc.c.ggml_tensor, v_output: []const *tc.c.ggml_tensor) void {
-    tc.io.printf("%s: Running mean...\n", .{"run"});
+fn runMean(v_input: []const *llama.impl.llama_c.ggml_tensor, v_output: []const *llama.impl.llama_c.ggml_tensor) void {
+    tools_common.io.printf("%s: Running mean...\n", .{"run"});
     for (v_input, 0..) |t_layer, il| {
         // prepare output vector
         const ctrl_out = v_output[il];
-        _ = tc.c.ggml_format_name(ctrl_out, "direction.%zu", il + 1);
+        _ = llama.impl.llama_c.ggml_format_name(ctrl_out, "direction.%zu", il + 1);
 
         // calculate mean vector
-        tc.ggml.ggmlAssert(t_layer.ne[0] == ctrl_out.ne[0], "mean.hpp", 22, "t_layer->ne[0] == ctrl_out->ne[0]"); // == n_embd
+        tools_common.ggml.ggmlAssert(t_layer.ne[0] == ctrl_out.ne[0], "mean.hpp", 22, "t_layer->ne[0] == ctrl_out->ne[0]"); // == n_embd
         var ic: c_int = 0;
         while (ic < t_layer.ne[0]) : (ic += 1) {
             var f: f32 = 0.0;
             var ir: c_int = 0;
-            while (ir < t_layer.ne[1]) : (ir += 1) f += tc.c.ggml_get_f32_nd(t_layer, ic, ir, 0, 0);
+            while (ir < t_layer.ne[1]) : (ir += 1) f += llama.impl.llama_c.ggml_get_f32_nd(t_layer, ic, ir, 0, 0);
             f /= @floatFromInt(t_layer.ne[1]);
-            tc.c.ggml_set_f32_1d(ctrl_out, ic, f);
+            llama.impl.llama_c.ggml_set_f32_1d(ctrl_out, ic, f);
         }
 
         // normalize output vector
         var norm: f32 = 0.0;
         var i: c_int = 0;
-        while (i < tc.c.ggml_nelements(ctrl_out)) : (i += 1) {
-            const f = tc.c.ggml_get_f32_1d(ctrl_out, i);
+        while (i < llama.impl.llama_c.ggml_nelements(ctrl_out)) : (i += 1) {
+            const f = llama.impl.llama_c.ggml_get_f32_1d(ctrl_out, i);
             norm = @mulAdd(f32, f, f, norm);
         }
         // `sqrt(norm)` in `<math.h>`: the double overload, narrowed back
         norm = @floatCast(@sqrt(@as(f64, norm)));
         i = 0;
-        while (i < tc.c.ggml_nelements(ctrl_out)) : (i += 1) {
-            const f = tc.c.ggml_get_f32_1d(ctrl_out, i);
-            tc.c.ggml_set_f32_1d(ctrl_out, i, f / norm);
+        while (i < llama.impl.llama_c.ggml_nelements(ctrl_out)) : (i += 1) {
+            const f = llama.impl.llama_c.ggml_get_f32_1d(ctrl_out, i);
+            llama.impl.llama_c.ggml_set_f32_1d(ctrl_out, i, f / norm);
         }
 
-        tc.io.printf("%s: Done layer %d / %d\n", .{ "run", @as(c_int, @intCast(il + 1)), @as(c_int, @intCast(v_input.len)) });
+        tools_common.io.printf("%s: Done layer %d / %d\n", .{ "run", @as(c_int, @intCast(il + 1)), @as(c_int, @intCast(v_input.len)) });
     }
 }
 
@@ -669,16 +665,16 @@ fn runMean(v_input: []const *tc.c.ggml_tensor, v_output: []const *tc.c.ggml_tens
 
 /// Ports `main` (cvector-generator.cpp:398 @b1b770d90).
 fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
-    var params = try tc.params.Params.init(a);
+    var params = try tools_common.params.Params.init(a);
 
     params.out_file = "control_vector.gguf";
 
-    tc.common.init();
+    tools_common.common.init();
 
-    if (!try tc.arg.parse(argv, &params, .cvector_generator, printUsage)) return 1;
+    if (!try tools_common.arg.parse(argv, &params, .cvector_generator, printUsage)) return 1;
 
     if (@rem(params.n_pca_iterations, params.n_pca_batch) != 0) {
-        tc.io.eprintf("PCA iterations must by multiply of PCA batch size\n", .{});
+        tools_common.io.eprintf("PCA iterations must by multiply of PCA batch size\n", .{});
         return 1;
     }
 
@@ -690,23 +686,23 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     params.cb_eval_user_data = &cb_data;
     params.warmup = false;
 
-    tc.build_info.print(tc.c.llama_version(), stdlib.stdio.stderr());
-    tc.c.llama_backend_init();
-    tc.c.llama_numa_init(params.numa);
+    tools_common.build_info.print(llama.api.llama.llama_version(), stdlib.stdio.stderr());
+    llama.api.llama.llama_backend_init();
+    llama.api.llama.llama_numa_init(params.numa);
 
     // load the model to get hparams
-    var llama_init = try tc.init.initFromParams(init.gpa, &params, false);
+    var llama_init = try tools_common.init.initFromParams(init.gpa, &params, false);
     defer llama_init.deinit();
 
     const model = llama_init.model;
     const ctx = llama_init.context;
 
-    const n_layers = tc.c.llama_model_n_layer(model);
-    const n_embd = tc.c.llama_model_n_embd(model);
+    const n_layers = llama.api.model.llama_model_n_layer(model);
+    const n_embd = llama.api.model.llama_model_n_embd(model);
 
     // get model hint param (a.k.a model arch name)
     var model_hint: [128]u8 = @splat(0);
-    _ = tc.c.llama_model_meta_val_str(model, "general.architecture", &model_hint, 128);
+    _ = llama.api.model.llama_model_meta_val_str(model, "general.architecture", &model_hint, 128);
 
     // init train_context
     var ctx_train = try TrainContext.init(a, n_embd, n_layers);
@@ -723,17 +719,17 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
         try tokenized_prompts.append(a, t);
     }
 
-    tc.io.printf("n_total_tokens: %zu\n", .{n_total_tokens});
+    tools_common.io.printf("n_total_tokens: %zu\n", .{n_total_tokens});
     stdlib.stdio.stdout().flush(); // `std::endl`
 
-    const vocab = tc.c.llama_model_get_vocab(model);
+    const vocab = llama.api.model.llama_model_get_vocab(model);
     for (0..ctx_train.positive_entries.items.len) |i| {
         var success = false;
         const t = tokenized_prompts.items[i];
         cb_data.n_layers = n_layers;
         cb_data.n_tokens = @intCast(t.max_seq_len);
 
-        tc.io.printf("Evaluating prompt[%d/%d]: \"%s\" - \"%s\" (%d tokens)\n", .{
+        tools_common.io.printf("Evaluating prompt[%d/%d]: \"%s\" - \"%s\" (%d tokens)\n", .{
             @as(c_int, @intCast(i + 1)),                   @as(c_int, @intCast(ctx_train.positive_entries.items.len)),
             (try tokensToStr(a, vocab, t.tokens_pos)).ptr, (try tokensToStr(a, vocab, t.tokens_neg)).ptr,
             @as(c_int, @intCast(t.max_seq_len)),
@@ -758,7 +754,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     }
 
     // done with the model, we can now free it to make gain some memory
-    tc.io.printf("Done evaluate prompts, unload model...\n", .{});
+    tools_common.io.printf("Done evaluate prompts, unload model...\n", .{});
 
     const use_pca = params.cvector_dimre_method == .pca;
 
@@ -780,7 +776,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     // write output vectors to gguf
     try exportGguf(a, ctx_train.v_final.items, params.out_file, @ptrCast(&model_hint));
 
-    tc.c.llama_backend_free();
+    llama.api.llama.llama_backend_free();
 
     return 0;
 }

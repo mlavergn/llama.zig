@@ -16,25 +16,25 @@ fn oom() noreturn {
     ggml.impl.abort("ggml_vulkan: out of memory");
 }
 
-fn backendCtx(backend: ggml.impl.c.ggml_backend_t) *ggml.vulkan.context.BackendCtx {
+fn backendCtx(backend: ggml.impl.ggml_c.ggml_backend_t) *ggml.vulkan.context.BackendCtx {
     return @ptrCast(@alignCast(backend.*.context));
 }
 
 /// Ports `ggml_backend_vk_name` (ggml-vulkan.cpp:13706 @b1b770d90).
-fn name(backend: ggml.impl.c.ggml_backend_t) callconv(.c) [*c]const u8 {
+fn name(backend: ggml.impl.ggml_c.ggml_backend_t) callconv(.c) [*c]const u8 {
     return backendCtx(backend).name.ptr;
 }
 
 /// Ports `ggml_backend_vk_free` (ggml-vulkan.cpp:13712 @b1b770d90).
-fn free(backend: ggml.impl.c.ggml_backend_t) callconv(.c) void {
+fn free(backend: ggml.impl.ggml_c.ggml_backend_t) callconv(.c) void {
     const ctx = backendCtx(backend);
     ggml.vulkan.context.cleanup(ctx);
     std.heap.c_allocator.destroy(ctx);
-    std.heap.c_allocator.destroy(ggml.impl.one(ggml.impl.c.struct_ggml_backend, backend));
+    std.heap.c_allocator.destroy(ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend, backend));
 }
 
 /// Ports `ggml_backend_vk_get_default_buffer_type` (ggml-vulkan.cpp:13722 @b1b770d90).
-fn getDefaultBufferType(backend: ggml.impl.c.ggml_backend_t) callconv(.c) ggml.impl.c.ggml_backend_buffer_type_t {
+fn getDefaultBufferType(backend: ggml.impl.ggml_c.ggml_backend_t) callconv(.c) ggml.impl.ggml_c.ggml_backend_buffer_type_t {
     return &backendCtx(backend).device.buffer_type;
 }
 
@@ -53,14 +53,14 @@ fn stagingSlices(off: usize, stride: usize, size: usize, n_copies: usize, to_sta
     return out;
 }
 
-fn assertBufferType(backend: ggml.impl.c.ggml_backend_t, tensor: *const ggml.impl.c.ggml_tensor) void {
+fn assertBufferType(backend: ggml.impl.ggml_c.ggml_backend_t, tensor: *const ggml.impl.ggml_c.ggml_tensor) void {
     ggml.impl.assert(tensor.buffer.*.buft == getDefaultBufferType(backend) or tensor.buffer.*.buft == ggml.vulkan.buffer.hostBufferType(), "(tensor->buffer->buft == ggml_backend_vk_get_default_buffer_type(backend) || tensor->buffer->buft == ggml_backend_vk_host_buffer_type()) && \"unsupported buffer type\"");
 }
 
 /// Ports `ggml_backend_vk_set_tensor_2d_async` (ggml-vulkan.cpp:13728 @b1b770d90).
-fn setTensor2dAsync(backend: ggml.impl.c.ggml_backend_t, tensor_c: [*c]ggml.impl.c.ggml_tensor, data: ?*const anyopaque, offset: usize, size: usize, n_copies: usize, stride_tensor: usize, stride_data: usize) callconv(.c) void {
+fn setTensor2dAsync(backend: ggml.impl.ggml_c.ggml_backend_t, tensor_c: [*c]ggml.impl.ggml_c.ggml_tensor, data: ?*const anyopaque, offset: usize, size: usize, n_copies: usize, stride_tensor: usize, stride_data: usize) callconv(.c) void {
     const ctx = backendCtx(backend);
-    const tensor = ggml.impl.one(ggml.impl.c.ggml_tensor, tensor_c);
+    const tensor = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, tensor_c);
     assertBufferType(backend, tensor);
     if (size == 0) return;
 
@@ -88,14 +88,14 @@ fn setTensor2dAsync(backend: ggml.impl.c.ggml_backend_t, tensor_c: [*c]ggml.impl
 }
 
 /// Ports `ggml_backend_vk_set_tensor_async` (ggml-vulkan.cpp:13786 @b1b770d90).
-fn setTensorAsync(backend: ggml.impl.c.ggml_backend_t, tensor: [*c]ggml.impl.c.ggml_tensor, data: ?*const anyopaque, offset: usize, size: usize) callconv(.c) void {
+fn setTensorAsync(backend: ggml.impl.ggml_c.ggml_backend_t, tensor: [*c]ggml.impl.ggml_c.ggml_tensor, data: ?*const anyopaque, offset: usize, size: usize) callconv(.c) void {
     setTensor2dAsync(backend, tensor, data, offset, size, 1, size, size);
 }
 
 /// Ports `ggml_backend_vk_get_tensor_2d_async` (ggml-vulkan.cpp:13791 @b1b770d90).
-fn getTensor2dAsync(backend: ggml.impl.c.ggml_backend_t, tensor_c: [*c]const ggml.impl.c.ggml_tensor, data: ?*anyopaque, offset: usize, size: usize, n_copies: usize, stride_tensor: usize, stride_data: usize) callconv(.c) void {
+fn getTensor2dAsync(backend: ggml.impl.ggml_c.ggml_backend_t, tensor_c: [*c]const ggml.impl.ggml_c.ggml_tensor, data: ?*anyopaque, offset: usize, size: usize, n_copies: usize, stride_tensor: usize, stride_data: usize) callconv(.c) void {
     const ctx = backendCtx(backend);
-    const tensor = ggml.impl.one(ggml.impl.c.ggml_tensor, @constCast(tensor_c));
+    const tensor = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, @constCast(tensor_c));
     assertBufferType(backend, tensor);
     if (size == 0) return;
 
@@ -123,18 +123,18 @@ fn getTensor2dAsync(backend: ggml.impl.c.ggml_backend_t, tensor_c: [*c]const ggm
 }
 
 /// Ports `ggml_backend_vk_get_tensor_async` (ggml-vulkan.cpp:13842 @b1b770d90).
-fn getTensorAsync(backend: ggml.impl.c.ggml_backend_t, tensor: [*c]const ggml.impl.c.ggml_tensor, data: ?*anyopaque, offset: usize, size: usize) callconv(.c) void {
+fn getTensorAsync(backend: ggml.impl.ggml_c.ggml_backend_t, tensor: [*c]const ggml.impl.ggml_c.ggml_tensor, data: ?*anyopaque, offset: usize, size: usize) callconv(.c) void {
     getTensor2dAsync(backend, tensor, data, offset, size, 1, size, size);
 }
 
 /// Ports `ggml_backend_vk_cpy_tensor_async` (ggml-vulkan.cpp:13847 @b1b770d90).
-fn cpyTensorAsync(backend_src: ggml.impl.c.ggml_backend_t, backend_dst: ggml.impl.c.ggml_backend_t, src_c: [*c]const ggml.impl.c.ggml_tensor, dst_c: [*c]ggml.impl.c.ggml_tensor) callconv(.c) bool {
+fn cpyTensorAsync(backend_src: ggml.impl.ggml_c.ggml_backend_t, backend_dst: ggml.impl.ggml_c.ggml_backend_t, src_c: [*c]const ggml.impl.ggml_c.ggml_tensor, dst_c: [*c]ggml.impl.ggml_c.ggml_tensor) callconv(.c) bool {
     const ctx = backendCtx(backend_dst);
-    const src = ggml.impl.one(ggml.impl.c.ggml_tensor, @constCast(src_c));
-    const dst = ggml.impl.one(ggml.impl.c.ggml_tensor, dst_c);
+    const src = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, @constCast(src_c));
+    const dst = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst_c);
 
     // Skip zero-size tensors
-    if (ggml.impl.c.ggml_nbytes(src) == 0) return true;
+    if (ggml.impl.ggml_c.ggml_nbytes(src) == 0) return true;
     if (dst.buffer.*.buft != getDefaultBufferType(backend_dst)) return false;
 
     const dst_buf = ggml.vulkan.buffer.tensorBuffer(dst);
@@ -144,11 +144,11 @@ fn cpyTensorAsync(backend_src: ggml.impl.c.ggml_backend_t, backend_dst: ggml.imp
         // Async copy only works within the same device
         if (src_buf.device != dst_buf.device) return false;
         const compute_ctx = ggml.vulkan.context.getComputeCtx(ctx);
-        ggml.vulkan.submit.bufferCopyAsync(compute_ctx, dst_buf, ggml.vulkan.buffer.tensorOffset(dst) + dst.view_offs, src_buf, ggml.vulkan.buffer.tensorOffset(src) + src.view_offs, ggml.impl.c.ggml_nbytes(src));
+        ggml.vulkan.submit.bufferCopyAsync(compute_ctx, dst_buf, ggml.vulkan.buffer.tensorOffset(dst) + dst.view_offs, src_buf, ggml.vulkan.buffer.tensorOffset(src) + src.view_offs, ggml.impl.ggml_c.ggml_nbytes(src));
         return true;
     }
 
-    if (ggml.impl.c.ggml_backend_buffer_is_host(src.buffer)) {
+    if (ggml.impl.ggml_c.ggml_backend_buffer_is_host(src.buffer)) {
         var pinned_offset: usize = 0;
         if (ggml.vulkan.buffer.hostGet(ctx.device, src.data, &pinned_offset) == null) return false;
 
@@ -162,19 +162,19 @@ fn cpyTensorAsync(backend_src: ggml.impl.c.ggml_backend_t, backend_dst: ggml.imp
         const coherent: ggml.vulkan.common.vk.VkMemoryPropertyFlags = ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
         const dst_host_coherent = (dst_buf.memory_property_flags & coherent) == coherent;
 
-        if ((backend_src == backend_dst or src_backend_synchronous) and backend_idle and dst_host_coherent and ggml.impl.c.ggml_nbytes(src) <= max_cpu_copy_size) {
-            ggml.vulkan.submit.bufferWrite(dst_buf, ggml.vulkan.buffer.tensorOffset(dst) + dst.view_offs, @ptrCast(src.data.?), ggml.impl.c.ggml_nbytes(src));
+        if ((backend_src == backend_dst or src_backend_synchronous) and backend_idle and dst_host_coherent and ggml.impl.ggml_c.ggml_nbytes(src) <= max_cpu_copy_size) {
+            ggml.vulkan.submit.bufferWrite(dst_buf, ggml.vulkan.buffer.tensorOffset(dst) + dst.view_offs, @ptrCast(src.data.?), ggml.impl.ggml_c.ggml_nbytes(src));
             return true;
         }
 
         const cpy_ctx = if (ctx.device.async_use_transfer_queue) ggml.vulkan.context.getTransferCtx(ctx) else ggml.vulkan.context.getComputeCtx(ctx);
-        return ggml.vulkan.submit.bufferWriteAsync(cpy_ctx, dst_buf, ggml.vulkan.buffer.tensorOffset(dst) + dst.view_offs, @ptrCast(src.data.?), ggml.impl.c.ggml_nbytes(src), false);
+        return ggml.vulkan.submit.bufferWriteAsync(cpy_ctx, dst_buf, ggml.vulkan.buffer.tensorOffset(dst) + dst.view_offs, @ptrCast(src.data.?), ggml.impl.ggml_c.ggml_nbytes(src), false);
     }
     return false;
 }
 
 /// Ports `ggml_backend_vk_synchronize` (ggml-vulkan.cpp:13989 @b1b770d90).
-fn synchronize(backend: ggml.impl.c.ggml_backend_t) callconv(.c) void {
+fn synchronize(backend: ggml.impl.ggml_c.ggml_backend_t) callconv(.c) void {
     const ctx = backendCtx(backend);
     ggml.vulkan.context.synchronize(ctx);
     ggml.vulkan.context.graphCleanup(ctx);
@@ -192,12 +192,12 @@ pub const Event = struct {
     cmd_buffer_use_counter: u64 = 0,
 };
 
-fn eventOf(event: ggml.impl.c.ggml_backend_event_t) *Event {
+fn eventOf(event: ggml.impl.ggml_c.ggml_backend_event_t) *Event {
     return @ptrCast(@alignCast(event.*.context));
 }
 
 /// Ports `ggml_backend_vk_event_record` (ggml-vulkan.cpp:15642 @b1b770d90).
-fn eventRecord(backend: ggml.impl.c.ggml_backend_t, event: ggml.impl.c.ggml_backend_event_t) callconv(.c) void {
+fn eventRecord(backend: ggml.impl.ggml_c.ggml_backend_t, event: ggml.impl.ggml_c.ggml_backend_event_t) callconv(.c) void {
     const ctx = backendCtx(backend);
     const vkev = eventOf(event);
 
@@ -231,7 +231,7 @@ fn eventRecord(backend: ggml.impl.c.ggml_backend_t, event: ggml.impl.c.ggml_back
 }
 
 /// Ports `ggml_backend_vk_event_wait` (ggml-vulkan.cpp:15680 @b1b770d90).
-fn eventWait(backend: ggml.impl.c.ggml_backend_t, event: ggml.impl.c.ggml_backend_event_t) callconv(.c) void {
+fn eventWait(backend: ggml.impl.ggml_c.ggml_backend_t, event: ggml.impl.ggml_c.ggml_backend_event_t) callconv(.c) void {
     const ctx = backendCtx(backend);
     const vkev = eventOf(event);
     const compute_ctx = ggml.vulkan.context.getComputeCtx(ctx);
@@ -246,7 +246,7 @@ fn eventWait(backend: ggml.impl.c.ggml_backend_t, event: ggml.impl.c.ggml_backen
 }
 
 /// Ports `ggml_backend_vk_device_event_new` (ggml-vulkan.cpp:16573 @b1b770d90).
-pub fn deviceEventNew(dev: ggml.impl.c.ggml_backend_dev_t, dev_idx: usize) ggml.impl.c.ggml_backend_event_t {
+pub fn deviceEventNew(dev: ggml.impl.ggml_c.ggml_backend_dev_t, dev_idx: usize) ggml.impl.ggml_c.ggml_backend_event_t {
     const device = ggml.vulkan.device.getDevice(dev_idx);
     const vkev = std.heap.c_allocator.create(Event) catch oom();
     // No events initially, they get created on demand
@@ -256,13 +256,13 @@ pub fn deviceEventNew(dev: ggml.impl.c.ggml_backend_dev_t, dev_idx: usize) ggml.
     var ci = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkSemaphoreCreateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO);
     ci.pNext = &tci;
     ggml.vulkan.common.checkOrAbort(ggml.vulkan.common.dispatch.vkCreateSemaphore.?(device.device, &ci, null, &vkev.tl_semaphore.s), "vk::Device::createSemaphore");
-    const ev = std.heap.c_allocator.create(ggml.impl.c.struct_ggml_backend_event) catch oom();
+    const ev = std.heap.c_allocator.create(ggml.impl.ggml_c.struct_ggml_backend_event) catch oom();
     ev.* = .{ .device = dev, .context = vkev };
     return ev;
 }
 
 /// Ports `ggml_backend_vk_device_event_free` (ggml-vulkan.cpp:16596 @b1b770d90).
-pub fn deviceEventFree(dev_idx: usize, event: ggml.impl.c.ggml_backend_event_t) void {
+pub fn deviceEventFree(dev_idx: usize, event: ggml.impl.ggml_c.ggml_backend_event_t) void {
     const device = ggml.vulkan.device.getDevice(dev_idx);
     const vkev = eventOf(event);
     ggml.vulkan.common.dispatch.vkDestroySemaphore.?(device.device, vkev.tl_semaphore.s, null);
@@ -272,11 +272,11 @@ pub fn deviceEventFree(dev_idx: usize, event: ggml.impl.c.ggml_backend_event_t) 
     vkev.events_free.deinit(std.heap.c_allocator);
     vkev.events_submitted.deinit(std.heap.c_allocator);
     std.heap.c_allocator.destroy(vkev);
-    std.heap.c_allocator.destroy(ggml.impl.one(ggml.impl.c.struct_ggml_backend_event, event));
+    std.heap.c_allocator.destroy(ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend_event, event));
 }
 
 /// Ports `ggml_backend_vk_device_event_synchronize` (ggml-vulkan.cpp:16616 @b1b770d90).
-pub fn deviceEventSynchronize(dev_idx: usize, event: ggml.impl.c.ggml_backend_event_t) void {
+pub fn deviceEventSynchronize(dev_idx: usize, event: ggml.impl.ggml_c.ggml_backend_event_t) void {
     const device = ggml.vulkan.device.getDevice(dev_idx);
     const vkev = eventOf(event);
     // Only do something if the event has actually been used
@@ -319,14 +319,14 @@ pub fn bufferFromHostPtr(device: *ggml.vulkan.device.Device, ptr: ?*anyopaque, s
 }
 
 /// Ports `ggml_backend_vk_device_buffer_from_host_ptr` (ggml-vulkan.cpp:16648 @b1b770d90).
-pub fn deviceBufferFromHostPtr(dev: ggml.impl.c.ggml_backend_dev_t, dev_idx: usize, ptr: ?*anyopaque, size: usize) ggml.impl.c.ggml_backend_buffer_t {
+pub fn deviceBufferFromHostPtr(dev: ggml.impl.ggml_c.ggml_backend_dev_t, dev_idx: usize, ptr: ?*anyopaque, size: usize) ggml.impl.ggml_c.ggml_backend_buffer_t {
     const device = ggml.vulkan.device.getDevice(dev_idx);
     const buf = bufferFromHostPtr(device, ptr, size) orelse return null;
-    return ggml.vulkan.buffer.wrapBuffer(ggml.impl.c.ggml_backend_dev_buffer_type(dev), device, buf, device.name, size);
+    return ggml.vulkan.buffer.wrapBuffer(ggml.impl.ggml_c.ggml_backend_dev_buffer_type(dev), device, buf, device.name, size);
 }
 
 /// Ports `ggml_backend_vk_interface` (ggml-vulkan.cpp:15698 @b1b770d90).
-const backend_iface: ggml.impl.c.struct_ggml_backend_i = .{
+const backend_iface: ggml.impl.ggml_c.struct_ggml_backend_i = .{
     .get_name = &name,
     .free = &free,
     .set_tensor_async = &setTensorAsync,
@@ -346,16 +346,16 @@ const backend_iface: ggml.impl.c.struct_ggml_backend_i = .{
 };
 
 /// Ports `ggml_backend_vk_init` (ggml-vulkan.cpp:15722 @b1b770d90).
-pub fn backendInit(dev_num: usize, guid: ggml.impl.c.ggml_guid_t) ggml.impl.c.ggml_backend_t {
+pub fn backendInit(dev_num: usize, guid: ggml.impl.ggml_c.ggml_guid_t) ggml.impl.ggml_c.ggml_backend_t {
     const ctx = std.heap.c_allocator.create(ggml.vulkan.context.BackendCtx) catch oom();
     ctx.* = .{};
     ggml.vulkan.context.init(ctx, dev_num);
 
-    const backend = std.heap.c_allocator.create(ggml.impl.c.struct_ggml_backend) catch oom();
+    const backend = std.heap.c_allocator.create(ggml.impl.ggml_c.struct_ggml_backend) catch oom();
     backend.* = .{
         .guid = guid,
         .iface = backend_iface,
-        .device = ggml.impl.c.ggml_backend_reg_dev_get(ggml.vulkan.backend.reg(), dev_num),
+        .device = ggml.impl.ggml_c.ggml_backend_reg_dev_get(ggml.vulkan.backend.reg(), dev_num),
         .context = ctx,
     };
     if (!ctx.device.support_async) backend.iface.get_tensor_async = null;

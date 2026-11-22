@@ -125,7 +125,7 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
 /// The mixture of experts and the shared expert of `layer`, or its dense
 /// FFN when it has no router; common to `graph` and `graph_mtp`, which
 /// differ only in the names they give the results.
-fn buildFfnBlock(b: *const llama.graph.Builder, layer: *const llama.model.Layer, cur_: *llama.impl.c.ggml_tensor, comptime mtp: bool, il: c_int) *llama.impl.c.ggml_tensor {
+fn buildFfnBlock(b: *const llama.graph.Builder, layer: *const llama.model.Layer, cur_: *llama.impl.llama_c.ggml_tensor, comptime mtp: bool, il: c_int) *llama.impl.llama_c.ggml_tensor {
     const hp = b.hparams;
     const p = if (mtp) "mtp_" else "";
     var cur = cur_;
@@ -158,7 +158,7 @@ fn buildFfnBlock(b: *const llama.graph.Builder, layer: *const llama.model.Layer,
         const sh_out = b.buildFfn(cur, layer.ffn_up_shexp, null, layer.ffn_up_shexp_s, layer.ffn_gate_shexp, null, layer.ffn_gate_shexp_s, layer.ffn_down_shexp, null, layer.ffn_down_shexp_s, null, .silu, .par, il);
         b.cb(sh_out, p ++ "ffn_shared_out", il);
 
-        cur = llama.impl.c.ggml_add(b.ctx0, moe_out, sh_out);
+        cur = llama.impl.llama_c.ggml_add(b.ctx0, moe_out, sh_out);
         b.cb(cur, p ++ "ffn_out", il);
     }
     return cur;
@@ -209,11 +209,11 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         }
 
         if (il == b.n_layer - 1 and b.cropBeforeNextn(inp_out_ids)) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        const ffn_inp = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -221,7 +221,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 
         cur = buildFfnBlock(b, layer, cur, false, il);
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
 
@@ -237,7 +237,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     b.cb(cur, "h_nextn", -1);
     b.res.t_h_nextn = cur;
 
-    if (b.cropAfterNextn(inp_out_ids)) cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+    if (b.cropAfterNextn(inp_out_ids)) cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
 
     b.cb(cur, "result_norm", -1);
     b.res.t_embd = cur;
@@ -273,18 +273,18 @@ fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder)
     const inp = std.heap.c_allocator.create(llama.graph.InpEmbdH) catch llama.impl.abort("models/hy-v3.cpp", 241, "out of memory");
     inp.* = .{ .n_embd = hp.nEmbdInp(), .n_embd_state = hp.n_embd };
 
-    inp.tokens = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_I32, b.n_tokens);
-    llama.impl.c.ggml_set_input(inp.tokens);
+    inp.tokens = llama.impl.llama_c.ggml_new_tensor_1d(ctx, llama.impl.llama_c.GGML_TYPE_I32, b.n_tokens);
+    llama.impl.llama_c.ggml_set_input(inp.tokens);
 
-    inp.embd = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_F32, hp.nEmbdInp(), b.n_tokens);
-    llama.impl.c.ggml_set_input(inp.embd);
+    inp.embd = llama.impl.llama_c.ggml_new_tensor_2d(ctx, llama.impl.llama_c.GGML_TYPE_F32, hp.nEmbdInp(), b.n_tokens);
+    llama.impl.llama_c.ggml_set_input(inp.embd);
 
     inp.h = b.buildInpEmbdState(inp, hp.n_embd);
 
     const tok_embd_w = layer.nextn.embed_tokens orelse model.tok_embd.?;
 
     const h_input = inp.h.?;
-    const tok_embd: *llama.impl.c.ggml_tensor = if (b.ubatch.token != null) llama.impl.c.ggml_get_rows(ctx, tok_embd_w, inp.tokens) else inp.embd.?;
+    const tok_embd: *llama.impl.llama_c.ggml_tensor = if (b.ubatch.token != null) llama.impl.llama_c.ggml_get_rows(ctx, tok_embd_w, inp.tokens) else inp.embd.?;
     b.cb(tok_embd, "mtp_tok_embd", il);
 
     _ = b.res.addInput(llama.graph.InpEmbdH, inp);
@@ -299,7 +299,7 @@ fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder)
     const e_norm = b.buildNorm(tok_embd, layer.nextn.enorm, null, .rms, il);
     b.cb(e_norm, "mtp_enorm", il);
 
-    const concat = llama.impl.c.ggml_concat(ctx, e_norm, h_norm, 0);
+    const concat = llama.impl.llama_c.ggml_concat(ctx, e_norm, h_norm, 0);
     b.cb(concat, "mtp_concat", il);
 
     var cur = b.buildLoraMm(layer.nextn.eh_proj.?, concat, null);
@@ -329,7 +329,7 @@ fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder)
         b.cb(cur, "mtp_attn_out", il);
     }
 
-    const ffn_inp = llama.impl.c.ggml_add(ctx, cur, inpSA);
+    const ffn_inp = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
     b.cb(ffn_inp, "mtp_ffn_inp", il);
 
     cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -337,7 +337,7 @@ fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder)
 
     cur = buildFfnBlock(b, layer, cur, true, il);
 
-    cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+    cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
     b.cb(cur, "mtp_post_ffn", il);
 
     // The final layernorm, after the decoder block and before the shared
@@ -350,7 +350,7 @@ fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder)
     b.cb(cur, "h_nextn", -1);
     b.res.t_h_nextn = cur;
 
-    cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+    cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
     b.cb(cur, "mtp_shared_head_norm", -1);
 
     const head_w = layer.nextn.shared_head_head orelse model.output;

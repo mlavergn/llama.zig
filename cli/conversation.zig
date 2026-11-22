@@ -86,8 +86,6 @@ const llama = @import("llama");
 const common_chat = @import("common_chat");
 const json = @import("json");
 
-const Allocator = std.mem.Allocator;
-
 /// Failures of the chat layer, told apart from the session's.
 pub const Error = error{
     /// The template's render could not be matched with its trust marks.
@@ -103,8 +101,6 @@ pub const Error = error{
 pub var last_error: std.ArrayList(u8) = .empty;
 
 /// Where `last_error` lives: it outlives every chat.
-const error_allocator = std.heap.smp_allocator;
-
 fn fail(e: anyerror) anyerror {
     if (e == error.OutOfMemory) return e;
     setError(common_chat.what(e)) catch return error.OutOfMemory;
@@ -113,7 +109,7 @@ fn fail(e: anyerror) anyerror {
 
 fn setError(text: []const u8) !void {
     last_error.clearRetainingCapacity();
-    try last_error.appendSlice(error_allocator, text);
+    try last_error.appendSlice(std.heap.smp_allocator, text);
 }
 
 // -----------------------------------------------------------------------------
@@ -131,7 +127,7 @@ fn setError(text: []const u8) !void {
 /// Return: the map's entries, one per name, the last write winning. On a
 /// `--chat-template-kwargs` value that is not JSON, `error.JsonError` with
 /// the parser's `what()` in `last_error`.
-pub fn resolveKwargs(a: Allocator, ops: []const mod.args.KwargOp) ![]common_chat.templates.KwArg {
+pub fn resolveKwargs(a: std.mem.Allocator, ops: []const mod.args.KwargOp) ![]common_chat.templates.KwArg {
     var map: std.ArrayList(common_chat.templates.KwArg) = .empty;
     for (ops) |op| switch (op) {
         .object => |text| {
@@ -160,7 +156,7 @@ pub fn resolveKwargs(a: Allocator, ops: []const mod.args.KwargOp) ![]common_chat
     return map.items;
 }
 
-fn put(a: Allocator, map: *std.ArrayList(common_chat.templates.KwArg), key: []const u8, value: []const u8) !void {
+fn put(a: std.mem.Allocator, map: *std.ArrayList(common_chat.templates.KwArg), key: []const u8, value: []const u8) !void {
     for (map.items) |*kv| if (std.mem.eql(u8, kv.key, key)) {
         kv.value = value;
         return;
@@ -289,7 +285,7 @@ pub const Display = struct {
 /// `generate_completion` (tools/cli/cli-context.cpp:350 @b1b770d90)
 /// collects them.
 pub const Reply = struct {
-    gpa: Allocator,
+    gpa: std.mem.Allocator,
     display: *Display,
     /// `task_result_state::chat_session`: owns the reply so far.
     session: *common_chat.session.Session,
@@ -303,7 +299,7 @@ pub const Reply = struct {
 
     /// Parameters:
     /// - `session`: the chat session; must outlive the reply.
-    pub fn init(gpa: Allocator, display: *Display, session: *common_chat.session.Session) !Reply {
+    pub fn init(gpa: std.mem.Allocator, display: *Display, session: *common_chat.session.Session) !Reply {
         return .{ .gpa = gpa, .display = display, .session = session, .msg = try session.msg().clone(gpa) };
     }
 
@@ -383,7 +379,7 @@ pub const Reply = struct {
 
 /// A conversation: the templates, the server's chat options, and the history.
 pub const Chat = struct {
-    gpa: Allocator,
+    gpa: std.mem.Allocator,
     /// Owns the kwargs and anything else that lives as long as the chat.
     arena: std.heap.ArenaAllocator,
     tmpls: common_chat.templates.Templates,
@@ -411,10 +407,10 @@ pub const Chat = struct {
     /// Return: `Error.ChatFailed` with `last_error` set when the template
     /// does not load.
     pub fn init(
-        gpa: Allocator,
+        gpa: std.mem.Allocator,
         settings: *const mod.args.Args,
         kwargs: []const common_chat.templates.KwArg,
-        model: *const llama.impl.c.llama_model,
+        model: *const llama.impl.llama_c.llama_model,
         override: []const u8,
         system: []const u8,
     ) !Chat {
@@ -492,7 +488,7 @@ pub const Chat = struct {
     /// prompt or a file arrives as U+FFFD where it once threw.
     ///
     /// Return: owned by `gpa`.
-    fn dumpSafeText(gpa: Allocator, text: []const u8) ![]u8 {
+    fn dumpSafeText(gpa: std.mem.Allocator, text: []const u8) ![]u8 {
         if (std.unicode.utf8ValidateSlice(text)) return gpa.dupe(u8, text);
         var arena_state = std.heap.ArenaAllocator.init(gpa);
         defer arena_state.deinit();
@@ -594,27 +590,27 @@ pub const Chat = struct {
     /// counting.
     ///
     /// Return: the sampler, or null.
-    fn budget(self: *const Chat, a: Allocator, session: *mod.session.Session, cs: *const common_chat.session.Session) !?*llama.impl.c.llama_sampler {
+    fn budget(self: *const Chat, a: std.mem.Allocator, session: *mod.session.Session, cs: *const common_chat.session.Session) !?*llama.impl.llama_c.llama_sampler {
         if (cs.thinkingEndTags().len == 0) return null;
         const n_budget = self.settings.reasoning_budget;
         if (!(cs.grammar_lazy or n_budget >= 0)) return null;
 
         const tok = struct {
-            fn run(al: Allocator, s: *mod.session.Session, text: []const u8) ![]llama.impl.c.llama_token {
+            fn run(al: std.mem.Allocator, s: *mod.session.Session, text: []const u8) ![]llama.impl.llama_c.llama_token {
                 const ids = try s.tokenizeText(text, .{ .add_special = false, .parse_special = true });
                 defer s.allocator.free(ids);
-                return al.dupe(llama.impl.c.llama_token, ids);
+                return al.dupe(llama.impl.llama_c.llama_token, ids);
             }
         }.run;
 
         const start = try tok(a, session, cs.thinkingStartTag());
-        var ends: std.ArrayList([]const llama.impl.c.llama_token) = .empty;
+        var ends: std.ArrayList([]const llama.impl.llama_c.llama_token) = .empty;
         for (cs.thinkingEndTags()) |tag| {
             if (tag.len != 0) try ends.append(a, try tok(a, session, tag));
         }
         if (start.len == 0 or ends.items.len == 0) return null;
 
-        var forced: std.ArrayList(llama.impl.c.llama_token) = .empty;
+        var forced: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
         if (self.settings.reasoning_budget_message.len != 0) {
             try forced.appendSlice(a, try tok(a, session, self.settings.reasoning_budget_message));
         }
@@ -652,7 +648,7 @@ pub const Chat = struct {
 /// template part trusted -- special tokens parsed -- and an input part not.
 ///
 /// Return: segments borrowing from `prompt`, allocated in `a`.
-fn segmentsFor(a: Allocator, prompt: *const common_chat.prompt.Prompt) ![]mod.chat.Segment {
+fn segmentsFor(a: std.mem.Allocator, prompt: *const common_chat.prompt.Prompt) ![]mod.chat.Segment {
     var out: std.ArrayList(mod.chat.Segment) = .empty;
     for (prompt.parts.items) |part| {
         if (part.text.len == 0) continue;

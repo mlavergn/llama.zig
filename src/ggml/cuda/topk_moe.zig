@@ -62,10 +62,10 @@ fn launchTopkMoe(comptime has_bias: bool, ctx: *ggml.cuda.common.Context, logits
 }
 
 /// Ports `ggml_cuda_op_topk_moe` (topk-moe.cu:425 @b1b770d90).
-pub fn opTopkMoe(ctx: *ggml.cuda.common.Context, logits: *const ggml.impl.c.ggml_tensor, weights: *ggml.impl.c.ggml_tensor, ids: *ggml.impl.c.ggml_tensor, clamp: ?*const ggml.impl.c.ggml_tensor, scale: ?*const ggml.impl.c.ggml_tensor, bias: ?*const ggml.impl.c.ggml_tensor, args: *const Args) void {
-    ggml.impl.assert(logits.type == ggml.impl.c.GGML_TYPE_F32, "logits->type == GGML_TYPE_F32");
-    ggml.impl.assert(weights.type == ggml.impl.c.GGML_TYPE_F32, "weights->type == GGML_TYPE_F32");
-    ggml.impl.assert(ids.type == ggml.impl.c.GGML_TYPE_I32, "ids->type == GGML_TYPE_I32");
+pub fn opTopkMoe(ctx: *ggml.cuda.common.Context, logits: *const ggml.impl.ggml_c.ggml_tensor, weights: *ggml.impl.ggml_c.ggml_tensor, ids: *ggml.impl.ggml_c.ggml_tensor, clamp: ?*const ggml.impl.ggml_c.ggml_tensor, scale: ?*const ggml.impl.ggml_c.ggml_tensor, bias: ?*const ggml.impl.ggml_c.ggml_tensor, args: *const Args) void {
+    ggml.impl.assert(logits.type == ggml.impl.ggml_c.GGML_TYPE_F32, "logits->type == GGML_TYPE_F32");
+    ggml.impl.assert(weights.type == ggml.impl.ggml_c.GGML_TYPE_F32, "weights->type == GGML_TYPE_F32");
+    ggml.impl.assert(ids.type == ggml.impl.ggml_c.GGML_TYPE_I32, "ids->type == GGML_TYPE_I32");
 
     const n_experts: c_int = @truncate(logits.ne[0]);
     const n_rows: c_int = @truncate(logits.ne[1]);
@@ -77,7 +77,7 @@ pub fn opTopkMoe(ctx: *ggml.cuda.common.Context, logits: *const ggml.impl.c.ggml
 
     const scale_val: f32 = if (scale) |s| ggml.impl.getOpParamsF32(s, 0) else 1.0;
 
-    ggml.impl.assert(ids.nb[1] / ggml.impl.c.ggml_type_size(ids.type) == @as(usize, @intCast(n_experts)), "ids->nb[1] / ggml_type_size(ids->type) == (size_t) n_experts");
+    ggml.impl.assert(ids.nb[1] / ggml.impl.ggml_c.ggml_type_size(ids.type) == @as(usize, @intCast(n_experts)), "ids->nb[1] / ggml_type_size(ids->type) == (size_t) n_experts");
 
     const n_expert_used: c_int = @truncate(weights.ne[1]);
 
@@ -103,26 +103,26 @@ pub fn opTopkMoe(ctx: *ggml.cuda.common.Context, logits: *const ggml.impl.c.ggml
 }
 
 /// Ports `ggml_cuda_should_use_topk_moe` (topk-moe.cu:475 @b1b770d90).
-pub fn shouldUseTopkMoe(gating_op: *const ggml.impl.c.ggml_tensor, weights: *const ggml.impl.c.ggml_tensor, logits: *const ggml.impl.c.ggml_tensor, ids: *const ggml.impl.c.ggml_tensor) bool {
+pub fn shouldUseTopkMoe(gating_op: *const ggml.impl.ggml_c.ggml_tensor, weights: *const ggml.impl.ggml_c.ggml_tensor, logits: *const ggml.impl.ggml_c.ggml_tensor, ids: *const ggml.impl.ggml_c.ggml_tensor) bool {
     // must match an instantiation of launch_topk_moe_cuda: a power of 2 up
     // to 512, or one of the non-power-of-2 expert counts of supported models
     const n_expert: c_int = @intCast(ids.nb[1] / ids.nb[0]);
     if (((n_expert & (n_expert - 1)) != 0 or n_expert > 512) and n_expert != 288 and n_expert != 384 and n_expert != 576) return false;
 
-    if (!ggml.impl.c.ggml_is_contiguous(weights) or !ggml.impl.c.ggml_is_contiguous(logits)) return false;
+    if (!ggml.impl.ggml_c.ggml_is_contiguous(weights) or !ggml.impl.ggml_c.ggml_is_contiguous(logits)) return false;
 
-    if (gating_op.op == ggml.impl.c.GGML_OP_SOFT_MAX) {
+    if (gating_op.op == ggml.impl.ggml_c.GGML_OP_SOFT_MAX) {
         const softmax = gating_op;
         const scale = ggml.impl.getOpParamsF32(softmax, 0);
         const max_bias = ggml.impl.getOpParamsF32(softmax, 1);
 
-        if (!ggml.impl.c.ggml_is_contiguous(ggml.impl.one(ggml.impl.c.ggml_tensor, softmax.src[0]))) return false;
+        if (!ggml.impl.ggml_c.ggml_is_contiguous(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, softmax.src[0]))) return false;
         if (scale != 1.0 or max_bias != 0.0) return false;
         // don't fuse when masks or sinks are present
         if (softmax.src[1] != null or softmax.src[2] != null) return false;
-    } else if (gating_op.op == ggml.impl.c.GGML_OP_UNARY) {
-        const op = ggml.impl.c.ggml_get_unary_op(gating_op);
-        if (op != ggml.impl.c.GGML_UNARY_OP_SIGMOID and op != ggml.impl.c.GGML_UNARY_OP_SOFTPLUS) return false;
+    } else if (gating_op.op == ggml.impl.ggml_c.GGML_OP_UNARY) {
+        const op = ggml.impl.ggml_c.ggml_get_unary_op(gating_op);
+        if (op != ggml.impl.ggml_c.GGML_UNARY_OP_SIGMOID and op != ggml.impl.ggml_c.GGML_UNARY_OP_SOFTPLUS) return false;
     }
 
     return true;

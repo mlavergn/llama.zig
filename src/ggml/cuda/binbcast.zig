@@ -63,9 +63,9 @@ fn launchBinBcastPack(
     comptime S1: type,
     comptime D: type,
     comptime n_fuse: usize,
-    src0: *const ggml.impl.c.ggml_tensor,
-    src1: *const ggml.impl.c.ggml_tensor,
-    dst: *const ggml.impl.c.ggml_tensor,
+    src0: *const ggml.impl.ggml_c.ggml_tensor,
+    src1: *const ggml.impl.ggml_c.ggml_tensor,
+    dst: *const ggml.impl.ggml_c.ggml_tensor,
     src0_dd: ?*const anyopaque,
     src1_dd: ?*const anyopaque,
     dst_dd: ?*anyopaque,
@@ -107,7 +107,7 @@ fn launchBinBcastPack(
         }
     }.f;
 
-    if (ggml.impl.c.ggml_is_contiguous(src0) and ggml.impl.c.ggml_is_contiguous(src1) and !ggml.impl.c.ggml_is_permuted(src0) and !ggml.impl.c.ggml_is_permuted(src1)) {
+    if (ggml.impl.ggml_c.ggml_is_contiguous(src0) and ggml.impl.ggml_c.ggml_is_contiguous(src1) and !ggml.impl.ggml_c.ggml_is_permuted(src0) and !ggml.impl.ggml_c.ggml_is_permuted(src1)) {
         for (0..4) |i| {
             if (nr[i] != 1) break;
             if (i > 0) {
@@ -278,12 +278,12 @@ fn launchBinBcastPack(
 /// Ports `ggml_cuda_op_bin_bcast` (binbcast.cu:413 @b1b770d90) with the
 /// functor `bin_bcast_cuda` (binbcast.cu:390 @b1b770d90) it is instantiated
 /// with, as `bin_bcast_cuda<op, n_fuse>`.
-fn opBinBcast(comptime op: Op, comptime n_fuse: usize, src0: *const ggml.impl.c.ggml_tensor, src1: *const ggml.impl.c.ggml_tensor, dst: *const ggml.impl.c.ggml_tensor, src0_dd: ?*const anyopaque, src1_dd: ?*const anyopaque, dst_dd: ?*anyopaque, stream: ggml.cuda.common.cu.cudaStream_t) void {
-    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32 or src1.type == ggml.impl.c.GGML_TYPE_F16 or src1.type == ggml.impl.c.GGML_TYPE_BF16, "src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_F16 || src1->type == GGML_TYPE_BF16");
+fn opBinBcast(comptime op: Op, comptime n_fuse: usize, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, dst: *const ggml.impl.ggml_c.ggml_tensor, src0_dd: ?*const anyopaque, src1_dd: ?*const anyopaque, dst_dd: ?*anyopaque, stream: ggml.cuda.common.cu.cudaStream_t) void {
+    ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32 or src1.type == ggml.impl.ggml_c.GGML_TYPE_F16 or src1.type == ggml.impl.ggml_c.GGML_TYPE_BF16, "src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_F16 || src1->type == GGML_TYPE_BF16");
 
-    const F32 = ggml.impl.c.GGML_TYPE_F32;
-    const F16 = ggml.impl.c.GGML_TYPE_F16;
-    const BF16 = ggml.impl.c.GGML_TYPE_BF16;
+    const F32 = ggml.impl.ggml_c.GGML_TYPE_F32;
+    const F16 = ggml.impl.ggml_c.GGML_TYPE_F16;
+    const BF16 = ggml.impl.ggml_c.GGML_TYPE_BF16;
     const bf16 = ggml.cuda.kernels.bf16;
     if (src0.type == F32 and src1.type != BF16 and dst.type == F32) {
         launchBinBcastPack(op, f32, f32, f32, n_fuse, src0, src1, dst, src0_dd, src1_dd, dst_dd, stream);
@@ -298,39 +298,39 @@ fn opBinBcast(comptime op: Op, comptime n_fuse: usize, src0: *const ggml.impl.c.
     } else if (src0.type == F16 and dst.type == F32) {
         launchBinBcastPack(op, ggml.cuda.kernels.half, f32, f32, n_fuse, src0, src1, dst, src0_dd, src1_dd, dst_dd, stream);
     } else {
-        ggml.impl.fprintfStderr("%s: unsupported types: dst: %s, src0: %s, src1: %s\n", .{ "ggml_cuda_op_bin_bcast", ggml.impl.c.ggml_type_name(dst.type), ggml.impl.c.ggml_type_name(src0.type), ggml.impl.c.ggml_type_name(src1.type) });
+        ggml.impl.fprintfStderr("%s: unsupported types: dst: %s, src0: %s, src1: %s\n", .{ "ggml_cuda_op_bin_bcast", ggml.impl.ggml_c.ggml_type_name(dst.type), ggml.impl.ggml_c.ggml_type_name(src0.type), ggml.impl.ggml_c.ggml_type_name(src1.type) });
         ggml.impl.abort("fatal error");
     }
 }
 
-fn srcOf(dst: *const ggml.impl.c.ggml_tensor, i: usize) *const ggml.impl.c.ggml_tensor {
-    return ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[i]);
+fn srcOf(dst: *const ggml.impl.ggml_c.ggml_tensor, i: usize) *const ggml.impl.ggml_c.ggml_tensor {
+    return ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[i]);
 }
 
 /// Ports `ggml_cuda_op_repeat` (binbcast.cu:438 @b1b770d90): `src0` is `dst`
 /// itself, read through a null pointer, so the kernel starts every element
 /// from zero.
-pub fn opRepeat(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+pub fn opRepeat(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     opBinBcast(.repeat, 0, dst, srcOf(dst, 0), dst, null, srcOf(dst, 0).data, dst.data, ctx.stream());
 }
 
 /// Ports `ggml_cuda_op_add`, `ggml_cuda_op_sub`, `ggml_cuda_op_mul` and
 /// `ggml_cuda_op_div` (binbcast.cu:442, 446, 450, 454 @b1b770d90).
-pub fn opBinary(comptime op: Op, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+pub fn opBinary(comptime op: Op, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const s0 = srcOf(dst, 0);
     const s1 = srcOf(dst, 1);
     opBinBcast(op, 1, s0, s1, dst, s0.data, s1.data, dst.data, ctx.stream());
 }
 
 /// Ports `ggml_cuda_op_fused_binbcast_impl` (binbcast.cu:459 @b1b770d90).
-fn fusedBinBcastImpl(comptime op: Op, comptime n_fuse: usize, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+fn fusedBinBcastImpl(comptime op: Op, comptime n_fuse: usize, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const stream = ctx.stream();
     const src0 = srcOf(dst, 0);
     const src1 = srcOf(dst, 1);
 
-    const F32 = ggml.impl.c.GGML_TYPE_F32;
-    const F16 = ggml.impl.c.GGML_TYPE_F16;
-    const BF16 = ggml.impl.c.GGML_TYPE_BF16;
+    const F32 = ggml.impl.ggml_c.GGML_TYPE_F32;
+    const F16 = ggml.impl.ggml_c.GGML_TYPE_F16;
+    const BF16 = ggml.impl.ggml_c.GGML_TYPE_BF16;
     const bf16 = ggml.cuda.kernels.bf16;
     if (src0.type == F32 and src1.type != BF16 and dst.type == F32) {
         launchBinBcastPack(op, f32, f32, f32, n_fuse, src0, src1, dst, src0.data, src1.data, dst.data, stream);
@@ -345,14 +345,14 @@ fn fusedBinBcastImpl(comptime op: Op, comptime n_fuse: usize, ctx: *ggml.cuda.co
     } else if (src0.type == F16 and dst.type == F32) {
         launchBinBcastPack(op, ggml.cuda.kernels.half, f32, f32, n_fuse, src0, src1, dst, src0.data, src1.data, dst.data, stream);
     } else {
-        ggml.impl.logError("%s: unsupported types for fusion: dst: %s, src0: %s, src1: %s\n", .{ "ggml_cuda_op_fused_binbcast_impl", ggml.impl.c.ggml_type_name(dst.type), ggml.impl.c.ggml_type_name(src0.type), ggml.impl.c.ggml_type_name(src1.type) });
+        ggml.impl.logError("%s: unsupported types for fusion: dst: %s, src0: %s, src1: %s\n", .{ "ggml_cuda_op_fused_binbcast_impl", ggml.impl.ggml_c.ggml_type_name(dst.type), ggml.impl.ggml_c.ggml_type_name(src0.type), ggml.impl.ggml_c.ggml_type_name(src1.type) });
         ggml.impl.abort("fatal error");
     }
 }
 
 /// Ports `ggml_cuda_op_fused_add` and `ggml_cuda_op_fused_mul`
 /// (binbcast.cu:498, 528 @b1b770d90).
-pub fn opFused(comptime op: Op, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor, n_fuse: c_int) void {
+pub fn opFused(comptime op: Op, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor, n_fuse: c_int) void {
     ggml.impl.assert(2 <= n_fuse and n_fuse <= 8, "2 <= n_fuse && n_fuse <= 8");
     switch (n_fuse) {
         inline 2...8 => |n| fusedBinBcastImpl(op, n, ctx, dst),
@@ -363,12 +363,12 @@ pub fn opFused(comptime op: Op, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.
 /// Ports `ggml_cuda_op_repeat_back` (binbcast.cu:558 @b1b770d90) with
 /// `repeat_back_cuda` (binbcast.cu:401 @b1b770d90), which launches with
 /// `<<<>>>`, not PDL.
-pub fn opRepeatBack(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+pub fn opRepeatBack(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const src0 = srcOf(dst, 0);
 
     ggml.impl.assert(src0.type == dst.type, "src0->type == dst->type");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
-    ggml.impl.assert(ggml.impl.c.ggml_can_repeat(dst, src0), "ggml_can_repeat(dst, src0)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_can_repeat(dst, src0), "ggml_can_repeat(dst, src0)");
 
     const stream = ctx.stream();
     const ne0 = dst.ne[0];
@@ -378,14 +378,14 @@ pub fn opRepeatBack(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tenso
 
     ggml.impl.assert(ne2 * ne3 <= (1 << 15), "ne2*ne3 <= (1 << 15)");
 
-    const ts = ggml.impl.c.ggml_type_size(src0.type);
+    const ts = ggml.impl.ggml_c.ggml_type_size(src0.type);
     const s00 = src0.nb[0] / ts;
     const s01 = src0.nb[1] / ts;
     const s02 = src0.nb[2] / ts;
     const s03 = src0.nb[3] / ts;
 
     switch (dst.type) {
-        ggml.impl.c.GGML_TYPE_F32 => {
+        ggml.impl.ggml_c.GGML_TYPE_F32 => {
             ggml.cuda.kernels.launch(ggml.cuda.kernels.get("binbcast", "k_repeat_back<float>"), .{
                 .grid = ggml.cuda.kernels.Dim3.of(@divTrunc(ne0 + ggml.cuda.common.warp_size - 1, ggml.cuda.common.warp_size), ne1, ne2 * ne3),
                 .block = .{ .x = ggml.cuda.common.warp_size },

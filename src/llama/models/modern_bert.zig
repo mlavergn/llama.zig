@@ -82,14 +82,14 @@ pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader,
     }
 
     // GGUFs without a classifier pooling type use mean (gte-reranker-modernbert-base).
-    if (hp.pooling_type_cls == llama.impl.c.LLAMA_POOLING_TYPE_UNSPECIFIED) {
-        hp.pooling_type_cls = llama.impl.c.LLAMA_POOLING_TYPE_MEAN;
+    if (hp.pooling_type_cls == llama.impl.llama_c.LLAMA_POOLING_TYPE_UNSPECIFIED) {
+        hp.pooling_type_cls = llama.impl.llama_c.LLAMA_POOLING_TYPE_MEAN;
     }
 
     // GGUFs without a classifier activation use gelu, the transformers
     // default.
     if (try meta.getKey([]const u8, .classifier_activation, false, exc) == null) {
-        hp.act_cls = llama.impl.c.GGML_UNARY_OP_GELU_ERF;
+        hp.act_cls = llama.impl.llama_c.GGML_UNARY_OP_GELU_ERF;
     }
 
     if (try meta.getKey(u32, .decision_block_count, false, exc)) |v| hp.n_layer_decision = v;
@@ -248,12 +248,12 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         b.cb(cur, "kqv_out", il);
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpL = llama.impl.llama_c.ggml_get_rows(ctx, inpL, inp_out_ids);
         }
 
         // Re-add the layer input.
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpL);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpL);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The feed-forward's layer norm.
@@ -263,7 +263,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         cur = b.buildFfn(cur, layer.ffn_up, null, null, null, null, null, layer.ffn_down, null, null, null, @fromBackingInt(hp.llm_ffn_op), .seq, il);
 
         // The attention output bypasses the feed-forward.
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
 
         // The next layer's input.
         inpL = cur;
@@ -279,7 +279,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     }
 
     b.res.t_embd = cur;
-    llama.impl.c.ggml_build_forward_expand(b.gf, cur);
+    llama.impl.llama_c.ggml_build_forward_expand(b.gf, cur);
 }
 
 /// Ports `llama_model_modern_bert::graph`'s `build_decision_head`
@@ -287,7 +287,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 /// each output token, read at the option markers by the caller. The
 /// question type is not a graph input, so the head is evaluated once per
 /// type.
-fn buildDecisionHead(model: *const llama.model.Model, b: *const llama.graph.Builder, inp: *llama.impl.c.ggml_tensor, inp_attn: *llama.graph.InpAttnNoCache, inp_out_ids: *llama.impl.c.ggml_tensor) *llama.impl.c.ggml_tensor {
+fn buildDecisionHead(model: *const llama.model.Model, b: *const llama.graph.Builder, inp: *llama.impl.llama_c.ggml_tensor, inp_attn: *llama.graph.InpAttnNoCache, inp_out_ids: *llama.impl.llama_c.ggml_tensor) *llama.impl.llama_c.ggml_tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
@@ -295,12 +295,12 @@ fn buildDecisionHead(model: *const llama.model.Model, b: *const llama.graph.Buil
     const n_layer_enc: c_int = n_layer - @as(c_int, @intCast(hp.n_layer_decision));
     const type_embd = model.type_embd.?;
 
-    var scores: ?*llama.impl.c.ggml_tensor = null;
+    var scores: ?*llama.impl.llama_c.ggml_tensor = null;
 
     var it: u32 = 0;
     while (it < n_decision_types) : (it += 1) {
-        const type_row = llama.impl.c.ggml_view_1d(ctx, type_embd, b.n_embd, it * type_embd.nb[1]);
-        var inpL: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, inp, type_row);
+        const type_row = llama.impl.llama_c.ggml_view_1d(ctx, type_embd, b.n_embd, it * type_embd.nb[1]);
+        var inpL: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, inp, type_row);
 
         var il: c_int = n_layer_enc;
         while (il < n_layer) : (il += 1) {
@@ -316,11 +316,11 @@ fn buildDecisionHead(model: *const llama.model.Model, b: *const llama.graph.Buil
             b.cb(cur, "kqv_out", il);
 
             if (il == n_layer - 1) {
-                cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-                inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
+                cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+                inpL = llama.impl.llama_c.ggml_get_rows(ctx, inpL, inp_out_ids);
             }
 
-            const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpL);
+            const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpL);
             b.cb(ffn_inp, "ffn_inp", il);
 
             cur = b.buildNorm(ffn_inp, layer.ffn_norm, layer.ffn_norm_b, .norm, il);
@@ -328,16 +328,16 @@ fn buildDecisionHead(model: *const llama.model.Model, b: *const llama.graph.Buil
 
             cur = b.buildFfn(cur, layer.ffn_up, layer.ffn_up_b, null, null, null, null, layer.ffn_down, layer.ffn_down_b, null, null, .relu, .seq, il);
 
-            inpL = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+            inpL = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
         }
 
         // The scorer.
         var cur = b.buildNorm(inpL, model.cls_norm, model.cls_norm_b, .norm, -1);
-        cur = llama.impl.c.ggml_add(ctx, b.buildLoraMm(model.cls.?, cur, null), model.cls_b);
-        cur = llama.impl.c.ggml_gelu_erf(ctx, cur);
-        cur = llama.impl.c.ggml_add(ctx, b.buildLoraMm(model.cls_out.?, cur, null), model.cls_out_b);
+        cur = llama.impl.llama_c.ggml_add(ctx, b.buildLoraMm(model.cls.?, cur, null), model.cls_b);
+        cur = llama.impl.llama_c.ggml_gelu_erf(ctx, cur);
+        cur = llama.impl.llama_c.ggml_add(ctx, b.buildLoraMm(model.cls_out.?, cur, null), model.cls_out_b);
 
-        scores = if (scores) |s| llama.impl.c.ggml_concat(ctx, s, cur, 0) else cur;
+        scores = if (scores) |s| llama.impl.llama_c.ggml_concat(ctx, s, cur, 0) else cur;
     }
     b.cb(scores.?, "decision_scores", -1);
 

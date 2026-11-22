@@ -29,13 +29,13 @@ extern fn vDSP_vadd(a: [*]const f32, ia: Stride, b: [*]const f32, ib: Stride, ds
 /// (ggml-cpu/binary-ops.cpp:140 @b1b770d90), which `cpu/binary_ops.zig`
 /// already provides, by its C name.
 /// Ports `ggml_compute_forward_add_q_f32` (ops.cpp:588 @b1b770d90).
-fn addQF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+fn addQF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0, src1) and ggml.impl.c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, src1) && ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, src1) and ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, src1) && ggml_are_same_shape(src0, dst)");
 
-    const nr: i64 = @intCast(ggml.impl.c.ggml_nrows(src0));
+    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src0));
 
     const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
@@ -44,11 +44,11 @@ fn addQF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_te
 
     const @"type" = src0.type;
     const dtype = dst.type;
-    const dequantize_row_q = ggml.impl.c.ggml_get_type_traits(@"type").*.to_float.?;
-    const quantize_row_q = ggml.impl.c.ggml_get_type_traits_cpu(dtype).*.from_float;
+    const dequantize_row_q = ggml.impl.ggml_c.ggml_get_type_traits(@"type").*.to_float.?;
+    const quantize_row_q = ggml.impl.ggml_c.ggml_get_type_traits_cpu(dtype).*.from_float;
 
     // we don't support permuted src0 or src1
-    ggml.impl.assert(l.nb00 == ggml.impl.c.ggml_type_size(@"type"), "nb00 == ggml_type_size(type)");
+    ggml.impl.assert(l.nb00 == ggml.impl.ggml_c.ggml_type_size(@"type"), "nb00 == ggml_type_size(type)");
     ggml.impl.assert(l.nb10 == @sizeOf(f32), "nb10 == sizeof(float)");
 
     // dst cannot be transposed or permuted
@@ -56,9 +56,9 @@ fn addQF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_te
     ggml.impl.assert(l.nb1 <= l.nb2, "nb1 <= nb2");
     ggml.impl.assert(l.nb2 <= l.nb3, "nb2 <= nb3");
 
-    ggml.impl.assert(ggml.impl.c.ggml_is_quantized(src0.type) or src0.type == ggml.impl.c.GGML_TYPE_F8_E4M3, "ggml_is_quantized(src0->type) || src0->type == GGML_TYPE_F8_E4M3");
-    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
-    ggml.impl.assert(@rem(l.ne00, ggml.impl.c.ggml_blck_size(@"type")) == 0, "ne00 % ggml_blck_size(type) == 0");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_quantized(src0.type) or src0.type == ggml.impl.ggml_c.GGML_TYPE_F8_E4M3, "ggml_is_quantized(src0->type) || src0->type == GGML_TYPE_F8_E4M3");
+    ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+    ggml.impl.assert(@rem(l.ne00, ggml.impl.ggml_c.ggml_blck_size(@"type")) == 0, "ne00 % ggml_blck_size(type) == 0");
 
     const dr = @divTrunc(nr + nth - 1, nth);
     const ir0 = dr * ith;
@@ -106,52 +106,52 @@ fn addQF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_te
 }
 
 /// Ports `ggml_compute_forward_add` (ops.cpp:663 @b1b770d90).
-pub export fn ggml_compute_forward_add(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_add(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32, ggml.impl.c.GGML_TYPE_F16, ggml.impl.c.GGML_TYPE_BF16 => ggml.cpu.binary_ops.ggml_compute_forward_add_non_quantized(params, dst),
-        ggml.impl.c.GGML_TYPE_Q1_0,
-        ggml.impl.c.GGML_TYPE_Q2_0,
-        ggml.impl.c.GGML_TYPE_Q4_0,
-        ggml.impl.c.GGML_TYPE_Q4_1,
-        ggml.impl.c.GGML_TYPE_Q5_0,
-        ggml.impl.c.GGML_TYPE_Q5_1,
-        ggml.impl.c.GGML_TYPE_Q8_0,
-        ggml.impl.c.GGML_TYPE_MXFP4,
-        ggml.impl.c.GGML_TYPE_NVFP4,
-        ggml.impl.c.GGML_TYPE_F8_E4M3,
-        ggml.impl.c.GGML_TYPE_Q2_K,
-        ggml.impl.c.GGML_TYPE_Q3_K,
-        ggml.impl.c.GGML_TYPE_Q4_K,
-        ggml.impl.c.GGML_TYPE_Q5_K,
-        ggml.impl.c.GGML_TYPE_Q6_K,
-        ggml.impl.c.GGML_TYPE_TQ1_0,
-        ggml.impl.c.GGML_TYPE_TQ2_0,
-        ggml.impl.c.GGML_TYPE_IQ2_XXS,
-        ggml.impl.c.GGML_TYPE_IQ2_XS,
-        ggml.impl.c.GGML_TYPE_IQ3_XXS,
-        ggml.impl.c.GGML_TYPE_IQ1_S,
-        ggml.impl.c.GGML_TYPE_IQ1_M,
-        ggml.impl.c.GGML_TYPE_IQ4_NL,
-        ggml.impl.c.GGML_TYPE_IQ4_XS,
-        ggml.impl.c.GGML_TYPE_IQ3_S,
-        ggml.impl.c.GGML_TYPE_IQ2_S,
+        ggml.impl.ggml_c.GGML_TYPE_F32, ggml.impl.ggml_c.GGML_TYPE_F16, ggml.impl.ggml_c.GGML_TYPE_BF16 => ggml.cpu.binary_ops.ggml_compute_forward_add_non_quantized(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_Q1_0,
+        ggml.impl.ggml_c.GGML_TYPE_Q2_0,
+        ggml.impl.ggml_c.GGML_TYPE_Q4_0,
+        ggml.impl.ggml_c.GGML_TYPE_Q4_1,
+        ggml.impl.ggml_c.GGML_TYPE_Q5_0,
+        ggml.impl.ggml_c.GGML_TYPE_Q5_1,
+        ggml.impl.ggml_c.GGML_TYPE_Q8_0,
+        ggml.impl.ggml_c.GGML_TYPE_MXFP4,
+        ggml.impl.ggml_c.GGML_TYPE_NVFP4,
+        ggml.impl.ggml_c.GGML_TYPE_F8_E4M3,
+        ggml.impl.ggml_c.GGML_TYPE_Q2_K,
+        ggml.impl.ggml_c.GGML_TYPE_Q3_K,
+        ggml.impl.ggml_c.GGML_TYPE_Q4_K,
+        ggml.impl.ggml_c.GGML_TYPE_Q5_K,
+        ggml.impl.ggml_c.GGML_TYPE_Q6_K,
+        ggml.impl.ggml_c.GGML_TYPE_TQ1_0,
+        ggml.impl.ggml_c.GGML_TYPE_TQ2_0,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XS,
+        ggml.impl.ggml_c.GGML_TYPE_IQ3_XXS,
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_S,
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_M,
+        ggml.impl.ggml_c.GGML_TYPE_IQ4_NL,
+        ggml.impl.ggml_c.GGML_TYPE_IQ4_XS,
+        ggml.impl.ggml_c.GGML_TYPE_IQ3_S,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_S,
         => addQF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
 
 /// Ports `ggml_compute_forward_add_id_f32` (ops.cpp:714 @b1b770d90).
-fn addIdF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const src2 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
+fn addIdF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const src2 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]);
 
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
-    ggml.impl.assert(src2.type == ggml.impl.c.GGML_TYPE_I32, "src2->type == GGML_TYPE_I32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+    ggml.impl.assert(src2.type == ggml.impl.ggml_c.GGML_TYPE_I32, "src2->type == GGML_TYPE_I32");
 
     ggml.impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
     ggml.impl.assert(src1.nb[0] == @sizeOf(f32), "src1->nb[0] == sizeof(float)");
@@ -159,7 +159,7 @@ fn addIdF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_t
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const nr: i64 = @intCast(ggml.impl.c.ggml_nrows(src0));
+    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src0));
 
     const l = ggml.cpu.defs.TernaryLocals.of(src0, src1, src2, dst);
 
@@ -203,11 +203,11 @@ fn addIdF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_t
 }
 
 /// Ports `ggml_compute_forward_add_id` (ops.cpp:770 @b1b770d90).
-pub export fn ggml_compute_forward_add_id(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_add_id(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => addIdF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => addIdF32(params, dst),
         else => ggml.impl.abort("unsupported type for ggml_compute_forward_add_id"),
     }
 }
@@ -216,17 +216,17 @@ pub export fn ggml_compute_forward_add_id(params: *const ggml.cpu.defs.ComputePa
 ///
 /// The `GGML_USE_ACCELERATE` arm: `vDSP_vadd` with a **zero stride** on the
 /// scalar operand, which is how it broadcasts `*src1->data` across the row.
-fn add1F32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+fn add1F32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_scalar(src1), "ggml_is_scalar(src1)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_scalar(src1), "ggml_is_scalar(src1)");
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const nr: i64 = @intCast(ggml.impl.c.ggml_nrows(src0));
+    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src0));
 
     const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
@@ -268,12 +268,12 @@ fn add1F32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_te
 /// as an `f32` or as that same narrow type, so they are one function over two
 /// comptime parameters. Their assertions differ only in naming the types this
 /// already fixes.
-fn add1Narrow(comptime T: type, comptime scalar_is_f32: bool, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+fn add1Narrow(comptime T: type, comptime scalar_is_f32: bool, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_scalar(src1), "ggml_is_scalar(src1)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_scalar(src1), "ggml_is_scalar(src1)");
 
     // scalar to add
     const v: f32 = if (scalar_is_f32)
@@ -284,7 +284,7 @@ fn add1Narrow(comptime T: type, comptime scalar_is_f32: bool, params: *const ggm
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const nr: i64 = @intCast(ggml.impl.c.ggml_nrows(src0));
+    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src0));
 
     const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
@@ -316,12 +316,12 @@ fn add1Narrow(comptime T: type, comptime scalar_is_f32: bool, params: *const ggm
 }
 
 /// Ports `ggml_compute_forward_add1_q_f32` (ops.cpp:936 @b1b770d90).
-fn add1QF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+fn add1QF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_scalar(src1), "ggml_is_scalar(src1)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_scalar(src1), "ggml_is_scalar(src1)");
 
     // scalar to add
     const v = @as(*const f32, @ptrCast(@alignCast(src1.data.?))).*;
@@ -329,25 +329,25 @@ fn add1QF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_t
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const nr: i64 = @intCast(ggml.impl.c.ggml_nrows(src0));
+    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src0));
 
     const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
     const @"type" = src0.type;
-    const dequantize_row_q = ggml.impl.c.ggml_get_type_traits(@"type").*.to_float.?;
-    const quantize_row_q = ggml.impl.c.ggml_get_type_traits_cpu(@"type").*.from_float.?;
+    const dequantize_row_q = ggml.impl.ggml_c.ggml_get_type_traits(@"type").*.to_float.?;
+    const quantize_row_q = ggml.impl.ggml_c.ggml_get_type_traits_cpu(@"type").*.from_float.?;
 
     // we don't support permuted src0
-    ggml.impl.assert(l.nb00 == ggml.impl.c.ggml_type_size(@"type"), "nb00 == ggml_type_size(type)");
+    ggml.impl.assert(l.nb00 == ggml.impl.ggml_c.ggml_type_size(@"type"), "nb00 == ggml_type_size(type)");
 
     // dst cannot be transposed or permuted
     ggml.impl.assert(l.nb0 <= l.nb1, "nb0 <= nb1");
     ggml.impl.assert(l.nb1 <= l.nb2, "nb1 <= nb2");
     ggml.impl.assert(l.nb2 <= l.nb3, "nb2 <= nb3");
 
-    ggml.impl.assert(ggml.impl.c.ggml_is_quantized(src0.type) or src0.type == ggml.impl.c.GGML_TYPE_F8_E4M3, "ggml_is_quantized(src0->type) || src0->type == GGML_TYPE_F8_E4M3");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_quantized(src0.type) or src0.type == ggml.impl.ggml_c.GGML_TYPE_F8_E4M3, "ggml_is_quantized(src0->type) || src0->type == GGML_TYPE_F8_E4M3");
     ggml.impl.assert(dst.type == src0.type, "dst->type == src0->type");
-    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+    ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
 
     const dr = @divTrunc(nr + nth - 1, nth);
     const ir0 = dr * ith;
@@ -384,69 +384,69 @@ fn add1QF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_t
 }
 
 /// Ports `ggml_compute_forward_add1` (ops.cpp:1097 @b1b770d90).
-pub export fn ggml_compute_forward_add1(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+pub fn ggml_compute_forward_add1(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => add1F32(params, dst),
-        ggml.impl.c.GGML_TYPE_F16 => {
-            if (src1.type == ggml.impl.c.GGML_TYPE_F16) {
-                add1Narrow(ggml.impl.c.ggml_fp16_t, false, params, dst);
-            } else if (src1.type == ggml.impl.c.GGML_TYPE_F32) {
-                add1Narrow(ggml.impl.c.ggml_fp16_t, true, params, dst);
+        ggml.impl.ggml_c.GGML_TYPE_F32 => add1F32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => {
+            if (src1.type == ggml.impl.ggml_c.GGML_TYPE_F16) {
+                add1Narrow(ggml.impl.ggml_c.ggml_fp16_t, false, params, dst);
+            } else if (src1.type == ggml.impl.ggml_c.GGML_TYPE_F32) {
+                add1Narrow(ggml.impl.ggml_c.ggml_fp16_t, true, params, dst);
             } else {
                 ggml.impl.abort("fatal error");
             }
         },
-        ggml.impl.c.GGML_TYPE_BF16 => {
-            if (src1.type == ggml.impl.c.GGML_TYPE_BF16) {
-                add1Narrow(ggml.impl.c.ggml_bf16_t, false, params, dst);
-            } else if (src1.type == ggml.impl.c.GGML_TYPE_F32) {
-                add1Narrow(ggml.impl.c.ggml_bf16_t, true, params, dst);
+        ggml.impl.ggml_c.GGML_TYPE_BF16 => {
+            if (src1.type == ggml.impl.ggml_c.GGML_TYPE_BF16) {
+                add1Narrow(ggml.impl.ggml_c.ggml_bf16_t, false, params, dst);
+            } else if (src1.type == ggml.impl.ggml_c.GGML_TYPE_F32) {
+                add1Narrow(ggml.impl.ggml_c.ggml_bf16_t, true, params, dst);
             } else {
                 ggml.impl.abort("fatal error");
             }
         },
-        ggml.impl.c.GGML_TYPE_Q1_0,
-        ggml.impl.c.GGML_TYPE_Q2_0,
-        ggml.impl.c.GGML_TYPE_Q4_0,
-        ggml.impl.c.GGML_TYPE_Q4_1,
-        ggml.impl.c.GGML_TYPE_Q5_0,
-        ggml.impl.c.GGML_TYPE_Q5_1,
-        ggml.impl.c.GGML_TYPE_Q8_0,
-        ggml.impl.c.GGML_TYPE_Q8_1,
-        ggml.impl.c.GGML_TYPE_MXFP4,
-        ggml.impl.c.GGML_TYPE_NVFP4,
-        ggml.impl.c.GGML_TYPE_F8_E4M3,
-        ggml.impl.c.GGML_TYPE_Q2_K,
-        ggml.impl.c.GGML_TYPE_Q3_K,
-        ggml.impl.c.GGML_TYPE_Q4_K,
-        ggml.impl.c.GGML_TYPE_Q5_K,
-        ggml.impl.c.GGML_TYPE_Q6_K,
-        ggml.impl.c.GGML_TYPE_TQ1_0,
-        ggml.impl.c.GGML_TYPE_TQ2_0,
-        ggml.impl.c.GGML_TYPE_IQ2_XXS,
-        ggml.impl.c.GGML_TYPE_IQ2_XS,
-        ggml.impl.c.GGML_TYPE_IQ3_XXS,
-        ggml.impl.c.GGML_TYPE_IQ1_S,
-        ggml.impl.c.GGML_TYPE_IQ1_M,
-        ggml.impl.c.GGML_TYPE_IQ4_NL,
-        ggml.impl.c.GGML_TYPE_IQ4_XS,
-        ggml.impl.c.GGML_TYPE_IQ3_S,
-        ggml.impl.c.GGML_TYPE_IQ2_S,
+        ggml.impl.ggml_c.GGML_TYPE_Q1_0,
+        ggml.impl.ggml_c.GGML_TYPE_Q2_0,
+        ggml.impl.ggml_c.GGML_TYPE_Q4_0,
+        ggml.impl.ggml_c.GGML_TYPE_Q4_1,
+        ggml.impl.ggml_c.GGML_TYPE_Q5_0,
+        ggml.impl.ggml_c.GGML_TYPE_Q5_1,
+        ggml.impl.ggml_c.GGML_TYPE_Q8_0,
+        ggml.impl.ggml_c.GGML_TYPE_Q8_1,
+        ggml.impl.ggml_c.GGML_TYPE_MXFP4,
+        ggml.impl.ggml_c.GGML_TYPE_NVFP4,
+        ggml.impl.ggml_c.GGML_TYPE_F8_E4M3,
+        ggml.impl.ggml_c.GGML_TYPE_Q2_K,
+        ggml.impl.ggml_c.GGML_TYPE_Q3_K,
+        ggml.impl.ggml_c.GGML_TYPE_Q4_K,
+        ggml.impl.ggml_c.GGML_TYPE_Q5_K,
+        ggml.impl.ggml_c.GGML_TYPE_Q6_K,
+        ggml.impl.ggml_c.GGML_TYPE_TQ1_0,
+        ggml.impl.ggml_c.GGML_TYPE_TQ2_0,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XS,
+        ggml.impl.ggml_c.GGML_TYPE_IQ3_XXS,
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_S,
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_M,
+        ggml.impl.ggml_c.GGML_TYPE_IQ4_NL,
+        ggml.impl.ggml_c.GGML_TYPE_IQ4_XS,
+        ggml.impl.ggml_c.GGML_TYPE_IQ3_S,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_S,
         => add1QF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
 
 /// Ports `ggml_compute_forward_acc_f32` (ops.cpp:1172 @b1b770d90).
-fn accF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+fn accF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(dst) and ggml.impl.c.ggml_is_contiguous(src0), "ggml_is_contiguous(dst) && ggml_is_contiguous(src0)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst) and ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(dst) && ggml_is_contiguous(src0)");
 
     // view src0 and dst with these strides and data offset in bytes during acc
     // nb0 is implicitly element_size because src0 and dst are contiguous
@@ -461,7 +461,7 @@ fn accF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_ten
         if (params.ith == 0) {
             // memcpy needs to be synchronized across threads to avoid race
             // conditions. => do it in INIT phase
-            const n = ggml.impl.c.ggml_nbytes(dst);
+            const n = ggml.impl.ggml_c.ggml_nbytes(dst);
             const d: [*]u8 = @ptrCast(dst.data.?);
             const s: [*]const u8 = @ptrCast(src0.data.?);
             @memcpy(d[0..n], s[0..n]);
@@ -472,7 +472,7 @@ fn accF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_ten
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const nr: i64 = @intCast(ggml.impl.c.ggml_nrows(src1));
+    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src1));
     const nc = src1.ne[0];
 
     const ne10 = src1.ne[0];
@@ -485,7 +485,7 @@ fn accF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_ten
     const nb13 = src1.nb[3];
 
     // src0 and dst as viewed during acc
-    const nb0: usize = ggml.impl.c.ggml_element_size(src0);
+    const nb0: usize = ggml.impl.ggml_c.ggml_element_size(src0);
 
     const nb00 = nb0;
     const nb01 = nb1;
@@ -493,9 +493,9 @@ fn accF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_ten
     const nb03 = nb3;
 
     ggml.impl.assert(offset + @as(usize, @intCast(if (ne10 == 0) 0 else ne10 - 1)) * nb0 + @as(usize, @intCast(if (ne11 == 0) 0 else ne11 - 1)) * nb1 +
-        @as(usize, @intCast(if (ne12 == 0) 0 else ne12 - 1)) * nb2 + @as(usize, @intCast(if (ne13 == 0) 0 else ne13 - 1)) * nb3 < ggml.impl.c.ggml_nbytes(dst), "acc fits in dst");
+        @as(usize, @intCast(if (ne12 == 0) 0 else ne12 - 1)) * nb2 + @as(usize, @intCast(if (ne13 == 0) 0 else ne13 - 1)) * nb3 < ggml.impl.ggml_c.ggml_nbytes(dst), "acc fits in dst");
     ggml.impl.assert(offset + @as(usize, @intCast(if (ne10 == 0) 0 else ne10 - 1)) * nb00 + @as(usize, @intCast(if (ne11 == 0) 0 else ne11 - 1)) * nb01 +
-        @as(usize, @intCast(if (ne12 == 0) 0 else ne12 - 1)) * nb02 + @as(usize, @intCast(if (ne13 == 0) 0 else ne13 - 1)) * nb03 < ggml.impl.c.ggml_nbytes(src0), "acc fits in src0");
+        @as(usize, @intCast(if (ne12 == 0) 0 else ne12 - 1)) * nb02 + @as(usize, @intCast(if (ne13 == 0) 0 else ne13 - 1)) * nb03 < ggml.impl.ggml_c.ggml_nbytes(src0), "acc fits in src0");
 
     ggml.impl.assert(nb10 == @sizeOf(f32), "nb10 == sizeof(float)");
 
@@ -527,11 +527,11 @@ fn accF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_ten
 }
 
 /// Ports `ggml_compute_forward_acc` (ops.cpp:1252 @b1b770d90).
-pub export fn ggml_compute_forward_acc(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_acc(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => accF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => accF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }

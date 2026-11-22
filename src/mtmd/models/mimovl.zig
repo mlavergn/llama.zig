@@ -7,6 +7,7 @@
 //! Ports `llama.cpp/tools/mtmd/models/mimovl.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
+const llama = @import("llama");
 const mtmd = @import("../module.zig");
 const stdlib = @import("stdlib");
 
@@ -14,21 +15,21 @@ const stdlib = @import("stdlib");
 /// `mtmd_graph_mimovl`: every matmul asks for BF16 accumulation (d6be06557: the
 /// reference implementation does not keep these in F32).
 pub fn buildMm(g: *const mtmd.graph.Graph, w: mtmd.graph.T, x: mtmd.graph.T) mtmd.graph.T {
-    const cur = mtmd.impl.c.ggml_mul_mat(g.ctx0, w, x);
-    _ = mtmd.impl.c.ggml_prec_set_acc(cur, mtmd.impl.c.GGML_PREC_BF16);
+    const cur = llama.impl.llama_c.ggml_mul_mat(g.ctx0, w, x);
+    _ = llama.impl.llama_c.ggml_prec_set_acc(cur, llama.impl.llama_c.GGML_PREC_BF16);
     return cur;
 }
 
 /// The `reorder` lambda (mimovl.cpp:94 @b1b770d90): permutes patches at
 /// merge-unit granularity, keeping each group's (h, w) order.
 fn reorder(g: *mtmd.graph.Graph, x: mtmd.graph.T, idx: mtmd.graph.T, merge_unit: c_int, n_units: c_int, n_pos: c_int, batch_size: c_int) mtmd.graph.T {
-    var y = mtmd.impl.c.ggml_reshape_2d(g.ctx0, x, g.n_embd * merge_unit, n_units);
-    y = mtmd.impl.c.ggml_get_rows(g.ctx0, y, idx);
-    return mtmd.impl.c.ggml_reshape_3d(g.ctx0, y, g.n_embd, n_pos, batch_size);
+    var y = llama.impl.llama_c.ggml_reshape_2d(g.ctx0, x, g.n_embd * merge_unit, n_units);
+    y = llama.impl.llama_c.ggml_get_rows(g.ctx0, y, idx);
+    return llama.impl.llama_c.ggml_reshape_3d(g.ctx0, y, g.n_embd, n_pos, batch_size);
 }
 
 /// Ports `build` (mimovl.cpp:22 @b1b770d90), a member of `mtmd_graph_mimovl`.
-pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*llama.impl.llama_c.ggml_cgraph {
     _ = params;
     g.mm_hook = buildMm;
     const ctx0 = g.ctx0;
@@ -66,38 +67,38 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     // Patch embed: Conv3D(kt=2) split into two Conv2D, then interleave-merge
     // along the height axis to match the merge-tile token order.
     const inp_raw = g.buildInpRaw(3);
-    var inp: mtmd.graph.T = mtmd.impl.c.ggml_conv_2d(ctx0, model.patch_embeddings_0, inp_raw, patch_size, patch_size, 0, 0, 1, 1);
+    var inp: mtmd.graph.T = llama.impl.llama_c.ggml_conv_2d(ctx0, model.patch_embeddings_0, inp_raw, patch_size, patch_size, 0, 0, 1, 1);
     {
-        const inp_1 = mtmd.impl.c.ggml_conv_2d(ctx0, model.patch_embeddings_1, inp_raw, patch_size, patch_size, 0, 0, 1, 1);
-        inp = mtmd.impl.c.ggml_add(ctx0, inp, inp_1);
+        const inp_1 = llama.impl.llama_c.ggml_conv_2d(ctx0, model.patch_embeddings_1, inp_raw, patch_size, patch_size, 0, 0, 1, 1);
+        inp = llama.impl.llama_c.ggml_add(ctx0, inp, inp_1);
 
         mtmd.impl.ggmlAssert(@rem(g.img.nx(), patch_size * 2) == 0, "mimovl.cpp", 59, "img.nx() % (patch_size * 2) == 0");
         mtmd.impl.ggmlAssert(@rem(g.img.ny(), patch_size * 2) == 0, "mimovl.cpp", 60, "img.ny() % (patch_size * 2) == 0");
 
-        inp = mtmd.impl.c.ggml_permute(ctx0, inp, 1, 2, 0, 3); // [w,h,c,b] -> [c,w,h,b]
-        inp = mtmd.impl.c.ggml_cont_4d(ctx0, inp, n_embd * 2, @divTrunc(g.n_patches_x, 2), g.n_patches_y, batch_size);
-        inp = mtmd.impl.c.ggml_reshape_4d(ctx0, inp, n_embd * 2, @divTrunc(g.n_patches_x, 2), 2, batch_size * @divTrunc(g.n_patches_y, 2));
-        inp = mtmd.impl.c.ggml_permute(ctx0, inp, 0, 2, 1, 3);
-        inp = mtmd.impl.c.ggml_cont_3d(ctx0, inp, n_embd, g.n_patches_x * g.n_patches_y, batch_size);
+        inp = llama.impl.llama_c.ggml_permute(ctx0, inp, 1, 2, 0, 3); // [w,h,c,b] -> [c,w,h,b]
+        inp = llama.impl.llama_c.ggml_cont_4d(ctx0, inp, n_embd * 2, @divTrunc(g.n_patches_x, 2), g.n_patches_y, batch_size);
+        inp = llama.impl.llama_c.ggml_reshape_4d(ctx0, inp, n_embd * 2, @divTrunc(g.n_patches_x, 2), 2, batch_size * @divTrunc(g.n_patches_y, 2));
+        inp = llama.impl.llama_c.ggml_permute(ctx0, inp, 0, 2, 1, 3);
+        inp = llama.impl.llama_c.ggml_cont_3d(ctx0, inp, n_embd, g.n_patches_x * g.n_patches_y, batch_size);
     }
     g.cb(inp, "patch_embed", -1);
 
-    const positions_row = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, n_pos * 4);
-    _ = mtmd.impl.c.ggml_set_name(positions_row, "mimovl_positions_row");
-    mtmd.impl.c.ggml_set_input(positions_row);
+    const positions_row = llama.impl.llama_c.ggml_new_tensor_1d(ctx0, llama.impl.llama_c.GGML_TYPE_I32, n_pos * 4);
+    _ = llama.impl.llama_c.ggml_set_name(positions_row, "mimovl_positions_row");
+    llama.impl.llama_c.ggml_set_input(positions_row);
 
-    const positions_col = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, n_pos * 4);
-    _ = mtmd.impl.c.ggml_set_name(positions_col, "mimovl_positions_col");
-    mtmd.impl.c.ggml_set_input(positions_col);
+    const positions_col = llama.impl.llama_c.ggml_new_tensor_1d(ctx0, llama.impl.llama_c.GGML_TYPE_I32, n_pos * 4);
+    _ = llama.impl.llama_c.ggml_set_name(positions_col, "mimovl_positions_col");
+    llama.impl.llama_c.ggml_set_input(positions_col);
 
     // idx_col is the col-major merge-unit permutation, taken as F32 so its
     // inverse can be derived in-graph with ggml_argsort, and cast back to I32
     // for ggml_get_rows.
-    const idx_col_f = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_F32, n_units);
-    _ = mtmd.impl.c.ggml_set_name(idx_col_f, "mimovl_idx_col");
-    mtmd.impl.c.ggml_set_input(idx_col_f);
-    const idx_col = mtmd.impl.c.ggml_cast(ctx0, idx_col_f, mtmd.impl.c.GGML_TYPE_I32);
-    const idx_col_inv = mtmd.impl.c.ggml_argsort(ctx0, idx_col_f, mtmd.impl.c.GGML_SORT_ORDER_ASC);
+    const idx_col_f = llama.impl.llama_c.ggml_new_tensor_1d(ctx0, llama.impl.llama_c.GGML_TYPE_F32, n_units);
+    _ = llama.impl.llama_c.ggml_set_name(idx_col_f, "mimovl_idx_col");
+    llama.impl.llama_c.ggml_set_input(idx_col_f);
+    const idx_col = llama.impl.llama_c.ggml_cast(ctx0, idx_col_f, llama.impl.llama_c.GGML_TYPE_I32);
+    const idx_col_inv = llama.impl.llama_c.ggml_argsort(ctx0, idx_col_f, llama.impl.llama_c.GGML_SORT_ORDER_ASC);
 
     const window_mask = g.buildInpAttnMask(n_pos, n_pos, 0);
 
@@ -128,15 +129,15 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
 
         // Fused QKV with GQA.
         var qkv = g.buildMm(layer.qkv_w, cur);
-        qkv = mtmd.impl.c.ggml_add(ctx0, qkv, layer.qkv_b);
+        qkv = llama.impl.llama_c.ggml_add(ctx0, qkv, layer.qkv_b);
 
-        const row = mtmd.impl.c.ggml_row_size(qkv.?.type, head_dim);
-        const off_k = mtmd.impl.c.ggml_row_size(qkv.?.type, n_head * head_dim);
-        const off_v = mtmd.impl.c.ggml_row_size(qkv.?.type, (n_head + n_head_kv) * head_dim);
+        const row = llama.impl.llama_c.ggml_row_size(qkv.?.type, head_dim);
+        const off_k = llama.impl.llama_c.ggml_row_size(qkv.?.type, n_head * head_dim);
+        const off_v = llama.impl.llama_c.ggml_row_size(qkv.?.type, (n_head + n_head_kv) * head_dim);
 
-        var Qcur = mtmd.impl.c.ggml_view_3d(ctx0, qkv, head_dim, n_head, n_pos, row, mtmd.graph.nb(qkv, 1), 0);
-        var Kcur = mtmd.impl.c.ggml_view_3d(ctx0, qkv, head_dim, n_head_kv, n_pos, row, mtmd.graph.nb(qkv, 1), off_k);
-        const Vcur = mtmd.impl.c.ggml_view_3d(ctx0, qkv, head_dim, n_head_kv, n_pos, row, mtmd.graph.nb(qkv, 1), off_v);
+        var Qcur = llama.impl.llama_c.ggml_view_3d(ctx0, qkv, head_dim, n_head, n_pos, row, mtmd.graph.nb(qkv, 1), 0);
+        var Kcur = llama.impl.llama_c.ggml_view_3d(ctx0, qkv, head_dim, n_head_kv, n_pos, row, mtmd.graph.nb(qkv, 1), off_k);
+        const Vcur = llama.impl.llama_c.ggml_view_3d(ctx0, qkv, head_dim, n_head_kv, n_pos, row, mtmd.graph.nb(qkv, 1), off_v);
 
         g.cb(Qcur, "Qcur", il);
         g.cb(Kcur, "Kcur", il);
@@ -144,8 +145,8 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
 
         // 2D RoPE
         const pos = if (is_col) positions_col else positions_row;
-        Qcur = mtmd.impl.c.ggml_rope_multi(ctx0, Qcur, pos, null, rope_n_dims, &mrope_sections, mtmd.impl.c.GGML_ROPE_TYPE_VISION, 32768, 10000.0, 1.0, 0.0, 1.0, 32.0, 1.0);
-        Kcur = mtmd.impl.c.ggml_rope_multi(ctx0, Kcur, pos, null, rope_n_dims, &mrope_sections, mtmd.impl.c.GGML_ROPE_TYPE_VISION, 32768, 10000.0, 1.0, 0.0, 1.0, 32.0, 1.0);
+        Qcur = llama.impl.llama_c.ggml_rope_multi(ctx0, Qcur, pos, null, rope_n_dims, &mrope_sections, llama.impl.llama_c.GGML_ROPE_TYPE_VISION, 32768, 10000.0, 1.0, 0.0, 1.0, 32.0, 1.0);
+        Kcur = llama.impl.llama_c.ggml_rope_multi(ctx0, Kcur, pos, null, rope_n_dims, &mrope_sections, llama.impl.llama_c.GGML_ROPE_TYPE_VISION, 32768, 10000.0, 1.0, 0.0, 1.0, 32.0, 1.0);
         g.cb(Qcur, "Qcur_rope", il);
         g.cb(Kcur, "Kcur_rope", il);
 
@@ -157,7 +158,7 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
         g.cb(attn_out, "attn_out", il);
 
         // Residual 1.
-        cur = mtmd.impl.c.ggml_add(ctx0, attn_out, inpL);
+        cur = llama.impl.llama_c.ggml_add(ctx0, attn_out, inpL);
         inpL = cur;
         g.cb(cur, "ffn_inp", il);
 
@@ -170,7 +171,7 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
         g.cb(cur, "ffn_out", il);
 
         // Residual 2.
-        cur = mtmd.impl.c.ggml_add(ctx0, inpL, cur);
+        cur = llama.impl.llama_c.ggml_add(ctx0, inpL, cur);
         g.cb(cur, "layer_out", il);
 
         inpL = cur;
@@ -189,11 +190,11 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
 
     // Spatial merge: pack each merge_unit of patches into a single
     // (n_embd*merge_unit)-wide row, then run the 2-layer MLP.
-    var embeddings = mtmd.impl.c.ggml_reshape_3d(ctx0, inpL, n_embd * merge_unit, n_units, batch_size);
+    var embeddings = llama.impl.llama_c.ggml_reshape_3d(ctx0, inpL, n_embd * merge_unit, n_units, batch_size);
     embeddings = g.buildFfn(embeddings, model.mm_0_w, null, null, null, model.mm_1_w, null, .gelu, -1);
     g.cb(embeddings, "vit_out", -1);
 
-    mtmd.impl.c.ggml_build_forward_expand(g.gf, embeddings);
+    llama.impl.llama_c.ggml_build_forward_expand(g.gf, embeddings);
     return g.gf;
 }
 

@@ -13,8 +13,6 @@ const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
 
-const Allocator = std.mem.Allocator;
-
 const tool_call_start = "<|tool_call_start|>";
 const tool_call_end = "<|tool_call_end|>";
 const tool_list_start = "<|tool_list_start|>";
@@ -66,7 +64,7 @@ const Build = struct {
 /// renders without them.
 ///
 /// Return: owned by the arena `a`.
-pub fn init(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams, tool_list_tokens: bool) common_chat.exception.Error!common_chat.params.ChatParams {
+pub fn init(a: std.mem.Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams, tool_list_tokens: bool) common_chat.exception.Error!common_chat.params.ChatParams {
     var data: common_chat.params.ChatParams = .{};
 
     // Copy reasoning to the "thinking" field the template expects

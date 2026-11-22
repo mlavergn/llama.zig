@@ -16,8 +16,6 @@ const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
 
-const Allocator = std.mem.Allocator;
-
 // -----------------------------------------------------------------------------
 // Gemma 4 value parsers
 
@@ -102,7 +100,7 @@ fn valueRules(b: *peg.Builder) peg.Error!void {
 /// json-schema-to-grammar implementation. This implements a subset to
 /// enforce properties.
 const SchemaParser = struct {
-    a: Allocator,
+    a: std.mem.Allocator,
     b: *peg.Builder,
     root: []const u8,
     depth: c_int = 0,
@@ -282,7 +280,7 @@ const SchemaParser = struct {
         return b.plus(try b.plus(try b.literal(","), ws), kv);
     }
 
-    fn lowerLess(a: Allocator, x: []const u8, y: []const u8) Allocator.Error!bool {
+    fn lowerLess(a: std.mem.Allocator, x: []const u8, y: []const u8) std.mem.Allocator.Error!bool {
         const lx = try std.ascii.allocLowerString(a, x);
         const ly = try std.ascii.allocLowerString(a, y);
         return std.mem.order(u8, lx, ly) == .lt;
@@ -354,7 +352,7 @@ const SchemaParser = struct {
 // The parser
 
 const Build = struct {
-    a: Allocator,
+    a: std.mem.Allocator,
     inputs: *const common_chat.template.GenerationParams,
     has_tools: bool,
     has_response_format: bool,
@@ -470,7 +468,7 @@ const Build = struct {
 /// Ports `common_chat_params_init_gemma4` (parsers/gemma4.cpp:283 @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
-pub fn init(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
+pub fn init(a: std.mem.Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
     var data: common_chat.params.ChatParams = .{};
 
     data.prompt = try common_chat.template.directApplyImpl(a, tmpl, inputs, null, null, null);

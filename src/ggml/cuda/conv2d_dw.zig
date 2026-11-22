@@ -12,12 +12,12 @@ const block_size = 256;
 
 /// Ports `ggml_cuda_op_conv2d_dw` (conv2d-dw.cu:120 @b1b770d90). The
 /// kernel may be F16; the input and output stay F32.
-pub fn opConv2dDw(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const kernel = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const input = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+pub fn opConv2dDw(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const kernel = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const input = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    ggml.impl.assert(kernel.type == ggml.impl.c.GGML_TYPE_F16 or kernel.type == ggml.impl.c.GGML_TYPE_F32, "kernel->type == GGML_TYPE_F16 || kernel->type == GGML_TYPE_F32");
-    ggml.impl.assert(input.type == ggml.impl.c.GGML_TYPE_F32 and dst.type == ggml.impl.c.GGML_TYPE_F32, "input->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(kernel.type == ggml.impl.ggml_c.GGML_TYPE_F16 or kernel.type == ggml.impl.ggml_c.GGML_TYPE_F32, "kernel->type == GGML_TYPE_F16 || kernel->type == GGML_TYPE_F32");
+    ggml.impl.assert(input.type == ggml.impl.ggml_c.GGML_TYPE_F32 and dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "input->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32");
     const w_d: ?*const anyopaque = kernel.data;
     const x_d: ?*const anyopaque = input.data;
     const y_d: ?*anyopaque = dst.data;
@@ -45,14 +45,14 @@ pub fn opConv2dDw(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor)
 
     const p: ggml.cuda.kernels.LaunchParams = .{ .grid = .{ .x = @bitCast(blocks) }, .block = .{ .x = block_size }, .shmem = 0, .stream = st };
     const args = .{ x_d, w_d, y_d, in_w, in_h, out_w, out_h, kernel_w, kernel_h, stride_x, stride_y, padding_x, padding_y, dilation_x, dilation_y, channels, batches };
-    if (ggml.impl.c.ggml_is_contiguous(input)) {
-        if (kernel.type == ggml.impl.c.GGML_TYPE_F16) {
+    if (ggml.impl.ggml_c.ggml_is_contiguous(input)) {
+        if (kernel.type == ggml.impl.ggml_c.GGML_TYPE_F16) {
             ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv2d-dw", "conv2d_dw_kernel<__half, whcn_layout>"), p, args);
         } else {
             ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv2d-dw", "conv2d_dw_kernel<float, whcn_layout>"), p, args);
         }
-    } else if (ggml.impl.c.ggml_is_contiguous_channels(input)) {
-        if (kernel.type == ggml.impl.c.GGML_TYPE_F16) {
+    } else if (ggml.impl.ggml_c.ggml_is_contiguous_channels(input)) {
+        if (kernel.type == ggml.impl.ggml_c.GGML_TYPE_F16) {
             ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv2d-dw", "conv2d_dw_kernel<__half, cwhn_layout>"), p, args);
         } else {
             ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv2d-dw", "conv2d_dw_kernel<float, cwhn_layout>"), p, args);

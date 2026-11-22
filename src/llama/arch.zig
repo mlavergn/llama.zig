@@ -99,7 +99,7 @@ pub fn kvName(arch: mod.arch_table.Arch, kv: mod.arch_table.Kv, suffix: ?[]const
 /// Return: the tensor's name.
 pub fn tensorName(tensor: mod.arch_table.Tensor, suffix: ?[]const u8, bid: i32, xid: i32) Name {
     const f = mod.arch_table.tensor_names[@intCast(@backingInt(tensor))] orelse
-        mod.impl.c.ggml_abort("llama-arch.cpp", 1295, "unknown tensor name for tensor id %d", @as(c_int, @backingInt(tensor)));
+        mod.impl.llama_c.ggml_abort("llama-arch.cpp", 1295, "unknown tensor name for tensor id %d", @as(c_int, @backingInt(tensor)));
     var out: Name = .{};
     const args = [2]i32{ bid, xid };
     var next: usize = 0;

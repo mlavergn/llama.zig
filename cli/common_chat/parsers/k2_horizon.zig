@@ -13,8 +13,6 @@ const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
 
-const Allocator = std.mem.Allocator;
-
 const GEN_PREFIX = "<|ifm|im_start|>assistant\n";
 const SECTION_START = "<ifm|tool_calls>";
 const SECTION_END = "</ifm|tool_calls>";
@@ -30,7 +28,7 @@ const ARG_VAL_END = "</ifm|arg_value>";
 /// The lambda `build_chat_peg_parser` runs, and the state its
 /// `foreach_function` and `foreach_parameter` callbacks share.
 const Build = struct {
-    a: Allocator,
+    a: std.mem.Allocator,
     inputs: *const common_chat.template.GenerationParams,
     data: *const common_chat.params.ChatParams,
     think_start: []const u8,
@@ -191,7 +189,7 @@ const Build = struct {
 /// @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
-pub fn init(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
+pub fn init(a: std.mem.Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
     var data: common_chat.params.ChatParams = .{};
 
     // The template requires a thinking field on every assistant message

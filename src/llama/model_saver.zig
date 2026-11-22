@@ -212,7 +212,7 @@ fn PathType(comptime T: type, comptime path: []const u8) ?type {
     return F;
 }
 
-fn getPath(ptr: anytype, comptime path: []const u8) ?*mod.impl.c.ggml_tensor {
+fn getPath(ptr: anytype, comptime path: []const u8) ?*mod.impl.llama_c.ggml_tensor {
     const dot = comptime std.mem.findScalar(u8, path, '.');
     if (dot) |d| return getPath(&@field(ptr.*, path[0..d]), path[d + 1 ..]);
     return @field(ptr.*, path);
@@ -228,7 +228,7 @@ fn checkLayer(comptime T: type, comptime prefix: []const u8) void {
     for (@typeInfo(T).@"struct".field_names) |fname| {
         const path = prefix ++ fname;
         const F = @FieldType(T, fname);
-        if (F == ?*mod.impl.c.ggml_tensor) {
+        if (F == ?*mod.impl.llama_c.ggml_tensor) {
             if (!listed(&layer_fields, path)) @compileError("Layer." ++ path ++ " is not a member of llama_layer: add it to layer_fields in its declaration order");
         } else if (@typeInfo(F) == .@"struct") {
             checkLayer(F, path ++ ".");
@@ -242,7 +242,7 @@ comptime {
     @setEvalBranchQuota(1_000_000);
     checkLayer(mod.model.Layer, "");
     for (@typeInfo(mod.model.Model).@"struct".field_names) |fname| {
-        if (@FieldType(mod.model.Model, fname) == ?*mod.impl.c.ggml_tensor and !std.mem.eql(u8, fname, "tok_embd") and !listed(&model_fields, fname) and !listed(&model_unsaved, fname)) {
+        if (@FieldType(mod.model.Model, fname) == ?*mod.impl.llama_c.ggml_tensor and !std.mem.eql(u8, fname, "tok_embd") and !listed(&model_fields, fname) and !listed(&model_unsaved, fname)) {
             @compileError("Model." ++ fname ++ " is a tensor add_tensors_from_model does not name: decide whether the saver writes it");
         }
     }
@@ -260,7 +260,7 @@ const KeyZ = struct {
 /// Ports `llama_model_saver` (llama-model-saver.h:9 @b1b770d90), built from
 /// a model.
 pub const Saver = struct {
-    gguf_ctx: *mod.impl.c.gguf_context,
+    gguf_ctx: *mod.impl.llama_c.gguf_context,
     model: *const mod.model.Model,
     /// `llm_kv`: the architecture whose name the keys take.
     arch: mod.arch_table.Arch,
@@ -273,7 +273,7 @@ pub const Saver = struct {
     ///
     /// Return: the saver; free it with `deinit`.
     pub fn init(model: *const mod.model.Model) Saver {
-        const ctx = mod.impl.c.gguf_init_empty().?;
+        const ctx = mod.impl.llama_c.gguf_init_empty().?;
         mod.impl.assert(mod.arch.supportsSave(model.arch), "llama-model-saver.cpp", 19, "llama_arch_supports_save(model->arch)");
         return .{ .gguf_ctx = ctx, .model = model, .arch = model.arch };
     }
@@ -283,7 +283,7 @@ pub const Saver = struct {
     ///
     /// Return: nothing.
     pub fn deinit(self: *Saver) void {
-        mod.impl.c.gguf_free(self.gguf_ctx);
+        mod.impl.llama_c.gguf_free(self.gguf_ctx);
     }
 
     fn key(self: *const Saver, kv: mod.arch_table.Kv) KeyZ {
@@ -301,11 +301,11 @@ pub const Saver = struct {
     fn addScalar(self: *Saver, kv: mod.arch_table.Kv, value: anytype) void {
         const k = self.key(kv);
         switch (@TypeOf(value)) {
-            u32 => mod.impl.c.gguf_set_val_u32(self.gguf_ctx, k.ptr(), value),
-            i32, c_int => mod.impl.c.gguf_set_val_i32(self.gguf_ctx, k.ptr(), value),
-            u64 => mod.impl.c.gguf_set_val_u64(self.gguf_ctx, k.ptr(), value),
-            f32 => mod.impl.c.gguf_set_val_f32(self.gguf_ctx, k.ptr(), value),
-            bool => mod.impl.c.gguf_set_val_bool(self.gguf_ctx, k.ptr(), value),
+            u32 => mod.impl.llama_c.gguf_set_val_u32(self.gguf_ctx, k.ptr(), value),
+            i32, c_int => mod.impl.llama_c.gguf_set_val_i32(self.gguf_ctx, k.ptr(), value),
+            u64 => mod.impl.llama_c.gguf_set_val_u64(self.gguf_ctx, k.ptr(), value),
+            f32 => mod.impl.llama_c.gguf_set_val_f32(self.gguf_ctx, k.ptr(), value),
+            bool => mod.impl.llama_c.gguf_set_val_bool(self.gguf_ctx, k.ptr(), value),
             else => @compileError("no add_kv overload for " ++ @typeName(@TypeOf(value))),
         }
     }
@@ -314,7 +314,7 @@ pub const Saver = struct {
     /// @b1b770d90).
     fn addCStr(self: *Saver, kv: mod.arch_table.Kv, value: [*:0]const u8) void {
         const k = self.key(kv);
-        mod.impl.c.gguf_set_val_str(self.gguf_ctx, k.ptr(), value);
+        mod.impl.llama_c.gguf_set_val_str(self.gguf_ctx, k.ptr(), value);
     }
 
     /// Ports the container `add_kv` (llama-model-saver.cpp:58 @b1b770d90) for
@@ -350,17 +350,17 @@ pub const Saver = struct {
         }
 
         const gtype = switch (T) {
-            u8 => mod.impl.c.GGUF_TYPE_UINT8,
-            i8 => mod.impl.c.GGUF_TYPE_INT8,
-            u32 => mod.impl.c.GGUF_TYPE_UINT32,
-            bool => mod.impl.c.GGUF_TYPE_BOOL,
-            i32, c_int => mod.impl.c.GGUF_TYPE_INT32,
-            u64 => mod.impl.c.GGUF_TYPE_UINT64,
-            f32 => mod.impl.c.GGUF_TYPE_FLOAT32,
+            u8 => mod.impl.llama_c.GGUF_TYPE_UINT8,
+            i8 => mod.impl.llama_c.GGUF_TYPE_INT8,
+            u32 => mod.impl.llama_c.GGUF_TYPE_UINT32,
+            bool => mod.impl.llama_c.GGUF_TYPE_BOOL,
+            i32, c_int => mod.impl.llama_c.GGUF_TYPE_INT32,
+            u64 => mod.impl.llama_c.GGUF_TYPE_UINT64,
+            f32 => mod.impl.llama_c.GGUF_TYPE_FLOAT32,
             else => @compileError("no add_kv branch for " ++ @typeName(T)),
         };
         const k = self.key(kv);
-        mod.impl.c.gguf_set_arr_data(self.gguf_ctx, k.ptr(), gtype, value.ptr, n_values);
+        mod.impl.llama_c.gguf_set_arr_data(self.gguf_ctx, k.ptr(), gtype, value.ptr, n_values);
     }
 
     /// Ports the `std::vector<std::string>` overload of `add_kv`
@@ -378,19 +378,19 @@ pub const Saver = struct {
             tmp[i] = zs[i].ptr;
         }
         const k = self.key(kv);
-        mod.impl.c.gguf_set_arr_str(self.gguf_ctx, k.ptr(), if (tmp.len == 0) null else tmp.ptr, tmp.len);
+        mod.impl.llama_c.gguf_set_arr_str(self.gguf_ctx, k.ptr(), if (tmp.len == 0) null else tmp.ptr, tmp.len);
     }
 
     /// Ports `add_tensor` (llama-model-saver.cpp:110 @b1b770d90).
-    fn addTensor(self: *Saver, tensor: ?*const mod.impl.c.ggml_tensor) void {
+    fn addTensor(self: *Saver, tensor: ?*const mod.impl.llama_c.ggml_tensor) void {
         const t = tensor orelse return;
-        if (mod.impl.c.gguf_find_tensor(self.gguf_ctx, &t.name) >= 0) {
+        if (mod.impl.llama_c.gguf_find_tensor(self.gguf_ctx, &t.name) >= 0) {
             const name = std.mem.sliceTo(&t.name, 0);
             mod.impl.assert(std.mem.eql(u8, name, "rope_freqs.weight") or std.mem.eql(u8, name, "rope_factors_long.weight") or
                 std.mem.eql(u8, name, "rope_factors_short.weight"), "llama-model-saver.cpp", 118, "tensor_name == \"rope_freqs.weight\" || tensor_name == \"rope_factors_long.weight\" || tensor_name == \"rope_factors_short.weight\"");
             return;
         }
-        mod.impl.c.gguf_add_tensor(self.gguf_ctx, t);
+        mod.impl.llama_c.gguf_add_tensor(self.gguf_ctx, t);
     }
 
     /// Ports `add_kv_from_model` (llama-model-saver.cpp:124 @b1b770d90). The
@@ -430,13 +430,13 @@ pub const Saver = struct {
                 scores[i] = td.score;
                 // Exact attribute values only; a combination is UNDEFINED.
                 token_types[i] = switch (td.attr) {
-                    mod.impl.c.LLAMA_TOKEN_ATTR_UNKNOWN => mod.impl.c.LLAMA_TOKEN_TYPE_UNKNOWN,
-                    mod.impl.c.LLAMA_TOKEN_ATTR_UNUSED => mod.impl.c.LLAMA_TOKEN_TYPE_UNUSED,
-                    mod.impl.c.LLAMA_TOKEN_ATTR_NORMAL => mod.impl.c.LLAMA_TOKEN_TYPE_NORMAL,
-                    mod.impl.c.LLAMA_TOKEN_ATTR_CONTROL => mod.impl.c.LLAMA_TOKEN_TYPE_CONTROL,
-                    mod.impl.c.LLAMA_TOKEN_ATTR_USER_DEFINED => mod.impl.c.LLAMA_TOKEN_TYPE_USER_DEFINED,
-                    mod.impl.c.LLAMA_TOKEN_ATTR_BYTE => mod.impl.c.LLAMA_TOKEN_TYPE_BYTE,
-                    else => mod.impl.c.LLAMA_TOKEN_TYPE_UNDEFINED,
+                    mod.impl.llama_c.LLAMA_TOKEN_ATTR_UNKNOWN => mod.impl.llama_c.LLAMA_TOKEN_TYPE_UNKNOWN,
+                    mod.impl.llama_c.LLAMA_TOKEN_ATTR_UNUSED => mod.impl.llama_c.LLAMA_TOKEN_TYPE_UNUSED,
+                    mod.impl.llama_c.LLAMA_TOKEN_ATTR_NORMAL => mod.impl.llama_c.LLAMA_TOKEN_TYPE_NORMAL,
+                    mod.impl.llama_c.LLAMA_TOKEN_ATTR_CONTROL => mod.impl.llama_c.LLAMA_TOKEN_TYPE_CONTROL,
+                    mod.impl.llama_c.LLAMA_TOKEN_ATTR_USER_DEFINED => mod.impl.llama_c.LLAMA_TOKEN_TYPE_USER_DEFINED,
+                    mod.impl.llama_c.LLAMA_TOKEN_ATTR_BYTE => mod.impl.llama_c.LLAMA_TOKEN_TYPE_BYTE,
+                    else => mod.impl.llama_c.LLAMA_TOKEN_TYPE_UNDEFINED,
                 };
             }
         }
@@ -451,12 +451,12 @@ pub const Saver = struct {
             const values = std.heap.c_allocator.alloc(i8, src1.count()) catch oom();
             defer std.heap.c_allocator.free(values);
             for (src1.keys(), src1.values(), 0..) |w, prec, i| {
-                names[i] = std.mem.sliceTo(mod.impl.c.ggml_get_name(w), 0);
-                values[i] = if (prec == mod.impl.c.GGML_PREC_Q8) 0 else 1;
+                names[i] = std.mem.sliceTo(mod.impl.llama_c.ggml_get_name(w), 0);
+                values[i] = if (prec == mod.impl.llama_c.GGML_PREC_Q8) 0 else 1;
             }
             self.addStrArr(.general_tensor_extra_name, names);
             const k = self.key(.general_tensor_extra_prec_a4);
-            mod.impl.c.gguf_set_arr_data(self.gguf_ctx, k.ptr(), mod.impl.c.GGUF_TYPE_BOOL, values.ptr, values.len);
+            mod.impl.llama_c.gguf_set_arr_data(self.gguf_ctx, k.ptr(), mod.impl.llama_c.GGUF_TYPE_BOOL, values.ptr, values.len);
         }
 
         self.addScalar(.vocab_size, vocab.nTokens());
@@ -764,7 +764,7 @@ pub const Saver = struct {
         }
 
         // A different tensor with an existing name still asserts in `addTensor`.
-        var seen: std.AutoHashMapUnmanaged(*const mod.impl.c.ggml_tensor, void) = .empty;
+        var seen: std.AutoHashMapUnmanaged(*const mod.impl.llama_c.ggml_tensor, void) = .empty;
         defer seen.deinit(std.heap.c_allocator);
         for (model.layers) |*layer| {
             inline for (layer_fields) |path| {
@@ -785,7 +785,7 @@ pub const Saver = struct {
     ///
     /// Return: nothing.
     pub fn save(self: *Saver, path_model: [*:0]const u8) void {
-        _ = mod.impl.c.gguf_write_to_file(self.gguf_ctx, path_model, false);
+        _ = mod.impl.llama_c.gguf_write_to_file(self.gguf_ctx, path_model, false);
     }
 };
 

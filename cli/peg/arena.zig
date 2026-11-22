@@ -29,8 +29,6 @@ const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 const json = @import("json");
 
-const Allocator = std.mem.Allocator;
-
 /// Ports `common_peg_parser_id` (peg-parser.h:21 @b1b770d90).
 pub const ParserId = usize;
 /// Ports `COMMON_PEG_INVALID_PARSER_ID` (peg-parser.h:22 @b1b770d90).
@@ -98,7 +96,7 @@ pub const AstNode = struct {
     /// - `gpa`: allocates the result.
     ///
     /// Return: owned by the caller.
-    pub fn sanitizedText(self: *const AstNode, gpa: Allocator) Allocator.Error![]u8 {
+    pub fn sanitizedText(self: *const AstNode, gpa: std.mem.Allocator) std.mem.Allocator.Error![]u8 {
         if (self.invalid_utf8.len == 0) return gpa.dupe(u8, self.text);
         var out: std.ArrayList(u8) = .empty;
         errdefer out.deinit(gpa);
@@ -117,13 +115,13 @@ pub const AstNode = struct {
 /// Ports `common_peg_ast_arena` (peg-parser.h:105 @b1b770d90): the nodes a
 /// parse produced, by id.
 pub const AstArena = struct {
-    gpa: Allocator,
+    gpa: std.mem.Allocator,
     nodes: std.ArrayList(AstNode) = .empty,
     /// the nodes' names and child lists
     mem: std.heap.ArenaAllocator,
 
     /// Return: an empty arena; `deinit` frees it.
-    pub fn init(gpa: Allocator) AstArena {
+    pub fn init(gpa: std.mem.Allocator) AstArena {
         return .{ .gpa = gpa, .mem = .init(gpa) };
     }
 
@@ -253,7 +251,7 @@ pub const AstArena = struct {
     /// once more under each ancestor.
     ///
     /// Return: owned by the caller.
-    pub fn dump(self: *const AstArena, gpa: Allocator) mod.errors.Error![]u8 {
+    pub fn dump(self: *const AstArena, gpa: std.mem.Allocator) mod.errors.Error![]u8 {
         var out: std.ArrayList(u8) = .empty;
         errdefer out.deinit(gpa);
         for (self.nodes.items) |*node| try self.bfsNode(gpa, &out, node, 0);
@@ -261,7 +259,7 @@ pub const AstArena = struct {
     }
 
     /// Ports `bfs_node` (peg-parser.cpp:858 @b1b770d90).
-    fn bfsNode(self: *const AstArena, gpa: Allocator, out: *std.ArrayList(u8), node: *const AstNode, indent: c_int) mod.errors.Error!void {
+    fn bfsNode(self: *const AstArena, gpa: std.mem.Allocator, out: *std.ArrayList(u8), node: *const AstNode, indent: c_int) mod.errors.Error!void {
         var i: c_int = 0;
         while (i < indent) : (i += 1) try out.appendSlice(gpa, "  ");
         try out.print(gpa, "NODE {d}", .{node.id});
@@ -306,7 +304,7 @@ pub const ParseResult = struct {
 
 /// Ports `common_peg_parse_context` (peg-parser.h:191 @b1b770d90).
 pub const ParseContext = struct {
-    gpa: Allocator,
+    gpa: std.mem.Allocator,
     input: []u8, // [h,   e,  l,  l,  o,  _,  w,  o,  r,  l,  d]
     /// One entry per input byte: the token that begins there, -1
     /// (`LLAMA_TOKEN_NULL`) inside a token's text; empty when the input
@@ -324,7 +322,7 @@ pub const ParseContext = struct {
     /// constructor taking input, which it copies.
     ///
     /// Return: the context; `deinit` frees it.
-    pub fn init(gpa: Allocator, input: []const u8, flags: u32) mod.errors.Error!ParseContext {
+    pub fn init(gpa: std.mem.Allocator, input: []const u8, flags: u32) mod.errors.Error!ParseContext {
         return .{
             .gpa = gpa,
             .input = try gpa.dupe(u8, input),
@@ -340,7 +338,7 @@ pub const ParseContext = struct {
     /// mode.
     ///
     /// Return: the context; `deinit` frees it.
-    pub fn initTokens(gpa: Allocator, input: []const u8, tokens: []const i32, flags: u32) mod.errors.Error!ParseContext {
+    pub fn initTokens(gpa: std.mem.Allocator, input: []const u8, tokens: []const i32, flags: u32) mod.errors.Error!ParseContext {
         @import("llama").impl.assert(tokens.len == 0 or tokens.len == input.len, "common/peg-parser.h", 208, "this->tokens.empty() || this->tokens.size() == this->input.size()");
         var self = try init(gpa, input, flags);
         errdefer self.deinit();
@@ -384,14 +382,14 @@ pub const CharRange = struct {
 /// A schema document several parsers -- and arenas -- may share, as the
 /// C++ shares a `common_chat_schema_document_ptr`.
 pub const SharedDoc = struct {
-    gpa: Allocator,
+    gpa: std.mem.Allocator,
     doc: json.schema.Document,
     refs: usize = 1,
 
     /// Parses `value` into a document of its own, held once.
     ///
     /// Return: the document, released with `release`.
-    pub fn fromJson(gpa: Allocator, value: *const json.Value) mod.errors.Error!*SharedDoc {
+    pub fn fromJson(gpa: std.mem.Allocator, value: *const json.Value) mod.errors.Error!*SharedDoc {
         const doc = json.schema.fromJsonSchema(gpa, value) catch |e| return mod.errors.fromSchema(e);
         const self = try gpa.create(SharedDoc);
         self.* = .{ .gpa = gpa, .doc = doc };
@@ -494,7 +492,7 @@ pub const Parser = union(enum) {
 /// Ports `common_peg_arena` (peg-parser.h:341 @b1b770d90): the parsers, the
 /// named rules and the root.
 pub const Arena = struct {
-    gpa: Allocator,
+    gpa: std.mem.Allocator,
     parsers: std.ArrayList(Parser) = .empty,
     rules: stdlib.libcxx.StringMap(ParserId),
     root: ParserId = invalid_parser_id,
@@ -502,7 +500,7 @@ pub const Arena = struct {
     mem: std.heap.ArenaAllocator,
 
     /// Return: an empty arena; `deinit` frees it.
-    pub fn init(gpa: Allocator) mod.errors.Error!Arena {
+    pub fn init(gpa: std.mem.Allocator) mod.errors.Error!Arena {
         return .{ .gpa = gpa, .rules = try .init(gpa), .mem = .init(gpa) };
     }
 
@@ -525,7 +523,7 @@ pub const Arena = struct {
     /// builds one from a copy.
     ///
     /// Return: owned by `gpa`; `deinit` frees it.
-    pub fn clone(self: *const Arena, gpa: Allocator) mod.errors.Error!Arena {
+    pub fn clone(self: *const Arena, gpa: std.mem.Allocator) mod.errors.Error!Arena {
         var out = try Arena.init(gpa);
         errdefer out.deinit();
         const a = out.alloc();
@@ -565,7 +563,7 @@ pub const Arena = struct {
         return out;
     }
 
-    fn dupeStrings(a: Allocator, list: []const []const u8) mod.errors.Error![]const []const u8 {
+    fn dupeStrings(a: std.mem.Allocator, list: []const []const u8) mod.errors.Error![]const []const u8 {
         const out = try a.alloc([]const u8, list.len);
         for (list, out) |s, *o| o.* = try a.dupe(u8, s);
         return out;
@@ -573,7 +571,7 @@ pub const Arena = struct {
 
     /// The allocator parser payloads live in; never stored, since an arena
     /// moves.
-    pub fn alloc(self: *Arena) Allocator {
+    pub fn alloc(self: *Arena) std.mem.Allocator {
         return self.mem.allocator();
     }
 
@@ -678,7 +676,7 @@ pub const Arena = struct {
     /// parser met twice on the way down printed as `[cycle]`.
     ///
     /// Return: owned by the caller.
-    pub fn dump(self: *const Arena, gpa: Allocator, id: ParserId) mod.errors.Error![]u8 {
+    pub fn dump(self: *const Arena, gpa: std.mem.Allocator, id: ParserId) mod.errors.Error![]u8 {
         var visited: std.AutoHashMapUnmanaged(ParserId, void) = .empty;
         defer visited.deinit(gpa);
         var out: std.ArrayList(u8) = .empty;
@@ -688,7 +686,7 @@ pub const Arena = struct {
     }
 
     /// Ports `dump_impl` (peg-parser.cpp:937 @b1b770d90).
-    fn dumpImpl(self: *const Arena, gpa: Allocator, out: *std.ArrayList(u8), id: ParserId, visited: *std.AutoHashMapUnmanaged(ParserId, void)) mod.errors.Error!void {
+    fn dumpImpl(self: *const Arena, gpa: std.mem.Allocator, out: *std.ArrayList(u8), id: ParserId, visited: *std.AutoHashMapUnmanaged(ParserId, void)) mod.errors.Error!void {
         if (visited.contains(id)) return out.appendSlice(gpa, "[cycle]");
         try visited.put(gpa, id, {});
         const parser = try self.get(id);
@@ -764,7 +762,7 @@ pub const Arena = struct {
         }
     }
 
-    fn dumpWrapped(self: *const Arena, gpa: Allocator, out: *std.ArrayList(u8), open: []const u8, child: ParserId, visited: *std.AutoHashMapUnmanaged(ParserId, void)) mod.errors.Error!void {
+    fn dumpWrapped(self: *const Arena, gpa: std.mem.Allocator, out: *std.ArrayList(u8), open: []const u8, child: ParserId, visited: *std.AutoHashMapUnmanaged(ParserId, void)) mod.errors.Error!void {
         try out.appendSlice(gpa, open);
         try self.dumpImpl(gpa, out, child, visited);
         try out.appendSlice(gpa, ")");
@@ -772,7 +770,7 @@ pub const Arena = struct {
 };
 
 /// `string_join` (common.cpp), appended.
-pub fn joinTo(gpa: Allocator, out: *std.ArrayList(u8), parts: []const []const u8, sep: []const u8) mod.errors.Error!void {
+pub fn joinTo(gpa: std.mem.Allocator, out: *std.ArrayList(u8), parts: []const []const u8, sep: []const u8) mod.errors.Error!void {
     for (parts, 0..) |p, i| {
         if (i > 0) try out.appendSlice(gpa, sep);
         try out.appendSlice(gpa, p);
@@ -812,7 +810,7 @@ const Executor = struct {
         return .{ .type = t, .start = start, .end = end, .nodes = nodes, .invalid_utf8 = invalid_utf8 };
     }
 
-    fn scratch(self: *Executor) Allocator {
+    fn scratch(self: *Executor) std.mem.Allocator {
         return self.ctx.scratch.allocator();
     }
 
@@ -849,7 +847,7 @@ const Executor = struct {
     }
 
     /// Ports `debug_input_snippet` (peg-parser.cpp:241 @b1b770d90).
-    fn snippet(self: *const Executor, gpa: Allocator, pos: usize) mod.errors.Error![]u8 {
+    fn snippet(self: *const Executor, gpa: std.mem.Allocator, pos: usize) mod.errors.Error![]u8 {
         const len = 60;
         const input = self.ctx.input;
         if (pos >= input.len) return gpa.dupe(u8, "<EOF>");

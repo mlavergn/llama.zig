@@ -31,13 +31,9 @@
 
 const std = @import("std");
 const harness_root = @import("harness_root");
-const mport = @import("mtmd_port");
-const c = @import("llama_c");
+const mtmd_port = @import("mtmd_port");
+const llama_c = @import("llama_c");
 const mtmd_c = @import("mtmd_c");
-
-const M = mport.mtmd;
-const H = mport.helper;
-const G = mport.helper_gen;
 
 // -----------------------------------------------------------------------------
 // struct layout: the port's hand-declared mtmd.h structs against the C
@@ -56,24 +52,24 @@ fn checkLayout(comptime Port: type, comptime C: type) void {
 }
 
 comptime {
-    checkLayout(M.InputText, mtmd_c.struct_mtmd_input_text);
-    checkLayout(M.InputPart, mtmd_c.struct_mtmd_input_part);
-    checkLayout(M.ContextParams, mtmd_c.struct_mtmd_context_params);
-    checkLayout(M.DecoderPos, mtmd_c.struct_mtmd_decoder_pos);
-    checkLayout(M.Caps, mtmd_c.struct_mtmd_caps);
-    checkLayout(M.GenAudioInfo, mtmd_c.struct_mtmd_gen_audio_info);
-    checkLayout(M.GenInp, mtmd_c.struct_mtmd_gen_inp);
-    checkLayout(M.GenOut, mtmd_c.struct_mtmd_gen_out);
-    checkLayout(H.BitmapWrapper, mtmd_c.struct_mtmd_helper_bitmap_wrapper);
-    checkLayout(H.VideoInfo, mtmd_c.struct_mtmd_helper_video_info);
-    checkLayout(H.VideoInitParams, mtmd_c.struct_mtmd_helper_video_init_params);
-    checkLayout(H.InitOpt, mtmd_c.struct_mtmd_helper_init_opt);
-    checkLayout(G.Inp, mtmd_c.struct_mtmd_helper_gen_audio_inp);
-    checkLayout(H.EmbdBatchView, mtmd_c.struct_mtmd_helper_embd_batch);
-    checkLayout(H.Cap, mtmd_c.struct_mtmd_helper_cap);
-    checkLayout(M.GenStateParams, mtmd_c.struct_mtmd_gen_state_params);
-    checkLayout(M.AudioStreamParams, mtmd_c.struct_mtmd_audio_stream_params);
-    checkLayout(M.VideoConfig, mtmd_c.struct_mtmd_video_config);
+    checkLayout(mtmd_port.mtmd.InputText, mtmd_c.struct_mtmd_input_text);
+    checkLayout(mtmd_port.mtmd.InputPart, mtmd_c.struct_mtmd_input_part);
+    checkLayout(mtmd_port.mtmd.ContextParams, mtmd_c.struct_mtmd_context_params);
+    checkLayout(mtmd_port.mtmd.DecoderPos, mtmd_c.struct_mtmd_decoder_pos);
+    checkLayout(mtmd_port.mtmd.Caps, mtmd_c.struct_mtmd_caps);
+    checkLayout(mtmd_port.mtmd.GenAudioInfo, mtmd_c.struct_mtmd_gen_audio_info);
+    checkLayout(mtmd_port.mtmd.GenInp, mtmd_c.struct_mtmd_gen_inp);
+    checkLayout(mtmd_port.mtmd.GenOut, mtmd_c.struct_mtmd_gen_out);
+    checkLayout(mtmd_port.helper.BitmapWrapper, mtmd_c.struct_mtmd_helper_bitmap_wrapper);
+    checkLayout(mtmd_port.helper.VideoInfo, mtmd_c.struct_mtmd_helper_video_info);
+    checkLayout(mtmd_port.helper.VideoInitParams, mtmd_c.struct_mtmd_helper_video_init_params);
+    checkLayout(mtmd_port.helper.InitOpt, mtmd_c.struct_mtmd_helper_init_opt);
+    checkLayout(mtmd_port.helper_gen.Inp, mtmd_c.struct_mtmd_helper_gen_audio_inp);
+    checkLayout(mtmd_port.helper.EmbdBatchView, mtmd_c.struct_mtmd_helper_embd_batch);
+    checkLayout(mtmd_port.helper.Cap, mtmd_c.struct_mtmd_helper_cap);
+    checkLayout(mtmd_port.mtmd.GenStateParams, mtmd_c.struct_mtmd_gen_state_params);
+    checkLayout(mtmd_port.mtmd.AudioStreamParams, mtmd_c.struct_mtmd_audio_stream_params);
+    checkLayout(mtmd_port.mtmd.VideoConfig, mtmd_c.struct_mtmd_video_config);
 }
 
 // -----------------------------------------------------------------------------
@@ -85,12 +81,12 @@ const OptP = ?*anyopaque;
 /// Every entry point the script calls, typed as the C declares it. A side
 /// is this table filled from its library.
 const Api = struct {
-    mtmd_context_params_default: *const fn () callconv(.c) M.ContextParams,
+    mtmd_context_params_default: *const fn () callconv(.c) mtmd_port.mtmd.ContextParams,
     // the streaming resampler of mtmd-helper.h
     mtmd_helper_resampler_init: *const fn (i32, i32) callconv(.c) OptP,
     mtmd_helper_resampler_free: *const fn (OptP) callconv(.c) void,
     mtmd_helper_resampler_process: *const fn (P, ?[*]const f32, usize, *?[*]const f32) callconv(.c) i64,
-    mtmd_init_from_file: *const fn ([*:0]const u8, OptP, M.ContextParams) callconv(.c) OptP,
+    mtmd_init_from_file: *const fn ([*:0]const u8, OptP, mtmd_port.mtmd.ContextParams) callconv(.c) OptP,
     mtmd_free: *const fn (OptP) callconv(.c) void,
     mtmd_support_vision: *const fn (P) callconv(.c) bool,
     mtmd_support_audio: *const fn (P) callconv(.c) bool,
@@ -98,8 +94,8 @@ const Api = struct {
     mtmd_decode_use_mrope: *const fn (P) callconv(.c) bool,
     mtmd_decode_use_non_causal: *const fn (P, OptP) callconv(.c) bool,
     mtmd_get_marker: *const fn (P) callconv(.c) [*:0]const u8,
-    mtmd_gen_audio_get_info: *const fn (P) callconv(.c) M.GenAudioInfo,
-    mtmd_gen_inp_default: *const fn (P) callconv(.c) M.GenInp,
+    mtmd_gen_audio_get_info: *const fn (P) callconv(.c) mtmd_port.mtmd.GenAudioInfo,
+    mtmd_gen_inp_default: *const fn (P) callconv(.c) mtmd_port.mtmd.GenInp,
     mtmd_bitmap_init: *const fn (u32, u32, ?[*]const u8) callconv(.c) P,
     mtmd_bitmap_init_from_audio: *const fn (usize, ?[*]const f32) callconv(.c) P,
     mtmd_bitmap_free: *const fn (OptP) callconv(.c) void,
@@ -121,13 +117,13 @@ const Api = struct {
     mtmd_input_chunks_free: *const fn (OptP) callconv(.c) void,
     mtmd_input_chunks_size: *const fn (P) callconv(.c) usize,
     mtmd_input_chunks_get: *const fn (P, usize) callconv(.c) OptP,
-    mtmd_tokenize: *const fn (P, P, *const M.InputText, ?[*]const P, usize) callconv(.c) i32,
-    mtmd_tokenize_from_parts: *const fn (P, P, ?[*]const *const M.InputPart, usize, bool) callconv(.c) i32,
+    mtmd_tokenize: *const fn (P, P, *const mtmd_port.mtmd.InputText, ?[*]const P, usize) callconv(.c) i32,
+    mtmd_tokenize_from_parts: *const fn (P, P, ?[*]const *const mtmd_port.mtmd.InputPart, usize, bool) callconv(.c) i32,
     mtmd_input_chunk_get_type: *const fn (P) callconv(.c) c_int,
-    mtmd_input_chunk_get_tokens_text: *const fn (P, *usize) callconv(.c) ?[*]const c.llama_token,
+    mtmd_input_chunk_get_tokens_text: *const fn (P, *usize) callconv(.c) ?[*]const llama_c.llama_token,
     mtmd_input_chunk_get_tokens_image: *const fn (P) callconv(.c) OptP,
     mtmd_input_chunk_get_n_tokens: *const fn (P) callconv(.c) usize,
-    mtmd_input_chunk_get_n_pos: *const fn (P) callconv(.c) c.llama_pos,
+    mtmd_input_chunk_get_n_pos: *const fn (P) callconv(.c) llama_c.llama_pos,
     mtmd_input_chunk_get_id: *const fn (P) callconv(.c) ?[*:0]const u8,
     mtmd_input_chunk_copy: *const fn (P) callconv(.c) P,
     mtmd_input_chunk_free: *const fn (OptP) callconv(.c) void,
@@ -138,8 +134,8 @@ const Api = struct {
     mtmd_image_tokens_get_nx: *const fn (P) callconv(.c) usize,
     mtmd_image_tokens_get_ny: *const fn (P) callconv(.c) usize,
     mtmd_image_tokens_get_id: *const fn (P) callconv(.c) [*:0]const u8,
-    mtmd_image_tokens_get_n_pos: *const fn (P) callconv(.c) c.llama_pos,
-    mtmd_image_tokens_get_decoder_pos: *const fn (P, c.llama_pos, usize) callconv(.c) M.DecoderPos,
+    mtmd_image_tokens_get_n_pos: *const fn (P) callconv(.c) llama_c.llama_pos,
+    mtmd_image_tokens_get_decoder_pos: *const fn (P, llama_c.llama_pos, usize) callconv(.c) mtmd_port.mtmd.DecoderPos,
     mtmd_encode_chunk: *const fn (P, P) callconv(.c) i32,
     mtmd_get_output_embd: *const fn (P) callconv(.c) ?[*]f32,
     mtmd_batch_init: *const fn (P) callconv(.c) P,
@@ -147,73 +143,73 @@ const Api = struct {
     mtmd_batch_add_chunk: *const fn (P, P) callconv(.c) i32,
     mtmd_batch_encode: *const fn (P) callconv(.c) i32,
     mtmd_batch_get_output_embd: *const fn (P, OptP) callconv(.c) ?[*]f32,
-    mtmd_get_cap_from_file: *const fn ([*:0]const u8) callconv(.c) M.Caps,
+    mtmd_get_cap_from_file: *const fn ([*:0]const u8) callconv(.c) mtmd_port.mtmd.Caps,
     mtmd_test_create_input_chunks: *const fn () callconv(.c) OptP,
-    mtmd_helper_log_set: *const fn (c.ggml_log_callback, OptP) callconv(.c) void,
-    mtmd_helper_init_opt_default: *const fn () callconv(.c) H.InitOpt,
-    mtmd_helper_bitmap_init_from_file: *const fn (P, [*:0]const u8, bool, H.InitOpt) callconv(.c) H.BitmapWrapper,
-    mtmd_helper_bitmap_init_from_buf: *const fn (P, ?[*]const u8, usize, bool, H.InitOpt) callconv(.c) H.BitmapWrapper,
+    mtmd_helper_log_set: *const fn (llama_c.ggml_log_callback, OptP) callconv(.c) void,
+    mtmd_helper_init_opt_default: *const fn () callconv(.c) mtmd_port.helper.InitOpt,
+    mtmd_helper_bitmap_init_from_file: *const fn (P, [*:0]const u8, bool, mtmd_port.helper.InitOpt) callconv(.c) mtmd_port.helper.BitmapWrapper,
+    mtmd_helper_bitmap_init_from_buf: *const fn (P, ?[*]const u8, usize, bool, mtmd_port.helper.InitOpt) callconv(.c) mtmd_port.helper.BitmapWrapper,
     mtmd_helper_get_n_tokens: *const fn (P) callconv(.c) usize,
-    mtmd_helper_get_n_pos: *const fn (P) callconv(.c) c.llama_pos,
-    mtmd_helper_eval_chunks: *const fn (P, OptP, P, c.llama_pos, c.llama_seq_id, i32, bool, *c.llama_pos) callconv(.c) i32,
-    mtmd_helper_decode_image_chunk: *const fn (P, OptP, P, ?[*]f32, c.llama_pos, c.llama_seq_id, i32, *c.llama_pos, H.PostDecodeCallback, OptP) callconv(.c) i32,
+    mtmd_helper_get_n_pos: *const fn (P) callconv(.c) llama_c.llama_pos,
+    mtmd_helper_eval_chunks: *const fn (P, OptP, P, llama_c.llama_pos, llama_c.llama_seq_id, i32, bool, *llama_c.llama_pos) callconv(.c) i32,
+    mtmd_helper_decode_image_chunk: *const fn (P, OptP, P, ?[*]f32, llama_c.llama_pos, llama_c.llama_seq_id, i32, *llama_c.llama_pos, mtmd_port.helper.PostDecodeCallback, OptP) callconv(.c) i32,
     mtmd_helper_model_can_chat: *const fn (OptP, OptP) callconv(.c) bool,
     mtmd_helper_gen_audio_init: *const fn (OptP, P) callconv(.c) P,
     mtmd_helper_gen_audio_free: *const fn (OptP) callconv(.c) void,
-    mtmd_helper_gen_audio_set_input: *const fn (P, *const G.Inp) callconv(.c) i32,
+    mtmd_helper_gen_audio_set_input: *const fn (P, *const mtmd_port.helper_gen.Inp) callconv(.c) i32,
     mtmd_helper_gen_audio_step_prompt: *const fn (P, i32) callconv(.c) i32,
-    mtmd_helper_gen_audio_step_gen: *const fn (P, c.llama_token, ?[*]const f32, *?[*]const f32, ?*bool) callconv(.c) i32,
+    mtmd_helper_gen_audio_step_gen: *const fn (P, llama_c.llama_token, ?[*]const f32, *?[*]const f32, ?*bool) callconv(.c) i32,
     mtmd_helper_gen_audio_get_output: *const fn (P, *i32, *?[*]const u8, *usize, ?*i64) callconv(.c) i32,
     mtmd_helper_gen_audio_flush: *const fn (P) callconv(.c) i32,
-    mtmd_helper_gen_audio_inp_default: *const fn () callconv(.c) G.Inp,
+    mtmd_helper_gen_audio_inp_default: *const fn () callconv(.c) mtmd_port.helper_gen.Inp,
     mtmd_helper_gen_audio_next_is_text: *const fn (P) callconv(.c) bool,
-    mtmd_helper_gen_audio_get_logit_bias: *const fn (P, *usize) callconv(.c) ?[*]const c.llama_logit_bias,
-    mtmd_helper_audio_stream_get_logit_bias: *const fn (P, ?*const c.llama_model, ?[*]c.llama_logit_bias, i32) callconv(.c) i32,
-    mtmd_helper_get_capabilities: *const fn (?*const c.llama_model, OptP) callconv(.c) H.Cap,
+    mtmd_helper_gen_audio_get_logit_bias: *const fn (P, *usize) callconv(.c) ?[*]const llama_c.llama_logit_bias,
+    mtmd_helper_audio_stream_get_logit_bias: *const fn (P, ?*const llama_c.llama_model, ?[*]llama_c.llama_logit_bias, i32) callconv(.c) i32,
+    mtmd_helper_get_capabilities: *const fn (?*const llama_c.llama_model, OptP) callconv(.c) mtmd_port.helper.Cap,
     mtmd_helper_support_video: *const fn (OptP) callconv(.c) bool,
-    mtmd_gen_state_params_default: *const fn () callconv(.c) M.GenStateParams,
-    mtmd_gen_state_init: *const fn (P, M.GenStateParams) callconv(.c) OptP,
+    mtmd_gen_state_params_default: *const fn () callconv(.c) mtmd_port.mtmd.GenStateParams,
+    mtmd_gen_state_init: *const fn (P, mtmd_port.mtmd.GenStateParams) callconv(.c) OptP,
     mtmd_gen_state_free: *const fn (OptP) callconv(.c) void,
     mtmd_gen_state_reset: *const fn (P) callconv(.c) void,
-    mtmd_gen_audio_process: *const fn (P, OptP, *const M.GenInp, *M.GenOut) callconv(.c) i32,
+    mtmd_gen_audio_process: *const fn (P, OptP, *const mtmd_port.mtmd.GenInp, *mtmd_port.mtmd.GenOut) callconv(.c) i32,
     mtmd_support_audio_stream: *const fn (P) callconv(.c) bool,
-    mtmd_audio_stream_params_default: *const fn () callconv(.c) M.AudioStreamParams,
-    mtmd_audio_stream_init: *const fn (P, M.AudioStreamParams) callconv(.c) OptP,
+    mtmd_audio_stream_params_default: *const fn () callconv(.c) mtmd_port.mtmd.AudioStreamParams,
+    mtmd_audio_stream_init: *const fn (P, mtmd_port.mtmd.AudioStreamParams) callconv(.c) OptP,
     mtmd_audio_stream_free: *const fn (OptP) callconv(.c) void,
     mtmd_audio_stream_push: *const fn (P, ?[*]const f32, usize) callconv(.c) i32,
     mtmd_audio_stream_flush: *const fn (P, bool) callconv(.c) i32,
-    mtmd_audio_stream_step: *const fn (P, c.llama_token) callconv(.c) i32,
+    mtmd_audio_stream_step: *const fn (P, llama_c.llama_token) callconv(.c) i32,
     mtmd_audio_stream_get_output_embd: *const fn (P) callconv(.c) ?[*]const f32,
     mtmd_audio_stream_is_seq_start: *const fn (P) callconv(.c) bool,
     mtmd_audio_stream_get_n_rows: *const fn (P) callconv(.c) i64,
     mtmd_audio_stream_get_n_rows_flushed: *const fn (P) callconv(.c) i64,
-    mtmd_get_video_config: *const fn (P, i32, i32, i32, f32) callconv(.c) M.VideoConfig,
+    mtmd_get_video_config: *const fn (P, i32, i32, i32, f32) callconv(.c) mtmd_port.mtmd.VideoConfig,
     mtmd_bitmap_set_is_video: *const fn (P, bool) callconv(.c) void,
     mtmd_bitmap_init_lazy: *const fn (OptP, ?[*:0]const u8, OptP, ?*const anyopaque) callconv(.c) P,
 
-    llama_log_set: *const fn (c.ggml_log_callback, OptP) callconv(.c) void,
-    llama_model_default_params: *const fn () callconv(.c) c.llama_model_params,
-    llama_model_load_from_file: *const fn ([*:0]const u8, c.llama_model_params) callconv(.c) ?*c.llama_model,
-    llama_model_free: *const fn (?*c.llama_model) callconv(.c) void,
-    llama_context_default_params: *const fn () callconv(.c) c.llama_context_params,
-    llama_init_from_model: *const fn (?*c.llama_model, c.llama_context_params) callconv(.c) ?*c.llama_context,
-    llama_free: *const fn (?*c.llama_context) callconv(.c) void,
-    llama_get_logits_ith: *const fn (?*c.llama_context, i32) callconv(.c) ?[*]f32,
-    llama_get_embeddings_ith: *const fn (?*c.llama_context, i32) callconv(.c) ?[*]f32,
-    llama_get_memory: *const fn (?*const c.llama_context) callconv(.c) c.llama_memory_t,
-    llama_memory_clear: *const fn (c.llama_memory_t, bool) callconv(.c) void,
-    llama_model_n_embd: *const fn (?*const c.llama_model) callconv(.c) i32,
-    llama_model_n_embd_inp: *const fn (?*const c.llama_model) callconv(.c) i32,
-    llama_model_get_vocab: *const fn (?*const c.llama_model) callconv(.c) ?*const c.llama_vocab,
-    llama_vocab_n_tokens: *const fn (?*const c.llama_vocab) callconv(.c) i32,
-    llama_vocab_get_text: *const fn (?*const c.llama_vocab, c.llama_token) callconv(.c) [*c]const u8,
-    llama_vocab_eos: *const fn (?*const c.llama_vocab) callconv(.c) c.llama_token,
+    llama_log_set: *const fn (llama_c.ggml_log_callback, OptP) callconv(.c) void,
+    llama_model_default_params: *const fn () callconv(.c) llama_c.llama_model_params,
+    llama_model_load_from_file: *const fn ([*:0]const u8, llama_c.llama_model_params) callconv(.c) ?*llama_c.llama_model,
+    llama_model_free: *const fn (?*llama_c.llama_model) callconv(.c) void,
+    llama_context_default_params: *const fn () callconv(.c) llama_c.llama_context_params,
+    llama_init_from_model: *const fn (?*llama_c.llama_model, llama_c.llama_context_params) callconv(.c) ?*llama_c.llama_context,
+    llama_free: *const fn (?*llama_c.llama_context) callconv(.c) void,
+    llama_get_logits_ith: *const fn (?*llama_c.llama_context, i32) callconv(.c) ?[*]f32,
+    llama_get_embeddings_ith: *const fn (?*llama_c.llama_context, i32) callconv(.c) ?[*]f32,
+    llama_get_memory: *const fn (?*const llama_c.llama_context) callconv(.c) llama_c.llama_memory_t,
+    llama_memory_clear: *const fn (llama_c.llama_memory_t, bool) callconv(.c) void,
+    llama_model_n_embd: *const fn (?*const llama_c.llama_model) callconv(.c) i32,
+    llama_model_n_embd_inp: *const fn (?*const llama_c.llama_model) callconv(.c) i32,
+    llama_model_get_vocab: *const fn (?*const llama_c.llama_model) callconv(.c) ?*const llama_c.llama_vocab,
+    llama_vocab_n_tokens: *const fn (?*const llama_c.llama_vocab) callconv(.c) i32,
+    llama_vocab_get_text: *const fn (?*const llama_c.llama_vocab, llama_c.llama_token) callconv(.c) [*c]const u8,
+    llama_vocab_eos: *const fn (?*const llama_c.llama_vocab) callconv(.c) llama_c.llama_token,
 };
 
 /// The port's definition of `name`: libmtmd's three files, then libllama's
 /// `api/`.
 fn portFn(comptime name: []const u8) *const anyopaque {
-    inline for (.{ M, H, G }) |f| {
+    inline for (.{ mtmd_port.mtmd, mtmd_port.helper, mtmd_port.helper_gen }) |f| {
         if (@hasDecl(f, name)) return @ptrCast(&@field(f, name));
     }
     const api = harness_root.api;
@@ -256,7 +252,7 @@ fn flush() void {
     w().flush() catch {};
 }
 
-fn logCb(level: c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
+fn logCb(level: llama_c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
     print("[log {d}] {s}", .{ level, std.mem.span(@as([*:0]const u8, @ptrCast(text))) });
     flush();
 }
@@ -274,20 +270,20 @@ fn hashF32(p: ?[*]const f32, n: usize) u64 {
 var node_mode = false;
 
 /// Every node the encoder computes: what it is and a hash of what it holds.
-fn cbEval(t: [*c]c.struct_ggml_tensor, ask: bool, _: ?*anyopaque) callconv(.c) bool {
+fn cbEval(t: [*c]llama_c.struct_ggml_tensor, ask: bool, _: ?*anyopaque) callconv(.c) bool {
     if (ask) return true;
-    const tensor: *c.struct_ggml_tensor = t;
-    const nbytes = c.ggml_nbytes(tensor);
+    const tensor: *llama_c.struct_ggml_tensor = t;
+    const nbytes = llama_c.ggml_nbytes(tensor);
     var h: u64 = 0;
     if (nbytes > 0 and tensor.buffer != null) {
         const buf = std.heap.c_allocator.alloc(u8, nbytes) catch return true;
         defer std.heap.c_allocator.free(buf);
-        c.ggml_backend_tensor_get(tensor, buf.ptr, 0, nbytes);
+        llama_c.ggml_backend_tensor_get(tensor, buf.ptr, 0, nbytes);
         h = hashBytes(buf);
     }
     print("node {s} {s} {s} [{d},{d},{d},{d}] {x:0>16}\n", .{
-        std.mem.sliceTo(&tensor.name, 0), std.mem.span(c.ggml_op_desc(tensor)), std.mem.span(c.ggml_type_name(tensor.type)),
-        tensor.ne[0],                     tensor.ne[1],                         tensor.ne[2],
+        std.mem.sliceTo(&tensor.name, 0), std.mem.span(llama_c.ggml_op_desc(tensor)), std.mem.span(llama_c.ggml_type_name(tensor.type)),
+        tensor.ne[0],                     tensor.ne[1],                               tensor.ne[2],
         tensor.ne[3],                     h,
     });
     return true;
@@ -366,8 +362,8 @@ const Ctx = struct {
     a: std.mem.Allocator,
     api: *const Api,
     mctx: P,
-    model: *c.llama_model,
-    lctx: ?*c.llama_context,
+    model: *llama_c.llama_model,
+    lctx: ?*llama_c.llama_context,
 };
 
 fn dumpChunks(x: *const Ctx, chunks: P) void {
@@ -465,7 +461,7 @@ fn encodeChunks(x: *const Ctx, chunks: P) void {
 fn evalChunks(x: *const Ctx, chunks: P) void {
     const api = x.api;
     const lctx = x.lctx orelse return;
-    var n_past: c.llama_pos = 0;
+    var n_past: llama_c.llama_pos = 0;
     const rc = api.mtmd_helper_eval_chunks(x.mctx, lctx, chunks, 0, 0, 512, true, &n_past);
     print("eval rc {d} n_past {d}", .{ rc, n_past });
     if (rc == 0) {
@@ -478,7 +474,7 @@ fn evalChunks(x: *const Ctx, chunks: P) void {
 /// The post-decode callback (a `mtmd_helper_embd_batch` view, not
 /// a `llama_batch`): every field of each sub-batch's view, its embeddings
 /// and its section-major positions by hash.
-fn postDecode(v: ?*const H.EmbdBatchView, _: ?*anyopaque) callconv(.c) i32 {
+fn postDecode(v: ?*const mtmd_port.helper.EmbdBatchView, _: ?*anyopaque) callconv(.c) i32 {
     const b = v.?;
     const n: usize = @intCast(b.n_tokens);
     const ne: usize = @intCast(b.n_embd);
@@ -501,7 +497,7 @@ fn decodeMediaChunks(x: *const Ctx, chunks: P) void {
         if (api.mtmd_input_chunk_get_type(ch) == 0) continue;
         if (api.mtmd_encode_chunk(x.mctx, ch) != 0) continue;
         api.llama_memory_clear(api.llama_get_memory(lctx), true);
-        var new_n_past: c.llama_pos = -1;
+        var new_n_past: llama_c.llama_pos = -1;
         print("decode-chunk {d}\n", .{i});
         const rc = api.mtmd_helper_decode_image_chunk(x.mctx, lctx, ch, api.mtmd_get_output_embd(x.mctx), 3, 0, 5, &new_n_past, postDecode, null);
         print("decode-chunk {d} rc {d} n_past {d}\n", .{ i, rc, new_n_past });
@@ -512,16 +508,16 @@ fn decodeMediaChunks(x: *const Ctx, chunks: P) void {
 /// `mtmd_get_memory_usage` (C++ linkage upstream, so the reference is
 /// reached through `harness/mtmd_mem_ref.cpp`): per device, the image token
 /// budget and whether the image decodes non-causally.
-extern fn ref_mtmd_get_memory_usage(fname: [*:0]const u8, params: M.ContextParams, devs: [*]c.ggml_backend_dev_t, sizes: [*]usize, cap: c_int, image_max_tokens: *c_int, use_non_causal: *bool) c_int;
+extern fn ref_mtmd_get_memory_usage(fname: [*:0]const u8, params: mtmd_port.mtmd.ContextParams, devs: [*]llama_c.ggml_backend_dev_t, sizes: [*]usize, cap: c_int, image_max_tokens: *c_int, use_non_causal: *bool) c_int;
 
-fn memoryUsage(port: bool, fname: [*:0]const u8, params: M.ContextParams) void {
-    var devs: [16]c.ggml_backend_dev_t = undefined;
+fn memoryUsage(port: bool, fname: [*:0]const u8, params: mtmd_port.mtmd.ContextParams) void {
+    var devs: [16]llama_c.ggml_backend_dev_t = undefined;
     var sizes: [16]usize = undefined;
     var n: usize = 0;
     var imt: c_int = 0;
     var nc = false;
     if (port) {
-        var r = M.getMemoryUsage(fname, params);
+        var r = mtmd_port.mtmd.getMemoryUsage(fname, params);
         defer r.deinit();
         for (r.backend_mem_usage.items.items) |e| {
             if (n < devs.len) {
@@ -538,7 +534,7 @@ fn memoryUsage(port: bool, fname: [*:0]const u8, params: M.ContextParams) void {
     print("memory-usage n {d} image_max_tokens {d} non_causal {}", .{ n, imt, nc });
     // the weights are keyed by their buffer type's device, which
     // is null for the CPU buffer type (ggml-cpu.cpp's FIXME): name it so
-    for (0..@min(n, devs.len)) |k| print(" {s}={d}", .{ if (devs[k] != null) std.mem.span(c.ggml_backend_dev_name(devs[k])) else "(null)", sizes[k] });
+    for (0..@min(n, devs.len)) |k| print(" {s}={d}", .{ if (devs[k] != null) std.mem.span(llama_c.ggml_backend_dev_name(devs[k])) else "(null)", sizes[k] });
     print("\n", .{});
     flush();
 }
@@ -659,19 +655,19 @@ fn runMedia(x: *const Ctx, tmp: []const u8, inputs: []const u8, vision: bool, au
         const ch = api.mtmd_input_chunks_init();
         defer api.mtmd_input_chunks_free(ch);
         const t1 = "a <__media__> b <__media__>";
-        const it1: M.InputText = .{ .text = t1, .text_len = t1.len, .add_special = true, .parse_special = true };
+        const it1: mtmd_port.mtmd.InputText = .{ .text = t1, .text_len = t1.len, .add_special = true, .parse_special = true };
         print("tokenize-mismatch {d}\n", .{api.mtmd_tokenize(x.mctx, ch, &it1, bitmaps.items.ptr, 1)});
         const t2 = "no marker here";
-        const it2: M.InputText = .{ .text = t2, .text_len = t2.len, .add_special = true, .parse_special = true };
+        const it2: mtmd_port.mtmd.InputText = .{ .text = t2, .text_len = t2.len, .add_special = true, .parse_special = true };
         print("tokenize-mismatch {d}\n", .{api.mtmd_tokenize(x.mctx, ch, &it2, bitmaps.items.ptr, 1)});
 
         // parts with both, neither, and a null text pointer
-        const both: M.InputPart = .{ .text = &it1, .bitmap = @ptrCast(@alignCast(bitmaps.items[0])) };
-        const neither: M.InputPart = .{ .text = null, .bitmap = null };
-        const null_txt: M.InputText = .{ .text = null, .text_len = 0, .add_special = false, .parse_special = true };
-        const null_part: M.InputPart = .{ .text = &null_txt, .bitmap = null };
-        for ([_]*const M.InputPart{ &both, &neither, &null_part }) |bp| {
-            const one = [_]*const M.InputPart{bp};
+        const both: mtmd_port.mtmd.InputPart = .{ .text = &it1, .bitmap = @ptrCast(@alignCast(bitmaps.items[0])) };
+        const neither: mtmd_port.mtmd.InputPart = .{ .text = null, .bitmap = null };
+        const null_txt: mtmd_port.mtmd.InputText = .{ .text = null, .text_len = 0, .add_special = false, .parse_special = true };
+        const null_part: mtmd_port.mtmd.InputPart = .{ .text = &null_txt, .bitmap = null };
+        for ([_]*const mtmd_port.mtmd.InputPart{ &both, &neither, &null_part }) |bp| {
+            const one = [_]*const mtmd_port.mtmd.InputPart{bp};
             print("tokenize-parts-bad {d}\n", .{api.mtmd_tokenize_from_parts(x.mctx, ch, &one, one.len, true)});
         }
     }
@@ -683,7 +679,7 @@ fn runMedia(x: *const Ctx, tmp: []const u8, inputs: []const u8, vision: bool, au
 fn tokenizeParts(x: *const Ctx, bitmaps: []const P, add_special: bool) !void {
     const api = x.api;
     if (bitmaps.len == 0) return;
-    var texts: std.ArrayList(M.InputText) = .empty;
+    var texts: std.ArrayList(mtmd_port.mtmd.InputText) = .empty;
     defer texts.deinit(x.a);
     var strs: std.ArrayList([]u8) = .empty;
     defer {
@@ -691,7 +687,7 @@ fn tokenizeParts(x: *const Ctx, bitmaps: []const P, add_special: bool) !void {
         strs.deinit(x.a);
     }
     try texts.ensureTotalCapacity(x.a, bitmaps.len + 1);
-    var parts: std.ArrayList(M.InputPart) = .empty;
+    var parts: std.ArrayList(mtmd_port.mtmd.InputPart) = .empty;
     defer parts.deinit(x.a);
     for (0..bitmaps.len + 1) |i| {
         const t = if (i == 0)
@@ -705,7 +701,7 @@ fn tokenizeParts(x: *const Ctx, bitmaps: []const P, add_special: bool) !void {
         try parts.append(x.a, .{ .text = &texts.items[i], .bitmap = null });
         if (i < bitmaps.len) try parts.append(x.a, .{ .text = null, .bitmap = @ptrCast(@alignCast(bitmaps[i])) });
     }
-    var ptrs: std.ArrayList(*const M.InputPart) = .empty;
+    var ptrs: std.ArrayList(*const mtmd_port.mtmd.InputPart) = .empty;
     defer ptrs.deinit(x.a);
     for (parts.items) |*p| try ptrs.append(x.a, p);
     const chunks = api.mtmd_input_chunks_init();
@@ -736,7 +732,7 @@ fn tokenizeAndRunAdjacent(x: *const Ctx, bitmaps: []const P, run: bool, adjacent
         } else try prompt.print(x.a, " item {d} <__media__>\n", .{i});
     }
     try prompt.appendSlice(x.a, "describe them.");
-    const text: M.InputText = .{ .text = prompt.items.ptr, .text_len = prompt.items.len, .add_special = true, .parse_special = true };
+    const text: mtmd_port.mtmd.InputText = .{ .text = prompt.items.ptr, .text_len = prompt.items.len, .add_special = true, .parse_special = true };
     const chunks = api.mtmd_input_chunks_init();
     defer api.mtmd_input_chunks_free(chunks);
     const rc = api.mtmd_tokenize(x.mctx, chunks, &text, bitmaps.ptr, bitmaps.len);
@@ -876,7 +872,7 @@ fn runVoices(x: *const Ctx) void {
         const marker = std.mem.span(api.mtmd_get_marker(x.mctx));
         const chunks = api.mtmd_input_chunks_init();
         defer api.mtmd_input_chunks_free(chunks);
-        const text: M.InputText = .{ .text = marker.ptr, .text_len = marker.len, .add_special = false, .parse_special = true };
+        const text: mtmd_port.mtmd.InputText = .{ .text = marker.ptr, .text_len = marker.len, .add_special = false, .parse_special = true };
         const bms = [_]P{v};
         const rc = api.mtmd_tokenize(x.mctx, chunks, &text, &bms, 1);
         print("voice {d} tokenize {d}\n", .{ i, rc });
@@ -911,7 +907,7 @@ fn runTtsPromptRef(x: *const Ctx, modality: []const u8, steps: c_int, prompt: [:
 
 /// Chatterbox's backbone token at step `s`: speech tokens, a text
 /// token (decoded, but no speech code) at step 2, the end of speech at 5.
-fn cbxToken(x: *const Ctx, s: c_int) c.llama_token {
+fn cbxToken(x: *const Ctx, s: c_int) llama_c.llama_token {
     if (s == 5) return x.api.llama_vocab_eos(x.api.llama_model_get_vocab(x.model));
     if (s == 2) return tokenOf(x, "h");
     return tokenOf(x, "<|speech_0|>") + 5 * s + 3;
@@ -949,9 +945,9 @@ fn runTtsPromptRefLang(x: *const Ctx, modality: []const u8, steps: c_int, prompt
     }
     // chatterbox's multilingual cfg mixes into the last logits row
     if (cbx) print("tts prompt logits {x:0>16}\n", .{hashF32(api.llama_get_logits_ith(lctx, -1), n_vocab)});
-    var codec_0: c.llama_token = -1;
+    var codec_0: llama_c.llama_token = -1;
     if (qwen) {
-        var t: c.llama_token = 0;
+        var t: llama_c.llama_token = 0;
         while (t < api.llama_vocab_n_tokens(vocab)) : (t += 1) {
             if (std.mem.eql(u8, std.mem.span(@as([*:0]const u8, @ptrCast(api.llama_vocab_get_text(vocab, t)))), "<|codec_0|>")) {
                 codec_0 = t;
@@ -963,7 +959,7 @@ fn runTtsPromptRefLang(x: *const Ctx, modality: []const u8, steps: c_int, prompt
     var h: ?[*]const f32 = api.llama_get_embeddings_ith(lctx, -1);
     var s: c_int = 0;
     while (s < steps) : (s += 1) {
-        const sampled: c.llama_token = if (qwen) codec_0 + 7 * (s + 1) else if (soprano) 10 + s else if (cbx) cbxToken(x, s) else -1;
+        const sampled: llama_c.llama_token = if (qwen) codec_0 + 7 * (s + 1) else if (soprano) 10 + s else if (cbx) cbxToken(x, s) else -1;
         var h_next: ?[*]const f32 = null;
         var stop = false;
         rc = api.mtmd_helper_gen_audio_step_gen(gen, sampled, h, &h_next, &stop);
@@ -985,10 +981,10 @@ fn runTtsPromptRefLang(x: *const Ctx, modality: []const u8, steps: c_int, prompt
 // audio streams, gen state and the soundtrack of a video
 
 /// The token whose text is `text`, -1 if the vocabulary has none.
-fn tokenOf(x: *const Ctx, text: []const u8) c.llama_token {
+fn tokenOf(x: *const Ctx, text: []const u8) llama_c.llama_token {
     const api = x.api;
     const vocab = api.llama_model_get_vocab(x.model);
-    var t: c.llama_token = 0;
+    var t: llama_c.llama_token = 0;
     while (t < api.llama_vocab_n_tokens(vocab)) : (t += 1) {
         if (std.mem.eql(u8, std.mem.span(@as([*:0]const u8, @ptrCast(api.llama_vocab_get_text(vocab, t)))), text)) return t;
     }
@@ -1006,7 +1002,7 @@ const StreamScript = struct {
     text_len: usize = 0, // text tokens of a chunk before <|text_end|>
     mid_flush: usize = 0, // a flush(false) after this many samples
     no_end: bool = false, // leave the stream open, no flush(true)
-    bad_token: ?c.llama_token = null, // pass this after the first rows
+    bad_token: ?llama_c.llama_token = null, // pass this after the first rows
 };
 
 /// Feeds PCM to a stream in pieces and prints every step: its return value,
@@ -1017,7 +1013,7 @@ fn runStream(x: *const Ctx, sc: StreamScript) void {
     const api = x.api;
     var sp = api.mtmd_audio_stream_params_default();
     sp.step_ms = sc.step_ms;
-    const prompt = [_]c.llama_token{ 11, 12, 13, 14 };
+    const prompt = [_]llama_c.llama_token{ 11, 12, 13, 14 };
     if (sc.prompted) {
         sp.prompt = &prompt;
         sp.n_prompt = prompt.len;
@@ -1037,7 +1033,7 @@ fn runStream(x: *const Ctx, sc: StreamScript) void {
     var piece = sc.piece;
     var flushed = false;
     var mid_done = sc.mid_flush == 0;
-    var tok: c.llama_token = -1;
+    var tok: llama_c.llama_token = -1;
     var n_text: usize = 0;
     var bad_sent = false;
     var it: usize = 0;
@@ -1084,7 +1080,7 @@ fn runStream(x: *const Ctx, sc: StreamScript) void {
             tok = text_end;
             n_text = 0;
         } else {
-            tok = 20 + @as(c.llama_token, @intCast(it % 7));
+            tok = 20 + @as(llama_c.llama_token, @intCast(it % 7));
             n_text += 1;
         }
     }
@@ -1098,7 +1094,7 @@ fn runStreams(x: *const Ctx, sizes: []const u8) !void {
     const api = x.api;
     const dp = api.mtmd_audio_stream_params_default();
     print("stream support {} default step_ms {d} prompt_null {} n_prompt {d}\n", .{ api.mtmd_support_audio_stream(x.mctx), dp.step_ms, dp.prompt == null, dp.n_prompt });
-    var bias: [8]c.llama_logit_bias = undefined;
+    var bias: [8]llama_c.llama_logit_bias = undefined;
     const n_bias = api.mtmd_helper_audio_stream_get_logit_bias(x.mctx, x.model, &bias, bias.len);
     print("stream bias {d}\n", .{n_bias});
     for (bias[0..@intCast(@min(n_bias, 8))]) |b| print("bias {d} {x}\n", .{ b.token, @as(u32, @bitCast(b.bias)) });
@@ -1136,7 +1132,7 @@ fn runStreams(x: *const Ctx, sizes: []const u8) !void {
         runStream(x, .{ .label = "long", .n = 1400000, .piece = 16000 });
         const s = api.mtmd_audio_stream_params_default();
         var bad = s;
-        const p = [_]c.llama_token{1};
+        const p = [_]llama_c.llama_token{1};
         bad.prompt = &p;
         bad.n_prompt = 1;
         print("prompted voxtral {}\n", .{api.mtmd_audio_stream_init(x.mctx, bad) == null});
@@ -1162,7 +1158,7 @@ fn runGenApi(x: *const Ctx, modality: []const u8) void {
     for (h, 0..) |*v, i| v.* = 0.5 * @sin(0.13 * @as(f32, @floatFromInt(i)));
 
     const Show = struct {
-        fn out(a: *const Api, label: []const u8, rc: i32, o: *const M.GenOut, ne: usize) void {
+        fn out(a: *const Api, label: []const u8, rc: i32, o: *const mtmd_port.mtmd.GenOut, ne: usize) void {
             _ = a;
             print("gen {s} rc {d} codes {d} {x:0>16} feats {d} {x:0>16} embd {x:0>16} eos {} audio {d} {x:0>16}\n", .{
                 label,                                                                    rc,        o.n_codes,
@@ -1176,7 +1172,7 @@ fn runGenApi(x: *const Ctx, modality: []const u8) void {
 
     var inp = api.mtmd_gen_inp_default(x.mctx);
     print("gen inp type {d} top_k {d} top_p {x} temp {x} penalty {x} last_n {d}\n", .{ @backingInt(inp.type), inp.top_k, @as(u32, @bitCast(inp.top_p)), @as(u32, @bitCast(inp.temp)), @as(u32, @bitCast(inp.penalty_repeat)), inp.penalty_last_n });
-    var o = std.mem.zeroes(M.GenOut);
+    var o = std.mem.zeroes(mtmd_port.mtmd.GenOut);
     Show.out(api, "no state", api.mtmd_gen_audio_process(x.mctx, null, &inp, &o), &o, n_embd);
 
     if (std.mem.eql(u8, modality, "tts-soprano")) {
@@ -1256,7 +1252,7 @@ fn runGenApi(x: *const Ctx, modality: []const u8) void {
         const marker = std.mem.span(api.mtmd_get_marker(x.mctx));
         const chunks = api.mtmd_input_chunks_init();
         defer api.mtmd_input_chunks_free(chunks);
-        const text: M.InputText = .{ .text = marker.ptr, .text_len = marker.len, .add_special = false, .parse_special = true };
+        const text: mtmd_port.mtmd.InputText = .{ .text = marker.ptr, .text_len = marker.len, .add_special = false, .parse_special = true };
         const bms = [_]P{v};
         print("cbx voice tokenize {d}\n", .{api.mtmd_tokenize(x.mctx, chunks, &text, &bms, 1)});
         encodeChunks(x, chunks);
@@ -1278,7 +1274,7 @@ fn runGenApi(x: *const Ctx, modality: []const u8) void {
 }
 
 /// The pipelines in streaming mode: every step's new audio, then the flush.
-fn runTtsStream(x: *const Ctx, modality: []const u8, out_type: G.OutType, steps: c_int) void {
+fn runTtsStream(x: *const Ctx, modality: []const u8, out_type: mtmd_port.helper_gen.OutType, steps: c_int) void {
     const api = x.api;
     const lctx = x.lctx orelse return;
     const gen = api.mtmd_helper_gen_audio_init(lctx, x.mctx);
@@ -1325,7 +1321,7 @@ fn runTtsStream(x: *const Ctx, modality: []const u8, out_type: G.OutType, steps:
     };
     var s: c_int = 0;
     while (s < steps) : (s += 1) {
-        const sampled: c.llama_token = if (qwen) codec_0 + 7 * (s + 1) else if (soprano) 10 + s else if (cbx) cbxToken(x, s) else -1;
+        const sampled: llama_c.llama_token = if (qwen) codec_0 + 7 * (s + 1) else if (soprano) 10 + s else if (cbx) cbxToken(x, s) else -1;
         var h_next: ?[*]const f32 = null;
         var stop = false;
         rc = api.mtmd_helper_gen_audio_step_gen(gen, sampled, h, &h_next, &stop);
@@ -1351,8 +1347,8 @@ fn runLfm3aContinue(x: *const Ctx) void {
     const t_im_end = tokenOf(x, "<|im_end|>");
     const t_audio = tokenOf(x, "<|audio_start|>");
     const t_mixed = tokenOf(x, "<|mixed_start|>");
-    const modes = [_]G.OutMode{ .auto, .auto, .text, .audio, .mixed };
-    const scripts = [_][]const c.llama_token{
+    const modes = [_]mtmd_port.helper_gen.OutMode{ .auto, .auto, .text, .audio, .mixed };
+    const scripts = [_][]const llama_c.llama_token{
         &.{ 30, 31, t_audio, 0, 0, 0, 0, 30, t_end },
         &.{ 30, t_mixed, 31, 32, 33, 34, 35, 36, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 37, t_end, 0, 0, t_im_end },
         &.{ 30, 31, 32, 33, t_im_end },
@@ -1514,7 +1510,7 @@ pub fn main(init: std.process.Init) !u8 {
     out_writer = out_file.writer(g_io, &out_buf);
     defer flush();
 
-    c.ggml_log_set(logCb, null);
+    llama_c.ggml_log_set(logCb, null);
     api.llama_log_set(logCb, null);
     api.mtmd_helper_log_set(logCb, null); // and libmtmd's
 

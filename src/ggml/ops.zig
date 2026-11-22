@@ -33,7 +33,7 @@ const mod = @import("module.zig");
 ///
 /// An in-place op writes over its input, so the result is a view of it rather
 /// than fresh storage. Only ops listed in `ggml_op_can_inplace` may do this.
-inline fn dupOrView(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, inplace: bool) *mod.impl.c.ggml_tensor {
+inline fn dupOrView(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, inplace: bool) *mod.impl.ggml_c.ggml_tensor {
     return if (inplace)
         mod.context.ggml_view_tensor(ctx, a)
     else
@@ -41,7 +41,7 @@ inline fn dupOrView(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, inpla
 }
 
 /// One input, same shape out.
-inline fn unaryOp(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, op: mod.impl.c.enum_ggml_op, inplace: bool) *mod.impl.c.ggml_tensor {
+inline fn unaryOp(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, op: mod.impl.ggml_c.enum_ggml_op, inplace: bool) *mod.impl.ggml_c.ggml_tensor {
     const result = dupOrView(ctx, a, inplace);
     result.op = op;
     result.src[0] = a;
@@ -49,7 +49,7 @@ inline fn unaryOp(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, op: mod
 }
 
 /// Two inputs, shape of the first out, with `b` broadcastable over `a`.
-inline fn binaryOp(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, op: mod.impl.c.enum_ggml_op, inplace: bool) *mod.impl.c.ggml_tensor {
+inline fn binaryOp(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, op: mod.impl.ggml_c.enum_ggml_op, inplace: bool) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_can_repeat(b, a), "ggml_can_repeat(b, a)");
     const result = dupOrView(ctx, a, inplace);
     result.op = op;
@@ -62,26 +62,26 @@ inline fn binaryOp(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mo
 // ggml_dup
 
 /// Ports `ggml_dup` (ggml.c:2065 @b1b770d90).
-pub export fn ggml_dup(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-    return unaryOp(ctx, a, mod.impl.c.GGML_OP_DUP, false);
+pub fn ggml_dup(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return unaryOp(ctx, a, mod.impl.ggml_c.GGML_OP_DUP, false);
 }
 
 /// Ports `ggml_dup_inplace` (ggml.c:2071 @b1b770d90).
-pub export fn ggml_dup_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-    return unaryOp(ctx, a, mod.impl.c.GGML_OP_DUP, true);
+pub fn ggml_dup_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return unaryOp(ctx, a, mod.impl.ggml_c.GGML_OP_DUP, true);
 }
 
 // -----------------------------------------------------------------------------
 // ggml_add
 
 /// Ports `ggml_add` (ggml.c:2095 @b1b770d90).
-pub export fn ggml_add(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-    return binaryOp(ctx, a, b, mod.impl.c.GGML_OP_ADD, false);
+pub fn ggml_add(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return binaryOp(ctx, a, b, mod.impl.ggml_c.GGML_OP_ADD, false);
 }
 
 /// Ports `ggml_add_inplace` (ggml.c:2102 @b1b770d90).
-pub export fn ggml_add_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-    return binaryOp(ctx, a, b, mod.impl.c.GGML_OP_ADD, true);
+pub fn ggml_add_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return binaryOp(ctx, a, b, mod.impl.ggml_c.GGML_OP_ADD, true);
 }
 
 /// Ports `ggml_add_cast` (ggml.c:2134 @b1b770d90).
@@ -89,16 +89,16 @@ pub export fn ggml_add_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_te
 /// Adds and changes type in one node, so a quantized weight can accumulate
 /// into a wider gradient without a separate cast. Only quantized, f16, and
 /// bf16 inputs are supported, which is what the backends implement.
-pub export fn ggml_add_cast(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, t: mod.impl.c.enum_ggml_type) *mod.impl.c.ggml_tensor {
+pub fn ggml_add_cast(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, t: mod.impl.ggml_c.enum_ggml_type) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     // The C notes this constraint is stricter than it needs to be.
     mod.impl.assert(mod.types.canRepeatRows(b, a), "ggml_can_repeat_rows(b, a)");
     mod.impl.assert(
-        mod.types.ggml_is_quantized(a.type) or a.type == mod.impl.c.GGML_TYPE_F16 or a.type == mod.impl.c.GGML_TYPE_BF16,
+        mod.types.ggml_is_quantized(a.type) or a.type == mod.impl.ggml_c.GGML_TYPE_F16 or a.type == mod.impl.ggml_c.GGML_TYPE_BF16,
         "ggml_is_quantized(a->type) || a->type == GGML_TYPE_F16 || a->type == GGML_TYPE_BF16",
     );
 
-    const result = mod.context.ggml_new_tensor(ctx, t, mod.impl.c.GGML_MAX_DIMS, &a.ne);
-    result.op = mod.impl.c.GGML_OP_ADD;
+    const result = mod.context.ggml_new_tensor(ctx, t, mod.impl.ggml_c.GGML_MAX_DIMS, &a.ne);
+    result.op = mod.impl.ggml_c.GGML_OP_ADD;
     result.src[0] = a;
     result.src[1] = b;
     return result;
@@ -108,14 +108,14 @@ pub export fn ggml_add_cast(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tenso
 ///
 /// Adds a row of `b` selected per position by `ids`, which is how mixture-of-
 /// experts biases are applied without materialising the full bias tensor.
-pub export fn ggml_add_id(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, ids: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_add_id(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, ids: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(a.ne[0] == b.ne[0], "a->ne[0] == b->ne[0]");
     mod.impl.assert(a.ne[1] == ids.ne[0], "a->ne[1] == ids->ne[0]");
     mod.impl.assert(a.ne[2] == ids.ne[1], "a->ne[2] == ids->ne[1]");
-    mod.impl.assert(ids.type == mod.impl.c.GGML_TYPE_I32, "ids->type == GGML_TYPE_I32");
+    mod.impl.assert(ids.type == mod.impl.ggml_c.GGML_TYPE_I32, "ids->type == GGML_TYPE_I32");
 
     const result = mod.context.ggml_dup_tensor(ctx, a);
-    result.op = mod.impl.c.GGML_OP_ADD_ID;
+    result.op = mod.impl.ggml_c.GGML_OP_ADD_ID;
     result.src[0] = a;
     result.src[1] = b;
     result.src[2] = ids;
@@ -134,18 +134,18 @@ pub export fn ggml_add_id(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor,
 /// out-of-bounds write.
 pub fn accImpl(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
     nb1: usize,
     nb2: usize,
     nb3: usize,
     offset: usize,
     inplace: bool,
-) *mod.impl.c.ggml_tensor {
+) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_nelements(b) <= mod.types.ggml_nelements(a), "ggml_nelements(b) <= ggml_nelements(a)");
     mod.impl.assert(mod.types.ggml_is_contiguous(a), "ggml_is_contiguous(a)");
-    mod.impl.assert(a.type == mod.impl.c.GGML_TYPE_F32, "a->type == GGML_TYPE_F32");
-    mod.impl.assert(b.type == mod.impl.c.GGML_TYPE_F32, "b->type == GGML_TYPE_F32");
+    mod.impl.assert(a.type == mod.impl.ggml_c.GGML_TYPE_F32, "a->type == GGML_TYPE_F32");
+    mod.impl.assert(b.type == mod.impl.ggml_c.GGML_TYPE_F32, "b->type == GGML_TYPE_F32");
 
     const result = dupOrView(ctx, a, inplace);
 
@@ -156,19 +156,19 @@ pub fn accImpl(
     };
     mod.impl.setOpParamsValue(result, params);
 
-    result.op = mod.impl.c.GGML_OP_ACC;
+    result.op = mod.impl.ggml_c.GGML_OP_ACC;
     result.src[0] = a;
     result.src[1] = b;
     return result;
 }
 
 /// Ports `ggml_acc` (ggml.c:2192 @b1b770d90).
-pub export fn ggml_acc(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, nb1: usize, nb2: usize, nb3: usize, offset: usize) *mod.impl.c.ggml_tensor {
+pub fn ggml_acc(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, nb1: usize, nb2: usize, nb3: usize, offset: usize) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return accImpl(ctx, a, b, nb1, nb2, nb3, offset, false);
 }
 
 /// Ports `ggml_acc_inplace` (ggml.c:2203 @b1b770d90).
-pub export fn ggml_acc_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, nb1: usize, nb2: usize, nb3: usize, offset: usize) *mod.impl.c.ggml_tensor {
+pub fn ggml_acc_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, nb1: usize, nb2: usize, nb3: usize, offset: usize) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return accImpl(ctx, a, b, nb1, nb2, nb3, offset, true);
 }
 
@@ -181,43 +181,43 @@ pub export fn ggml_acc_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_te
 /// different op, and the wrappers above already go through it. They exist
 /// under their own names because the autodiff pass in `graph.zig` calls them
 /// with a computed `inplace`, which no exported wrapper offers.
-pub fn addImpl(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, inplace: bool) *mod.impl.c.ggml_tensor {
-    return binaryOp(ctx, a, b, mod.impl.c.GGML_OP_ADD, inplace);
+pub fn addImpl(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, inplace: bool) *mod.impl.ggml_c.ggml_tensor {
+    return binaryOp(ctx, a, b, mod.impl.ggml_c.GGML_OP_ADD, inplace);
 }
 
 /// Ports `ggml_sub_impl` (ggml.c:2216 @b1b770d90). See `addImpl`.
-pub fn subImpl(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, inplace: bool) *mod.impl.c.ggml_tensor {
-    return binaryOp(ctx, a, b, mod.impl.c.GGML_OP_SUB, inplace);
+pub fn subImpl(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, inplace: bool) *mod.impl.ggml_c.ggml_tensor {
+    return binaryOp(ctx, a, b, mod.impl.ggml_c.GGML_OP_SUB, inplace);
 }
 
 /// Ports `ggml_sub` (ggml.c:2232 @b1b770d90).
-pub export fn ggml_sub(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-    return binaryOp(ctx, a, b, mod.impl.c.GGML_OP_SUB, false);
+pub fn ggml_sub(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return binaryOp(ctx, a, b, mod.impl.ggml_c.GGML_OP_SUB, false);
 }
 
 /// Ports `ggml_sub_inplace` (ggml.c:2239 @b1b770d90).
-pub export fn ggml_sub_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-    return binaryOp(ctx, a, b, mod.impl.c.GGML_OP_SUB, true);
+pub fn ggml_sub_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return binaryOp(ctx, a, b, mod.impl.ggml_c.GGML_OP_SUB, true);
 }
 
 /// Ports `ggml_mul` (ggml.c:2264 @b1b770d90).
-pub export fn ggml_mul(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-    return binaryOp(ctx, a, b, mod.impl.c.GGML_OP_MUL, false);
+pub fn ggml_mul(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return binaryOp(ctx, a, b, mod.impl.ggml_c.GGML_OP_MUL, false);
 }
 
 /// Ports `ggml_mul_inplace` (ggml.c:2271 @b1b770d90).
-pub export fn ggml_mul_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-    return binaryOp(ctx, a, b, mod.impl.c.GGML_OP_MUL, true);
+pub fn ggml_mul_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return binaryOp(ctx, a, b, mod.impl.ggml_c.GGML_OP_MUL, true);
 }
 
 /// Ports `ggml_div` (ggml.c:2296 @b1b770d90).
-pub export fn ggml_div(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-    return binaryOp(ctx, a, b, mod.impl.c.GGML_OP_DIV, false);
+pub fn ggml_div(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return binaryOp(ctx, a, b, mod.impl.ggml_c.GGML_OP_DIV, false);
 }
 
 /// Ports `ggml_div_inplace` (ggml.c:2303 @b1b770d90).
-pub export fn ggml_div_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-    return binaryOp(ctx, a, b, mod.impl.c.GGML_OP_DIV, true);
+pub fn ggml_div_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return binaryOp(ctx, a, b, mod.impl.ggml_c.GGML_OP_DIV, true);
 }
 
 // -----------------------------------------------------------------------------
@@ -227,53 +227,53 @@ pub export fn ggml_div_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_te
 // activations further down which share one.
 
 /// Ports `ggml_sqr` (ggml.c:2324 @b1b770d90).
-pub export fn ggml_sqr(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-    return unaryOp(ctx, a, mod.impl.c.GGML_OP_SQR, false);
+pub fn ggml_sqr(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return unaryOp(ctx, a, mod.impl.ggml_c.GGML_OP_SQR, false);
 }
 
 /// Ports `ggml_sqr_inplace` (ggml.c:2330 @b1b770d90).
-pub export fn ggml_sqr_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-    return unaryOp(ctx, a, mod.impl.c.GGML_OP_SQR, true);
+pub fn ggml_sqr_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return unaryOp(ctx, a, mod.impl.ggml_c.GGML_OP_SQR, true);
 }
 
 /// Ports `ggml_sqrt` (ggml.c:2350 @b1b770d90).
-pub export fn ggml_sqrt(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-    return unaryOp(ctx, a, mod.impl.c.GGML_OP_SQRT, false);
+pub fn ggml_sqrt(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return unaryOp(ctx, a, mod.impl.ggml_c.GGML_OP_SQRT, false);
 }
 
 /// Ports `ggml_sqrt_inplace` (ggml.c:2356 @b1b770d90).
-pub export fn ggml_sqrt_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-    return unaryOp(ctx, a, mod.impl.c.GGML_OP_SQRT, true);
+pub fn ggml_sqrt_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return unaryOp(ctx, a, mod.impl.ggml_c.GGML_OP_SQRT, true);
 }
 
 /// Ports `ggml_log` (ggml.c:2376 @b1b770d90).
-pub export fn ggml_log(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-    return unaryOp(ctx, a, mod.impl.c.GGML_OP_LOG, false);
+pub fn ggml_log(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return unaryOp(ctx, a, mod.impl.ggml_c.GGML_OP_LOG, false);
 }
 
 /// Ports `ggml_log_inplace` (ggml.c:2382 @b1b770d90).
-pub export fn ggml_log_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-    return unaryOp(ctx, a, mod.impl.c.GGML_OP_LOG, true);
+pub fn ggml_log_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return unaryOp(ctx, a, mod.impl.ggml_c.GGML_OP_LOG, true);
 }
 
 /// Ports `ggml_sin` (ggml.c:2426 @b1b770d90).
-pub export fn ggml_sin(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-    return unaryOp(ctx, a, mod.impl.c.GGML_OP_SIN, false);
+pub fn ggml_sin(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return unaryOp(ctx, a, mod.impl.ggml_c.GGML_OP_SIN, false);
 }
 
 /// Ports `ggml_sin_inplace` (ggml.c:2432 @b1b770d90).
-pub export fn ggml_sin_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-    return unaryOp(ctx, a, mod.impl.c.GGML_OP_SIN, true);
+pub fn ggml_sin_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return unaryOp(ctx, a, mod.impl.ggml_c.GGML_OP_SIN, true);
 }
 
 /// Ports `ggml_cos` (ggml.c:2452 @b1b770d90).
-pub export fn ggml_cos(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-    return unaryOp(ctx, a, mod.impl.c.GGML_OP_COS, false);
+pub fn ggml_cos(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return unaryOp(ctx, a, mod.impl.ggml_c.GGML_OP_COS, false);
 }
 
 /// Ports `ggml_cos_inplace` (ggml.c:2458 @b1b770d90).
-pub export fn ggml_cos_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-    return unaryOp(ctx, a, mod.impl.c.GGML_OP_COS, true);
+pub fn ggml_cos_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return unaryOp(ctx, a, mod.impl.ggml_c.GGML_OP_COS, true);
 }
 
 // -----------------------------------------------------------------------------
@@ -282,9 +282,9 @@ pub export fn ggml_cos_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_te
 /// Ports `ggml_sum` (ggml.c:2466 @b1b770d90).
 ///
 /// Collapses every dimension to a single element, keeping the input's type.
-pub export fn ggml_sum(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_sum(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const result = mod.context.ggml_new_tensor_1d(ctx, a.type, 1);
-    result.op = mod.impl.c.GGML_OP_SUM;
+    result.op = mod.impl.ggml_c.GGML_OP_SUM;
     result.src[0] = a;
     return result;
 }
@@ -292,21 +292,21 @@ pub export fn ggml_sum(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *m
 /// Ports `ggml_sum_rows` (ggml.c:2479 @b1b770d90).
 ///
 /// Collapses only dimension 0, so a matrix becomes a column.
-pub export fn ggml_sum_rows(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_sum_rows(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     var ne = [_]i64{ 1, 1, 1, 1 };
-    for (1..mod.impl.c.GGML_MAX_DIMS) |i| ne[i] = a.ne[i];
+    for (1..mod.impl.ggml_c.GGML_MAX_DIMS) |i| ne[i] = a.ne[i];
 
-    const result = mod.context.ggml_new_tensor(ctx, a.type, mod.impl.c.GGML_MAX_DIMS, &ne);
-    result.op = mod.impl.c.GGML_OP_SUM_ROWS;
+    const result = mod.context.ggml_new_tensor(ctx, a.type, mod.impl.ggml_c.GGML_MAX_DIMS, &ne);
+    result.op = mod.impl.ggml_c.GGML_OP_SUM_ROWS;
     result.src[0] = a;
     return result;
 }
 
 /// Ports `ggml_cumsum` (ggml.c:2497 @b1b770d90).
-pub export fn ggml_cumsum(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-    mod.impl.assert(a.type == mod.impl.c.GGML_TYPE_F32, "a->type == GGML_TYPE_F32");
+pub fn ggml_cumsum(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    mod.impl.assert(a.type == mod.impl.ggml_c.GGML_TYPE_F32, "a->type == GGML_TYPE_F32");
     const result = mod.context.ggml_dup_tensor(ctx, a);
-    result.op = mod.impl.c.GGML_OP_CUMSUM;
+    result.op = mod.impl.ggml_c.GGML_OP_CUMSUM;
     result.src[0] = a;
     return result;
 }
@@ -314,10 +314,10 @@ pub export fn ggml_cumsum(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor)
 /// Ports `ggml_mean` (ggml.c:2512 @b1b770d90).
 ///
 /// Always f32 out, whatever went in, because the division needs a float.
-pub export fn ggml_mean(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_mean(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const ne = [_]i64{ 1, a.ne[1], a.ne[2], a.ne[3] };
-    const result = mod.context.ggml_new_tensor(ctx, mod.impl.c.GGML_TYPE_F32, 4, &ne);
-    result.op = mod.impl.c.GGML_OP_MEAN;
+    const result = mod.context.ggml_new_tensor(ctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, &ne);
+    result.op = mod.impl.ggml_c.GGML_OP_MEAN;
     result.src[0] = a;
     return result;
 }
@@ -326,12 +326,12 @@ pub export fn ggml_mean(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *
 ///
 /// Index of the largest element in each row, so the result is i32 and one
 /// element per row.
-pub export fn ggml_argmax(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_argmax(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_is_matrix(a), "ggml_is_matrix(a)");
     mod.impl.assert(a.ne[0] <= std.math.maxInt(i32), "a->ne[0] <= INT32_MAX");
 
-    const result = mod.context.ggml_new_tensor_1d(ctx, mod.impl.c.GGML_TYPE_I32, a.ne[1]);
-    result.op = mod.impl.c.GGML_OP_ARGMAX;
+    const result = mod.context.ggml_new_tensor_1d(ctx, mod.impl.ggml_c.GGML_TYPE_I32, a.ne[1]);
+    result.op = mod.impl.ggml_c.GGML_OP_ARGMAX;
     result.src[0] = a;
     return result;
 }
@@ -339,11 +339,11 @@ pub export fn ggml_argmax(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor)
 /// Ports `ggml_count_equal` (ggml.c:2542 @b1b770d90).
 ///
 /// i64 out, because the count can exceed what i32 holds for a large tensor.
-pub export fn ggml_count_equal(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_count_equal(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_are_same_shape(a, b), "ggml_are_same_shape(a, b)");
 
-    const result = mod.context.ggml_new_tensor_1d(ctx, mod.impl.c.GGML_TYPE_I64, 1);
-    result.op = mod.impl.c.GGML_OP_COUNT_EQUAL;
+    const result = mod.context.ggml_new_tensor_1d(ctx, mod.impl.ggml_c.GGML_TYPE_I64, 1);
+    result.op = mod.impl.ggml_c.GGML_OP_COUNT_EQUAL;
     result.src[0] = a;
     result.src[1] = b;
     return result;
@@ -356,11 +356,11 @@ pub export fn ggml_count_equal(ctx: *mod.context.Context, a: *mod.impl.c.ggml_te
 ///
 /// Tiles `a` up to `b`'s shape. `b` supplies only the shape; it is not a source
 /// of the node, so it does not create a graph dependency.
-pub export fn ggml_repeat(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_repeat(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_can_repeat(a, b), "ggml_can_repeat(a, b)");
 
-    const result = mod.context.ggml_new_tensor(ctx, a.type, mod.impl.c.GGML_MAX_DIMS, &b.ne);
-    result.op = mod.impl.c.GGML_OP_REPEAT;
+    const result = mod.context.ggml_new_tensor(ctx, a.type, mod.impl.ggml_c.GGML_MAX_DIMS, &b.ne);
+    result.op = mod.impl.ggml_c.GGML_OP_REPEAT;
     result.src[0] = a;
     return result;
 }
@@ -370,7 +370,7 @@ pub export fn ggml_repeat(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor,
 /// Same as `ggml_repeat` with the target shape given directly. The check is
 /// spelled out rather than reusing `ggml_can_repeat`, since there is no tensor
 /// to compare against.
-pub export fn ggml_repeat_4d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, ne0: i64, ne1: i64, ne2: i64, ne3: i64) *mod.impl.c.ggml_tensor {
+pub fn ggml_repeat_4d(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, ne0: i64, ne1: i64, ne2: i64, ne3: i64) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const can_repeat = mod.types.ggml_is_empty(a) or
         (@rem(ne0, a.ne[0]) == 0 and
             @rem(ne1, a.ne[1]) == 0 and
@@ -379,7 +379,7 @@ pub export fn ggml_repeat_4d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tens
     mod.impl.assert(can_repeat, "can_repeat");
 
     const result = mod.context.ggml_new_tensor_4d(ctx, a.type, ne0, ne1, ne2, ne3);
-    result.op = mod.impl.c.GGML_OP_REPEAT;
+    result.op = mod.impl.ggml_c.GGML_OP_REPEAT;
     result.src[0] = a;
     return result;
 }
@@ -387,11 +387,11 @@ pub export fn ggml_repeat_4d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tens
 /// Ports `ggml_repeat_back` (ggml.c:2595 @b1b770d90).
 ///
 /// The gradient of `ggml_repeat`: sums the tiles back down.
-pub export fn ggml_repeat_back(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_repeat_back(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_can_repeat(b, a), "ggml_can_repeat(b, a)");
 
-    const result = mod.context.ggml_new_tensor(ctx, a.type, mod.impl.c.GGML_MAX_DIMS, &b.ne);
-    result.op = mod.impl.c.GGML_OP_REPEAT_BACK;
+    const result = mod.context.ggml_new_tensor(ctx, a.type, mod.impl.ggml_c.GGML_MAX_DIMS, &b.ne);
+    result.op = mod.impl.ggml_c.GGML_OP_REPEAT_BACK;
     result.src[0] = a;
     return result;
 }
@@ -399,12 +399,12 @@ pub export fn ggml_repeat_back(ctx: *mod.context.Context, a: *mod.impl.c.ggml_te
 /// Ports `ggml_concat` (ggml.c:2611 @b1b770d90).
 ///
 /// Joins along `dim`; every other dimension must match exactly.
-pub export fn ggml_concat(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, dim: c_int) *mod.impl.c.ggml_tensor {
-    mod.impl.assert(dim >= 0 and dim < mod.impl.c.GGML_MAX_DIMS, "dim >= 0 && dim < GGML_MAX_DIMS");
+pub fn ggml_concat(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, dim: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    mod.impl.assert(dim >= 0 and dim < mod.impl.ggml_c.GGML_MAX_DIMS, "dim >= 0 && dim < GGML_MAX_DIMS");
     mod.impl.assert(a.type == b.type, "a->type == b->type");
 
-    var ne: [mod.impl.c.GGML_MAX_DIMS]i64 = undefined;
-    for (0..mod.impl.c.GGML_MAX_DIMS) |d| {
+    var ne: [mod.impl.ggml_c.GGML_MAX_DIMS]i64 = undefined;
+    for (0..mod.impl.ggml_c.GGML_MAX_DIMS) |d| {
         if (d == @as(usize, @intCast(dim))) {
             ne[d] = a.ne[d] + b.ne[d];
             continue;
@@ -413,10 +413,10 @@ pub export fn ggml_concat(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor,
         ne[d] = a.ne[d];
     }
 
-    const result = mod.context.ggml_new_tensor(ctx, a.type, mod.impl.c.GGML_MAX_DIMS, &ne);
+    const result = mod.context.ggml_new_tensor(ctx, a.type, mod.impl.ggml_c.GGML_MAX_DIMS, &ne);
     mod.impl.setOpParamsI32(result, 0, dim);
 
-    result.op = mod.impl.c.GGML_OP_CONCAT;
+    result.op = mod.impl.ggml_c.GGML_OP_CONCAT;
     result.src[0] = a;
     result.src[1] = b;
     return result;
@@ -442,20 +442,20 @@ test "elementwise ops keep the shape of their first input" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
 
-    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 4);
-    const b = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 4);
+    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 4);
+    const b = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 4);
 
     inline for (.{
-        .{ ggml_add, mod.impl.c.GGML_OP_ADD },
-        .{ ggml_sub, mod.impl.c.GGML_OP_SUB },
-        .{ ggml_mul, mod.impl.c.GGML_OP_MUL },
-        .{ ggml_div, mod.impl.c.GGML_OP_DIV },
+        .{ ggml_add, mod.impl.ggml_c.GGML_OP_ADD },
+        .{ ggml_sub, mod.impl.ggml_c.GGML_OP_SUB },
+        .{ ggml_mul, mod.impl.ggml_c.GGML_OP_MUL },
+        .{ ggml_div, mod.impl.ggml_c.GGML_OP_DIV },
     }) |case| {
         const r = case[0](&ctx, a, b);
-        try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, case[1]), r.op);
+        try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, case[1]), r.op);
         try std.testing.expect(mod.types.ggml_are_same_shape(r, a));
-        try std.testing.expectEqual(@as(?*mod.impl.c.ggml_tensor, a), r.src[0]);
-        try std.testing.expectEqual(@as(?*mod.impl.c.ggml_tensor, b), r.src[1]);
+        try std.testing.expectEqual(@as(?*mod.impl.ggml_c.ggml_tensor, a), r.src[0]);
+        try std.testing.expectEqual(@as(?*mod.impl.ggml_c.ggml_tensor, b), r.src[1]);
     }
 }
 
@@ -463,29 +463,29 @@ test "in-place ops return a view of their input" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
 
-    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 4);
-    const b = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 4);
+    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 4);
+    const b = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 4);
 
     const out_of_place = ggml_add(&ctx, a, b);
     try std.testing.expect(!mod.types.ggml_is_view(out_of_place));
 
     const in_place = ggml_add_inplace(&ctx, a, b);
     try std.testing.expect(mod.types.ggml_is_view(in_place));
-    try std.testing.expectEqual(@as(?*mod.impl.c.ggml_tensor, a), in_place.view_src);
+    try std.testing.expectEqual(@as(?*mod.impl.ggml_c.ggml_tensor, a), in_place.view_src);
 }
 
 test "broadcasting is allowed only when shapes tile" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
 
-    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 4);
-    const row = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 1);
+    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 4);
+    const row = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 1);
     // A single row tiles over four rows, so this is a legal add.
     const r = ggml_add(&ctx, a, row);
     try std.testing.expect(mod.types.ggml_are_same_shape(r, a));
 
     // 3 does not divide 8, so ggml_can_repeat rejects it.
-    const bad = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 3, 4);
+    const bad = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 3, 4);
     try std.testing.expect(!mod.types.ggml_can_repeat(bad, a));
 }
 
@@ -493,7 +493,7 @@ test "reductions collapse the dimensions they claim to" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
 
-    const a = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 4, 2);
+    const a = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 4, 2);
 
     const sum = ggml_sum(&ctx, a);
     try std.testing.expectEqual(@as(i64, 1), mod.types.ggml_nelements(sum));
@@ -504,26 +504,26 @@ test "reductions collapse the dimensions they claim to" {
     try std.testing.expectEqual(@as(i64, 2), rows.ne[2]);
 
     const mean = ggml_mean(&ctx, a);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_type, mod.impl.c.GGML_TYPE_F32), mean.type);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_type, mod.impl.ggml_c.GGML_TYPE_F32), mean.type);
     try std.testing.expectEqual(@as(i64, 1), mean.ne[0]);
 
     // argmax needs a matrix and reports one i32 index per row.
-    const m = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 4);
+    const m = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 4);
     const am = ggml_argmax(&ctx, m);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_type, mod.impl.c.GGML_TYPE_I32), am.type);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_type, mod.impl.ggml_c.GGML_TYPE_I32), am.type);
     try std.testing.expectEqual(@as(i64, 4), am.ne[0]);
 
     // count_equal is i64, because the count can exceed i32.
     const ce = ggml_count_equal(&ctx, m, m);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_type, mod.impl.c.GGML_TYPE_I64), ce.type);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_type, mod.impl.ggml_c.GGML_TYPE_I64), ce.type);
 }
 
 test "concat extends only the chosen dimension" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
 
-    const a = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 4, 2);
-    const b = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 4, 3);
+    const a = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 4, 2);
+    const b = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 4, 3);
 
     const r = ggml_concat(&ctx, a, b, 2);
     try std.testing.expectEqual(@as(i64, 8), r.ne[0]);
@@ -537,13 +537,13 @@ test "repeat_4d accepts only whole-number tilings" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
 
-    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 4, 2);
+    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, 2);
     const r = ggml_repeat_4d(&ctx, a, 8, 4, 1, 1);
     try std.testing.expectEqual(@as(i64, 8), r.ne[0]);
     try std.testing.expectEqual(@as(i64, 4), r.ne[1]);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, mod.impl.c.GGML_OP_REPEAT), r.op);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, mod.impl.ggml_c.GGML_OP_REPEAT), r.op);
     // The shape source is not a graph dependency.
-    try std.testing.expectEqual(@as(?*mod.impl.c.ggml_tensor, a), r.src[0]);
+    try std.testing.expectEqual(@as(?*mod.impl.ggml_c.ggml_tensor, a), r.src[0]);
     try std.testing.expect(r.src[1] == null);
 }
 
@@ -551,8 +551,8 @@ test "acc records its strides and offset in op_params" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
 
-    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 4);
-    const b = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.c.GGML_TYPE_F32, 8);
+    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 4);
+    const b = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8);
 
     const r = ggml_acc(&ctx, a, b, 32, 64, 96, 16);
     try std.testing.expectEqual(@as(i32, 32), mod.impl.getOpParamsI32(r, 0));
@@ -574,35 +574,35 @@ test "acc records its strides and offset in op_params" {
 // mapping from symbol to activation is stated once and cannot drift.
 
 /// Ports `ggml_unary_impl` (ggml.c:5944 @b1b770d90).
-fn unaryActivation(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, op: mod.impl.c.enum_ggml_unary_op, inplace: bool) *mod.impl.c.ggml_tensor {
+fn unaryActivation(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, op: mod.impl.ggml_c.enum_ggml_unary_op, inplace: bool) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_is_contiguous_rows(a), "ggml_is_contiguous_rows(a)");
 
     const result = dupOrView(ctx, a, inplace);
     mod.impl.setOpParamsI32(result, 0, @intCast(op));
 
-    result.op = mod.impl.c.GGML_OP_UNARY;
+    result.op = mod.impl.ggml_c.GGML_OP_UNARY;
     result.src[0] = a;
     return result;
 }
 
 /// Ports `ggml_unary` (ggml.c:5961 @b1b770d90).
-pub export fn ggml_unary(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, op: mod.impl.c.enum_ggml_unary_op) *mod.impl.c.ggml_tensor {
+pub fn ggml_unary(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, op: mod.impl.ggml_c.enum_ggml_unary_op) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return unaryActivation(ctx, a, op, false);
 }
 
 /// Ports `ggml_unary_inplace` (ggml.c:5968 @b1b770d90).
-pub export fn ggml_unary_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, op: mod.impl.c.enum_ggml_unary_op) *mod.impl.c.ggml_tensor {
+pub fn ggml_unary_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, op: mod.impl.ggml_c.enum_ggml_unary_op) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return unaryActivation(ctx, a, op, true);
 }
 
 /// Builds one activation wrapper. `op` and `inplace` are comptime, so each
 /// instantiation is the same single tail call the C wrapper compiles to.
-fn activationWrapper(
-    comptime op: mod.impl.c.enum_ggml_unary_op,
+pub fn activationWrapper(
+    comptime op: mod.impl.ggml_c.enum_ggml_unary_op,
     comptime inplace: bool,
-) fn (*mod.context.Context, *mod.impl.c.ggml_tensor) callconv(.c) *mod.impl.c.ggml_tensor {
+) fn (*mod.context.Context, *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return struct {
-        fn f(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) callconv(.c) *mod.impl.c.ggml_tensor {
+        fn f(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
             return unaryActivation(ctx, a, op, inplace);
         }
     }.f;
@@ -612,54 +612,48 @@ fn activationWrapper(
 ///
 /// Taken from ggml.c lines 2650-2900. Note `hardswish` and `hardsigmoid` have
 /// no in-place form there, and so have none here.
-const activations = .{
-    .{ "ggml_abs", mod.impl.c.GGML_UNARY_OP_ABS, false },
-    .{ "ggml_abs_inplace", mod.impl.c.GGML_UNARY_OP_ABS, true },
-    .{ "ggml_sgn", mod.impl.c.GGML_UNARY_OP_SGN, false },
-    .{ "ggml_sgn_inplace", mod.impl.c.GGML_UNARY_OP_SGN, true },
-    .{ "ggml_neg", mod.impl.c.GGML_UNARY_OP_NEG, false },
-    .{ "ggml_neg_inplace", mod.impl.c.GGML_UNARY_OP_NEG, true },
-    .{ "ggml_step", mod.impl.c.GGML_UNARY_OP_STEP, false },
-    .{ "ggml_step_inplace", mod.impl.c.GGML_UNARY_OP_STEP, true },
-    .{ "ggml_tanh", mod.impl.c.GGML_UNARY_OP_TANH, false },
-    .{ "ggml_tanh_inplace", mod.impl.c.GGML_UNARY_OP_TANH, true },
-    .{ "ggml_elu", mod.impl.c.GGML_UNARY_OP_ELU, false },
-    .{ "ggml_elu_inplace", mod.impl.c.GGML_UNARY_OP_ELU, true },
-    .{ "ggml_relu", mod.impl.c.GGML_UNARY_OP_RELU, false },
-    .{ "ggml_relu_inplace", mod.impl.c.GGML_UNARY_OP_RELU, true },
-    .{ "ggml_sigmoid", mod.impl.c.GGML_UNARY_OP_SIGMOID, false },
-    .{ "ggml_sigmoid_inplace", mod.impl.c.GGML_UNARY_OP_SIGMOID, true },
-    .{ "ggml_gelu", mod.impl.c.GGML_UNARY_OP_GELU, false },
-    .{ "ggml_gelu_inplace", mod.impl.c.GGML_UNARY_OP_GELU, true },
-    .{ "ggml_gelu_erf", mod.impl.c.GGML_UNARY_OP_GELU_ERF, false },
-    .{ "ggml_gelu_erf_inplace", mod.impl.c.GGML_UNARY_OP_GELU_ERF, true },
-    .{ "ggml_gelu_quick", mod.impl.c.GGML_UNARY_OP_GELU_QUICK, false },
-    .{ "ggml_gelu_quick_inplace", mod.impl.c.GGML_UNARY_OP_GELU_QUICK, true },
-    .{ "ggml_silu", mod.impl.c.GGML_UNARY_OP_SILU, false },
-    .{ "ggml_silu_inplace", mod.impl.c.GGML_UNARY_OP_SILU, true },
-    .{ "ggml_hardswish", mod.impl.c.GGML_UNARY_OP_HARDSWISH, false },
-    .{ "ggml_hardsigmoid", mod.impl.c.GGML_UNARY_OP_HARDSIGMOID, false },
-    .{ "ggml_exp", mod.impl.c.GGML_UNARY_OP_EXP, false },
-    .{ "ggml_exp_inplace", mod.impl.c.GGML_UNARY_OP_EXP, true },
-    .{ "ggml_expm1", mod.impl.c.GGML_UNARY_OP_EXPM1, false },
-    .{ "ggml_expm1_inplace", mod.impl.c.GGML_UNARY_OP_EXPM1, true },
-    .{ "ggml_softplus", mod.impl.c.GGML_UNARY_OP_SOFTPLUS, false },
-    .{ "ggml_softplus_inplace", mod.impl.c.GGML_UNARY_OP_SOFTPLUS, true },
-    .{ "ggml_floor", mod.impl.c.GGML_UNARY_OP_FLOOR, false },
-    .{ "ggml_floor_inplace", mod.impl.c.GGML_UNARY_OP_FLOOR, true },
-    .{ "ggml_ceil", mod.impl.c.GGML_UNARY_OP_CEIL, false },
-    .{ "ggml_ceil_inplace", mod.impl.c.GGML_UNARY_OP_CEIL, true },
-    .{ "ggml_round", mod.impl.c.GGML_UNARY_OP_ROUND, false },
-    .{ "ggml_round_inplace", mod.impl.c.GGML_UNARY_OP_ROUND, true },
-    .{ "ggml_trunc", mod.impl.c.GGML_UNARY_OP_TRUNC, false },
-    .{ "ggml_trunc_inplace", mod.impl.c.GGML_UNARY_OP_TRUNC, true },
+pub const activations = .{
+    .{ "ggml_abs", mod.impl.ggml_c.GGML_UNARY_OP_ABS, false },
+    .{ "ggml_abs_inplace", mod.impl.ggml_c.GGML_UNARY_OP_ABS, true },
+    .{ "ggml_sgn", mod.impl.ggml_c.GGML_UNARY_OP_SGN, false },
+    .{ "ggml_sgn_inplace", mod.impl.ggml_c.GGML_UNARY_OP_SGN, true },
+    .{ "ggml_neg", mod.impl.ggml_c.GGML_UNARY_OP_NEG, false },
+    .{ "ggml_neg_inplace", mod.impl.ggml_c.GGML_UNARY_OP_NEG, true },
+    .{ "ggml_step", mod.impl.ggml_c.GGML_UNARY_OP_STEP, false },
+    .{ "ggml_step_inplace", mod.impl.ggml_c.GGML_UNARY_OP_STEP, true },
+    .{ "ggml_tanh", mod.impl.ggml_c.GGML_UNARY_OP_TANH, false },
+    .{ "ggml_tanh_inplace", mod.impl.ggml_c.GGML_UNARY_OP_TANH, true },
+    .{ "ggml_elu", mod.impl.ggml_c.GGML_UNARY_OP_ELU, false },
+    .{ "ggml_elu_inplace", mod.impl.ggml_c.GGML_UNARY_OP_ELU, true },
+    .{ "ggml_relu", mod.impl.ggml_c.GGML_UNARY_OP_RELU, false },
+    .{ "ggml_relu_inplace", mod.impl.ggml_c.GGML_UNARY_OP_RELU, true },
+    .{ "ggml_sigmoid", mod.impl.ggml_c.GGML_UNARY_OP_SIGMOID, false },
+    .{ "ggml_sigmoid_inplace", mod.impl.ggml_c.GGML_UNARY_OP_SIGMOID, true },
+    .{ "ggml_gelu", mod.impl.ggml_c.GGML_UNARY_OP_GELU, false },
+    .{ "ggml_gelu_inplace", mod.impl.ggml_c.GGML_UNARY_OP_GELU, true },
+    .{ "ggml_gelu_erf", mod.impl.ggml_c.GGML_UNARY_OP_GELU_ERF, false },
+    .{ "ggml_gelu_erf_inplace", mod.impl.ggml_c.GGML_UNARY_OP_GELU_ERF, true },
+    .{ "ggml_gelu_quick", mod.impl.ggml_c.GGML_UNARY_OP_GELU_QUICK, false },
+    .{ "ggml_gelu_quick_inplace", mod.impl.ggml_c.GGML_UNARY_OP_GELU_QUICK, true },
+    .{ "ggml_silu", mod.impl.ggml_c.GGML_UNARY_OP_SILU, false },
+    .{ "ggml_silu_inplace", mod.impl.ggml_c.GGML_UNARY_OP_SILU, true },
+    .{ "ggml_hardswish", mod.impl.ggml_c.GGML_UNARY_OP_HARDSWISH, false },
+    .{ "ggml_hardsigmoid", mod.impl.ggml_c.GGML_UNARY_OP_HARDSIGMOID, false },
+    .{ "ggml_exp", mod.impl.ggml_c.GGML_UNARY_OP_EXP, false },
+    .{ "ggml_exp_inplace", mod.impl.ggml_c.GGML_UNARY_OP_EXP, true },
+    .{ "ggml_expm1", mod.impl.ggml_c.GGML_UNARY_OP_EXPM1, false },
+    .{ "ggml_expm1_inplace", mod.impl.ggml_c.GGML_UNARY_OP_EXPM1, true },
+    .{ "ggml_softplus", mod.impl.ggml_c.GGML_UNARY_OP_SOFTPLUS, false },
+    .{ "ggml_softplus_inplace", mod.impl.ggml_c.GGML_UNARY_OP_SOFTPLUS, true },
+    .{ "ggml_floor", mod.impl.ggml_c.GGML_UNARY_OP_FLOOR, false },
+    .{ "ggml_floor_inplace", mod.impl.ggml_c.GGML_UNARY_OP_FLOOR, true },
+    .{ "ggml_ceil", mod.impl.ggml_c.GGML_UNARY_OP_CEIL, false },
+    .{ "ggml_ceil_inplace", mod.impl.ggml_c.GGML_UNARY_OP_CEIL, true },
+    .{ "ggml_round", mod.impl.ggml_c.GGML_UNARY_OP_ROUND, false },
+    .{ "ggml_round_inplace", mod.impl.ggml_c.GGML_UNARY_OP_ROUND, true },
+    .{ "ggml_trunc", mod.impl.ggml_c.GGML_UNARY_OP_TRUNC, false },
+    .{ "ggml_trunc_inplace", mod.impl.ggml_c.GGML_UNARY_OP_TRUNC, true },
 };
-
-comptime {
-    for (activations) |entry| {
-        @export(&activationWrapper(entry[1], entry[2]), .{ .name = entry[0] });
-    }
-}
 
 /// Named handles on the generated wrappers above, for callers inside Zig.
 ///
@@ -674,12 +668,12 @@ comptime {
 /// resolving the collision the other way would weaken the test into re-
 /// deriving the mapping from the table it is checking.
 pub const unary = struct {
-    pub const neg = activationWrapper(mod.impl.c.GGML_UNARY_OP_NEG, false);
-    pub const sgn = activationWrapper(mod.impl.c.GGML_UNARY_OP_SGN, false);
-    pub const step = activationWrapper(mod.impl.c.GGML_UNARY_OP_STEP, false);
-    pub const silu = activationWrapper(mod.impl.c.GGML_UNARY_OP_SILU, false);
-    pub const exp = activationWrapper(mod.impl.c.GGML_UNARY_OP_EXP, false);
-    pub const sigmoid = activationWrapper(mod.impl.c.GGML_UNARY_OP_SIGMOID, false);
+    pub const neg = activationWrapper(mod.impl.ggml_c.GGML_UNARY_OP_NEG, false);
+    pub const sgn = activationWrapper(mod.impl.ggml_c.GGML_UNARY_OP_SGN, false);
+    pub const step = activationWrapper(mod.impl.ggml_c.GGML_UNARY_OP_STEP, false);
+    pub const silu = activationWrapper(mod.impl.ggml_c.GGML_UNARY_OP_SILU, false);
+    pub const exp = activationWrapper(mod.impl.ggml_c.GGML_UNARY_OP_EXP, false);
+    pub const sigmoid = activationWrapper(mod.impl.ggml_c.GGML_UNARY_OP_SIGMOID, false);
 };
 
 /// Ports `ggml_xielu` (ggml.c:2827 @b1b770d90).
@@ -687,24 +681,24 @@ pub const unary = struct {
 /// The only activation with parameters of its own. `alpha_n` and `alpha_p`
 /// arrive raw and are passed through softplus here, at graph-build time, so
 /// the backend reads values it can use directly.
-pub export fn ggml_xielu(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, alpha_n: f32, alpha_p: f32, beta: f32, eps: f32) *mod.impl.c.ggml_tensor {
+pub fn ggml_xielu(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, alpha_n: f32, alpha_p: f32, beta: f32, eps: f32) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const result = mod.context.ggml_dup_tensor(ctx, a);
 
-    mod.impl.setOpParamsI32(result, 0, @intCast(mod.impl.c.GGML_UNARY_OP_XIELU));
+    mod.impl.setOpParamsI32(result, 0, @intCast(mod.impl.ggml_c.GGML_UNARY_OP_XIELU));
     mod.impl.setOpParamsF32(result, 1, beta + mod.impl.softplus(alpha_n));
     mod.impl.setOpParamsF32(result, 2, mod.impl.softplus(alpha_p));
     mod.impl.setOpParamsF32(result, 3, beta);
     mod.impl.setOpParamsF32(result, 4, eps);
 
-    result.op = mod.impl.c.GGML_OP_UNARY;
+    result.op = mod.impl.ggml_c.GGML_OP_UNARY;
     result.src[0] = a;
     return result;
 }
 
 /// Ports `ggml_silu_back` (ggml.c:2850 @b1b770d90).
-pub export fn ggml_silu_back(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_silu_back(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const result = mod.context.ggml_dup_tensor(ctx, a);
-    result.op = mod.impl.c.GGML_OP_SILU_BACK;
+    result.op = mod.impl.ggml_c.GGML_OP_SILU_BACK;
     result.src[0] = a;
     result.src[1] = b;
     return result;
@@ -718,7 +712,7 @@ pub export fn ggml_silu_back(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tens
 // as separate tensors instead, in which case the shape is unchanged.
 
 /// Ports `ggml_glu_impl` (ggml.c:2895 @b1b770d90).
-fn gluImpl(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: ?*mod.impl.c.ggml_tensor, op: mod.impl.c.enum_ggml_glu_op, swapped: bool) *mod.impl.c.ggml_tensor {
+fn gluImpl(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: ?*mod.impl.ggml_c.ggml_tensor, op: mod.impl.ggml_c.enum_ggml_glu_op, swapped: bool) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_is_contiguous_1(a), "ggml_is_contiguous_1(a)");
 
     if (b) |bt| {
@@ -730,46 +724,46 @@ fn gluImpl(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: ?*mod.impl.
     // Halved along dimension 0 when gating within one tensor; unchanged when
     // the halves arrive separately.
     var ne = [_]i64{ @divTrunc(a.ne[0], 2), 1, 1, 1 };
-    for (1..mod.impl.c.GGML_MAX_DIMS) |i| ne[i] = a.ne[i];
+    for (1..mod.impl.ggml_c.GGML_MAX_DIMS) |i| ne[i] = a.ne[i];
     const shape: [*]const i64 = if (b != null) &a.ne else &ne;
 
-    const result = mod.context.newTensorImpl(ctx, a.type, mod.impl.c.GGML_MAX_DIMS, shape, null, null, 0);
+    const result = mod.context.newTensorImpl(ctx, a.type, mod.impl.ggml_c.GGML_MAX_DIMS, shape, null, null, 0);
 
     mod.impl.setOpParamsI32(result, 0, @intCast(op));
     mod.impl.setOpParamsI32(result, 1, if (swapped) 1 else 0);
 
-    result.op = mod.impl.c.GGML_OP_GLU;
+    result.op = mod.impl.ggml_c.GGML_OP_GLU;
     result.src[0] = a;
     result.src[1] = b;
     return result;
 }
 
 /// Ports `ggml_glu` (ggml.c:2978 @b1b770d90).
-pub export fn ggml_glu(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, op: mod.impl.c.enum_ggml_glu_op, swapped: bool) *mod.impl.c.ggml_tensor {
+pub fn ggml_glu(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, op: mod.impl.ggml_c.enum_ggml_glu_op, swapped: bool) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return gluImpl(ctx, a, null, op, swapped);
 }
 
 /// Ports `ggml_glu_split` (ggml.c:2986 @b1b770d90).
-pub export fn ggml_glu_split(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, op: mod.impl.c.enum_ggml_glu_op) *mod.impl.c.ggml_tensor {
+pub fn ggml_glu_split(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, op: mod.impl.ggml_c.enum_ggml_glu_op) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return gluImpl(ctx, a, b, op, false);
 }
 
 /// Builds a single-tensor GLU wrapper.
-fn gluWrapper(
-    comptime op: mod.impl.c.enum_ggml_glu_op,
+pub fn gluWrapper(
+    comptime op: mod.impl.ggml_c.enum_ggml_glu_op,
     comptime swapped: bool,
-) fn (*mod.context.Context, *mod.impl.c.ggml_tensor) callconv(.c) *mod.impl.c.ggml_tensor {
+) fn (*mod.context.Context, *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return struct {
-        fn f(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) callconv(.c) *mod.impl.c.ggml_tensor {
+        fn f(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
             return gluImpl(ctx, a, null, op, swapped);
         }
     }.f;
 }
 
 /// Builds a split GLU wrapper, taking the two halves separately.
-fn gluSplitWrapper(comptime op: mod.impl.c.enum_ggml_glu_op) fn (*mod.context.Context, *mod.impl.c.ggml_tensor, *mod.impl.c.ggml_tensor) callconv(.c) *mod.impl.c.ggml_tensor {
+pub fn gluSplitWrapper(comptime op: mod.impl.ggml_c.enum_ggml_glu_op) fn (*mod.context.Context, *mod.impl.ggml_c.ggml_tensor, *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return struct {
-        fn f(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) callconv(.c) *mod.impl.c.ggml_tensor {
+        fn f(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
             return gluImpl(ctx, a, b, op, false);
         }
     }.f;
@@ -777,35 +771,26 @@ fn gluSplitWrapper(comptime op: mod.impl.c.enum_ggml_glu_op) fn (*mod.context.Co
 
 /// The GLU wrappers, from ggml.c lines 3004-3120. A `_swapped` form gates on
 /// the other half.
-const glus = .{
-    .{ "ggml_reglu", mod.impl.c.GGML_GLU_OP_REGLU, false },
-    .{ "ggml_reglu_swapped", mod.impl.c.GGML_GLU_OP_REGLU, true },
-    .{ "ggml_geglu", mod.impl.c.GGML_GLU_OP_GEGLU, false },
-    .{ "ggml_geglu_swapped", mod.impl.c.GGML_GLU_OP_GEGLU, true },
-    .{ "ggml_swiglu", mod.impl.c.GGML_GLU_OP_SWIGLU, false },
-    .{ "ggml_swiglu_swapped", mod.impl.c.GGML_GLU_OP_SWIGLU, true },
-    .{ "ggml_geglu_erf", mod.impl.c.GGML_GLU_OP_GEGLU_ERF, false },
-    .{ "ggml_geglu_erf_swapped", mod.impl.c.GGML_GLU_OP_GEGLU_ERF, true },
-    .{ "ggml_geglu_quick", mod.impl.c.GGML_GLU_OP_GEGLU_QUICK, false },
-    .{ "ggml_geglu_quick_swapped", mod.impl.c.GGML_GLU_OP_GEGLU_QUICK, true },
+pub const glus = .{
+    .{ "ggml_reglu", mod.impl.ggml_c.GGML_GLU_OP_REGLU, false },
+    .{ "ggml_reglu_swapped", mod.impl.ggml_c.GGML_GLU_OP_REGLU, true },
+    .{ "ggml_geglu", mod.impl.ggml_c.GGML_GLU_OP_GEGLU, false },
+    .{ "ggml_geglu_swapped", mod.impl.ggml_c.GGML_GLU_OP_GEGLU, true },
+    .{ "ggml_swiglu", mod.impl.ggml_c.GGML_GLU_OP_SWIGLU, false },
+    .{ "ggml_swiglu_swapped", mod.impl.ggml_c.GGML_GLU_OP_SWIGLU, true },
+    .{ "ggml_geglu_erf", mod.impl.ggml_c.GGML_GLU_OP_GEGLU_ERF, false },
+    .{ "ggml_geglu_erf_swapped", mod.impl.ggml_c.GGML_GLU_OP_GEGLU_ERF, true },
+    .{ "ggml_geglu_quick", mod.impl.ggml_c.GGML_GLU_OP_GEGLU_QUICK, false },
+    .{ "ggml_geglu_quick_swapped", mod.impl.ggml_c.GGML_GLU_OP_GEGLU_QUICK, true },
 };
 
-const glu_splits = .{
-    .{ "ggml_reglu_split", mod.impl.c.GGML_GLU_OP_REGLU },
-    .{ "ggml_geglu_split", mod.impl.c.GGML_GLU_OP_GEGLU },
-    .{ "ggml_swiglu_split", mod.impl.c.GGML_GLU_OP_SWIGLU },
-    .{ "ggml_geglu_erf_split", mod.impl.c.GGML_GLU_OP_GEGLU_ERF },
-    .{ "ggml_geglu_quick_split", mod.impl.c.GGML_GLU_OP_GEGLU_QUICK },
+pub const glu_splits = .{
+    .{ "ggml_reglu_split", mod.impl.ggml_c.GGML_GLU_OP_REGLU },
+    .{ "ggml_geglu_split", mod.impl.ggml_c.GGML_GLU_OP_GEGLU },
+    .{ "ggml_swiglu_split", mod.impl.ggml_c.GGML_GLU_OP_SWIGLU },
+    .{ "ggml_geglu_erf_split", mod.impl.ggml_c.GGML_GLU_OP_GEGLU_ERF },
+    .{ "ggml_geglu_quick_split", mod.impl.ggml_c.GGML_GLU_OP_GEGLU_QUICK },
 };
-
-comptime {
-    for (glus) |entry| {
-        @export(&gluWrapper(entry[1], entry[2]), .{ .name = entry[0] });
-    }
-    for (glu_splits) |entry| {
-        @export(&gluSplitWrapper(entry[1]), .{ .name = entry[0] });
-    }
-}
 
 // -----------------------------------------------------------------------------
 // Unit Tests for activations and GLU
@@ -815,20 +800,20 @@ comptime {
 // export table wired each name to the activation it claims: calling
 // `activationWrapper` directly would re-derive the mapping from the same table
 // under test.
-extern fn ggml_relu(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor;
-extern fn ggml_gelu(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor;
-extern fn ggml_silu(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor;
-extern fn ggml_relu_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor;
-extern fn ggml_hardswish(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor;
-extern fn ggml_swiglu(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor;
-extern fn ggml_swiglu_swapped(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor;
-extern fn ggml_swiglu_split(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor;
-extern fn ggml_geglu(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor;
+extern fn ggml_relu(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) *mod.impl.ggml_c.ggml_tensor;
+extern fn ggml_gelu(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) *mod.impl.ggml_c.ggml_tensor;
+extern fn ggml_silu(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) *mod.impl.ggml_c.ggml_tensor;
+extern fn ggml_relu_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) *mod.impl.ggml_c.ggml_tensor;
+extern fn ggml_hardswish(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) *mod.impl.ggml_c.ggml_tensor;
+extern fn ggml_swiglu(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) *mod.impl.ggml_c.ggml_tensor;
+extern fn ggml_swiglu_swapped(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) *mod.impl.ggml_c.ggml_tensor;
+extern fn ggml_swiglu_split(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor) *mod.impl.ggml_c.ggml_tensor;
+extern fn ggml_geglu(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) *mod.impl.ggml_c.ggml_tensor;
 
 test "exported activation names map to the right activation" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const a = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.c.GGML_TYPE_F32, 8);
+    const a = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8);
 
     // Called through the real symbols, so a mis-wired table entry shows up.
     try std.testing.expectEqualStrings("RELU", std.mem.span(mod.types.ggml_op_desc(ggml_relu(&ctx, a))));
@@ -846,15 +831,15 @@ test "exported activation names map to the right activation" {
 test "activations share one op code and differ in op_params" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 4);
+    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 4);
 
     const r = ggml_relu(&ctx, a);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, mod.impl.c.GGML_OP_UNARY), r.op);
-    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.c.GGML_UNARY_OP_RELU)), mod.impl.getOpParamsI32(r, 0));
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, mod.impl.ggml_c.GGML_OP_UNARY), r.op);
+    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.ggml_c.GGML_UNARY_OP_RELU)), mod.impl.getOpParamsI32(r, 0));
     try std.testing.expect(mod.types.ggml_are_same_shape(r, a));
 
     const g = ggml_gelu(&ctx, a);
-    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.c.GGML_UNARY_OP_GELU)), mod.impl.getOpParamsI32(g, 0));
+    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.ggml_c.GGML_UNARY_OP_GELU)), mod.impl.getOpParamsI32(g, 0));
 
     // ggml_op_desc must report the activation, not "UNARY".
     try std.testing.expectEqualStrings("RELU", std.mem.span(mod.types.ggml_op_desc(r)));
@@ -864,13 +849,13 @@ test "activations share one op code and differ in op_params" {
 test "every generated activation wrapper reports its own op" {
     var buf: [1 << 20]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const a = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.c.GGML_TYPE_F32, 8);
+    const a = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8);
 
     // Walk the table so a wrapper wired to the wrong activation is caught.
     inline for (activations) |entry| {
         const f = activationWrapper(entry[1], entry[2]);
         const r = f(&ctx, a);
-        try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, mod.impl.c.GGML_OP_UNARY), r.op);
+        try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, mod.impl.ggml_c.GGML_OP_UNARY), r.op);
         try std.testing.expectEqual(@as(i32, @intCast(entry[1])), mod.impl.getOpParamsI32(r, 0));
         try std.testing.expectEqual(entry[2], mod.types.ggml_is_view(r));
     }
@@ -879,10 +864,10 @@ test "every generated activation wrapper reports its own op" {
 test "xielu passes its alphas through softplus" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const a = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.c.GGML_TYPE_F32, 8);
+    const a = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8);
 
     const r = ggml_xielu(&ctx, a, 0.5, 1.5, 0.25, 1e-6);
-    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.c.GGML_UNARY_OP_XIELU)), mod.impl.getOpParamsI32(r, 0));
+    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.ggml_c.GGML_UNARY_OP_XIELU)), mod.impl.getOpParamsI32(r, 0));
     try std.testing.expectEqual(0.25 + mod.impl.softplus(0.5), mod.impl.getOpParamsF32(r, 1));
     try std.testing.expectEqual(mod.impl.softplus(1.5), mod.impl.getOpParamsF32(r, 2));
     try std.testing.expectEqual(@as(f32, 0.25), mod.impl.getOpParamsF32(r, 3));
@@ -896,21 +881,21 @@ test "glu halves dimension 0 unless the halves arrive separately" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
 
-    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 4);
+    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 4);
     const gated = ggml_swiglu(&ctx, a);
     try std.testing.expectEqual(@as(i64, 4), gated.ne[0]);
     try std.testing.expectEqual(@as(i64, 4), gated.ne[1]);
-    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.c.GGML_GLU_OP_SWIGLU)), mod.impl.getOpParamsI32(gated, 0));
+    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.ggml_c.GGML_GLU_OP_SWIGLU)), mod.impl.getOpParamsI32(gated, 0));
     try std.testing.expectEqual(@as(i32, 0), mod.impl.getOpParamsI32(gated, 1));
 
     const swapped = ggml_swiglu_swapped(&ctx, a);
     try std.testing.expectEqual(@as(i32, 1), mod.impl.getOpParamsI32(swapped, 1));
 
     // Split form keeps the shape, because nothing is being divided.
-    const b = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 4);
+    const b = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 4);
     const split = ggml_swiglu_split(&ctx, a, b);
     try std.testing.expectEqual(@as(i64, 8), split.ne[0]);
-    try std.testing.expectEqual(@as(?*mod.impl.c.ggml_tensor, b), split.src[1]);
+    try std.testing.expectEqual(@as(?*mod.impl.ggml_c.ggml_tensor, b), split.src[1]);
     try std.testing.expectEqualStrings("SWIGLU", std.mem.span(mod.types.ggml_op_desc(split)));
 }
 
@@ -923,12 +908,12 @@ test "glu halves dimension 0 unless the halves arrive separately" {
 // to unit length.
 
 /// Builds a normalisation wrapper taking only an epsilon.
-fn normWrapper(
-    comptime op: mod.impl.c.enum_ggml_op,
+pub fn normWrapper(
+    comptime op: mod.impl.ggml_c.enum_ggml_op,
     comptime inplace: bool,
-) fn (*mod.context.Context, *mod.impl.c.ggml_tensor, f32) callconv(.c) *mod.impl.c.ggml_tensor {
+) fn (*mod.context.Context, *mod.impl.ggml_c.ggml_tensor, f32) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return struct {
-        fn f(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, eps: f32) callconv(.c) *mod.impl.c.ggml_tensor {
+        fn f(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, eps: f32) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
             const result = dupOrView(ctx, a, inplace);
             mod.impl.setOpParamsValue(result, eps);
             result.op = op;
@@ -943,48 +928,42 @@ fn normWrapper(
 /// `l2_norm` writes its epsilon with `set_op_params_f32(result, 0, eps)` in the
 /// C rather than `set_op_params(&eps)`; both put a float at index 0, so the
 /// result is identical.
-const norms = .{
-    .{ "ggml_norm", mod.impl.c.GGML_OP_NORM, false },
-    .{ "ggml_norm_inplace", mod.impl.c.GGML_OP_NORM, true },
-    .{ "ggml_rms_norm", mod.impl.c.GGML_OP_RMS_NORM, false },
-    .{ "ggml_rms_norm_inplace", mod.impl.c.GGML_OP_RMS_NORM, true },
-    .{ "ggml_l2_norm", mod.impl.c.GGML_OP_L2_NORM, false },
-    .{ "ggml_l2_norm_inplace", mod.impl.c.GGML_OP_L2_NORM, true },
+pub const norms = .{
+    .{ "ggml_norm", mod.impl.ggml_c.GGML_OP_NORM, false },
+    .{ "ggml_norm_inplace", mod.impl.ggml_c.GGML_OP_NORM, true },
+    .{ "ggml_rms_norm", mod.impl.ggml_c.GGML_OP_RMS_NORM, false },
+    .{ "ggml_rms_norm_inplace", mod.impl.ggml_c.GGML_OP_RMS_NORM, true },
+    .{ "ggml_l2_norm", mod.impl.ggml_c.GGML_OP_L2_NORM, false },
+    .{ "ggml_l2_norm_inplace", mod.impl.ggml_c.GGML_OP_L2_NORM, true },
 };
 
-comptime {
-    for (norms) |entry| {
-        @export(&normWrapper(entry[1], entry[2]), .{ .name = entry[0] });
-    }
-}
-
 /// Ports `ggml_rms_norm_back` (ggml.c:3187 @b1b770d90).
-pub export fn ggml_rms_norm_back(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, eps: f32) *mod.impl.c.ggml_tensor {
+pub fn ggml_rms_norm_back(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, eps: f32) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const result = mod.context.ggml_dup_tensor(ctx, a);
     mod.impl.setOpParamsValue(result, eps);
-    result.op = mod.impl.c.GGML_OP_RMS_NORM_BACK;
+    result.op = mod.impl.ggml_c.GGML_OP_RMS_NORM_BACK;
     result.src[0] = a;
     result.src[1] = b;
     return result;
 }
 
 /// Ports `ggml_group_norm_impl` (ggml.c:3205 @b1b770d90).
-fn groupNormImpl(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, n_groups: c_int, eps: f32, inplace: bool) *mod.impl.c.ggml_tensor {
+fn groupNormImpl(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, n_groups: c_int, eps: f32, inplace: bool) *mod.impl.ggml_c.ggml_tensor {
     const result = dupOrView(ctx, a, inplace);
     mod.impl.setOpParamsI32(result, 0, n_groups);
     mod.impl.setOpParamsF32(result, 1, eps);
-    result.op = mod.impl.c.GGML_OP_GROUP_NORM;
+    result.op = mod.impl.ggml_c.GGML_OP_GROUP_NORM;
     result.src[0] = a;
     return result;
 }
 
 /// Ports `ggml_group_norm` (ggml.c:3222 @b1b770d90).
-pub export fn ggml_group_norm(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, n_groups: c_int, eps: f32) *mod.impl.c.ggml_tensor {
+pub fn ggml_group_norm(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, n_groups: c_int, eps: f32) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return groupNormImpl(ctx, a, n_groups, eps, false);
 }
 
 /// Ports `ggml_group_norm_inplace` (ggml.c:3230 @b1b770d90).
-pub export fn ggml_group_norm_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, n_groups: c_int, eps: f32) *mod.impl.c.ggml_tensor {
+pub fn ggml_group_norm_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, n_groups: c_int, eps: f32) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return groupNormImpl(ctx, a, n_groups, eps, true);
 }
 
@@ -996,10 +975,10 @@ pub export fn ggml_group_norm_inplace(ctx: *mod.context.Context, a: *mod.impl.c.
 /// Records the minimum accumulator precision in the op's own slot: 0 for a
 /// matmul, 3 for flash attention, where the slots before it hold the scale,
 /// bias and softcap. Any other op is refused.
-pub export fn ggml_prec_set_acc(a: *mod.impl.c.ggml_tensor, prec: mod.impl.c.enum_ggml_prec) bool {
+pub fn ggml_prec_set_acc(a: *mod.impl.ggml_c.ggml_tensor, prec: mod.impl.ggml_c.enum_ggml_prec) callconv(.c) bool {
     switch (a.op) {
-        mod.impl.c.GGML_OP_MUL_MAT, mod.impl.c.GGML_OP_MUL_MAT_ID => mod.impl.setOpParamsI32(a, 0, @intCast(prec)),
-        mod.impl.c.GGML_OP_FLASH_ATTN_EXT => mod.impl.setOpParamsI32(a, 3, @intCast(prec)),
+        mod.impl.ggml_c.GGML_OP_MUL_MAT, mod.impl.ggml_c.GGML_OP_MUL_MAT_ID => mod.impl.setOpParamsI32(a, 0, @intCast(prec)),
+        mod.impl.ggml_c.GGML_OP_FLASH_ATTN_EXT => mod.impl.setOpParamsI32(a, 3, @intCast(prec)),
         else => return false,
     }
     return true;
@@ -1009,11 +988,11 @@ pub export fn ggml_prec_set_acc(a: *mod.impl.c.ggml_tensor, prec: mod.impl.c.enu
 ///
 /// Only a matmul's `src[1]` has a slot (op_params 3), so any other op or
 /// source index is refused.
-pub export fn ggml_prec_set_src(a: *mod.impl.c.ggml_tensor, prec: mod.impl.c.enum_ggml_prec, idx: c_int) bool {
-    mod.impl.assert(idx >= 0 and idx < mod.impl.c.GGML_MAX_SRC, "idx >= 0 && idx < GGML_MAX_SRC");
+pub fn ggml_prec_set_src(a: *mod.impl.ggml_c.ggml_tensor, prec: mod.impl.ggml_c.enum_ggml_prec, idx: c_int) callconv(.c) bool {
+    mod.impl.assert(idx >= 0 and idx < mod.impl.ggml_c.GGML_MAX_SRC, "idx >= 0 && idx < GGML_MAX_SRC");
 
     switch (a.op) {
-        mod.impl.c.GGML_OP_MUL_MAT, mod.impl.c.GGML_OP_MUL_MAT_ID => {
+        mod.impl.ggml_c.GGML_OP_MUL_MAT, mod.impl.ggml_c.GGML_OP_MUL_MAT_ID => {
             if (idx != 1) return false;
             mod.impl.setOpParamsI32(a, @intCast(2 + idx), @intCast(prec));
         },
@@ -1023,24 +1002,24 @@ pub export fn ggml_prec_set_src(a: *mod.impl.c.ggml_tensor, prec: mod.impl.c.enu
 }
 
 /// Ports `ggml_prec_get_acc` (ggml.c:3320 @b1b770d90).
-pub export fn ggml_prec_get_acc(a: *const mod.impl.c.ggml_tensor) mod.impl.c.enum_ggml_prec {
+pub fn ggml_prec_get_acc(a: *const mod.impl.ggml_c.ggml_tensor) callconv(.c) mod.impl.ggml_c.enum_ggml_prec {
     return switch (a.op) {
-        mod.impl.c.GGML_OP_MUL_MAT, mod.impl.c.GGML_OP_MUL_MAT_ID => @intCast(mod.impl.getOpParamsI32(a, 0)),
-        mod.impl.c.GGML_OP_FLASH_ATTN_EXT => @intCast(mod.impl.getOpParamsI32(a, 3)),
-        else => mod.impl.c.GGML_PREC_UNDEFINED,
+        mod.impl.ggml_c.GGML_OP_MUL_MAT, mod.impl.ggml_c.GGML_OP_MUL_MAT_ID => @intCast(mod.impl.getOpParamsI32(a, 0)),
+        mod.impl.ggml_c.GGML_OP_FLASH_ATTN_EXT => @intCast(mod.impl.getOpParamsI32(a, 3)),
+        else => mod.impl.ggml_c.GGML_PREC_UNDEFINED,
     };
 }
 
 /// Ports `ggml_prec_get_src` (ggml.c:3333 @b1b770d90).
-pub export fn ggml_prec_get_src(a: *const mod.impl.c.ggml_tensor, idx: c_int) mod.impl.c.enum_ggml_prec {
-    mod.impl.assert(idx >= 0 and idx < mod.impl.c.GGML_MAX_SRC, "idx >= 0 && idx < GGML_MAX_SRC");
+pub fn ggml_prec_get_src(a: *const mod.impl.ggml_c.ggml_tensor, idx: c_int) callconv(.c) mod.impl.ggml_c.enum_ggml_prec {
+    mod.impl.assert(idx >= 0 and idx < mod.impl.ggml_c.GGML_MAX_SRC, "idx >= 0 && idx < GGML_MAX_SRC");
 
     return switch (a.op) {
-        mod.impl.c.GGML_OP_MUL_MAT, mod.impl.c.GGML_OP_MUL_MAT_ID => if (idx != 1)
-            mod.impl.c.GGML_PREC_UNDEFINED
+        mod.impl.ggml_c.GGML_OP_MUL_MAT, mod.impl.ggml_c.GGML_OP_MUL_MAT_ID => if (idx != 1)
+            mod.impl.ggml_c.GGML_PREC_UNDEFINED
         else
             @intCast(mod.impl.getOpParamsI32(a, @intCast(2 + idx))),
-        else => mod.impl.c.GGML_PREC_UNDEFINED,
+        else => mod.impl.ggml_c.GGML_PREC_UNDEFINED,
     };
 }
 
@@ -1051,8 +1030,8 @@ pub export fn ggml_prec_get_src(a: *const mod.impl.c.ggml_tensor, idx: c_int) mo
 ///
 /// The shared dimension must match exactly; the batch dimensions of `t0` need
 /// only divide `t1`'s, so a single weight matrix broadcasts over a batch.
-fn canMulMat(t0: *const mod.impl.c.ggml_tensor, t1: *const mod.impl.c.ggml_tensor) bool {
-    comptime std.debug.assert(mod.impl.c.GGML_MAX_DIMS == 4);
+fn canMulMat(t0: *const mod.impl.ggml_c.ggml_tensor, t1: *const mod.impl.ggml_c.ggml_tensor) bool {
+    comptime std.debug.assert(mod.impl.ggml_c.GGML_MAX_DIMS == 4);
     return t0.ne[0] == t1.ne[0] and
         @rem(t1.ne[2], t0.ne[2]) == 0 and
         @rem(t1.ne[3], t0.ne[3]) == 0;
@@ -1063,21 +1042,21 @@ fn canMulMat(t0: *const mod.impl.c.ggml_tensor, t1: *const mod.impl.c.ggml_tenso
 /// Always f32 out, whatever the input types, because that is what the backends
 /// accumulate in. Note `a` is the weight and is indexed by its second
 /// dimension, so the result's first dimension is `a->ne[1]`.
-pub export fn ggml_mul_mat(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_mul_mat(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(canMulMat(a, b), "ggml_can_mul_mat(a, b)");
     mod.impl.assert(!mod.types.ggml_is_transposed(a), "!ggml_is_transposed(a)");
 
     const ne = [_]i64{ a.ne[1], b.ne[1], b.ne[2], b.ne[3] };
-    const result = mod.context.ggml_new_tensor(ctx, mod.impl.c.GGML_TYPE_F32, 4, &ne);
-    result.op = mod.impl.c.GGML_OP_MUL_MAT;
+    const result = mod.context.ggml_new_tensor(ctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, &ne);
+    result.op = mod.impl.ggml_c.GGML_OP_MUL_MAT;
     result.src[0] = a;
     result.src[1] = b;
     return result;
 }
 
 /// Ports `ggml_mul_mat_set_hint` (ggml.c:3377 @b1b770d90).
-pub export fn ggml_mul_mat_set_hint(a: *mod.impl.c.ggml_tensor, hint: mod.impl.c.enum_ggml_op_hint) void {
-    mod.impl.assert(a.op == mod.impl.c.GGML_OP_MUL_MAT, "a->op == GGML_OP_MUL_MAT");
+pub fn ggml_mul_mat_set_hint(a: *mod.impl.ggml_c.ggml_tensor, hint: mod.impl.ggml_c.enum_ggml_op_hint) callconv(.c) void {
+    mod.impl.assert(a.op == mod.impl.ggml_c.GGML_OP_MUL_MAT, "a->op == GGML_OP_MUL_MAT");
     mod.impl.setOpParamsI32(a, 1, @intCast(hint));
 }
 
@@ -1095,9 +1074,9 @@ pub export fn ggml_mul_mat_set_hint(a: *mod.impl.c.ggml_tensor, hint: mod.impl.c
 /// [TAG_MUL_MAT_ID_DUPLICATE_ID] (ggml.h): the result is undefined if
 /// one expert appears more than once in a token's `ids` -- not every backend
 /// supports duplicates.
-pub export fn ggml_mul_mat_id(ctx: *mod.context.Context, as: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, ids: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_mul_mat_id(ctx: *mod.context.Context, as: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, ids: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(!mod.types.ggml_is_transposed(as), "!ggml_is_transposed(as)");
-    mod.impl.assert(ids.type == mod.impl.c.GGML_TYPE_I32, "ids->type == GGML_TYPE_I32");
+    mod.impl.assert(ids.type == mod.impl.ggml_c.GGML_TYPE_I32, "ids->type == GGML_TYPE_I32");
 
     mod.impl.assert(as.ne[3] == 1, "as->ne[3] == 1"); // one matrix per expert
     mod.impl.assert(b.ne[3] == 1, "b->ne[3] == 1");
@@ -1107,8 +1086,8 @@ pub export fn ggml_mul_mat_id(ctx: *mod.context.Context, as: *mod.impl.c.ggml_te
     mod.impl.assert(@rem(ids.ne[0], b.ne[1]) == 0, "ids->ne[0] % b->ne[1] == 0");
 
     const ne = [_]i64{ as.ne[1], ids.ne[0], b.ne[2], 1 };
-    const result = mod.context.ggml_new_tensor(ctx, mod.impl.c.GGML_TYPE_F32, 4, &ne);
-    result.op = mod.impl.c.GGML_OP_MUL_MAT_ID;
+    const result = mod.context.ggml_new_tensor(ctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, &ne);
+    result.op = mod.impl.ggml_c.GGML_OP_MUL_MAT_ID;
     result.src[0] = as;
     result.src[1] = b;
     result.src[2] = ids;
@@ -1116,22 +1095,22 @@ pub export fn ggml_mul_mat_id(ctx: *mod.context.Context, as: *mod.impl.c.ggml_te
 }
 
 /// Ports `ggml_can_out_prod` (ggml.c:3431 @b1b770d90).
-fn canOutProd(t0: *const mod.impl.c.ggml_tensor, t1: *const mod.impl.c.ggml_tensor) bool {
-    comptime std.debug.assert(mod.impl.c.GGML_MAX_DIMS == 4);
+fn canOutProd(t0: *const mod.impl.ggml_c.ggml_tensor, t1: *const mod.impl.ggml_c.ggml_tensor) bool {
+    comptime std.debug.assert(mod.impl.ggml_c.GGML_MAX_DIMS == 4);
     return t0.ne[1] == t1.ne[1] and
         @rem(t1.ne[2], t0.ne[2]) == 0 and
         @rem(t1.ne[3], t0.ne[3]) == 0;
 }
 
 /// Ports `ggml_out_prod` (ggml.c:3439 @b1b770d90).
-pub export fn ggml_out_prod(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_out_prod(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(canOutProd(a, b), "ggml_can_out_prod(a, b)");
     mod.impl.assert(!mod.types.ggml_is_transposed(a), "!ggml_is_transposed(a)");
 
     // `a` broadcasts over `b`'s batch dimensions, so `b`'s are the result's.
     const ne = [_]i64{ a.ne[0], b.ne[0], b.ne[2], b.ne[3] };
-    const result = mod.context.ggml_new_tensor(ctx, mod.impl.c.GGML_TYPE_F32, 4, &ne);
-    result.op = mod.impl.c.GGML_OP_OUT_PROD;
+    const result = mod.context.ggml_new_tensor(ctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, &ne);
+    result.op = mod.impl.ggml_c.GGML_OP_OUT_PROD;
     result.src[0] = a;
     result.src[1] = b;
     return result;
@@ -1144,57 +1123,57 @@ pub export fn ggml_out_prod(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tenso
 ///
 /// Computes `s * x + b`, so the bias is part of the same node rather than a
 /// separate add.
-pub fn scaleImpl(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, s: f32, b: f32, inplace: bool) *mod.impl.c.ggml_tensor {
+pub fn scaleImpl(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, s: f32, b: f32, inplace: bool) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_is_contiguous_rows(a), "ggml_is_contiguous_rows(a)");
 
     const result = dupOrView(ctx, a, inplace);
     mod.impl.setOpParamsValue(result, [_]f32{ s, b });
 
-    result.op = mod.impl.c.GGML_OP_SCALE;
+    result.op = mod.impl.ggml_c.GGML_OP_SCALE;
     result.src[0] = a;
     return result;
 }
 
 /// Ports `ggml_scale` (ggml.c:3478 @b1b770d90).
-pub export fn ggml_scale(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, s: f32) *mod.impl.c.ggml_tensor {
+pub fn ggml_scale(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, s: f32) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return scaleImpl(ctx, a, s, 0.0, false);
 }
 
 /// Ports `ggml_scale_inplace` (ggml.c:3485 @b1b770d90).
-pub export fn ggml_scale_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, s: f32) *mod.impl.c.ggml_tensor {
+pub fn ggml_scale_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, s: f32) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return scaleImpl(ctx, a, s, 0.0, true);
 }
 
 /// Ports `ggml_scale_bias` (ggml.c:3492 @b1b770d90).
-pub export fn ggml_scale_bias(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, s: f32, b: f32) *mod.impl.c.ggml_tensor {
+pub fn ggml_scale_bias(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, s: f32, b: f32) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return scaleImpl(ctx, a, s, b, false);
 }
 
 /// Ports `ggml_scale_bias_inplace` (ggml.c:3500 @b1b770d90).
-pub export fn ggml_scale_bias_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, s: f32, b: f32) *mod.impl.c.ggml_tensor {
+pub fn ggml_scale_bias_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, s: f32, b: f32) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return scaleImpl(ctx, a, s, b, true);
 }
 
 // -----------------------------------------------------------------------------
 // Unit Tests for norms and matmul
 
-extern fn ggml_rms_norm(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, eps: f32) *mod.impl.c.ggml_tensor;
-extern fn ggml_norm(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, eps: f32) *mod.impl.c.ggml_tensor;
-extern fn ggml_l2_norm(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, eps: f32) *mod.impl.c.ggml_tensor;
-extern fn ggml_rms_norm_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, eps: f32) *mod.impl.c.ggml_tensor;
+extern fn ggml_rms_norm(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, eps: f32) *mod.impl.ggml_c.ggml_tensor;
+extern fn ggml_norm(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, eps: f32) *mod.impl.ggml_c.ggml_tensor;
+extern fn ggml_l2_norm(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, eps: f32) *mod.impl.ggml_c.ggml_tensor;
+extern fn ggml_rms_norm_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, eps: f32) *mod.impl.ggml_c.ggml_tensor;
 
 test "normalisations record their epsilon and keep shape" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 4);
+    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 4);
 
     const r = ggml_rms_norm(&ctx, a, 1e-5);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, mod.impl.c.GGML_OP_RMS_NORM), r.op);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, mod.impl.ggml_c.GGML_OP_RMS_NORM), r.op);
     try std.testing.expectEqual(@as(f32, 1e-5), mod.impl.getOpParamsF32(r, 0));
     try std.testing.expect(mod.types.ggml_are_same_shape(r, a));
 
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, mod.impl.c.GGML_OP_NORM), ggml_norm(&ctx, a, 1e-5).op);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, mod.impl.c.GGML_OP_L2_NORM), ggml_l2_norm(&ctx, a, 1e-5).op);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, mod.impl.ggml_c.GGML_OP_NORM), ggml_norm(&ctx, a, 1e-5).op);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, mod.impl.ggml_c.GGML_OP_L2_NORM), ggml_l2_norm(&ctx, a, 1e-5).op);
     try std.testing.expect(mod.types.ggml_is_view(ggml_rms_norm_inplace(&ctx, a, 1e-5)));
 
     const g = ggml_group_norm(&ctx, a, 4, 1e-6);
@@ -1207,47 +1186,47 @@ test "mul_mat contracts the shared dimension" {
     var ctx = testContext(&buf);
 
     // Weight [k=8, n=16] times activations [k=8, m=4] gives [n=16, m=4].
-    const w = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 16);
-    const x = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 4);
+    const w = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 16);
+    const x = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 4);
 
     const r = ggml_mul_mat(&ctx, w, x);
     try std.testing.expectEqual(@as(i64, 16), r.ne[0]);
     try std.testing.expectEqual(@as(i64, 4), r.ne[1]);
     // f32 out regardless of input type, which is what the backends accumulate in.
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_type, mod.impl.c.GGML_TYPE_F32), r.type);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_type, mod.impl.ggml_c.GGML_TYPE_F32), r.type);
 
-    const q = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_Q4_K, 256, 16);
-    const xq = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 256, 4);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_type, mod.impl.c.GGML_TYPE_F32), ggml_mul_mat(&ctx, q, xq).type);
+    const q = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_Q4_K, 256, 16);
+    const xq = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 256, 4);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_type, mod.impl.ggml_c.GGML_TYPE_F32), ggml_mul_mat(&ctx, q, xq).type);
 
     // The shared dimension must match exactly; batch dimensions may broadcast.
     try std.testing.expect(canMulMat(w, x));
-    const mismatched = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 7, 4);
+    const mismatched = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 7, 4);
     try std.testing.expect(!canMulMat(w, mismatched));
 
-    const batched = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 4, 6);
+    const batched = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 4, 6);
     try std.testing.expect(canMulMat(w, batched)); // w has ne[2]==1, divides 6
 }
 
 test "mul_mat precision and hint land in distinct op_params slots" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const w = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 16);
-    const x = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 4);
+    const w = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 16);
+    const x = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 4);
 
     const r = ggml_mul_mat(&ctx, w, x);
-    _ = ggml_prec_set_acc(r, mod.impl.c.GGML_PREC_F32);
-    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.c.GGML_PREC_F32)), mod.impl.getOpParamsI32(r, 0));
+    _ = ggml_prec_set_acc(r, mod.impl.ggml_c.GGML_PREC_F32);
+    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.ggml_c.GGML_PREC_F32)), mod.impl.getOpParamsI32(r, 0));
     // Setting the hint must not disturb the precision.
-    ggml_mul_mat_set_hint(r, mod.impl.c.GGML_HINT_SRC0_IS_HADAMARD);
-    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.c.GGML_PREC_F32)), mod.impl.getOpParamsI32(r, 0));
-    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.c.GGML_HINT_SRC0_IS_HADAMARD)), mod.impl.getOpParamsI32(r, 1));
+    ggml_mul_mat_set_hint(r, mod.impl.ggml_c.GGML_HINT_SRC0_IS_HADAMARD);
+    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.ggml_c.GGML_PREC_F32)), mod.impl.getOpParamsI32(r, 0));
+    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.ggml_c.GGML_HINT_SRC0_IS_HADAMARD)), mod.impl.getOpParamsI32(r, 1));
 }
 
 test "scale carries both factor and bias" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const a = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.c.GGML_TYPE_F32, 8);
+    const a = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8);
 
     const plain = ggml_scale(&ctx, a, 2.5);
     try std.testing.expectEqual(@as(f32, 2.5), mod.impl.getOpParamsF32(plain, 0));
@@ -1262,13 +1241,13 @@ test "scale carries both factor and bias" {
 test "out_prod widens rather than contracts" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 4, 8);
-    const b = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 6, 8);
+    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, 8);
+    const b = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 6, 8);
 
     const r = ggml_out_prod(&ctx, a, b);
     try std.testing.expectEqual(@as(i64, 4), r.ne[0]);
     try std.testing.expectEqual(@as(i64, 6), r.ne[1]);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, mod.impl.c.GGML_OP_OUT_PROD), r.op);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, mod.impl.ggml_c.GGML_OP_OUT_PROD), r.op);
 }
 
 // -----------------------------------------------------------------------------
@@ -1281,14 +1260,14 @@ test "out_prod widens rather than contracts" {
 /// rather than silently truncating.
 fn setImpl(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
     nb1: usize,
     nb2: usize,
     nb3: usize,
     offset: usize,
     inplace: bool,
-) *mod.impl.c.ggml_tensor {
+) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_nelements(a) >= mod.types.ggml_nelements(b), "ggml_nelements(a) >= ggml_nelements(b)");
 
     const result = dupOrView(ctx, a, inplace);
@@ -1300,41 +1279,41 @@ fn setImpl(
     };
     mod.impl.setOpParamsValue(result, params);
 
-    result.op = mod.impl.c.GGML_OP_SET;
+    result.op = mod.impl.ggml_c.GGML_OP_SET;
     result.src[0] = a;
     result.src[1] = b;
     return result;
 }
 
 /// Ports `ggml_set` (ggml.c:3535 @b1b770d90).
-pub export fn ggml_set(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, nb1: usize, nb2: usize, nb3: usize, offset: usize) *mod.impl.c.ggml_tensor {
+pub fn ggml_set(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, nb1: usize, nb2: usize, nb3: usize, offset: usize) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return setImpl(ctx, a, b, nb1, nb2, nb3, offset, false);
 }
 
 /// Ports `ggml_set_inplace` (ggml.c:3546 @b1b770d90).
-pub export fn ggml_set_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, nb1: usize, nb2: usize, nb3: usize, offset: usize) *mod.impl.c.ggml_tensor {
+pub fn ggml_set_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, nb1: usize, nb2: usize, nb3: usize, offset: usize) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return setImpl(ctx, a, b, nb1, nb2, nb3, offset, true);
 }
 
 /// Ports `ggml_set_1d` (ggml.c:3557 @b1b770d90).
 ///
 /// Takes `a`'s own strides, so the window is a contiguous run.
-pub export fn ggml_set_1d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, offset: usize) *mod.impl.c.ggml_tensor {
+pub fn ggml_set_1d(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, offset: usize) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return setImpl(ctx, a, b, a.nb[1], a.nb[2], a.nb[3], offset, false);
 }
 
 /// Ports `ggml_set_1d_inplace` (ggml.c:3565 @b1b770d90).
-pub export fn ggml_set_1d_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, offset: usize) *mod.impl.c.ggml_tensor {
+pub fn ggml_set_1d_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, offset: usize) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return setImpl(ctx, a, b, a.nb[1], a.nb[2], a.nb[3], offset, true);
 }
 
 /// Ports `ggml_set_2d` (ggml.c:3573 @b1b770d90).
-pub export fn ggml_set_2d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, nb1: usize, offset: usize) *mod.impl.c.ggml_tensor {
+pub fn ggml_set_2d(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, nb1: usize, offset: usize) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return setImpl(ctx, a, b, nb1, a.nb[2], a.nb[3], offset, false);
 }
 
 /// Ports `ggml_set_2d_inplace` (ggml.c:3582 @b1b770d90).
-pub export fn ggml_set_2d_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, nb1: usize, offset: usize) *mod.impl.c.ggml_tensor {
+pub fn ggml_set_2d_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, nb1: usize, offset: usize) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return setImpl(ctx, a, b, nb1, a.nb[2], a.nb[3], offset, true);
 }
 
@@ -1349,7 +1328,7 @@ pub export fn ggml_set_2d_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml
 ///
 /// The result is a view of the destination, not of the source: the node writes
 /// into `b`'s storage.
-fn cpyImpl(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+fn cpyImpl(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_nelements(a) == mod.types.ggml_nelements(b), "ggml_nelements(a) == ggml_nelements(b)");
 
     const result = mod.context.ggml_view_tensor(ctx, b);
@@ -1359,14 +1338,14 @@ fn cpyImpl(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c
         _ = mod.context.ggml_format_name(result, "%s (copy)", &a.name);
     }
 
-    result.op = mod.impl.c.GGML_OP_CPY;
+    result.op = mod.impl.ggml_c.GGML_OP_CPY;
     result.src[0] = a;
     result.src[1] = b;
     return result;
 }
 
 /// Ports `ggml_cpy` (ggml.c:3614 @b1b770d90).
-pub export fn ggml_cpy(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_cpy(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return cpyImpl(ctx, a, b);
 }
 
@@ -1375,28 +1354,28 @@ pub export fn ggml_cpy(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b:
 /// Note `src[1]` points at the result itself. The C flags this as looking
 /// redundant but required: some backends read `src[1]` as the destination, and
 /// for a cast the destination is the new tensor.
-pub export fn ggml_cast(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, t: mod.impl.c.enum_ggml_type) *mod.impl.c.ggml_tensor {
-    const result = mod.context.ggml_new_tensor(ctx, t, mod.impl.c.GGML_MAX_DIMS, &a.ne);
+pub fn ggml_cast(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, t: mod.impl.ggml_c.enum_ggml_type) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    const result = mod.context.ggml_new_tensor(ctx, t, mod.impl.ggml_c.GGML_MAX_DIMS, &a.ne);
     _ = mod.context.ggml_format_name(result, "%s (copy)", &a.name);
 
-    result.op = mod.impl.c.GGML_OP_CPY;
+    result.op = mod.impl.ggml_c.GGML_OP_CPY;
     result.src[0] = a;
     result.src[1] = result;
     return result;
 }
 
 /// Ports `ggml_cont_impl` (ggml.c:3638 @b1b770d90).
-fn contImpl(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+fn contImpl(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) *mod.impl.ggml_c.ggml_tensor {
     const result = mod.context.ggml_dup_tensor(ctx, a);
     _ = mod.context.ggml_format_name(result, "%s (cont)", &a.name);
 
-    result.op = mod.impl.c.GGML_OP_CONT;
+    result.op = mod.impl.ggml_c.GGML_OP_CONT;
     result.src[0] = a;
     return result;
 }
 
 /// Ports `ggml_cont` (ggml.c:3650 @b1b770d90).
-pub export fn ggml_cont(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_cont(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return contImpl(ctx, a);
 }
 
@@ -1404,29 +1383,29 @@ pub export fn ggml_cont(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *
 ///
 /// Makes contiguous and reshapes in one node. The element count must be
 /// preserved; only the layout changes.
-pub export fn ggml_cont_4d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, ne0: i64, ne1: i64, ne2: i64, ne3: i64) *mod.impl.c.ggml_tensor {
+pub fn ggml_cont_4d(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, ne0: i64, ne1: i64, ne2: i64, ne3: i64) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_nelements(a) == ne0 * ne1 * ne2 * ne3, "ggml_nelements(a) == (ne0*ne1*ne2*ne3)");
 
     const result = mod.context.ggml_new_tensor_4d(ctx, a.type, ne0, ne1, ne2, ne3);
     _ = mod.context.ggml_format_name(result, "%s (cont)", &a.name);
 
-    result.op = mod.impl.c.GGML_OP_CONT;
+    result.op = mod.impl.ggml_c.GGML_OP_CONT;
     result.src[0] = a;
     return result;
 }
 
 /// Ports `ggml_cont_1d` (ggml.c:3657 @b1b770d90).
-pub export fn ggml_cont_1d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, ne0: i64) *mod.impl.c.ggml_tensor {
+pub fn ggml_cont_1d(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, ne0: i64) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return ggml_cont_4d(ctx, a, ne0, 1, 1, 1);
 }
 
 /// Ports `ggml_cont_2d` (ggml.c:3664 @b1b770d90).
-pub export fn ggml_cont_2d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, ne0: i64, ne1: i64) *mod.impl.c.ggml_tensor {
+pub fn ggml_cont_2d(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, ne0: i64, ne1: i64) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return ggml_cont_4d(ctx, a, ne0, ne1, 1, 1);
 }
 
 /// Ports `ggml_cont_3d` (ggml.c:3672 @b1b770d90).
-pub export fn ggml_cont_3d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, ne0: i64, ne1: i64, ne2: i64) *mod.impl.c.ggml_tensor {
+pub fn ggml_cont_3d(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, ne0: i64, ne1: i64, ne2: i64) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return ggml_cont_4d(ctx, a, ne0, ne1, ne2, 1);
 }
 
@@ -1440,22 +1419,22 @@ pub export fn ggml_cont_3d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor
 ///
 /// `b` supplies only the shape, and may itself be non-contiguous; it is not a
 /// source of the node.
-pub export fn ggml_reshape(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_reshape(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_is_contiguous(a), "ggml_is_contiguous(a)");
     mod.impl.assert(mod.types.ggml_nelements(a) == mod.types.ggml_nelements(b), "ggml_nelements(a) == ggml_nelements(b)");
 
-    const result = mod.context.newTensorImpl(ctx, a.type, mod.impl.c.GGML_MAX_DIMS, &b.ne, null, a, 0);
+    const result = mod.context.newTensorImpl(ctx, a.type, mod.impl.ggml_c.GGML_MAX_DIMS, &b.ne, null, a, 0);
     _ = mod.context.ggml_format_name(result, "%s (reshaped)", &a.name);
 
-    result.op = mod.impl.c.GGML_OP_RESHAPE;
+    result.op = mod.impl.ggml_c.GGML_OP_RESHAPE;
     result.src[0] = a;
     return result;
 }
 
 /// Builds a reshape wrapper for a fixed number of dimensions.
-fn reshapeWrapper(comptime n: usize) fn (*mod.context.Context, *mod.impl.c.ggml_tensor, [*]const i64) *mod.impl.c.ggml_tensor {
+fn reshapeWrapper(comptime n: usize) fn (*mod.context.Context, *mod.impl.ggml_c.ggml_tensor, [*]const i64) *mod.impl.ggml_c.ggml_tensor {
     return struct {
-        fn f(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, ne: [*]const i64) *mod.impl.c.ggml_tensor {
+        fn f(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, ne: [*]const i64) *mod.impl.ggml_c.ggml_tensor {
             mod.impl.assert(mod.types.ggml_is_contiguous(a), "ggml_is_contiguous(a)");
             var count: i64 = 1;
             for (0..n) |i| count *= ne[i];
@@ -1464,7 +1443,7 @@ fn reshapeWrapper(comptime n: usize) fn (*mod.context.Context, *mod.impl.c.ggml_
             const result = mod.context.newTensorImpl(ctx, a.type, n, ne, null, a, 0);
             _ = mod.context.ggml_format_name(result, "%s (reshaped)", &a.name);
 
-            result.op = mod.impl.c.GGML_OP_RESHAPE;
+            result.op = mod.impl.ggml_c.GGML_OP_RESHAPE;
             result.src[0] = a;
             return result;
         }
@@ -1472,25 +1451,25 @@ fn reshapeWrapper(comptime n: usize) fn (*mod.context.Context, *mod.impl.c.ggml_
 }
 
 /// Ports `ggml_reshape_1d` (ggml.c:3718 @b1b770d90).
-pub export fn ggml_reshape_1d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, ne0: i64) *mod.impl.c.ggml_tensor {
+pub fn ggml_reshape_1d(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, ne0: i64) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const ne = [_]i64{ne0};
     return reshapeWrapper(1)(ctx, a, &ne);
 }
 
 /// Ports `ggml_reshape_2d` (ggml.c:3735 @b1b770d90).
-pub export fn ggml_reshape_2d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, ne0: i64, ne1: i64) *mod.impl.c.ggml_tensor {
+pub fn ggml_reshape_2d(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, ne0: i64, ne1: i64) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const ne = [_]i64{ ne0, ne1 };
     return reshapeWrapper(2)(ctx, a, &ne);
 }
 
 /// Ports `ggml_reshape_3d` (ggml.c:3753 @b1b770d90).
-pub export fn ggml_reshape_3d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, ne0: i64, ne1: i64, ne2: i64) *mod.impl.c.ggml_tensor {
+pub fn ggml_reshape_3d(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, ne0: i64, ne1: i64, ne2: i64) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const ne = [_]i64{ ne0, ne1, ne2 };
     return reshapeWrapper(3)(ctx, a, &ne);
 }
 
 /// Ports `ggml_reshape_4d` (ggml.c:3772 @b1b770d90).
-pub export fn ggml_reshape_4d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, ne0: i64, ne1: i64, ne2: i64, ne3: i64) *mod.impl.c.ggml_tensor {
+pub fn ggml_reshape_4d(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, ne0: i64, ne1: i64, ne2: i64, ne3: i64) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const ne = [_]i64{ ne0, ne1, ne2, ne3 };
     return reshapeWrapper(4)(ctx, a, &ne);
 }
@@ -1505,7 +1484,7 @@ pub export fn ggml_reshape_4d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_ten
 ///
 /// The byte offset goes into `op_params` as a `size_t`, not an i32, so views
 /// are not subject to the 2^30 limit `ggml_set` has.
-fn viewImpl(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, n_dims: c_int, ne: [*]const i64, nb: ?[*]const usize, offset: usize) *mod.impl.c.ggml_tensor {
+fn viewImpl(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, n_dims: c_int, ne: [*]const i64, nb: ?[*]const usize, offset: usize) *mod.impl.ggml_c.ggml_tensor {
     // a strided view counts its strides from elements that are contiguous along dim 0 of its source
     mod.impl.assert(nb == null or a.nb[0] == mod.types.ggml_type_size(a.type), "nb == NULL || a->nb[0] == ggml_type_size(a->type)");
 
@@ -1514,13 +1493,13 @@ fn viewImpl(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, n_dims: c_int
 
     mod.impl.setOpParamsValue(result, offset);
 
-    result.op = mod.impl.c.GGML_OP_VIEW;
+    result.op = mod.impl.ggml_c.GGML_OP_VIEW;
     result.src[0] = a;
     return result;
 }
 
 /// Ports `ggml_view_1d` (ggml.c:3815 @b1b770d90).
-pub export fn ggml_view_1d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, ne0: i64, offset: usize) *mod.impl.c.ggml_tensor {
+pub fn ggml_view_1d(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, ne0: i64, offset: usize) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const ne = [_]i64{ne0};
     return viewImpl(ctx, a, 1, &ne, null, offset);
 }
@@ -1529,7 +1508,7 @@ pub export fn ggml_view_1d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor
 ///
 /// Only `nb1` is given; the higher strides follow from it, which is what makes
 /// this a plain 2-D window rather than an arbitrary layout.
-pub export fn ggml_view_2d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, ne0: i64, ne1: i64, nb1: usize, offset: usize) *mod.impl.c.ggml_tensor {
+pub fn ggml_view_2d(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, ne0: i64, ne1: i64, nb1: usize, offset: usize) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const ne = [_]i64{ ne0, ne1 };
     const n1: usize = @bitCast(ne1);
     const nb = [_]usize{ mod.types.ggml_type_size(a.type), nb1, nb1 *% n1, nb1 *% n1 };
@@ -1537,14 +1516,14 @@ pub export fn ggml_view_2d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor
 }
 
 /// Ports `ggml_view_3d` (ggml.c:3844 @b1b770d90).
-pub export fn ggml_view_3d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, ne0: i64, ne1: i64, ne2: i64, nb1: usize, nb2: usize, offset: usize) *mod.impl.c.ggml_tensor {
+pub fn ggml_view_3d(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, ne0: i64, ne1: i64, ne2: i64, nb1: usize, nb2: usize, offset: usize) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const ne = [_]i64{ ne0, ne1, ne2 };
     const nb = [_]usize{ mod.types.ggml_type_size(a.type), nb1, nb2, nb2 *% @as(usize, @bitCast(ne2)) };
     return viewImpl(ctx, a, 3, &ne, &nb, offset);
 }
 
 /// Ports `ggml_view_4d` (ggml.c:3863 @b1b770d90).
-pub export fn ggml_view_4d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, ne0: i64, ne1: i64, ne2: i64, ne3: i64, nb1: usize, nb2: usize, nb3: usize, offset: usize) *mod.impl.c.ggml_tensor {
+pub fn ggml_view_4d(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, ne0: i64, ne1: i64, ne2: i64, ne3: i64, nb1: usize, nb2: usize, nb3: usize, offset: usize) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const ne = [_]i64{ ne0, ne1, ne2, ne3 };
     const nb = [_]usize{ mod.types.ggml_type_size(a.type), nb1, nb2, nb3 };
     return viewImpl(ctx, a, 4, &ne, &nb, offset);
@@ -1558,10 +1537,10 @@ pub export fn ggml_view_4d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor
 /// The axis arguments say where each of the source's dimensions *goes*, not
 /// where it comes from, which is the easy thing to get backwards. All four must
 /// be distinct, so this is a permutation and not a projection.
-pub export fn ggml_permute(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, axis0: c_int, axis1: c_int, axis2: c_int, axis3: c_int) *mod.impl.c.ggml_tensor {
+pub fn ggml_permute(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, axis0: c_int, axis1: c_int, axis2: c_int, axis3: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const axes = [_]c_int{ axis0, axis1, axis2, axis3 };
     for (axes) |axis| {
-        mod.impl.assert(axis >= 0 and axis < mod.impl.c.GGML_MAX_DIMS, "axis >= 0 && axis < GGML_MAX_DIMS");
+        mod.impl.assert(axis >= 0 and axis < mod.impl.ggml_c.GGML_MAX_DIMS, "axis >= 0 && axis < GGML_MAX_DIMS");
     }
     for (0..axes.len) |i| {
         for (i + 1..axes.len) |j| {
@@ -1572,8 +1551,8 @@ pub export fn ggml_permute(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor
     const result = mod.context.ggml_view_tensor(ctx, a);
     _ = mod.context.ggml_format_name(result, "%s (permuted)", &a.name);
 
-    var ne: [mod.impl.c.GGML_MAX_DIMS]i64 = undefined;
-    var nb: [mod.impl.c.GGML_MAX_DIMS]usize = undefined;
+    var ne: [mod.impl.ggml_c.GGML_MAX_DIMS]i64 = undefined;
+    var nb: [mod.impl.ggml_c.GGML_MAX_DIMS]usize = undefined;
     for (axes, 0..) |axis, src_dim| {
         ne[@intCast(axis)] = a.ne[src_dim];
         nb[@intCast(axis)] = a.nb[src_dim];
@@ -1581,7 +1560,7 @@ pub export fn ggml_permute(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor
     result.ne = ne;
     result.nb = nb;
 
-    result.op = mod.impl.c.GGML_OP_PERMUTE;
+    result.op = mod.impl.ggml_c.GGML_OP_PERMUTE;
     result.src[0] = a;
 
     // The axes are recorded as well as applied. The strides above already
@@ -1596,7 +1575,7 @@ pub export fn ggml_permute(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor
 ///
 /// Swaps the first two dimensions by swapping their strides, so no data moves
 /// and the result is not contiguous.
-pub export fn ggml_transpose(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_transpose(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const result = mod.context.ggml_view_tensor(ctx, a);
     _ = mod.context.ggml_format_name(result, "%s (transposed)", &a.name);
 
@@ -1605,7 +1584,7 @@ pub export fn ggml_transpose(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tens
     result.nb[0] = a.nb[1];
     result.nb[1] = a.nb[0];
 
-    result.op = mod.impl.c.GGML_OP_TRANSPOSE;
+    result.op = mod.impl.ggml_c.GGML_OP_TRANSPOSE;
     result.src[0] = a;
     return result;
 }
@@ -1616,15 +1595,15 @@ pub export fn ggml_transpose(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tens
 test "reshape is a view and preserves the element count" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 4);
+    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 4);
 
     const r = ggml_reshape_2d(&ctx, a, 4, 8);
     try std.testing.expectEqual(@as(i64, 4), r.ne[0]);
     try std.testing.expectEqual(@as(i64, 8), r.ne[1]);
     try std.testing.expectEqual(mod.types.ggml_nelements(a), mod.types.ggml_nelements(r));
     // A reshape shares storage, so it must be a view of its source.
-    try std.testing.expectEqual(@as(?*mod.impl.c.ggml_tensor, a), r.view_src);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, mod.impl.c.GGML_OP_RESHAPE), r.op);
+    try std.testing.expectEqual(@as(?*mod.impl.ggml_c.ggml_tensor, a), r.view_src);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, mod.impl.ggml_c.GGML_OP_RESHAPE), r.op);
 
     const flat = ggml_reshape_1d(&ctx, a, 32);
     try std.testing.expectEqual(@as(i64, 32), flat.ne[0]);
@@ -1635,10 +1614,10 @@ test "reshape is a view and preserves the element count" {
 test "cont copies rather than viewing" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 4);
+    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 4);
 
     const r = ggml_cont(&ctx, a);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, mod.impl.c.GGML_OP_CONT), r.op);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, mod.impl.ggml_c.GGML_OP_CONT), r.op);
     // Unlike reshape, cont produces fresh contiguous storage.
     try std.testing.expect(!mod.types.ggml_is_view(r));
     try std.testing.expect(mod.types.ggml_is_contiguous(r));
@@ -1651,7 +1630,7 @@ test "cont copies rather than viewing" {
 test "views take their strides explicitly" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 4);
+    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 4);
 
     // A 2-row window starting one row in.
     const v = ggml_view_2d(&ctx, a, 8, 2, a.nb[1], a.nb[1]);
@@ -1671,7 +1650,7 @@ test "views take their strides explicitly" {
 test "permute moves each dimension to the axis it names" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const a = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F32, 2, 3, 4, 5);
+    const a = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 2, 3, 4, 5);
 
     // Send dim0 -> axis1, dim1 -> axis2, dim2 -> axis0, dim3 -> axis3.
     const p = ggml_permute(&ctx, a, 1, 2, 0, 3);
@@ -1686,7 +1665,7 @@ test "permute moves each dimension to the axis it names" {
 
     // The identity permutation must change nothing.
     const same = ggml_permute(&ctx, a, 0, 1, 2, 3);
-    for (0..mod.impl.c.GGML_MAX_DIMS) |i| {
+    for (0..mod.impl.ggml_c.GGML_MAX_DIMS) |i| {
         try std.testing.expectEqual(a.ne[i], same.ne[i]);
         try std.testing.expectEqual(a.nb[i], same.nb[i]);
     }
@@ -1695,7 +1674,7 @@ test "permute moves each dimension to the axis it names" {
 test "transpose swaps the first two dimensions without moving data" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 4);
+    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 4);
 
     const t = ggml_transpose(&ctx, a);
     try std.testing.expectEqual(@as(i64, 4), t.ne[0]);
@@ -1714,21 +1693,21 @@ test "transpose swaps the first two dimensions without moving data" {
 test "cast keeps shape, changes type, and self-references src[1]" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 4);
+    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 4);
 
-    const r = ggml_cast(&ctx, a, mod.impl.c.GGML_TYPE_F16);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_type, mod.impl.c.GGML_TYPE_F16), r.type);
+    const r = ggml_cast(&ctx, a, mod.impl.ggml_c.GGML_TYPE_F16);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_type, mod.impl.ggml_c.GGML_TYPE_F16), r.type);
     try std.testing.expect(mod.types.ggml_are_same_shape(r, a));
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, mod.impl.c.GGML_OP_CPY), r.op);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, mod.impl.ggml_c.GGML_OP_CPY), r.op);
     // Deliberate in the C: some backends read src[1] as the destination.
-    try std.testing.expectEqual(@as(?*mod.impl.c.ggml_tensor, r), r.src[1]);
+    try std.testing.expectEqual(@as(?*mod.impl.ggml_c.ggml_tensor, r), r.src[1]);
 }
 
 test "set records strides and rejects an offset that would not fit i32" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 64, 4);
-    const b = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.c.GGML_TYPE_F32, 8);
+    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 64, 4);
+    const b = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8);
 
     const r = ggml_set_1d(&ctx, a, b, 16);
     try std.testing.expectEqual(@as(i32, @intCast(a.nb[1])), mod.impl.getOpParamsI32(r, 0));
@@ -1751,16 +1730,16 @@ test "set records strides and rejects an offset that would not fit i32" {
 /// The result is f32 whatever `a`'s type, so a quantized embedding table is
 /// dequantized on the way out. The one exception is an i32 table, which stays
 /// i32 -- the C notes non-f32 returns are otherwise unimplemented.
-pub export fn ggml_get_rows(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_get_rows(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(a.ne[2] == b.ne[1], "a->ne[2] == b->ne[1]");
     mod.impl.assert(a.ne[3] == b.ne[2], "a->ne[3] == b->ne[2]");
     mod.impl.assert(b.ne[3] == 1, "b->ne[3] == 1");
-    mod.impl.assert(b.type == mod.impl.c.GGML_TYPE_I32, "b->type == GGML_TYPE_I32");
+    mod.impl.assert(b.type == mod.impl.ggml_c.GGML_TYPE_I32, "b->type == GGML_TYPE_I32");
 
-    const t: mod.impl.c.enum_ggml_type = if (a.type == mod.impl.c.GGML_TYPE_I32) a.type else mod.impl.c.GGML_TYPE_F32;
+    const t: mod.impl.ggml_c.enum_ggml_type = if (a.type == mod.impl.ggml_c.GGML_TYPE_I32) a.type else mod.impl.ggml_c.GGML_TYPE_F32;
     const result = mod.context.ggml_new_tensor_4d(ctx, t, a.ne[0], b.ne[0], b.ne[1], b.ne[2]);
 
-    result.op = mod.impl.c.GGML_OP_GET_ROWS;
+    result.op = mod.impl.ggml_c.GGML_OP_GET_ROWS;
     result.src[0] = a;
     result.src[1] = b;
     return result;
@@ -1770,9 +1749,9 @@ pub export fn ggml_get_rows(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tenso
 ///
 /// The gradient of `get_rows`: scatters rows back to where they came from.
 /// `c` supplies the output shape only and is not a source, matching the C.
-pub export fn ggml_get_rows_back(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, shape: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_get_rows_back(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, shape: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(
-        mod.types.ggml_is_matrix(a) and mod.types.ggml_is_vector(b) and b.type == mod.impl.c.GGML_TYPE_I32,
+        mod.types.ggml_is_matrix(a) and mod.types.ggml_is_vector(b) and b.type == mod.impl.ggml_c.GGML_TYPE_I32,
         "ggml_is_matrix(a) && ggml_is_vector(b) && b->type == GGML_TYPE_I32",
     );
     mod.impl.assert(
@@ -1780,8 +1759,8 @@ pub export fn ggml_get_rows_back(ctx: *mod.context.Context, a: *mod.impl.c.ggml_
         "ggml_is_matrix(c) && (a->ne[0] == c->ne[0])",
     );
 
-    const result = mod.context.ggml_new_tensor_2d(ctx, mod.impl.c.GGML_TYPE_F32, shape.ne[0], shape.ne[1]);
-    result.op = mod.impl.c.GGML_OP_GET_ROWS_BACK;
+    const result = mod.context.ggml_new_tensor_2d(ctx, mod.impl.ggml_c.GGML_TYPE_F32, shape.ne[0], shape.ne[1]);
+    result.op = mod.impl.ggml_c.GGML_OP_GET_ROWS_BACK;
     result.src[0] = a;
     result.src[1] = b;
     return result;
@@ -1795,7 +1774,7 @@ pub export fn ggml_get_rows_back(ctx: *mod.context.Context, a: *mod.impl.c.ggml_
 /// Note the source order: `src[0]` is the data, `src[1]` the indices, and
 /// `src[2]` the destination. The C flags this as weird and legacy, and it must
 /// be preserved because the backends read those slots positionally.
-pub export fn ggml_set_rows(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, idx: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_set_rows(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, idx: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(a.ne[0] == b.ne[0], "a->ne[0] == b->ne[0]");
     mod.impl.assert(a.ne[2] == b.ne[2], "a->ne[2] == b->ne[2]");
     mod.impl.assert(a.ne[3] == b.ne[3], "a->ne[3] == b->ne[3]");
@@ -1804,18 +1783,18 @@ pub export fn ggml_set_rows(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tenso
     mod.impl.assert(@rem(b.ne[3], idx.ne[2]) == 0, "b->ne[3] % c->ne[2] == 0");
     mod.impl.assert(idx.ne[3] == 1, "c->ne[3] == 1");
     mod.impl.assert(
-        b.type == mod.impl.c.GGML_TYPE_F32 or b.type == mod.impl.c.GGML_TYPE_F16,
+        b.type == mod.impl.ggml_c.GGML_TYPE_F32 or b.type == mod.impl.ggml_c.GGML_TYPE_F16,
         "b->type == GGML_TYPE_F32 || b->type == GGML_TYPE_F16",
     );
     mod.impl.assert(
-        idx.type == mod.impl.c.GGML_TYPE_I64 or idx.type == mod.impl.c.GGML_TYPE_I32,
+        idx.type == mod.impl.ggml_c.GGML_TYPE_I64 or idx.type == mod.impl.ggml_c.GGML_TYPE_I32,
         "c->type == GGML_TYPE_I64 || c->type == GGML_TYPE_I32",
     );
     mod.impl.assert(mod.types.ggml_is_contiguous_rows(a), "ggml_is_contiguous_rows(a)");
     mod.impl.assert(mod.types.ggml_is_contiguous_rows(b), "ggml_is_contiguous_rows(b)");
 
     const result = mod.context.ggml_view_tensor(ctx, a);
-    result.op = mod.impl.c.GGML_OP_SET_ROWS;
+    result.op = mod.impl.ggml_c.GGML_OP_SET_ROWS;
     result.src[0] = b;
     result.src[1] = idx;
     result.src[2] = a;
@@ -1828,12 +1807,12 @@ pub export fn ggml_set_rows(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tenso
 /// Ports `ggml_diag` (ggml.c:4036 @b1b770d90).
 ///
 /// Turns a row vector into a square matrix with that vector on the diagonal.
-pub export fn ggml_diag(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_diag(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(a.ne[1] == 1, "a->ne[1] == 1");
 
     const ne = [_]i64{ a.ne[0], a.ne[0], a.ne[2], a.ne[3] };
     const result = mod.context.ggml_new_tensor(ctx, a.type, 4, &ne);
-    result.op = mod.impl.c.GGML_OP_DIAG;
+    result.op = mod.impl.ggml_c.GGML_OP_DIAG;
     result.src[0] = a;
     return result;
 }
@@ -1842,21 +1821,21 @@ pub export fn ggml_diag(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *
 // Clamping
 
 /// Ports `ggml_clamp_impl` (ggml.c:4052 @b1b770d90).
-fn clampImpl(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, min: f32, max: f32, inplace: bool) *mod.impl.c.ggml_tensor {
+fn clampImpl(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, min: f32, max: f32, inplace: bool) *mod.impl.ggml_c.ggml_tensor {
     const result = dupOrView(ctx, a, inplace);
     mod.impl.setOpParamsValue(result, [_]f32{ min, max });
-    result.op = mod.impl.c.GGML_OP_CLAMP;
+    result.op = mod.impl.ggml_c.GGML_OP_CLAMP;
     result.src[0] = a;
     return result;
 }
 
 /// Ports `ggml_clamp` (ggml.c:4069 @b1b770d90).
-pub export fn ggml_clamp(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, min: f32, max: f32) *mod.impl.c.ggml_tensor {
+pub fn ggml_clamp(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, min: f32, max: f32) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return clampImpl(ctx, a, min, max, false);
 }
 
 /// Ports `ggml_clamp_inplace` (ggml.c:4077 @b1b770d90).
-pub export fn ggml_clamp_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, min: f32, max: f32) *mod.impl.c.ggml_tensor {
+pub fn ggml_clamp_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, min: f32, max: f32) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return clampImpl(ctx, a, min, max, true);
 }
 
@@ -1870,17 +1849,17 @@ pub export fn ggml_clamp_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_
 /// Ports `ggml_soft_max_impl` (ggml.c:4087 @b1b770d90).
 fn softMaxImpl(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    mask: ?*mod.impl.c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    mask: ?*mod.impl.ggml_c.ggml_tensor,
     scale: f32,
     max_bias: f32,
     inplace: bool,
-) *mod.impl.c.ggml_tensor {
+) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_is_contiguous(a), "ggml_is_contiguous(a)");
 
     if (mask) |m| {
         mod.impl.assert(
-            m.type == mod.impl.c.GGML_TYPE_F16 or m.type == mod.impl.c.GGML_TYPE_F32,
+            m.type == mod.impl.ggml_c.GGML_TYPE_F16 or m.type == mod.impl.ggml_c.GGML_TYPE_F32,
             "mask->type == GGML_TYPE_F16 || mask->type == GGML_TYPE_F32",
         );
         mod.impl.assert(mod.types.ggml_is_contiguous(m), "ggml_is_contiguous(mask)");
@@ -1898,29 +1877,29 @@ fn softMaxImpl(
     const result = dupOrView(ctx, a, inplace);
     mod.impl.setOpParamsValue(result, [_]f32{ scale, max_bias });
 
-    result.op = mod.impl.c.GGML_OP_SOFT_MAX;
+    result.op = mod.impl.ggml_c.GGML_OP_SOFT_MAX;
     result.src[0] = a;
     result.src[1] = mask;
     return result;
 }
 
 /// Ports `ggml_soft_max` (ggml.c:4121 @b1b770d90).
-pub export fn ggml_soft_max(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_soft_max(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return softMaxImpl(ctx, a, null, 1.0, 0.0, false);
 }
 
 /// Ports `ggml_soft_max_inplace` (ggml.c:4127 @b1b770d90).
-pub export fn ggml_soft_max_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_soft_max_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return softMaxImpl(ctx, a, null, 1.0, 0.0, true);
 }
 
 /// Ports `ggml_soft_max_ext` (ggml.c:4133 @b1b770d90).
-pub export fn ggml_soft_max_ext(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, mask: ?*mod.impl.c.ggml_tensor, scale: f32, max_bias: f32) *mod.impl.c.ggml_tensor {
+pub fn ggml_soft_max_ext(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, mask: ?*mod.impl.ggml_c.ggml_tensor, scale: f32, max_bias: f32) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return softMaxImpl(ctx, a, mask, scale, max_bias, false);
 }
 
 /// Ports `ggml_soft_max_ext_inplace` (ggml.c:4142 @b1b770d90).
-pub export fn ggml_soft_max_ext_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, mask: ?*mod.impl.c.ggml_tensor, scale: f32, max_bias: f32) *mod.impl.c.ggml_tensor {
+pub fn ggml_soft_max_ext_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, mask: ?*mod.impl.ggml_c.ggml_tensor, scale: f32, max_bias: f32) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return softMaxImpl(ctx, a, mask, scale, max_bias, true);
 }
 
@@ -1931,25 +1910,25 @@ pub export fn ggml_soft_max_ext_inplace(ctx: *mod.context.Context, a: *mod.impl.
 /// softmax and does not already have sinks.
 ///
 /// Passing null clears the slot and skips the checks, as the C does.
-pub export fn ggml_soft_max_add_sinks(a: *mod.impl.c.ggml_tensor, sinks: ?*mod.impl.c.ggml_tensor) void {
+pub fn ggml_soft_max_add_sinks(a: *mod.impl.ggml_c.ggml_tensor, sinks: ?*mod.impl.ggml_c.ggml_tensor) callconv(.c) void {
     const s = sinks orelse {
         a.src[2] = null;
         return;
     };
 
-    mod.impl.assert(a.op == mod.impl.c.GGML_OP_SOFT_MAX, "a->op == GGML_OP_SOFT_MAX");
+    mod.impl.assert(a.op == mod.impl.ggml_c.GGML_OP_SOFT_MAX, "a->op == GGML_OP_SOFT_MAX");
     mod.impl.assert(a.src[2] == null, "a->src[2] == NULL");
-    mod.impl.assert(mod.impl.one(mod.impl.c.ggml_tensor, a.src[0]).ne[2] == s.ne[0], "a->src[0]->ne[2] == sinks->ne[0]");
-    mod.impl.assert(s.type == mod.impl.c.GGML_TYPE_F32, "sinks->type == GGML_TYPE_F32");
+    mod.impl.assert(mod.impl.one(mod.impl.ggml_c.ggml_tensor, a.src[0]).ne[2] == s.ne[0], "a->src[0]->ne[2] == sinks->ne[0]");
+    mod.impl.assert(s.type == mod.impl.ggml_c.GGML_TYPE_F32, "sinks->type == GGML_TYPE_F32");
 
     a.src[2] = s;
 }
 
 /// Ports `ggml_soft_max_ext_back_impl` (ggml.c:4169 @b1b770d90).
-fn softMaxBackImpl(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, scale: f32, max_bias: f32, inplace: bool) *mod.impl.c.ggml_tensor {
+fn softMaxBackImpl(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, scale: f32, max_bias: f32, inplace: bool) *mod.impl.ggml_c.ggml_tensor {
     const result = dupOrView(ctx, a, inplace);
 
-    result.op = mod.impl.c.GGML_OP_SOFT_MAX_BACK;
+    result.op = mod.impl.ggml_c.GGML_OP_SOFT_MAX_BACK;
     result.src[0] = a;
     result.src[1] = b;
 
@@ -1961,12 +1940,12 @@ fn softMaxBackImpl(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mo
 }
 
 /// Ports `ggml_soft_max_ext_back` (ggml.c:4188 @b1b770d90).
-pub export fn ggml_soft_max_ext_back(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, scale: f32, max_bias: f32) *mod.impl.c.ggml_tensor {
+pub fn ggml_soft_max_ext_back(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, scale: f32, max_bias: f32) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return softMaxBackImpl(ctx, a, b, scale, max_bias, false);
 }
 
 /// Ports `ggml_soft_max_ext_back_inplace` (ggml.c:4197 @b1b770d90).
-pub export fn ggml_soft_max_ext_back_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, scale: f32, max_bias: f32) *mod.impl.c.ggml_tensor {
+pub fn ggml_soft_max_ext_back_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, scale: f32, max_bias: f32) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return softMaxBackImpl(ctx, a, b, scale, max_bias, true);
 }
 
@@ -1978,53 +1957,53 @@ test "get_rows dequantizes to f32 but keeps i32 tables" {
     var ctx = testContext(&buf);
 
     // A quantized embedding table indexed by token ids.
-    const table = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_Q4_K, 256, 100);
-    const ids = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.c.GGML_TYPE_I32, 7);
+    const table = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_Q4_K, 256, 100);
+    const ids = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.ggml_c.GGML_TYPE_I32, 7);
 
     const r = ggml_get_rows(&ctx, table, ids);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_type, mod.impl.c.GGML_TYPE_F32), r.type);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_type, mod.impl.ggml_c.GGML_TYPE_F32), r.type);
     try std.testing.expectEqual(@as(i64, 256), r.ne[0]);
     try std.testing.expectEqual(@as(i64, 7), r.ne[1]);
 
     // An i32 table is the one case that keeps its type.
-    const i32_table = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_I32, 8, 100);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_type, mod.impl.c.GGML_TYPE_I32), ggml_get_rows(&ctx, i32_table, ids).type);
+    const i32_table = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_I32, 8, 100);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_type, mod.impl.ggml_c.GGML_TYPE_I32), ggml_get_rows(&ctx, i32_table, ids).type);
 }
 
 test "set_rows keeps the legacy source order" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
 
-    const dst = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 64, 100);
-    const data = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 64, 4);
-    const idx = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.c.GGML_TYPE_I64, 4);
+    const dst = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 64, 100);
+    const data = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 64, 4);
+    const idx = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.ggml_c.GGML_TYPE_I64, 4);
 
     const r = ggml_set_rows(&ctx, dst, data, idx);
     // src[0]=data, src[1]=indices, src[2]=destination. Backends read these
     // positionally, so the order is load-bearing.
-    try std.testing.expectEqual(@as(?*mod.impl.c.ggml_tensor, data), r.src[0]);
-    try std.testing.expectEqual(@as(?*mod.impl.c.ggml_tensor, idx), r.src[1]);
-    try std.testing.expectEqual(@as(?*mod.impl.c.ggml_tensor, dst), r.src[2]);
+    try std.testing.expectEqual(@as(?*mod.impl.ggml_c.ggml_tensor, data), r.src[0]);
+    try std.testing.expectEqual(@as(?*mod.impl.ggml_c.ggml_tensor, idx), r.src[1]);
+    try std.testing.expectEqual(@as(?*mod.impl.ggml_c.ggml_tensor, dst), r.src[2]);
     // Writes in place, so the result views the destination.
     try std.testing.expect(mod.types.ggml_is_view(r));
-    try std.testing.expectEqual(@as(?*mod.impl.c.ggml_tensor, dst), r.view_src);
+    try std.testing.expectEqual(@as(?*mod.impl.ggml_c.ggml_tensor, dst), r.view_src);
 }
 
 test "diag squares a row vector" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const v = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.c.GGML_TYPE_F32, 8);
+    const v = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8);
 
     const r = ggml_diag(&ctx, v);
     try std.testing.expectEqual(@as(i64, 8), r.ne[0]);
     try std.testing.expectEqual(@as(i64, 8), r.ne[1]);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, mod.impl.c.GGML_OP_DIAG), r.op);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, mod.impl.ggml_c.GGML_OP_DIAG), r.op);
 }
 
 test "clamp stores both bounds" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const a = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.c.GGML_TYPE_F32, 8);
+    const a = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8);
 
     const r = ggml_clamp(&ctx, a, -1.5, 2.5);
     try std.testing.expectEqual(@as(f32, -1.5), mod.impl.getOpParamsF32(r, 0));
@@ -2036,7 +2015,7 @@ test "softmax carries scale and mask" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
     // Attention logits [n_kv, n_q, n_head].
-    const logits = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.c.GGML_TYPE_F32, 64, 8, 4);
+    const logits = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 64, 8, 4);
 
     const plain = ggml_soft_max(&ctx, logits);
     try std.testing.expectEqual(@as(f32, 1.0), mod.impl.getOpParamsF32(plain, 0));
@@ -2045,24 +2024,24 @@ test "softmax carries scale and mask" {
 
     // A mask longer than the query is allowed: a shared causal mask reused
     // across shorter batches.
-    const mask = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F16, 64, 32);
+    const mask = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F16, 64, 32);
     const ext = ggml_soft_max_ext(&ctx, logits, mask, 0.125, 8.0);
     try std.testing.expectEqual(@as(f32, 0.125), mod.impl.getOpParamsF32(ext, 0));
     try std.testing.expectEqual(@as(f32, 8.0), mod.impl.getOpParamsF32(ext, 1));
-    try std.testing.expectEqual(@as(?*mod.impl.c.ggml_tensor, mask), ext.src[1]);
+    try std.testing.expectEqual(@as(?*mod.impl.ggml_c.ggml_tensor, mask), ext.src[1]);
     try std.testing.expect(mod.types.ggml_are_same_shape(ext, logits));
 }
 
 test "attention sinks attach to src[2] and clear" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const logits = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.c.GGML_TYPE_F32, 64, 8, 4);
+    const logits = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 64, 8, 4);
     const sm = ggml_soft_max(&ctx, logits);
 
     // One sink per head: sinks->ne[0] must match src[0]->ne[2].
-    const sinks = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.c.GGML_TYPE_F32, 4);
+    const sinks = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 4);
     ggml_soft_max_add_sinks(sm, sinks);
-    try std.testing.expectEqual(@as(?*mod.impl.c.ggml_tensor, sinks), sm.src[2]);
+    try std.testing.expectEqual(@as(?*mod.impl.ggml_c.ggml_tensor, sinks), sm.src[2]);
 
     // Null clears without checking, so it works on any node.
     ggml_soft_max_add_sinks(sm, null);
@@ -2097,7 +2076,7 @@ const RopeParams = extern struct {
     attn_factor: f32,
     beta_fast: f32,
     beta_slow: f32,
-    sections: [mod.impl.c.GGML_MROPE_SECTIONS]i32,
+    sections: [mod.impl.ggml_c.GGML_MROPE_SECTIONS]i32,
     n_offs: i32 = 0,
 
     comptime {
@@ -2118,9 +2097,9 @@ const RopeParams = extern struct {
 /// Return: the rotated tensor, sharing `a`'s shape.
 fn ropeImpl(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
-    freqs: ?*mod.impl.c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
+    freqs: ?*mod.impl.ggml_c.ggml_tensor,
     n_dims: c_int,
     sections: ?[*]const c_int,
     mode: c_int,
@@ -2132,12 +2111,12 @@ fn ropeImpl(
     beta_fast: f32,
     beta_slow: f32,
     inplace: bool,
-) *mod.impl.c.ggml_tensor {
+) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert((mode & 1) == 0, "mode & 1 == 1 is no longer supported");
     mod.impl.assert(mod.types.ggml_is_vector(b), "ggml_is_vector(b)");
-    mod.impl.assert(b.type == mod.impl.c.GGML_TYPE_I32, "b->type == GGML_TYPE_I32");
+    mod.impl.assert(b.type == mod.impl.ggml_c.GGML_TYPE_I32, "b->type == GGML_TYPE_I32");
 
-    const mrope_used = (mode & mod.impl.c.GGML_ROPE_TYPE_MROPE) != 0;
+    const mrope_used = (mode & mod.impl.ggml_c.GGML_ROPE_TYPE_MROPE) != 0;
     if (mrope_used) {
         // mrope carries four position ids per token: time plus three spatial.
         mod.impl.assert(a.ne[2] * 4 == b.ne[0], "a->ne[2] * 4 == b->ne[0]");
@@ -2146,7 +2125,7 @@ fn ropeImpl(
     }
 
     if (freqs) |f| {
-        mod.impl.assert(f.type == mod.impl.c.GGML_TYPE_F32, "c->type == GGML_TYPE_F32");
+        mod.impl.assert(f.type == mod.impl.ggml_c.GGML_TYPE_F32, "c->type == GGML_TYPE_F32");
         // One factor per rotated pair.
         mod.impl.assert(f.ne[0] >= @divTrunc(n_dims, 2), "c->ne[0] >= n_dims / 2");
     }
@@ -2168,12 +2147,12 @@ fn ropeImpl(
     // Sections are only meaningful for mrope; otherwise the slots stay zero.
     if (mrope_used) {
         if (sections) |s| {
-            for (0..mod.impl.c.GGML_MROPE_SECTIONS) |i| params.sections[i] = s[i];
+            for (0..mod.impl.ggml_c.GGML_MROPE_SECTIONS) |i| params.sections[i] = s[i];
         }
     }
     mod.impl.setOpParamsValue(result, params);
 
-    result.op = mod.impl.c.GGML_OP_ROPE;
+    result.op = mod.impl.ggml_c.GGML_OP_ROPE;
     result.src[0] = a;
     result.src[1] = b;
     result.src[2] = freqs;
@@ -2183,12 +2162,12 @@ fn ropeImpl(
 /// Ports `ggml_rope` (ggml.c:4267 @b1b770d90).
 ///
 /// The plain form, with the defaults the original paper used.
-pub export fn ggml_rope(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, n_dims: c_int, mode: c_int) *mod.impl.c.ggml_tensor {
+pub fn ggml_rope(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, n_dims: c_int, mode: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return ropeImpl(ctx, a, b, null, n_dims, null, mode, 0, 10000.0, 1.0, 0.0, 1.0, 0.0, 0.0, false);
 }
 
 /// Ports `ggml_rope_inplace` (ggml.c:4320 @b1b770d90).
-pub export fn ggml_rope_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, n_dims: c_int, mode: c_int) *mod.impl.c.ggml_tensor {
+pub fn ggml_rope_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, n_dims: c_int, mode: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return ropeImpl(ctx, a, b, null, n_dims, null, mode, 0, 10000.0, 1.0, 0.0, 1.0, 0.0, 0.0, true);
 }
 
@@ -2196,11 +2175,11 @@ pub export fn ggml_rope_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_t
 ///
 /// The form models actually use: every scaling knob exposed, plus optional
 /// per-dimension frequency factors for YaRN-style context extension.
-pub export fn ggml_rope_ext(
+pub fn ggml_rope_ext(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
-    freqs: ?*mod.impl.c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
+    freqs: ?*mod.impl.ggml_c.ggml_tensor,
     n_dims: c_int,
     mode: c_int,
     n_ctx_orig: c_int,
@@ -2210,16 +2189,16 @@ pub export fn ggml_rope_ext(
     attn_factor: f32,
     beta_fast: f32,
     beta_slow: f32,
-) *mod.impl.c.ggml_tensor {
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return ropeImpl(ctx, a, b, freqs, n_dims, null, mode, n_ctx_orig, freq_base, freq_scale, ext_factor, attn_factor, beta_fast, beta_slow, false);
 }
 
 /// Ports `ggml_rope_ext_inplace` (ggml.c:4351 @b1b770d90).
-pub export fn ggml_rope_ext_inplace(
+pub fn ggml_rope_ext_inplace(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
-    freqs: ?*mod.impl.c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
+    freqs: ?*mod.impl.ggml_c.ggml_tensor,
     n_dims: c_int,
     mode: c_int,
     n_ctx_orig: c_int,
@@ -2229,7 +2208,7 @@ pub export fn ggml_rope_ext_inplace(
     attn_factor: f32,
     beta_fast: f32,
     beta_slow: f32,
-) *mod.impl.c.ggml_tensor {
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return ropeImpl(ctx, a, b, freqs, n_dims, null, mode, n_ctx_orig, freq_base, freq_scale, ext_factor, attn_factor, beta_fast, beta_slow, true);
 }
 
@@ -2238,11 +2217,11 @@ pub export fn ggml_rope_ext_inplace(
 /// Multimodal rope: the head dimension is split into sections rotated by
 /// different position components, so image patches carry spatial position
 /// alongside sequence position.
-pub export fn ggml_rope_multi(
+pub fn ggml_rope_multi(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
-    freqs: ?*mod.impl.c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
+    freqs: ?*mod.impl.ggml_c.ggml_tensor,
     n_dims: c_int,
     sections: ?[*]const c_int,
     mode: c_int,
@@ -2253,16 +2232,16 @@ pub export fn ggml_rope_multi(
     attn_factor: f32,
     beta_fast: f32,
     beta_slow: f32,
-) *mod.impl.c.ggml_tensor {
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return ropeImpl(ctx, a, b, freqs, n_dims, sections, mode, n_ctx_orig, freq_base, freq_scale, ext_factor, attn_factor, beta_fast, beta_slow, false);
 }
 
 /// Ports `ggml_rope_multi_inplace` (ggml.c:4299 @b1b770d90).
-pub export fn ggml_rope_multi_inplace(
+pub fn ggml_rope_multi_inplace(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
-    freqs: ?*mod.impl.c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
+    freqs: ?*mod.impl.ggml_c.ggml_tensor,
     n_dims: c_int,
     sections: ?[*]const c_int,
     mode: c_int,
@@ -2273,7 +2252,7 @@ pub export fn ggml_rope_multi_inplace(
     attn_factor: f32,
     beta_fast: f32,
     beta_slow: f32,
-) *mod.impl.c.ggml_tensor {
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return ropeImpl(ctx, a, b, freqs, n_dims, sections, mode, n_ctx_orig, freq_base, freq_scale, ext_factor, attn_factor, beta_fast, beta_slow, true);
 }
 
@@ -2281,11 +2260,11 @@ pub export fn ggml_rope_multi_inplace(
 ///
 /// Builds the forward node and flips the op, as the C does: the shape and
 /// parameters are identical, only the direction differs.
-pub export fn ggml_rope_ext_back(
+pub fn ggml_rope_ext_back(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
-    freqs: ?*mod.impl.c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
+    freqs: ?*mod.impl.ggml_c.ggml_tensor,
     n_dims: c_int,
     mode: c_int,
     n_ctx_orig: c_int,
@@ -2295,18 +2274,18 @@ pub export fn ggml_rope_ext_back(
     attn_factor: f32,
     beta_fast: f32,
     beta_slow: f32,
-) *mod.impl.c.ggml_tensor {
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const result = ggml_rope_ext(ctx, a, b, freqs, n_dims, mode, n_ctx_orig, freq_base, freq_scale, ext_factor, attn_factor, beta_fast, beta_slow);
-    result.op = mod.impl.c.GGML_OP_ROPE_BACK;
+    result.op = mod.impl.ggml_c.GGML_OP_ROPE_BACK;
     return result;
 }
 
 /// Ports `ggml_rope_multi_back` (ggml.c:4413 @b1b770d90).
-pub export fn ggml_rope_multi_back(
+pub fn ggml_rope_multi_back(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
-    freqs: ?*mod.impl.c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
+    freqs: ?*mod.impl.ggml_c.ggml_tensor,
     n_dims: c_int,
     sections: ?[*]const c_int,
     mode: c_int,
@@ -2317,9 +2296,9 @@ pub export fn ggml_rope_multi_back(
     attn_factor: f32,
     beta_fast: f32,
     beta_slow: f32,
-) *mod.impl.c.ggml_tensor {
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const result = ggml_rope_multi(ctx, a, b, freqs, n_dims, sections, mode, n_ctx_orig, freq_base, freq_scale, ext_factor, attn_factor, beta_fast, beta_slow);
-    result.op = mod.impl.c.GGML_OP_ROPE_BACK;
+    result.op = mod.impl.ggml_c.GGML_OP_ROPE_BACK;
     return result;
 }
 
@@ -2327,15 +2306,15 @@ pub export fn ggml_rope_multi_back(
 ///
 /// Sets the position offset on an existing rope node, in the last params slot.
 /// Vision mode has no offset, and the C rejects it.
-pub export fn ggml_rope_set_offset(a: *mod.impl.c.ggml_tensor, n_offs: c_int) *mod.impl.c.ggml_tensor {
+pub fn ggml_rope_set_offset(a: *mod.impl.ggml_c.ggml_tensor, n_offs: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(
-        a.op == mod.impl.c.GGML_OP_ROPE or a.op == mod.impl.c.GGML_OP_ROPE_BACK,
+        a.op == mod.impl.ggml_c.GGML_OP_ROPE or a.op == mod.impl.ggml_c.GGML_OP_ROPE_BACK,
         "a->op == GGML_OP_ROPE || a->op == GGML_OP_ROPE_BACK",
     );
     mod.impl.assert(n_offs >= 0, "n_offs >= 0");
 
     const mode = mod.impl.getOpParamsI32(a, 2);
-    mod.impl.assert(mode != mod.impl.c.GGML_ROPE_TYPE_VISION, "mode != GGML_ROPE_TYPE_VISION");
+    mod.impl.assert(mode != mod.impl.ggml_c.GGML_ROPE_TYPE_VISION, "mode != GGML_ROPE_TYPE_VISION");
 
     mod.impl.setOpParamsI32(a, 15, n_offs);
     return a;
@@ -2360,7 +2339,7 @@ fn ropeYarnCorrDim(n_dims: c_int, n_ctx_orig: c_int, n_rot: f32, base: f32) f32 
 /// - `truncate`: round the bounds outward to whole dimensions (the default;
 ///   `false` keeps them fractional).
 /// - `dims`: two floats, written as start and end.
-pub export fn ggml_rope_yarn_corr_dims(
+pub fn ggml_rope_yarn_corr_dims(
     n_dims: c_int,
     n_ctx_orig: c_int,
     freq_base: f32,
@@ -2368,7 +2347,7 @@ pub export fn ggml_rope_yarn_corr_dims(
     beta_slow: f32,
     truncate: bool,
     dims: *[2]f32,
-) void {
+) callconv(.c) void {
     var start = ropeYarnCorrDim(n_dims, n_ctx_orig, beta_fast, freq_base);
     var end = ropeYarnCorrDim(n_dims, n_ctx_orig, beta_slow, freq_base);
     if (truncate) {
@@ -2383,9 +2362,9 @@ pub export fn ggml_rope_yarn_corr_dims(
 ///
 /// Slot 3 holds the negation, so the zero every rope node starts with means
 /// "truncate".
-pub export fn ggml_rope_set_truncate(a: *mod.impl.c.ggml_tensor, truncate: bool) *mod.impl.c.ggml_tensor {
+pub fn ggml_rope_set_truncate(a: *mod.impl.ggml_c.ggml_tensor, truncate: bool) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(
-        a.op == mod.impl.c.GGML_OP_ROPE or a.op == mod.impl.c.GGML_OP_ROPE_BACK,
+        a.op == mod.impl.ggml_c.GGML_OP_ROPE or a.op == mod.impl.ggml_c.GGML_OP_ROPE_BACK,
         "a->op == GGML_OP_ROPE || a->op == GGML_OP_ROPE_BACK",
     );
     mod.impl.setOpParamsI32(a, 3, @intFromBool(!truncate));
@@ -2395,9 +2374,9 @@ pub export fn ggml_rope_set_truncate(a: *mod.impl.c.ggml_tensor, truncate: bool)
 /// Ports `ggml_rope_get_truncate` (ggml.c:4455 @b1b770d90).
 ///
 /// Declared in `ggml-impl.h`, not `ggml.h`; exported all the same.
-pub export fn ggml_rope_get_truncate(a: *const mod.impl.c.ggml_tensor) bool {
+pub fn ggml_rope_get_truncate(a: *const mod.impl.ggml_c.ggml_tensor) callconv(.c) bool {
     mod.impl.assert(
-        a.op == mod.impl.c.GGML_OP_ROPE or a.op == mod.impl.c.GGML_OP_ROPE_BACK,
+        a.op == mod.impl.ggml_c.GGML_OP_ROPE or a.op == mod.impl.ggml_c.GGML_OP_ROPE_BACK,
         "a->op == GGML_OP_ROPE || a->op == GGML_OP_ROPE_BACK",
     );
     return mod.impl.getOpParamsI32(a, 3) == 0;
@@ -2411,17 +2390,17 @@ test "rope fills the sixteen-slot parameter layout" {
     var ctx = testContext(&buf);
 
     // [head_dim, n_head, n_tokens]
-    const q = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.c.GGML_TYPE_F32, 128, 32, 6);
-    const pos = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.c.GGML_TYPE_I32, 6);
+    const q = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 128, 32, 6);
+    const pos = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.ggml_c.GGML_TYPE_I32, 6);
 
-    const r = ggml_rope(&ctx, q, pos, 128, mod.impl.c.GGML_ROPE_TYPE_NEOX);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, mod.impl.c.GGML_OP_ROPE), r.op);
+    const r = ggml_rope(&ctx, q, pos, 128, mod.impl.ggml_c.GGML_ROPE_TYPE_NEOX);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, mod.impl.ggml_c.GGML_OP_ROPE), r.op);
     try std.testing.expect(mod.types.ggml_are_same_shape(r, q));
 
     // Slot order is what the backends index by, so check it positionally.
     try std.testing.expectEqual(@as(i32, 0), mod.impl.getOpParamsI32(r, 0)); // n_past, retired
     try std.testing.expectEqual(@as(i32, 128), mod.impl.getOpParamsI32(r, 1)); // n_dims
-    try std.testing.expectEqual(@as(i32, mod.impl.c.GGML_ROPE_TYPE_NEOX), mod.impl.getOpParamsI32(r, 2));
+    try std.testing.expectEqual(@as(i32, mod.impl.ggml_c.GGML_ROPE_TYPE_NEOX), mod.impl.getOpParamsI32(r, 2));
     try std.testing.expectEqual(@as(i32, 0), mod.impl.getOpParamsI32(r, 3)); // no_trunc: truncate by default
     try std.testing.expectEqual(@as(f32, 10000.0), mod.impl.getOpParamsF32(r, 5));
     try std.testing.expectEqual(@as(f32, 1.0), mod.impl.getOpParamsF32(r, 6)); // freq_scale
@@ -2432,12 +2411,12 @@ test "rope fills the sixteen-slot parameter layout" {
 test "rope_ext records every scaling knob" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const q = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.c.GGML_TYPE_F32, 128, 32, 6);
-    const pos = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.c.GGML_TYPE_I32, 6);
+    const q = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 128, 32, 6);
+    const pos = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.ggml_c.GGML_TYPE_I32, 6);
     // One frequency factor per rotated pair.
-    const freqs = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.c.GGML_TYPE_F32, 64);
+    const freqs = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 64);
 
-    const r = ggml_rope_ext(&ctx, q, pos, freqs, 128, mod.impl.c.GGML_ROPE_TYPE_NEOX, 4096, 500000.0, 0.5, 1.0, 0.75, 32.0, 1.0);
+    const r = ggml_rope_ext(&ctx, q, pos, freqs, 128, mod.impl.ggml_c.GGML_ROPE_TYPE_NEOX, 4096, 500000.0, 0.5, 1.0, 0.75, 32.0, 1.0);
     try std.testing.expectEqual(@as(i32, 4096), mod.impl.getOpParamsI32(r, 4)); // n_ctx_orig
     try std.testing.expectEqual(@as(f32, 500000.0), mod.impl.getOpParamsF32(r, 5));
     try std.testing.expectEqual(@as(f32, 0.5), mod.impl.getOpParamsF32(r, 6));
@@ -2445,25 +2424,25 @@ test "rope_ext records every scaling knob" {
     try std.testing.expectEqual(@as(f32, 0.75), mod.impl.getOpParamsF32(r, 8));
     try std.testing.expectEqual(@as(f32, 32.0), mod.impl.getOpParamsF32(r, 9)); // beta_fast
     try std.testing.expectEqual(@as(f32, 1.0), mod.impl.getOpParamsF32(r, 10)); // beta_slow
-    try std.testing.expectEqual(@as(?*mod.impl.c.ggml_tensor, freqs), r.src[2]);
+    try std.testing.expectEqual(@as(?*mod.impl.ggml_c.ggml_tensor, freqs), r.src[2]);
 }
 
 test "mrope carries four positions per token and its sections" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const q = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.c.GGML_TYPE_F32, 128, 32, 6);
+    const q = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 128, 32, 6);
     // Four ids per token: time plus three spatial.
-    const pos = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.c.GGML_TYPE_I32, 24);
+    const pos = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.ggml_c.GGML_TYPE_I32, 24);
     const sections = [_]c_int{ 16, 24, 24, 0 };
 
-    const r = ggml_rope_multi(&ctx, q, pos, null, 128, &sections, mod.impl.c.GGML_ROPE_TYPE_MROPE, 4096, 10000.0, 1.0, 0.0, 1.0, 0.0, 0.0);
+    const r = ggml_rope_multi(&ctx, q, pos, null, 128, &sections, mod.impl.ggml_c.GGML_ROPE_TYPE_MROPE, 4096, 10000.0, 1.0, 0.0, 1.0, 0.0, 0.0);
     for (sections, 0..) |want, i| {
         try std.testing.expectEqual(@as(i32, want), mod.impl.getOpParamsI32(r, 11 + i));
     }
 
     // Without an mrope mode the section slots must stay zero, even if given.
-    const plain = ggml_rope_multi(&ctx, q, mod.context.ggml_new_tensor_1d(&ctx, mod.impl.c.GGML_TYPE_I32, 6), null, 128, &sections, mod.impl.c.GGML_ROPE_TYPE_NEOX, 4096, 10000.0, 1.0, 0.0, 1.0, 0.0, 0.0);
-    for (0..mod.impl.c.GGML_MROPE_SECTIONS) |i| {
+    const plain = ggml_rope_multi(&ctx, q, mod.context.ggml_new_tensor_1d(&ctx, mod.impl.ggml_c.GGML_TYPE_I32, 6), null, 128, &sections, mod.impl.ggml_c.GGML_ROPE_TYPE_NEOX, 4096, 10000.0, 1.0, 0.0, 1.0, 0.0, 0.0);
+    for (0..mod.impl.ggml_c.GGML_MROPE_SECTIONS) |i| {
         try std.testing.expectEqual(@as(i32, 0), mod.impl.getOpParamsI32(plain, 11 + i));
     }
 }
@@ -2471,10 +2450,10 @@ test "mrope carries four positions per token and its sections" {
 test "rope_set_offset writes the last slot without disturbing the rest" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const q = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.c.GGML_TYPE_F32, 128, 32, 6);
-    const pos = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.c.GGML_TYPE_I32, 6);
+    const q = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 128, 32, 6);
+    const pos = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.ggml_c.GGML_TYPE_I32, 6);
 
-    const r = ggml_rope(&ctx, q, pos, 128, mod.impl.c.GGML_ROPE_TYPE_NEOX);
+    const r = ggml_rope(&ctx, q, pos, 128, mod.impl.ggml_c.GGML_ROPE_TYPE_NEOX);
     _ = ggml_rope_set_offset(r, 17);
     try std.testing.expectEqual(@as(i32, 17), mod.impl.getOpParamsI32(r, 15));
     try std.testing.expectEqual(@as(i32, 128), mod.impl.getOpParamsI32(r, 1));
@@ -2484,11 +2463,11 @@ test "rope_set_offset writes the last slot without disturbing the rest" {
 test "rope back flips the op but keeps the parameters" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const q = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.c.GGML_TYPE_F32, 128, 32, 6);
-    const pos = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.c.GGML_TYPE_I32, 6);
+    const q = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 128, 32, 6);
+    const pos = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.ggml_c.GGML_TYPE_I32, 6);
 
-    const r = ggml_rope_ext_back(&ctx, q, pos, null, 128, mod.impl.c.GGML_ROPE_TYPE_NEOX, 4096, 10000.0, 1.0, 0.0, 1.0, 0.0, 0.0);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, mod.impl.c.GGML_OP_ROPE_BACK), r.op);
+    const r = ggml_rope_ext_back(&ctx, q, pos, null, 128, mod.impl.ggml_c.GGML_ROPE_TYPE_NEOX, 4096, 10000.0, 1.0, 0.0, 1.0, 0.0, 0.0);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, mod.impl.ggml_c.GGML_OP_ROPE_BACK), r.op);
     try std.testing.expectEqual(@as(i32, 128), mod.impl.getOpParamsI32(r, 1));
     // set_offset accepts ROPE_BACK too.
     _ = ggml_rope_set_offset(r, 3);
@@ -2521,10 +2500,10 @@ test "yarn correction dims stay inside the dimension range" {
 test "rope_set_truncate stores the negation in slot 3" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const q = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.c.GGML_TYPE_F32, 128, 32, 6);
-    const pos = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.c.GGML_TYPE_I32, 6);
+    const q = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 128, 32, 6);
+    const pos = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.ggml_c.GGML_TYPE_I32, 6);
 
-    const r = ggml_rope(&ctx, q, pos, 128, mod.impl.c.GGML_ROPE_TYPE_NEOX);
+    const r = ggml_rope(&ctx, q, pos, 128, mod.impl.ggml_c.GGML_ROPE_TYPE_NEOX);
     try std.testing.expect(ggml_rope_get_truncate(r));
     _ = ggml_rope_set_truncate(r, false);
     try std.testing.expectEqual(@as(i32, 1), mod.impl.getOpParamsI32(r, 3));
@@ -2555,8 +2534,8 @@ fn convTranspose1dOutputSize(ins: i64, ks: i64, s: c_int, p: c_int, d: c_int) i6
 ///
 /// f16 normally, but bf16 kernels go through f32: there is no bf16 matmul path
 /// to feed. Mirrors the ternary the C repeats at every conv site.
-fn im2colType(a: *const mod.impl.c.ggml_tensor) mod.impl.c.enum_ggml_type {
-    return if (a.type == mod.impl.c.GGML_TYPE_BF16) mod.impl.c.GGML_TYPE_F32 else mod.impl.c.GGML_TYPE_F16;
+fn im2colType(a: *const mod.impl.ggml_c.ggml_tensor) mod.impl.ggml_c.enum_ggml_type {
+    return if (a.type == mod.impl.ggml_c.GGML_TYPE_BF16) mod.impl.ggml_c.GGML_TYPE_F32 else mod.impl.ggml_c.GGML_TYPE_F16;
 }
 
 /// Ports `ggml_im2col` (ggml.c:4468 @b1b770d90).
@@ -2571,10 +2550,10 @@ fn im2colType(a: *const mod.impl.c.ggml_tensor) mod.impl.c.enum_ggml_type {
 /// - `s0`, `s1`: stride, `p0`, `p1`: padding, `d0`, `d1`: dilation.
 /// - `is_2D`: false collapses the vertical dimension for 1-D convolution.
 /// - `dst_type`: the intermediate type, chosen by the caller.
-pub export fn ggml_im2col(
+pub fn ggml_im2col(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
     s0: c_int,
     s1: c_int,
     p0: c_int,
@@ -2582,8 +2561,8 @@ pub export fn ggml_im2col(
     d0: c_int,
     d1: c_int,
     is_2D: bool,
-    dst_type: mod.impl.c.enum_ggml_type,
-) *mod.impl.c.ggml_tensor {
+    dst_type: mod.impl.ggml_c.enum_ggml_type,
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     if (is_2D) {
         mod.impl.assert(a.ne[2] == b.ne[2], "a->ne[2] == b->ne[2]");
     } else {
@@ -2607,7 +2586,7 @@ pub export fn ggml_im2col(
     const result = mod.context.ggml_new_tensor(ctx, dst_type, 4, &ne);
     mod.impl.setOpParamsValue(result, [_]i32{ s0, s1, p0, p1, d0, d1, if (is_2D) 1 else 0 });
 
-    result.op = mod.impl.c.GGML_OP_IM2COL;
+    result.op = mod.impl.ggml_c.GGML_OP_IM2COL;
     result.src[0] = a;
     result.src[1] = b;
     return result;
@@ -2617,10 +2596,10 @@ pub export fn ggml_im2col(
 ///
 /// The gradient of `im2col`. The output shape cannot be derived from the
 /// inputs, so the caller supplies it.
-pub export fn ggml_im2col_back(
+pub fn ggml_im2col_back(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
     ne: [*]const i64,
     s0: c_int,
     s1: c_int,
@@ -2629,11 +2608,11 @@ pub export fn ggml_im2col_back(
     d0: c_int,
     d1: c_int,
     is_2D: bool,
-) *mod.impl.c.ggml_tensor {
-    const result = mod.context.ggml_new_tensor(ctx, mod.impl.c.GGML_TYPE_F32, 4, ne);
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    const result = mod.context.ggml_new_tensor(ctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, ne);
     mod.impl.setOpParamsValue(result, [_]i32{ s0, s1, p0, p1, d0, d1, if (is_2D) 1 else 0 });
 
-    result.op = mod.impl.c.GGML_OP_IM2COL_BACK;
+    result.op = mod.impl.ggml_c.GGML_OP_IM2COL_BACK;
     result.src[0] = a;
     result.src[1] = b;
     return result;
@@ -2644,7 +2623,7 @@ pub export fn ggml_im2col_back(
 /// im2col, then one matmul, then a reshape and a permute back to [N, OC, OL].
 /// No op code of its own. The matmul's rows come out as [OC, N, OL], so it is
 /// reshaped to that and permuted to [N, OC, OL].
-pub export fn ggml_conv_1d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, s0: c_int, p0: c_int, d0: c_int) *mod.impl.c.ggml_tensor {
+pub fn ggml_conv_1d(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, s0: c_int, p0: c_int, d0: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     // [N, OL, IC * K]
     const im2col = ggml_im2col(ctx, a, b, s0, 0, p0, 0, d0, 0, false, im2colType(a));
 
@@ -2665,7 +2644,7 @@ pub export fn ggml_conv_1d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor
 /// Ports `ggml_conv_1d_ph` (ggml.c:4559 @b1b770d90).
 ///
 /// "Padded half": padding chosen so the output length matches the input.
-pub export fn ggml_conv_1d_ph(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, s: c_int, d: c_int) *mod.impl.c.ggml_tensor {
+pub fn ggml_conv_1d_ph(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, s: c_int, d: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return ggml_conv_1d(ctx, a, b, s, @intCast(@divTrunc(a.ne[0], 2)), d);
 }
 
@@ -2673,7 +2652,7 @@ pub export fn ggml_conv_1d_ph(ctx: *mod.context.Context, a: *mod.impl.c.ggml_ten
 ///
 /// Depthwise: each channel is convolved by its own kernel, so there is no
 /// summation across channels and the matmul is smaller.
-pub export fn ggml_conv_1d_dw(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, s0: c_int, p0: c_int, d0: c_int) *mod.impl.c.ggml_tensor {
+pub fn ggml_conv_1d_dw(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, s0: c_int, p0: c_int, d0: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const new_b = ggml_reshape_4d(ctx, b, b.ne[0], 1, b.ne[1], b.ne[2]);
     const im2col = ggml_im2col(ctx, a, new_b, s0, 0, p0, 0, d0, 0, false, im2colType(a));
     const result = ggml_mul_mat(ctx, im2col, a);
@@ -2681,7 +2660,7 @@ pub export fn ggml_conv_1d_dw(ctx: *mod.context.Context, a: *mod.impl.c.ggml_ten
 }
 
 /// Ports `ggml_conv_1d_dw_ph` (ggml.c:4590 @b1b770d90).
-pub export fn ggml_conv_1d_dw_ph(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, s0: c_int, d0: c_int) *mod.impl.c.ggml_tensor {
+pub fn ggml_conv_1d_dw_ph(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, s0: c_int, d0: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return ggml_conv_1d_dw(ctx, a, b, s0, @intCast(@divTrunc(a.ne[0], 2)), d0);
 }
 
@@ -2690,11 +2669,11 @@ pub export fn ggml_conv_1d_dw_ph(ctx: *mod.context.Context, a: *mod.impl.c.ggml_
 /// Folds overlapping columns back into a signal, summing where they overlap.
 /// The input's first dimension packs `oc` blocks of kernel taps, so it must
 /// divide evenly.
-pub export fn ggml_col2im_1d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, s0: c_int, oc: c_int, p0: c_int) *mod.impl.c.ggml_tensor {
+pub fn ggml_col2im_1d(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, s0: c_int, oc: c_int, p0: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_is_matrix(a), "ggml_is_matrix(a)");
     mod.impl.assert(mod.types.ggml_is_contiguous(a), "ggml_is_contiguous(a)");
     mod.impl.assert(
-        a.type == mod.impl.c.GGML_TYPE_F32 or a.type == mod.impl.c.GGML_TYPE_F16 or a.type == mod.impl.c.GGML_TYPE_BF16,
+        a.type == mod.impl.ggml_c.GGML_TYPE_F32 or a.type == mod.impl.ggml_c.GGML_TYPE_F16 or a.type == mod.impl.ggml_c.GGML_TYPE_BF16,
         "a->type == GGML_TYPE_F32 || a->type == GGML_TYPE_F16 || a->type == GGML_TYPE_BF16",
     );
     mod.impl.assert(s0 > 0, "s0 > 0");
@@ -2713,7 +2692,7 @@ pub export fn ggml_col2im_1d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tens
     const result = mod.context.ggml_new_tensor(ctx, a.type, 2, &ne);
     mod.impl.setOpParamsValue(result, [_]i32{ s0, oc, p0 });
 
-    result.op = mod.impl.c.GGML_OP_COL2IM_1D;
+    result.op = mod.impl.ggml_c.GGML_OP_COL2IM_1D;
     result.src[0] = a;
     return result;
 }
@@ -2722,7 +2701,7 @@ pub export fn ggml_col2im_1d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tens
 ///
 /// Padding and dilation are asserted away rather than supported; the C takes
 /// the arguments only to keep the signature stable.
-pub export fn ggml_conv_transpose_1d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, s0: c_int, p0: c_int, d0: c_int) *mod.impl.c.ggml_tensor {
+pub fn ggml_conv_transpose_1d(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, s0: c_int, p0: c_int, d0: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_is_matrix(b), "ggml_is_matrix(b)");
     mod.impl.assert(a.ne[2] == b.ne[1], "a->ne[2] == b->ne[1]");
     mod.impl.assert(a.ne[3] == 1, "a->ne[3] == 1");
@@ -2735,10 +2714,10 @@ pub export fn ggml_conv_transpose_1d(ctx: *mod.context.Context, a: *mod.impl.c.g
         b.ne[2],
         1,
     };
-    const result = mod.context.ggml_new_tensor(ctx, mod.impl.c.GGML_TYPE_F32, 4, &ne);
+    const result = mod.context.ggml_new_tensor(ctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, &ne);
     mod.impl.setOpParamsValue(result, [_]i32{ s0, p0, d0 });
 
-    result.op = mod.impl.c.GGML_OP_CONV_TRANSPOSE_1D;
+    result.op = mod.impl.ggml_c.GGML_OP_CONV_TRANSPOSE_1D;
     result.src[0] = a;
     result.src[1] = b;
     return result;
@@ -2752,17 +2731,17 @@ test "im2col shape follows the convolution output formula" {
     var ctx = testContext(&buf);
 
     // kernel [KW, KH, IC, OC] = [3, 3, 4, 8]; image [IW, IH, IC, N] = [16, 16, 4, 1]
-    const kernel = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F16, 3, 3, 4, 8);
-    const image = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F32, 16, 16, 4, 1);
+    const kernel = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F16, 3, 3, 4, 8);
+    const image = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 16, 16, 4, 1);
 
     // stride 1, pad 1, dilation 1 keeps the spatial size: (16 + 2 - 2 - 1)/1 + 1 = 16.
-    const r = ggml_im2col(&ctx, kernel, image, 1, 1, 1, 1, 1, 1, true, mod.impl.c.GGML_TYPE_F16);
+    const r = ggml_im2col(&ctx, kernel, image, 1, 1, 1, 1, 1, 1, true, mod.impl.ggml_c.GGML_TYPE_F16);
     try std.testing.expectEqual(@as(i64, 3 * 3 * 4), r.ne[0]); // IC*KH*KW
     try std.testing.expectEqual(@as(i64, 16), r.ne[1]); // OW
     try std.testing.expectEqual(@as(i64, 16), r.ne[2]); // OH
 
     // stride 2 halves it: (16 + 2 - 2 - 1)/2 + 1 = 8.
-    const strided = ggml_im2col(&ctx, kernel, image, 2, 2, 1, 1, 1, 1, true, mod.impl.c.GGML_TYPE_F16);
+    const strided = ggml_im2col(&ctx, kernel, image, 2, 2, 1, 1, 1, 1, true, mod.impl.ggml_c.GGML_TYPE_F16);
     try std.testing.expectEqual(@as(i64, 8), strided.ne[1]);
     try std.testing.expectEqual(@as(i64, 8), strided.ne[2]);
 
@@ -2777,13 +2756,13 @@ test "conv_1d builds a subgraph rather than its own op" {
     var ctx = testContext(&buf);
 
     // kernel [K, IC, OC] = [3, 4, 8]; signal [L, IC, N] = [32, 4, 1]
-    const kernel = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.c.GGML_TYPE_F16, 3, 4, 8);
-    const signal = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.c.GGML_TYPE_F32, 32, 4, 1);
+    const kernel = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.ggml_c.GGML_TYPE_F16, 3, 4, 8);
+    const signal = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 32, 4, 1);
 
     const r = ggml_conv_1d(&ctx, kernel, signal, 1, 1, 1);
     // The last node is the cont after the permute, not a conv op: this is a
     // composite.
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, mod.impl.c.GGML_OP_CONT), r.op);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, mod.impl.ggml_c.GGML_OP_CONT), r.op);
     try std.testing.expectEqual(@as(i64, 32), r.ne[0]); // OL, padding preserves length
     try std.testing.expectEqual(@as(i64, 8), r.ne[1]); // OC
 
@@ -2795,12 +2774,12 @@ test "conv_1d builds a subgraph rather than its own op" {
 test "bf16 kernels go through f32 rather than f16" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const f16_kernel = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.c.GGML_TYPE_F16, 3, 4, 8);
-    const bf16_kernel = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.c.GGML_TYPE_BF16, 3, 4, 8);
+    const f16_kernel = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.ggml_c.GGML_TYPE_F16, 3, 4, 8);
+    const bf16_kernel = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.ggml_c.GGML_TYPE_BF16, 3, 4, 8);
 
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_type, mod.impl.c.GGML_TYPE_F16), im2colType(f16_kernel));
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_type, mod.impl.ggml_c.GGML_TYPE_F16), im2colType(f16_kernel));
     // There is no bf16 matmul path to feed, so the intermediate widens.
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_type, mod.impl.c.GGML_TYPE_F32), im2colType(bf16_kernel));
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_type, mod.impl.ggml_c.GGML_TYPE_F32), im2colType(bf16_kernel));
 }
 
 test "col2im_1d inverts the column packing" {
@@ -2808,7 +2787,7 @@ test "col2im_1d inverts the column packing" {
     var ctx = testContext(&buf);
 
     // 24 = K(3) * oc(8) taps per column, 10 columns.
-    const cols = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 24, 10);
+    const cols = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 24, 10);
     const r = ggml_col2im_1d(&ctx, cols, 2, 8, 1);
 
     // T_out = (10-1)*2 + 3 - 2*1 = 19
@@ -2824,14 +2803,14 @@ test "conv_transpose_1d grows the signal" {
     var ctx = testContext(&buf);
 
     // kernel [K, OC, IC] = [4, 8, 4]; signal [L, IC] = [10, 4]
-    const kernel = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.c.GGML_TYPE_F32, 4, 8, 4);
-    const signal = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 10, 4);
+    const kernel = mod.context.ggml_new_tensor_3d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, 8, 4);
+    const signal = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 10, 4);
 
     // (10-1)*2 - 0 + 1*(4-1) + 1 = 22
     const r = ggml_conv_transpose_1d(&ctx, kernel, signal, 2, 0, 1);
     try std.testing.expectEqual(@as(i64, 22), r.ne[0]);
     try std.testing.expectEqual(@as(i64, 8), r.ne[1]);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, mod.impl.c.GGML_OP_CONV_TRANSPOSE_1D), r.op);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, mod.impl.ggml_c.GGML_OP_CONV_TRANSPOSE_1D), r.op);
 }
 
 test "convolution output size matches the formula" {
@@ -2857,17 +2836,17 @@ test "convolution output size matches the formula" {
 /// The matmul leaves the result as [OC, N, OH, OW], so it ends with a permute
 /// and a `cont` to reach [N, OC, OH, OW]. That copy is why the `_direct`
 /// variant exists.
-pub export fn ggml_conv_2d(
+pub fn ggml_conv_2d(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
     s0: c_int,
     s1: c_int,
     p0: c_int,
     p1: c_int,
     d0: c_int,
     d1: c_int,
-) *mod.impl.c.ggml_tensor {
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     // [N, OH, OW, IC*KH*KW]
     const im2col = ggml_im2col(ctx, a, b, s0, s1, p0, p1, d0, d1, true, im2colType(a));
 
@@ -2885,14 +2864,14 @@ pub export fn ggml_conv_2d(
 ///
 /// Stride equal to the kernel, no padding: tiles the input into
 /// non-overlapping patches. This is how vision transformers embed patches.
-pub export fn ggml_conv_2d_sk_p0(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_conv_2d_sk_p0(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return ggml_conv_2d(ctx, a, b, @intCast(a.ne[0]), @intCast(a.ne[1]), 0, 0, 1, 1);
 }
 
 /// Ports `ggml_conv_2d_s1_ph` (ggml.c:4795 @b1b770d90).
 ///
 /// Stride one, padding half the kernel: preserves the spatial size.
-pub export fn ggml_conv_2d_s1_ph(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_conv_2d_s1_ph(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return ggml_conv_2d(ctx, a, b, 1, 1, @intCast(@divTrunc(a.ne[0], 2)), @intCast(@divTrunc(a.ne[1], 2)), 1, 1);
 }
 
@@ -2901,17 +2880,17 @@ pub export fn ggml_conv_2d_s1_ph(ctx: *mod.context.Context, a: *mod.impl.c.ggml_
 /// Depthwise: one kernel per channel, no summation across channels. Both
 /// kernel and input are reshaped to fold the channel dimension into the batch,
 /// so a single grouped matmul does the work.
-pub export fn ggml_conv_2d_dw(
+pub fn ggml_conv_2d_dw(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
     s0: c_int,
     s1: c_int,
     p0: c_int,
     p1: c_int,
     d0: c_int,
     d1: c_int,
-) *mod.impl.c.ggml_tensor {
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     var new_a = ggml_reshape_4d(ctx, a, a.ne[0], a.ne[1], 1, a.ne[2] * a.ne[3]);
     const im2col = ggml_im2col(
         ctx,
@@ -2942,17 +2921,17 @@ pub export fn ggml_conv_2d_dw(
 /// When the input is in channels-first (CWHN) order the result is given the
 /// same permuted strides, so the layout survives the op rather than forcing a
 /// copy on either side.
-pub export fn ggml_conv_2d_dw_direct(
+pub fn ggml_conv_2d_dw_direct(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
     stride0: c_int,
     stride1: c_int,
     pad0: c_int,
     pad1: c_int,
     dilation0: c_int,
     dilation1: c_int,
-) *mod.impl.c.ggml_tensor {
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(a.ne[2] == 1, "a->ne[2] == 1");
     mod.impl.assert(a.ne[3] == b.ne[2], "a->ne[3] == b->ne[2]");
 
@@ -2974,7 +2953,7 @@ pub export fn ggml_conv_2d_dw_direct(
 
     mod.impl.setOpParamsValue(result, [_]i32{ stride0, stride1, pad0, pad1, dilation0, dilation1 });
 
-    result.op = mod.impl.c.GGML_OP_CONV_2D_DW;
+    result.op = mod.impl.ggml_c.GGML_OP_CONV_2D_DW;
     result.src[0] = a;
     result.src[1] = b;
     return result;
@@ -2984,17 +2963,17 @@ pub export fn ggml_conv_2d_dw_direct(
 ///
 /// Note the result takes `b`'s type, not f32: a direct kernel writes in the
 /// input's precision.
-pub export fn ggml_conv_2d_direct(
+pub fn ggml_conv_2d_direct(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
     s0: c_int,
     s1: c_int,
     p0: c_int,
     p1: c_int,
     d0: c_int,
     d1: c_int,
-) *mod.impl.c.ggml_tensor {
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(a.ne[2] == b.ne[2], "a->ne[2] == b->ne[2]");
 
     const ne = [_]i64{
@@ -3012,7 +2991,7 @@ pub export fn ggml_conv_2d_direct(
     mod.impl.setOpParamsI32(result, 4, d0);
     mod.impl.setOpParamsI32(result, 5, d1);
 
-    result.op = mod.impl.c.GGML_OP_CONV_2D;
+    result.op = mod.impl.ggml_c.GGML_OP_CONV_2D;
     result.src[0] = a;
     result.src[1] = b;
     return result;
@@ -3023,10 +3002,10 @@ pub export fn ggml_conv_2d_direct(
 /// The 3-D counterpart of `im2col`. Channels are folded into the batch
 /// dimension of both operands, so `IC` has to be passed explicitly to recover
 /// the real batch and output-channel counts.
-pub export fn ggml_im2col_3d(
+pub fn ggml_im2col_3d(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
     ic: i64,
     s0: c_int,
     s1: c_int,
@@ -3037,8 +3016,8 @@ pub export fn ggml_im2col_3d(
     d0: c_int,
     d1: c_int,
     d2: c_int,
-    dst_type: mod.impl.c.enum_ggml_type,
-) *mod.impl.c.ggml_tensor {
+    dst_type: mod.impl.ggml_c.enum_ggml_type,
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const n = @divTrunc(b.ne[3], ic);
     const od = convOutputSize(b.ne[2], a.ne[2], s2, p2, d2);
     const oh = convOutputSize(b.ne[1], a.ne[1], s1, p1, d1);
@@ -3052,7 +3031,7 @@ pub export fn ggml_im2col_3d(
     const result = mod.context.ggml_new_tensor(ctx, dst_type, 4, &ne);
     mod.impl.setOpParamsValue(result, [_]i32{ s0, s1, s2, p0, p1, p2, d0, d1, d2, @intCast(ic) });
 
-    result.op = mod.impl.c.GGML_OP_IM2COL_3D;
+    result.op = mod.impl.ggml_c.GGML_OP_IM2COL_3D;
     result.src[0] = a;
     result.src[1] = b;
     return result;
@@ -3062,10 +3041,10 @@ pub export fn ggml_im2col_3d(
 ///
 /// Composite, like `ggml_conv_2d`: im2col_3d, matmul, then reshapes and a
 /// permute to get the depth and channel dimensions back in order.
-pub export fn ggml_conv_3d(
+pub fn ggml_conv_3d(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
     ic: i64,
     s0: c_int,
     s1: c_int,
@@ -3076,7 +3055,7 @@ pub export fn ggml_conv_3d(
     d0: c_int,
     d1: c_int,
     d2: c_int,
-) *mod.impl.c.ggml_tensor {
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const im2col = ggml_im2col_3d(ctx, a, b, ic, s0, s1, s2, p0, p1, p2, d0, d1, d2, im2colType(a));
 
     const oc = @divTrunc(a.ne[3], ic);
@@ -3095,10 +3074,10 @@ pub export fn ggml_conv_3d(
 }
 
 /// Ports `ggml_conv_3d_direct` (ggml.c:4907 @b1b770d90).
-pub export fn ggml_conv_3d_direct(
+pub fn ggml_conv_3d_direct(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
     s0: c_int,
     s1: c_int,
     s2: c_int,
@@ -3111,7 +3090,7 @@ pub export fn ggml_conv_3d_direct(
     n_channels: c_int,
     n_batch: c_int,
     n_channels_out: c_int,
-) *mod.impl.c.ggml_tensor {
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(a.ne[3] == @as(i64, n_channels) * n_channels_out, "a->ne[3] == c * oc");
     mod.impl.assert(b.ne[3] == @as(i64, n_channels) * n_batch, "b->ne[3] == c * n");
 
@@ -3121,12 +3100,12 @@ pub export fn ggml_conv_3d_direct(
         convOutputSize(b.ne[2], a.ne[2], s2, p2, d2),
         @as(i64, n_channels_out) * n_batch,
     };
-    const result = mod.context.ggml_new_tensor(ctx, mod.impl.c.GGML_TYPE_F32, 4, &ne);
+    const result = mod.context.ggml_new_tensor(ctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, &ne);
 
     const params = [_]i32{ s0, s1, s2, p0, p1, p2, d0, d1, d2, n_channels, n_batch, n_channels_out };
     for (params, 0..) |v, i| mod.impl.setOpParamsI32(result, i, v);
 
-    result.op = mod.impl.c.GGML_OP_CONV_3D;
+    result.op = mod.impl.ggml_c.GGML_OP_CONV_3D;
     result.src[0] = a;
     result.src[1] = b;
     return result;
@@ -3140,7 +3119,7 @@ fn convTransposeOutputSize(ins: i64, ks: i64, s: c_int, p: c_int) i64 {
 /// Ports `ggml_conv_transpose_2d_p0` (ggml.c:4961 @b1b770d90).
 ///
 /// Zero padding only, which is what the `_p0` names.
-pub export fn ggml_conv_transpose_2d_p0(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, stride: c_int) *mod.impl.c.ggml_tensor {
+pub fn ggml_conv_transpose_2d_p0(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, stride: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(a.ne[3] == b.ne[2], "a->ne[3] == b->ne[2]");
 
     const ne = [_]i64{
@@ -3149,10 +3128,10 @@ pub export fn ggml_conv_transpose_2d_p0(ctx: *mod.context.Context, a: *mod.impl.
         a.ne[2],
         b.ne[3],
     };
-    const result = mod.context.ggml_new_tensor(ctx, mod.impl.c.GGML_TYPE_F32, 4, &ne);
+    const result = mod.context.ggml_new_tensor(ctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, &ne);
     mod.impl.setOpParamsI32(result, 0, stride);
 
-    result.op = mod.impl.c.GGML_OP_CONV_TRANSPOSE_2D;
+    result.op = mod.impl.ggml_c.GGML_OP_CONV_TRANSPOSE_2D;
     result.src[0] = a;
     result.src[1] = b;
     return result;
@@ -3171,7 +3150,7 @@ fn poolOutputSize(ins: i64, ks: c_int, s: c_int, p: f32) i64 {
 }
 
 /// Ports `ggml_pool_1d` (ggml.c:4993 @b1b770d90).
-pub export fn ggml_pool_1d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, op: mod.impl.c.enum_ggml_op_pool, k0: c_int, s0: c_int, p0: c_int) *mod.impl.c.ggml_tensor {
+pub fn ggml_pool_1d(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, op: mod.impl.ggml_c.enum_ggml_op_pool, k0: c_int, s0: c_int, p0: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const ne = [_]i64{
         poolOutputSize(a.ne[0], k0, s0, @floatFromInt(p0)),
         a.ne[1],
@@ -3180,10 +3159,10 @@ pub export fn ggml_pool_1d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor
     };
     mod.impl.assert(ne[0] > 0, "ne[0] > 0");
 
-    const result = mod.context.ggml_new_tensor(ctx, mod.impl.c.GGML_TYPE_F32, 4, &ne);
+    const result = mod.context.ggml_new_tensor(ctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, &ne);
     mod.impl.setOpParamsValue(result, [_]i32{ @intCast(op), k0, s0, p0 });
 
-    result.op = mod.impl.c.GGML_OP_POOL_1D;
+    result.op = mod.impl.ggml_c.GGML_OP_POOL_1D;
     result.src[0] = a;
     return result;
 }
@@ -3192,17 +3171,17 @@ pub export fn ggml_pool_1d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor
 ///
 /// The padding arguments are floats but land in `op_params` as i32, truncated,
 /// which is what the C's brace-initialised `int32_t params[]` does.
-pub export fn ggml_pool_2d(
+pub fn ggml_pool_2d(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    op: mod.impl.c.enum_ggml_op_pool,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    op: mod.impl.ggml_c.enum_ggml_op_pool,
     k0: c_int,
     k1: c_int,
     s0: c_int,
     s1: c_int,
     p0: f32,
     p1: f32,
-) *mod.impl.c.ggml_tensor {
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const ne = [_]i64{
         poolOutputSize(a.ne[0], k0, s0, p0),
         poolOutputSize(a.ne[1], k1, s1, p1),
@@ -3212,13 +3191,13 @@ pub export fn ggml_pool_2d(
     mod.impl.assert(ne[0] > 0, "ne[0] > 0");
     mod.impl.assert(ne[1] > 0, "ne[1] > 0");
 
-    const result = mod.context.ggml_new_tensor(ctx, mod.impl.c.GGML_TYPE_F32, 4, &ne);
+    const result = mod.context.ggml_new_tensor(ctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, &ne);
     mod.impl.setOpParamsValue(result, [_]i32{
         @intCast(op),      k0,                k1, s0, s1,
         @intFromFloat(p0), @intFromFloat(p1),
     });
 
-    result.op = mod.impl.c.GGML_OP_POOL_2D;
+    result.op = mod.impl.ggml_c.GGML_OP_POOL_2D;
     result.src[0] = a;
     return result;
 }
@@ -3227,25 +3206,25 @@ pub export fn ggml_pool_2d(
 ///
 /// `af` is the forward pass's input, needed because max pooling has to know
 /// which element won in order to route the gradient to it.
-pub export fn ggml_pool_2d_back(
+pub fn ggml_pool_2d_back(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    af: *mod.impl.c.ggml_tensor,
-    op: mod.impl.c.enum_ggml_op_pool,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    af: *mod.impl.ggml_c.ggml_tensor,
+    op: mod.impl.ggml_c.enum_ggml_op_pool,
     k0: c_int,
     k1: c_int,
     s0: c_int,
     s1: c_int,
     p0: f32,
     p1: f32,
-) *mod.impl.c.ggml_tensor {
-    const result = mod.context.ggml_new_tensor(ctx, mod.impl.c.GGML_TYPE_F32, 4, &af.ne);
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    const result = mod.context.ggml_new_tensor(ctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, &af.ne);
     mod.impl.setOpParamsValue(result, [_]i32{
         @intCast(op),      k0,                k1, s0, s1,
         @intFromFloat(p0), @intFromFloat(p1),
     });
 
-    result.op = mod.impl.c.GGML_OP_POOL_2D_BACK;
+    result.op = mod.impl.ggml_c.GGML_OP_POOL_2D_BACK;
     result.src[0] = a;
     result.src[1] = af;
     return result;
@@ -3259,13 +3238,13 @@ test "conv_2d composite ends in a contiguous permute" {
     var ctx = testContext(&buf);
 
     // kernel [KW, KH, IC, OC]; image [IW, IH, IC, N]
-    const kernel = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F16, 3, 3, 4, 8);
-    const image = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F32, 16, 16, 4, 2);
+    const kernel = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F16, 3, 3, 4, 8);
+    const image = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 16, 16, 4, 2);
 
     const r = ggml_conv_2d(&ctx, kernel, image, 1, 1, 1, 1, 1, 1);
     // The matmul leaves [OC, N, OH, OW], so the graph ends with a cont over a
     // permute rather than a conv op.
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, mod.impl.c.GGML_OP_CONT), r.op);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, mod.impl.ggml_c.GGML_OP_CONT), r.op);
     try std.testing.expectEqual(@as(i64, 16), r.ne[0]); // OW
     try std.testing.expectEqual(@as(i64, 16), r.ne[1]); // OH
     try std.testing.expectEqual(@as(i64, 8), r.ne[2]); // OC
@@ -3275,13 +3254,13 @@ test "conv_2d composite ends in a contiguous permute" {
 test "conv_2d_direct has its own op and keeps the input type" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const kernel = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F16, 3, 3, 4, 8);
-    const image = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F16, 16, 16, 4, 2);
+    const kernel = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F16, 3, 3, 4, 8);
+    const image = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F16, 16, 16, 4, 2);
 
     const r = ggml_conv_2d_direct(&ctx, kernel, image, 1, 1, 1, 1, 1, 1);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, mod.impl.c.GGML_OP_CONV_2D), r.op);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, mod.impl.ggml_c.GGML_OP_CONV_2D), r.op);
     // Direct kernels write in the input's precision, not f32.
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_type, mod.impl.c.GGML_TYPE_F16), r.type);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_type, mod.impl.ggml_c.GGML_TYPE_F16), r.type);
     try std.testing.expectEqual(@as(i64, 16), r.ne[0]);
     try std.testing.expectEqual(@as(i64, 8), r.ne[2]);
     // All six geometry values, in order.
@@ -3295,8 +3274,8 @@ test "patch embedding tiles the image" {
     var ctx = testContext(&buf);
 
     // A 14x14 patch kernel over a 224x224 image gives a 16x16 grid.
-    const kernel = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F16, 14, 14, 3, 768);
-    const image = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F32, 224, 224, 3, 1);
+    const kernel = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F16, 14, 14, 3, 768);
+    const image = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 224, 224, 3, 1);
 
     const r = ggml_conv_2d_sk_p0(&ctx, kernel, image);
     try std.testing.expectEqual(@as(i64, 16), r.ne[0]);
@@ -3304,8 +3283,8 @@ test "patch embedding tiles the image" {
     try std.testing.expectEqual(@as(i64, 768), r.ne[2]);
 
     // Stride-1 half-padding preserves the spatial size instead.
-    const k3 = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F16, 3, 3, 3, 16);
-    const small = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F32, 32, 32, 3, 1);
+    const k3 = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F16, 3, 3, 3, 16);
+    const small = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 32, 32, 3, 1);
     const same = ggml_conv_2d_s1_ph(&ctx, k3, small);
     try std.testing.expectEqual(@as(i64, 32), same.ne[0]);
     try std.testing.expectEqual(@as(i64, 32), same.ne[1]);
@@ -3315,11 +3294,11 @@ test "depthwise direct conv preserves a channels-first layout" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
 
-    const kernel = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F32, 3, 3, 1, 8);
-    const plain = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F32, 16, 16, 8, 1);
+    const kernel = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 3, 3, 1, 8);
+    const plain = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 16, 16, 8, 1);
 
     const r = ggml_conv_2d_dw_direct(&ctx, kernel, plain, 1, 1, 1, 1, 1, 1);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, mod.impl.c.GGML_OP_CONV_2D_DW), r.op);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, mod.impl.ggml_c.GGML_OP_CONV_2D_DW), r.op);
     try std.testing.expectEqual(@as(i64, 8), r.ne[2]); // channels pass through
     // A contiguous input yields a contiguous result.
     try std.testing.expect(mod.types.ggml_is_contiguous(r));
@@ -3328,7 +3307,7 @@ test "depthwise direct conv preserves a channels-first layout" {
     // layout survives instead of forcing a copy. Built by hand rather than via
     // permute, because ggml_is_contiguous_channels wants this exact stride
     // shape: channels innermost, nb[2] equal to one element.
-    const permuted = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F32, 16, 16, 8, 1);
+    const permuted = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 16, 16, 8, 1);
     permuted.nb[0] = 8 * 4;
     permuted.nb[1] = 16 * permuted.nb[0];
     permuted.nb[2] = 4;
@@ -3341,23 +3320,23 @@ test "depthwise direct conv preserves a channels-first layout" {
 test "pooling shrinks by the pool formula" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const a = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F32, 32, 32, 8, 1);
+    const a = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 32, 32, 8, 1);
 
     // 2x2 stride 2 halves both spatial dimensions and leaves channels alone.
-    const p = ggml_pool_2d(&ctx, a, mod.impl.c.GGML_OP_POOL_MAX, 2, 2, 2, 2, 0, 0);
+    const p = ggml_pool_2d(&ctx, a, mod.impl.ggml_c.GGML_OP_POOL_MAX, 2, 2, 2, 2, 0, 0);
     try std.testing.expectEqual(@as(i64, 16), p.ne[0]);
     try std.testing.expectEqual(@as(i64, 16), p.ne[1]);
     try std.testing.expectEqual(@as(i64, 8), p.ne[2]);
-    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.c.GGML_OP_POOL_MAX)), mod.impl.getOpParamsI32(p, 0));
+    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.ggml_c.GGML_OP_POOL_MAX)), mod.impl.getOpParamsI32(p, 0));
 
-    const p1 = ggml_pool_1d(&ctx, a, mod.impl.c.GGML_OP_POOL_AVG, 4, 4, 0);
+    const p1 = ggml_pool_1d(&ctx, a, mod.impl.ggml_c.GGML_OP_POOL_AVG, 4, 4, 0);
     try std.testing.expectEqual(@as(i64, 8), p1.ne[0]);
-    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.c.GGML_OP_POOL_AVG)), mod.impl.getOpParamsI32(p1, 0));
+    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.ggml_c.GGML_OP_POOL_AVG)), mod.impl.getOpParamsI32(p1, 0));
 
     // The backward pass takes the forward input's shape, not the pooled one.
-    const back = ggml_pool_2d_back(&ctx, p, a, mod.impl.c.GGML_OP_POOL_MAX, 2, 2, 2, 2, 0, 0);
+    const back = ggml_pool_2d_back(&ctx, p, a, mod.impl.ggml_c.GGML_OP_POOL_MAX, 2, 2, 2, 2, 0, 0);
     try std.testing.expect(mod.types.ggml_are_same_shape(back, a));
-    try std.testing.expectEqual(@as(?*mod.impl.c.ggml_tensor, a), back.src[1]);
+    try std.testing.expectEqual(@as(?*mod.impl.ggml_c.ggml_tensor, a), back.src[1]);
 }
 
 test "conv_transpose_2d grows the image" {
@@ -3365,8 +3344,8 @@ test "conv_transpose_2d grows the image" {
     var ctx = testContext(&buf);
 
     // kernel [KW, KH, OC, IC]; image [IW, IH, IC, N]
-    const kernel = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F16, 4, 4, 8, 16);
-    const image = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 8, 16, 1);
+    const kernel = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F16, 4, 4, 8, 16);
+    const image = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 8, 16, 1);
 
     // (8-1)*2 - 0 + 4 = 18
     const r = ggml_conv_transpose_2d_p0(&ctx, kernel, image, 2);
@@ -3381,10 +3360,10 @@ test "3d im2col folds channels into the batch dimension" {
     var ctx = testContext(&buf);
 
     // IC=2: kernel [KW, KH, KD, OC*IC], volume [IW, IH, ID, N*IC]
-    const kernel = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F16, 3, 3, 3, 8);
-    const volume = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F32, 16, 16, 16, 2);
+    const kernel = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F16, 3, 3, 3, 8);
+    const volume = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 16, 16, 16, 2);
 
-    const r = ggml_im2col_3d(&ctx, kernel, volume, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, mod.impl.c.GGML_TYPE_F16);
+    const r = ggml_im2col_3d(&ctx, kernel, volume, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, mod.impl.ggml_c.GGML_TYPE_F16);
     try std.testing.expectEqual(@as(i64, 3 * 3 * 3 * 2), r.ne[0]); // KW*KH*KD*IC
     try std.testing.expectEqual(@as(i64, 16), r.ne[1]); // OW
     try std.testing.expectEqual(@as(i64, 16), r.ne[2]); // OH
@@ -3399,20 +3378,20 @@ test "3d im2col folds channels into the batch dimension" {
 ///
 /// `mode` packs a scale mode in its low byte and flags above it, so it is
 /// masked before the range check.
-fn interpolateImpl(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, ne0: i64, ne1: i64, ne2: i64, ne3: i64, mode: u32) *mod.impl.c.ggml_tensor {
-    mod.impl.assert((mode & 0xFF) < mod.impl.c.GGML_SCALE_MODE_COUNT, "(mode & 0xFF) < GGML_SCALE_MODE_COUNT");
+fn interpolateImpl(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, ne0: i64, ne1: i64, ne2: i64, ne3: i64, mode: u32) *mod.impl.ggml_c.ggml_tensor {
+    mod.impl.assert((mode & 0xFF) < mod.impl.ggml_c.GGML_SCALE_MODE_COUNT, "(mode & 0xFF) < GGML_SCALE_MODE_COUNT");
     // Antialiasing is only implemented for bilinear.
     mod.impl.assert(
-        (mode & mod.impl.c.GGML_SCALE_FLAG_ANTIALIAS) == 0 or (mode & 0xFF) == mod.impl.c.GGML_SCALE_MODE_BILINEAR,
+        (mode & mod.impl.ggml_c.GGML_SCALE_FLAG_ANTIALIAS) == 0 or (mode & 0xFF) == mod.impl.ggml_c.GGML_SCALE_MODE_BILINEAR,
         "!(mode & GGML_SCALE_FLAG_ANTIALIAS) || (mode & 0xFF) == GGML_SCALE_MODE_BILINEAR",
     );
-    mod.impl.assert(a.type == mod.impl.c.GGML_TYPE_F32, "a->type == GGML_TYPE_F32");
+    mod.impl.assert(a.type == mod.impl.ggml_c.GGML_TYPE_F32, "a->type == GGML_TYPE_F32");
 
     const result = mod.context.ggml_new_tensor_4d(ctx, a.type, ne0, ne1, ne2, ne3);
     mod.impl.setOpParamsI32(result, 0, @bitCast(mode));
 
     // Interpolation and upscaling share one op code.
-    result.op = mod.impl.c.GGML_OP_UPSCALE;
+    result.op = mod.impl.ggml_c.GGML_OP_UPSCALE;
     result.src[0] = a;
     return result;
 }
@@ -3421,7 +3400,7 @@ fn interpolateImpl(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, ne0: i
 ///
 /// Scales the two spatial dimensions by an integer factor, leaving channels
 /// and batch alone.
-pub export fn ggml_upscale(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, scale_factor: c_int, mode: mod.impl.c.enum_ggml_scale_mode) *mod.impl.c.ggml_tensor {
+pub fn ggml_upscale(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, scale_factor: c_int, mode: mod.impl.ggml_c.enum_ggml_scale_mode) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(scale_factor > 1, "scale_factor > 1");
     return interpolateImpl(ctx, a, a.ne[0] * scale_factor, a.ne[1] * scale_factor, a.ne[2], a.ne[3], @intCast(mode));
 }
@@ -3430,7 +3409,7 @@ pub export fn ggml_upscale(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor
 ///
 /// The general form: any target shape, and `mode` may carry flags as well as a
 /// scale mode.
-pub export fn ggml_interpolate(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, ne0: i64, ne1: i64, ne2: i64, ne3: i64, mode: u32) *mod.impl.c.ggml_tensor {
+pub fn ggml_interpolate(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, ne0: i64, ne1: i64, ne2: i64, ne3: i64, mode: u32) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return interpolateImpl(ctx, a, ne0, ne1, ne2, ne3, mode);
 }
 
@@ -3438,9 +3417,9 @@ pub export fn ggml_interpolate(ctx: *mod.context.Context, a: *mod.impl.c.ggml_te
 ///
 /// Independent left and right padding on all four dimensions. Slot 8 records
 /// whether the padding wraps; `ggml_pad_ext_circular` flips it afterwards.
-pub export fn ggml_pad_ext(
+pub fn ggml_pad_ext(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
     lp0: c_int,
     rp0: c_int,
     lp1: c_int,
@@ -3449,7 +3428,7 @@ pub export fn ggml_pad_ext(
     rp2: c_int,
     lp3: c_int,
     rp3: c_int,
-) *mod.impl.c.ggml_tensor {
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const result = mod.context.ggml_new_tensor_4d(
         ctx,
         a.type,
@@ -3463,7 +3442,7 @@ pub export fn ggml_pad_ext(
     for (pads, 0..) |v, i| mod.impl.setOpParamsI32(result, i, v);
     mod.impl.setOpParamsI32(result, 8, 0); // not circular by default
 
-    result.op = mod.impl.c.GGML_OP_PAD;
+    result.op = mod.impl.ggml_c.GGML_OP_PAD;
     result.src[0] = a;
     return result;
 }
@@ -3471,7 +3450,7 @@ pub export fn ggml_pad_ext(
 /// Ports `ggml_pad` (ggml.c:5123 @b1b770d90).
 ///
 /// Right-hand padding only, which is the common case.
-pub export fn ggml_pad(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, p0: c_int, p1: c_int, p2: c_int, p3: c_int) *mod.impl.c.ggml_tensor {
+pub fn ggml_pad(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, p0: c_int, p1: c_int, p2: c_int, p3: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return ggml_pad_ext(ctx, a, 0, p0, 0, p1, 0, p2, 0, p3);
 }
 
@@ -3479,9 +3458,9 @@ pub export fn ggml_pad(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, p0
 ///
 /// Same shape as `ggml_pad_ext`, but the padding wraps around from the
 /// opposite edge rather than being filled with zeros.
-pub export fn ggml_pad_ext_circular(
+pub fn ggml_pad_ext_circular(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
     lp0: c_int,
     rp0: c_int,
     lp1: c_int,
@@ -3490,14 +3469,14 @@ pub export fn ggml_pad_ext_circular(
     rp2: c_int,
     lp3: c_int,
     rp3: c_int,
-) *mod.impl.c.ggml_tensor {
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const result = ggml_pad_ext(ctx, a, lp0, rp0, lp1, rp1, lp2, rp2, lp3, rp3);
     mod.impl.setOpParamsI32(result, 8, 1);
     return result;
 }
 
 /// Ports `ggml_pad_circular` (ggml.c:5135 @b1b770d90).
-pub export fn ggml_pad_circular(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, p0: c_int, p1: c_int, p2: c_int, p3: c_int) *mod.impl.c.ggml_tensor {
+pub fn ggml_pad_circular(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, p0: c_int, p1: c_int, p2: c_int, p3: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return ggml_pad_ext_circular(ctx, a, 0, p0, 0, p1, 0, p2, 0, p3);
 }
 
@@ -3506,18 +3485,18 @@ pub export fn ggml_pad_circular(ctx: *mod.context.Context, a: *mod.impl.c.ggml_t
 /// Mirrors the signal at each edge instead of filling. The padding must be
 /// shorter than the dimension, since there would otherwise be nothing to
 /// reflect.
-pub export fn ggml_pad_reflect_1d(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, p0: c_int, p1: c_int) *mod.impl.c.ggml_tensor {
+pub fn ggml_pad_reflect_1d(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, p0: c_int, p1: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(p0 >= 0, "p0 >= 0");
     mod.impl.assert(p1 >= 0, "p1 >= 0");
     mod.impl.assert(p0 < a.ne[0], "p0 < a->ne[0]");
     mod.impl.assert(p1 < a.ne[0], "p1 < a->ne[0]");
     mod.impl.assert(mod.types.ggml_is_contiguous(a), "ggml_is_contiguous(a)");
-    mod.impl.assert(a.type == mod.impl.c.GGML_TYPE_F32, "a->type == GGML_TYPE_F32");
+    mod.impl.assert(a.type == mod.impl.ggml_c.GGML_TYPE_F32, "a->type == GGML_TYPE_F32");
 
     const result = mod.context.ggml_new_tensor_4d(ctx, a.type, a.ne[0] + p0 + p1, a.ne[1], a.ne[2], a.ne[3]);
     mod.impl.setOpParamsValue(result, [_]i32{ p0, p1 });
 
-    result.op = mod.impl.c.GGML_OP_PAD_REFLECT_1D;
+    result.op = mod.impl.ggml_c.GGML_OP_PAD_REFLECT_1D;
     result.src[0] = a;
     return result;
 }
@@ -3528,18 +3507,18 @@ pub export fn ggml_pad_reflect_1d(ctx: *mod.context.Context, a: *mod.impl.c.ggml
 test "upscale scales only the spatial dimensions" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const a = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F32, 16, 16, 8, 2);
+    const a = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 16, 16, 8, 2);
 
-    const r = ggml_upscale(&ctx, a, 2, mod.impl.c.GGML_SCALE_MODE_NEAREST);
+    const r = ggml_upscale(&ctx, a, 2, mod.impl.ggml_c.GGML_SCALE_MODE_NEAREST);
     try std.testing.expectEqual(@as(i64, 32), r.ne[0]);
     try std.testing.expectEqual(@as(i64, 32), r.ne[1]);
     try std.testing.expectEqual(@as(i64, 8), r.ne[2]); // channels unchanged
     try std.testing.expectEqual(@as(i64, 2), r.ne[3]);
     // Upscale and interpolate share one op code.
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, mod.impl.c.GGML_OP_UPSCALE), r.op);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, mod.impl.ggml_c.GGML_OP_UPSCALE), r.op);
 
     // The general form takes an arbitrary target shape.
-    const ext = ggml_interpolate(&ctx, a, 24, 20, 8, 2, mod.impl.c.GGML_SCALE_MODE_BILINEAR);
+    const ext = ggml_interpolate(&ctx, a, 24, 20, 8, 2, mod.impl.ggml_c.GGML_SCALE_MODE_BILINEAR);
     try std.testing.expectEqual(@as(i64, 24), ext.ne[0]);
     try std.testing.expectEqual(@as(i64, 20), ext.ne[1]);
 }
@@ -3547,24 +3526,24 @@ test "upscale scales only the spatial dimensions" {
 test "interpolate mode packs flags above the scale mode" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const a = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F32, 16, 16, 3, 1);
+    const a = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 16, 16, 3, 1);
 
     // Antialiasing is a flag above the low byte, and only bilinear accepts it.
-    const mode: u32 = mod.impl.c.GGML_SCALE_MODE_BILINEAR | mod.impl.c.GGML_SCALE_FLAG_ANTIALIAS;
+    const mode: u32 = mod.impl.ggml_c.GGML_SCALE_MODE_BILINEAR | mod.impl.ggml_c.GGML_SCALE_FLAG_ANTIALIAS;
     const r = ggml_interpolate(&ctx, a, 8, 8, 3, 1, mode);
     try std.testing.expectEqual(@as(i32, @bitCast(mode)), mod.impl.getOpParamsI32(r, 0));
     try std.testing.expectEqual(@as(i64, 8), r.ne[0]);
 
     // The scale mode survives the round trip through op_params intact.
     const stored: u32 = @bitCast(mod.impl.getOpParamsI32(r, 0));
-    try std.testing.expectEqual(@as(u32, mod.impl.c.GGML_SCALE_MODE_BILINEAR), stored & 0xFF);
-    try std.testing.expect((stored & mod.impl.c.GGML_SCALE_FLAG_ANTIALIAS) != 0);
+    try std.testing.expectEqual(@as(u32, mod.impl.ggml_c.GGML_SCALE_MODE_BILINEAR), stored & 0xFF);
+    try std.testing.expect((stored & mod.impl.ggml_c.GGML_SCALE_FLAG_ANTIALIAS) != 0);
 }
 
 test "padding grows each dimension by both margins" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const a = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F32, 16, 8, 4, 2);
+    const a = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 16, 8, 4, 2);
 
     // ggml_pad is right-hand only.
     const r = ggml_pad(&ctx, a, 2, 3, 0, 0);
@@ -3585,7 +3564,7 @@ test "padding grows each dimension by both margins" {
 test "circular padding differs only in the wrap flag" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const a = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F32, 16, 8, 4, 2);
+    const a = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 16, 8, 4, 2);
 
     const plain = ggml_pad_ext(&ctx, a, 1, 1, 0, 0, 0, 0, 0, 0);
     const wrap = ggml_pad_ext_circular(&ctx, a, 1, 1, 0, 0, 0, 0, 0, 0);
@@ -3599,14 +3578,14 @@ test "circular padding differs only in the wrap flag" {
 test "reflect padding grows only the first dimension" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 16, 4);
+    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 16, 4);
 
     const r = ggml_pad_reflect_1d(&ctx, a, 3, 5);
     try std.testing.expectEqual(@as(i64, 24), r.ne[0]);
     try std.testing.expectEqual(@as(i64, 4), r.ne[1]);
     try std.testing.expectEqual(@as(i32, 3), mod.impl.getOpParamsI32(r, 0));
     try std.testing.expectEqual(@as(i32, 5), mod.impl.getOpParamsI32(r, 1));
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, mod.impl.c.GGML_OP_PAD_REFLECT_1D), r.op);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, mod.impl.ggml_c.GGML_OP_PAD_REFLECT_1D), r.op);
 }
 
 // -----------------------------------------------------------------------------
@@ -3615,13 +3594,13 @@ test "reflect padding grows only the first dimension" {
 /// Ports `ggml_argsort` (ggml.c:5334 @b1b770d90).
 ///
 /// Returns indices, not values, so the result is i32 whatever went in.
-pub export fn ggml_argsort(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, order: mod.impl.c.enum_ggml_sort_order) *mod.impl.c.ggml_tensor {
+pub fn ggml_argsort(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, order: mod.impl.ggml_c.enum_ggml_sort_order) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(a.ne[0] <= std.math.maxInt(i32), "a->ne[0] <= INT32_MAX");
 
-    const result = mod.context.ggml_new_tensor(ctx, mod.impl.c.GGML_TYPE_I32, mod.impl.c.GGML_MAX_DIMS, &a.ne);
+    const result = mod.context.ggml_new_tensor(ctx, mod.impl.ggml_c.GGML_TYPE_I32, mod.impl.ggml_c.GGML_MAX_DIMS, &a.ne);
     mod.impl.setOpParamsI32(result, 0, @intCast(order));
 
-    result.op = mod.impl.c.GGML_OP_ARGSORT;
+    result.op = mod.impl.ggml_c.GGML_OP_ARGSORT;
     result.src[0] = a;
     return result;
 }
@@ -3631,10 +3610,10 @@ pub export fn ggml_argsort(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor
 /// A full descending sort, then a view of its first `k` columns. Cheaper than
 /// it looks only when the backend fuses the two; `ggml_top_k` is the dedicated
 /// op that avoids sorting the tail.
-pub export fn ggml_argsort_top_k(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, k: c_int) *mod.impl.c.ggml_tensor {
+pub fn ggml_argsort_top_k(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, k: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(a.ne[0] >= k, "a->ne[0] >= k");
 
-    const sorted = ggml_argsort(ctx, a, mod.impl.c.GGML_SORT_ORDER_DESC);
+    const sorted = ggml_argsort(ctx, a, mod.impl.ggml_c.GGML_SORT_ORDER_DESC);
     return ggml_view_4d(
         ctx,
         sorted,
@@ -3650,11 +3629,11 @@ pub export fn ggml_argsort_top_k(ctx: *mod.context.Context, a: *mod.impl.c.ggml_
 }
 
 /// Ports `ggml_top_k` (ggml.c:5370 @b1b770d90).
-pub export fn ggml_top_k(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, k: c_int) *mod.impl.c.ggml_tensor {
+pub fn ggml_top_k(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, k: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(a.ne[0] >= k, "a->ne[0] >= k");
 
-    const result = mod.context.ggml_new_tensor_4d(ctx, mod.impl.c.GGML_TYPE_I32, k, a.ne[1], a.ne[2], a.ne[3]);
-    result.op = mod.impl.c.GGML_OP_TOP_K;
+    const result = mod.context.ggml_new_tensor_4d(ctx, mod.impl.ggml_c.GGML_TYPE_I32, k, a.ne[1], a.ne[2], a.ne[3]);
+    result.op = mod.impl.ggml_c.GGML_OP_TOP_K;
     result.src[0] = a;
     return result;
 }
@@ -3665,17 +3644,17 @@ pub export fn ggml_top_k(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, 
 /// Ports `ggml_arange` (ggml.c:5386 @b1b770d90).
 ///
 /// The only op with no source at all: it generates rather than transforms.
-pub export fn ggml_arange(ctx: *mod.context.Context, start: f32, stop: f32, step: f32) *mod.impl.c.ggml_tensor {
+pub fn ggml_arange(ctx: *mod.context.Context, start: f32, stop: f32, step: f32) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(stop > start, "stop > start");
 
     const steps: i64 = @intFromFloat(@ceil((stop - start) / step));
-    const result = mod.context.ggml_new_tensor_1d(ctx, mod.impl.c.GGML_TYPE_F32, steps);
+    const result = mod.context.ggml_new_tensor_1d(ctx, mod.impl.ggml_c.GGML_TYPE_F32, steps);
 
     mod.impl.setOpParamsF32(result, 0, start);
     mod.impl.setOpParamsF32(result, 1, stop);
     mod.impl.setOpParamsF32(result, 2, step);
 
-    result.op = mod.impl.c.GGML_OP_ARANGE;
+    result.op = mod.impl.ggml_c.GGML_OP_ARANGE;
     return result;
 }
 
@@ -3683,13 +3662,13 @@ pub export fn ggml_arange(ctx: *mod.context.Context, start: f32, stop: f32, step
 ///
 /// Sinusoidal position encoding for diffusion timesteps: one `dim`-wide
 /// embedding per timestep.
-pub export fn ggml_timestep_embedding(ctx: *mod.context.Context, timesteps: *mod.impl.c.ggml_tensor, dim: c_int, max_period: c_int) *mod.impl.c.ggml_tensor {
-    const result = mod.context.ggml_new_tensor_2d(ctx, mod.impl.c.GGML_TYPE_F32, dim, timesteps.ne[0]);
+pub fn ggml_timestep_embedding(ctx: *mod.context.Context, timesteps: *mod.impl.ggml_c.ggml_tensor, dim: c_int, max_period: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    const result = mod.context.ggml_new_tensor_2d(ctx, mod.impl.ggml_c.GGML_TYPE_F32, dim, timesteps.ne[0]);
 
     mod.impl.setOpParamsI32(result, 0, dim);
     mod.impl.setOpParamsI32(result, 1, max_period);
 
-    result.op = mod.impl.c.GGML_OP_TIMESTEP_EMBEDDING;
+    result.op = mod.impl.ggml_c.GGML_OP_TIMESTEP_EMBEDDING;
     result.src[0] = timesteps;
     return result;
 }
@@ -3698,7 +3677,7 @@ pub export fn ggml_timestep_embedding(ctx: *mod.context.Context, timesteps: *mod
 ///
 /// Circular shift along each dimension. Requires a contiguous first dimension,
 /// and each shift must be smaller in magnitude than the dimension it moves.
-pub export fn ggml_roll(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, shift0: c_int, shift1: c_int, shift2: c_int, shift3: c_int) *mod.impl.c.ggml_tensor {
+pub fn ggml_roll(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, shift0: c_int, shift1: c_int, shift2: c_int, shift3: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(a.nb[0] == mod.types.ggml_type_size(a.type), "a->nb[0] == ggml_type_size(a->type)");
 
     const shifts = [_]c_int{ shift0, shift1, shift2, shift3 };
@@ -3709,7 +3688,7 @@ pub export fn ggml_roll(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, s
     const result = mod.context.ggml_dup_tensor(ctx, a);
     for (shifts, 0..) |shift, i| mod.impl.setOpParamsI32(result, i, shift);
 
-    result.op = mod.impl.c.GGML_OP_ROLL;
+    result.op = mod.impl.ggml_c.GGML_OP_ROLL;
     result.src[0] = a;
     return result;
 }
@@ -3718,23 +3697,23 @@ pub export fn ggml_roll(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, s
 ///
 /// Masks a square matrix to one triangle. `type` selects which triangle and
 /// whether the diagonal is kept.
-pub export fn ggml_tri(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, tri_type: mod.impl.c.enum_ggml_tri_type) *mod.impl.c.ggml_tensor {
-    mod.impl.assert(a.type == mod.impl.c.GGML_TYPE_F32, "a->type == GGML_TYPE_F32");
+pub fn ggml_tri(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, tri_type: mod.impl.ggml_c.enum_ggml_tri_type) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    mod.impl.assert(a.type == mod.impl.ggml_c.GGML_TYPE_F32, "a->type == GGML_TYPE_F32");
     mod.impl.assert(mod.types.ggml_is_contiguous(a), "ggml_is_contiguous(a)");
     mod.impl.assert(a.ne[0] == a.ne[1], "a->ne[0] == a->ne[1]");
 
     const result = mod.context.ggml_dup_tensor(ctx, a);
     mod.impl.setOpParamsI32(result, 0, @intCast(tri_type));
 
-    result.op = mod.impl.c.GGML_OP_TRI;
+    result.op = mod.impl.ggml_c.GGML_OP_TRI;
     result.src[0] = a;
     return result;
 }
 
 /// Ports `ggml_fill_impl` (ggml.c:5300 @b1b770d90).
-fn fillImpl(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, value: f32, inplace: bool) *mod.impl.c.ggml_tensor {
+fn fillImpl(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, value: f32, inplace: bool) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(
-        a.type == mod.impl.c.GGML_TYPE_F32 or a.type == mod.impl.c.GGML_TYPE_F16,
+        a.type == mod.impl.ggml_c.GGML_TYPE_F32 or a.type == mod.impl.ggml_c.GGML_TYPE_F16,
         "a->type == GGML_TYPE_F32 || a->type == GGML_TYPE_F16",
     );
     mod.impl.assert(mod.types.ggml_is_contiguous(a), "ggml_is_contiguous(a)");
@@ -3742,18 +3721,18 @@ fn fillImpl(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, value: f32, i
     const result = dupOrView(ctx, a, inplace);
     mod.impl.setOpParamsF32(result, 0, value);
 
-    result.op = mod.impl.c.GGML_OP_FILL;
+    result.op = mod.impl.ggml_c.GGML_OP_FILL;
     result.src[0] = a;
     return result;
 }
 
 /// Ports `ggml_fill` (ggml.c:5318 @b1b770d90).
-pub export fn ggml_fill(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, value: f32) *mod.impl.c.ggml_tensor {
+pub fn ggml_fill(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, value: f32) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return fillImpl(ctx, a, value, false);
 }
 
 /// Ports `ggml_fill_inplace` (ggml.c:5325 @b1b770d90).
-pub export fn ggml_fill_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, value: f32) *mod.impl.c.ggml_tensor {
+pub fn ggml_fill_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, value: f32) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return fillImpl(ctx, a, value, true);
 }
 
@@ -3761,11 +3740,11 @@ pub export fn ggml_fill_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_t
 ///
 /// Its own op code rather than a `GGML_UNARY_OP`, because it carries a
 /// parameter and the unary ops do not.
-pub export fn ggml_leaky_relu(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, negative_slope: f32, inplace: bool) *mod.impl.c.ggml_tensor {
+pub fn ggml_leaky_relu(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, negative_slope: f32, inplace: bool) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     const result = dupOrView(ctx, a, inplace);
     mod.impl.setOpParamsValue(result, negative_slope);
 
-    result.op = mod.impl.c.GGML_OP_LEAKY_RELU;
+    result.op = mod.impl.ggml_c.GGML_OP_LEAKY_RELU;
     result.src[0] = a;
     return result;
 }
@@ -3774,8 +3753,8 @@ pub export fn ggml_leaky_relu(ctx: *mod.context.Context, a: *mod.impl.c.ggml_ten
 ///
 /// SwiGLU with OpenAI's clamping. Slots 0 and 1 are the op and swap flag that
 /// `gluImpl` writes; the two extra parameters go above them.
-pub export fn ggml_swiglu_oai(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, alpha: f32, limit: f32) *mod.impl.c.ggml_tensor {
-    const result = gluImpl(ctx, a, b, mod.impl.c.GGML_GLU_OP_SWIGLU_OAI, false);
+pub fn ggml_swiglu_oai(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, alpha: f32, limit: f32) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    const result = gluImpl(ctx, a, b, mod.impl.ggml_c.GGML_GLU_OP_SWIGLU_OAI, false);
     mod.impl.setOpParamsF32(result, 2, alpha);
     mod.impl.setOpParamsF32(result, 3, limit);
     return result;
@@ -3785,8 +3764,8 @@ pub export fn ggml_swiglu_oai(ctx: *mod.context.Context, a: *mod.impl.c.ggml_ten
 ///
 /// SwiGLU with the gate clamped to `limit`; the limit takes slot 3, as
 /// `ggml_swiglu_oai`'s does, and slot 2 stays zero.
-pub export fn ggml_swiglu_clamp(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, limit: f32) *mod.impl.c.ggml_tensor {
-    const result = gluImpl(ctx, a, b, mod.impl.c.GGML_GLU_OP_SWIGLU_CLAMP, false);
+pub fn ggml_swiglu_clamp(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, limit: f32) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    const result = gluImpl(ctx, a, b, mod.impl.ggml_c.GGML_GLU_OP_SWIGLU_CLAMP, false);
     mod.impl.setOpParamsF32(result, 3, limit);
     return result;
 }
@@ -3801,9 +3780,9 @@ pub export fn ggml_swiglu_clamp(ctx: *mod.context.Context, a: *mod.impl.c.ggml_t
 ///
 /// Splits an image into `w`-by-`w` windows, padding up to a whole number of
 /// them, and stacks the windows along the batch dimension.
-pub export fn ggml_win_part(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, w: c_int) *mod.impl.c.ggml_tensor {
+pub fn ggml_win_part(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, w: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(a.ne[3] == 1, "a->ne[3] == 1");
-    mod.impl.assert(a.type == mod.impl.c.GGML_TYPE_F32, "a->type == GGML_TYPE_F32");
+    mod.impl.assert(a.type == mod.impl.ggml_c.GGML_TYPE_F32, "a->type == GGML_TYPE_F32");
 
     // Padding needed to reach a whole number of windows on each axis.
     const px = @rem(w - @rem(a.ne[1], w), w);
@@ -3813,10 +3792,10 @@ pub export fn ggml_win_part(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tenso
     const np = npx * npy;
 
     const ne = [_]i64{ a.ne[0], w, w, np };
-    const result = mod.context.ggml_new_tensor(ctx, mod.impl.c.GGML_TYPE_F32, 4, &ne);
+    const result = mod.context.ggml_new_tensor(ctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, &ne);
     mod.impl.setOpParamsValue(result, [_]i32{ @intCast(npx), @intCast(npy), w });
 
-    result.op = mod.impl.c.GGML_OP_WIN_PART;
+    result.op = mod.impl.ggml_c.GGML_OP_WIN_PART;
     result.src[0] = a;
     return result;
 }
@@ -3825,14 +3804,14 @@ pub export fn ggml_win_part(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tenso
 ///
 /// The inverse. The original size cannot be recovered from the windows, so the
 /// caller supplies it.
-pub export fn ggml_win_unpart(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, w0: c_int, h0: c_int, w: c_int) *mod.impl.c.ggml_tensor {
-    mod.impl.assert(a.type == mod.impl.c.GGML_TYPE_F32, "a->type == GGML_TYPE_F32");
+pub fn ggml_win_unpart(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, w0: c_int, h0: c_int, w: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    mod.impl.assert(a.type == mod.impl.ggml_c.GGML_TYPE_F32, "a->type == GGML_TYPE_F32");
 
     const ne = [_]i64{ a.ne[0], w0, h0, 1 };
-    const result = mod.context.ggml_new_tensor(ctx, mod.impl.c.GGML_TYPE_F32, 3, &ne);
+    const result = mod.context.ggml_new_tensor(ctx, mod.impl.ggml_c.GGML_TYPE_F32, 3, &ne);
     mod.impl.setOpParamsValue(result, [_]i32{w});
 
-    result.op = mod.impl.c.GGML_OP_WIN_UNPART;
+    result.op = mod.impl.ggml_c.GGML_OP_WIN_UNPART;
     result.src[0] = a;
     return result;
 }
@@ -3841,26 +3820,26 @@ pub export fn ggml_win_unpart(ctx: *mod.context.Context, a: *mod.impl.c.ggml_ten
 ///
 /// Expands a table of relative position embeddings into a query-by-key matrix.
 /// The table holds `2*max(qh,kh) - 1` entries, one per possible offset.
-pub export fn ggml_get_rel_pos(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, qh: c_int, kh: c_int) *mod.impl.c.ggml_tensor {
+pub fn ggml_get_rel_pos(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, qh: c_int, kh: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(qh == kh, "qh == kh");
     mod.impl.assert(2 * @max(qh, kh) - 1 == a.ne[1], "2*MAX(qh, kh) - 1 == a->ne[1]");
 
     const ne = [_]i64{ a.ne[0], kh, qh, 1 };
-    const result = mod.context.ggml_new_tensor(ctx, mod.impl.c.GGML_TYPE_F16, 3, &ne);
+    const result = mod.context.ggml_new_tensor(ctx, mod.impl.ggml_c.GGML_TYPE_F16, 3, &ne);
 
-    result.op = mod.impl.c.GGML_OP_GET_REL_POS;
+    result.op = mod.impl.ggml_c.GGML_OP_GET_REL_POS;
     result.src[0] = a;
     return result;
 }
 
 /// Ports `ggml_add_rel_pos_impl` (ggml.c:5765 @b1b770d90).
-fn addRelPosImpl(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, pw: *mod.impl.c.ggml_tensor, ph: *mod.impl.c.ggml_tensor, inplace: bool) *mod.impl.c.ggml_tensor {
+fn addRelPosImpl(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, pw: *mod.impl.ggml_c.ggml_tensor, ph: *mod.impl.ggml_c.ggml_tensor, inplace: bool) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_are_same_shape(pw, ph), "ggml_are_same_shape(pw, ph)");
     mod.impl.assert(mod.types.ggml_is_contiguous(a), "ggml_is_contiguous(a)");
     mod.impl.assert(mod.types.ggml_is_contiguous(pw), "ggml_is_contiguous(pw)");
     mod.impl.assert(mod.types.ggml_is_contiguous(ph), "ggml_is_contiguous(ph)");
-    mod.impl.assert(ph.type == mod.impl.c.GGML_TYPE_F32, "ph->type == GGML_TYPE_F32");
-    mod.impl.assert(pw.type == mod.impl.c.GGML_TYPE_F32, "pw->type == GGML_TYPE_F32");
+    mod.impl.assert(ph.type == mod.impl.ggml_c.GGML_TYPE_F32, "ph->type == GGML_TYPE_F32");
+    mod.impl.assert(pw.type == mod.impl.ggml_c.GGML_TYPE_F32, "pw->type == GGML_TYPE_F32");
     mod.impl.assert(pw.ne[3] == a.ne[2], "pw->ne[3] == a->ne[2]");
     mod.impl.assert(pw.ne[0] * pw.ne[0] == a.ne[0], "pw->ne[0]*pw->ne[0] == a->ne[0]");
     mod.impl.assert(pw.ne[1] * pw.ne[2] == a.ne[1], "pw->ne[1]*pw->ne[2] == a->ne[1]");
@@ -3868,7 +3847,7 @@ fn addRelPosImpl(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, pw: *mod
     const result = dupOrView(ctx, a, inplace);
     mod.impl.setOpParamsI32(result, 0, if (inplace) 1 else 0);
 
-    result.op = mod.impl.c.GGML_OP_ADD_REL_POS;
+    result.op = mod.impl.ggml_c.GGML_OP_ADD_REL_POS;
     result.src[0] = a;
     result.src[1] = pw;
     result.src[2] = ph;
@@ -3876,12 +3855,12 @@ fn addRelPosImpl(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, pw: *mod
 }
 
 /// Ports `ggml_add_rel_pos` (ggml.c:5792 @b1b770d90).
-pub export fn ggml_add_rel_pos(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, pw: *mod.impl.c.ggml_tensor, ph: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_add_rel_pos(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, pw: *mod.impl.ggml_c.ggml_tensor, ph: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return addRelPosImpl(ctx, a, pw, ph, false);
 }
 
 /// Ports `ggml_add_rel_pos_inplace` (ggml.c:5800 @b1b770d90).
-pub export fn ggml_add_rel_pos_inplace(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, pw: *mod.impl.c.ggml_tensor, ph: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_add_rel_pos_inplace(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, pw: *mod.impl.ggml_c.ggml_tensor, ph: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return addRelPosImpl(ctx, a, pw, ph, true);
 }
 
@@ -3891,19 +3870,19 @@ pub export fn ggml_add_rel_pos_inplace(ctx: *mod.context.Context, a: *mod.impl.c
 // These mark a tensor's role for the graph allocator and the autodiff pass.
 
 /// Ports `ggml_set_input` (ggml.c:7940 @b1b770d90).
-pub export fn ggml_set_input(tensor: *mod.impl.c.ggml_tensor) void {
-    mod.impl.assert(tensor.op == mod.impl.c.GGML_OP_NONE, "tensor->op == GGML_OP_NONE");
-    tensor.flags |= mod.impl.c.GGML_TENSOR_FLAG_INPUT;
+pub fn ggml_set_input(tensor: *mod.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    mod.impl.assert(tensor.op == mod.impl.ggml_c.GGML_OP_NONE, "tensor->op == GGML_OP_NONE");
+    tensor.flags |= mod.impl.ggml_c.GGML_TENSOR_FLAG_INPUT;
 }
 
 /// Ports `ggml_set_output` (ggml.c:7945 @b1b770d90).
 ///
 /// Walks the view chain, because the allocator must not reuse the storage a
 /// view points into either.
-pub export fn ggml_set_output(tensor: *mod.impl.c.ggml_tensor) void {
-    var cur: ?*mod.impl.c.ggml_tensor = tensor;
-    while (cur) |t| : (cur = if (t.view_src != null) mod.impl.one(mod.impl.c.ggml_tensor, t.view_src) else null) {
-        t.flags |= mod.impl.c.GGML_TENSOR_FLAG_OUTPUT;
+pub fn ggml_set_output(tensor: *mod.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    var cur: ?*mod.impl.ggml_c.ggml_tensor = tensor;
+    while (cur) |t| : (cur = if (t.view_src != null) mod.impl.one(mod.impl.ggml_c.ggml_tensor, t.view_src) else null) {
+        t.flags |= mod.impl.ggml_c.GGML_TENSOR_FLAG_OUTPUT;
     }
 }
 
@@ -3911,16 +3890,16 @@ pub export fn ggml_set_output(tensor: *mod.impl.c.ggml_tensor) void {
 ///
 /// Only a leaf can be a parameter: something computed has a gradient path of
 /// its own.
-pub export fn ggml_set_param(tensor: *mod.impl.c.ggml_tensor) void {
-    mod.impl.assert(tensor.op == mod.impl.c.GGML_OP_NONE, "tensor->op == GGML_OP_NONE");
-    tensor.flags |= mod.impl.c.GGML_TENSOR_FLAG_PARAM;
+pub fn ggml_set_param(tensor: *mod.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    mod.impl.assert(tensor.op == mod.impl.ggml_c.GGML_OP_NONE, "tensor->op == GGML_OP_NONE");
+    tensor.flags |= mod.impl.ggml_c.GGML_TENSOR_FLAG_PARAM;
 }
 
 /// Ports `ggml_set_loss` (ggml.c:7956 @b1b770d90).
-pub export fn ggml_set_loss(tensor: *mod.impl.c.ggml_tensor) void {
+pub fn ggml_set_loss(tensor: *mod.impl.ggml_c.ggml_tensor) callconv(.c) void {
     mod.impl.assert(mod.types.ggml_is_scalar(tensor), "ggml_is_scalar(tensor)");
-    mod.impl.assert(tensor.type == mod.impl.c.GGML_TYPE_F32, "tensor->type == GGML_TYPE_F32");
-    tensor.flags |= mod.impl.c.GGML_TENSOR_FLAG_LOSS;
+    mod.impl.assert(tensor.type == mod.impl.ggml_c.GGML_TYPE_F32, "tensor->type == GGML_TYPE_F32");
+    tensor.flags |= mod.impl.ggml_c.GGML_TENSOR_FLAG_LOSS;
 }
 
 /// Ports `ggml_set_zero` (ggml.c:7543 @b1b770d90).
@@ -3928,12 +3907,12 @@ pub export fn ggml_set_loss(tensor: *mod.impl.c.ggml_tensor) void {
 /// Zeroes a tensor's data now, rather than adding a node. Goes through the
 /// backend when the tensor lives on one, since the memory may not be host
 /// addressable.
-pub export fn ggml_set_zero(tensor: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_set_zero(tensor: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     if (mod.types.ggml_is_empty(tensor)) return tensor;
 
     const nbytes = mod.types.ggml_nbytes(tensor);
     if (tensor.buffer != null) {
-        mod.impl.c.ggml_backend_tensor_memset(tensor, 0, 0, nbytes);
+        mod.impl.ggml_c.ggml_backend_tensor_memset(tensor, 0, 0, nbytes);
     } else {
         mod.impl.assert(tensor.data != null, "tensor->data");
         @memset(@as([*]u8, @ptrCast(tensor.data.?))[0..nbytes], 0);
@@ -3967,21 +3946,21 @@ pub export fn ggml_set_zero(tensor: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_te
 /// Return: a new f32 tensor owned by `ctx`.
 fn flashAttnExtImpl(
     ctx: *mod.context.Context,
-    q: *mod.impl.c.ggml_tensor,
-    k: *mod.impl.c.ggml_tensor,
-    v: *mod.impl.c.ggml_tensor,
-    mask: ?*mod.impl.c.ggml_tensor,
-    kv_rows: ?*mod.impl.c.ggml_tensor,
+    q: *mod.impl.ggml_c.ggml_tensor,
+    k: *mod.impl.ggml_c.ggml_tensor,
+    v: *mod.impl.ggml_c.ggml_tensor,
+    mask: ?*mod.impl.ggml_c.ggml_tensor,
+    kv_rows: ?*mod.impl.ggml_c.ggml_tensor,
     scale: f32,
     max_bias: f32,
     logit_softcap: f32,
-) *mod.impl.c.ggml_tensor {
+) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(canMulMat(k, q), "ggml_can_mul_mat(k, q)");
 
     if (kv_rows) |rows| {
         // k and v are shared by all q slices, kv_rows picks the rows of each slice
         mod.impl.assert(mask != null and mask.?.ne[0] == rows.ne[0], "mask && mask->ne[0] == kv_rows->ne[0]");
-        mod.impl.assert(rows.type == mod.impl.c.GGML_TYPE_I32 and mod.types.ggml_is_contiguous(rows), "kv_rows->type == GGML_TYPE_I32 && ggml_is_contiguous(kv_rows)");
+        mod.impl.assert(rows.type == mod.impl.ggml_c.GGML_TYPE_I32 and mod.types.ggml_is_contiguous(rows), "kv_rows->type == GGML_TYPE_I32 && ggml_is_contiguous(kv_rows)");
         mod.impl.assert(rows.ne[1] == q.ne[3] and rows.ne[2] == 1 and rows.ne[3] == 1, "kv_rows->ne[1] == q->ne[3] && kv_rows->ne[2] == 1 && kv_rows->ne[3] == 1");
         mod.impl.assert(k.ne[3] == 1, "k->ne[3] == 1");
         mod.impl.assert(v.ne[3] == 1, "v->ne[3] == 1");
@@ -3991,7 +3970,7 @@ fn flashAttnExtImpl(
     }
 
     if (mask) |m| {
-        mod.impl.assert(m.type == mod.impl.c.GGML_TYPE_F16, "mask->type == GGML_TYPE_F16");
+        mod.impl.assert(m.type == mod.impl.ggml_c.GGML_TYPE_F16, "mask->type == GGML_TYPE_F16");
         mod.impl.assert(mod.types.ggml_is_contiguous(m), "ggml_is_contiguous(mask)");
 
         mod.impl.assert(@rem(q.ne[2], m.ne[2]) == 0, "q->ne[2] % mask->ne[2] == 0");
@@ -4003,11 +3982,11 @@ fn flashAttnExtImpl(
 
     // permute(0, 2, 1, 3)
     const ne = [4]i64{ v.ne[0], q.ne[2], q.ne[1], q.ne[3] };
-    const result = mod.context.ggml_new_tensor(ctx, mod.impl.c.GGML_TYPE_F32, 4, &ne);
+    const result = mod.context.ggml_new_tensor(ctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, &ne);
 
     mod.impl.setOpParamsValue(result, [_]f32{ scale, max_bias, logit_softcap });
 
-    result.op = mod.impl.c.GGML_OP_FLASH_ATTN_EXT;
+    result.op = mod.impl.ggml_c.GGML_OP_FLASH_ATTN_EXT;
     result.src[0] = q;
     result.src[1] = k;
     result.src[2] = v;
@@ -4020,16 +3999,16 @@ fn flashAttnExtImpl(
 /// Ports `ggml_flash_attn_ext` (ggml.c:5463 @b1b770d90).
 ///
 /// `flashAttnExtImpl` without a row map.
-pub export fn ggml_flash_attn_ext(
+pub fn ggml_flash_attn_ext(
     ctx: *mod.context.Context,
-    q: *mod.impl.c.ggml_tensor,
-    k: *mod.impl.c.ggml_tensor,
-    v: *mod.impl.c.ggml_tensor,
-    mask: ?*mod.impl.c.ggml_tensor,
+    q: *mod.impl.ggml_c.ggml_tensor,
+    k: *mod.impl.ggml_c.ggml_tensor,
+    v: *mod.impl.ggml_c.ggml_tensor,
+    mask: ?*mod.impl.ggml_c.ggml_tensor,
     scale: f32,
     max_bias: f32,
     logit_softcap: f32,
-) *mod.impl.c.ggml_tensor {
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return flashAttnExtImpl(ctx, q, k, v, mask, null, scale, max_bias, logit_softcap);
 }
 
@@ -4038,23 +4017,23 @@ pub export fn ggml_flash_attn_ext(
 /// `flashAttnExtImpl` with a row map: each `q` slice attends to its own list
 /// of rows of the shared `k` and `v`. Negative rows are padding, and their
 /// mask entries must be `-inf`.
-pub export fn ggml_flash_attn_ext_rows(
+pub fn ggml_flash_attn_ext_rows(
     ctx: *mod.context.Context,
-    q: *mod.impl.c.ggml_tensor,
-    k: *mod.impl.c.ggml_tensor,
-    v: *mod.impl.c.ggml_tensor,
-    mask: ?*mod.impl.c.ggml_tensor,
-    kv_rows: ?*mod.impl.c.ggml_tensor,
+    q: *mod.impl.ggml_c.ggml_tensor,
+    k: *mod.impl.ggml_c.ggml_tensor,
+    v: *mod.impl.ggml_c.ggml_tensor,
+    mask: ?*mod.impl.ggml_c.ggml_tensor,
+    kv_rows: ?*mod.impl.ggml_c.ggml_tensor,
     scale: f32,
     max_bias: f32,
     logit_softcap: f32,
-) *mod.impl.c.ggml_tensor {
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return flashAttnExtImpl(ctx, q, k, v, mask, kv_rows, scale, max_bias, logit_softcap);
 }
 
 /// Ports `ggml_flash_attn_ext_get_prec` (ggml.c:5489 @b1b770d90).
-pub export fn ggml_flash_attn_ext_get_prec(a: *const mod.impl.c.ggml_tensor) mod.impl.c.enum_ggml_prec {
-    mod.impl.assert(a.op == mod.impl.c.GGML_OP_FLASH_ATTN_EXT, "a->op == GGML_OP_FLASH_ATTN_EXT");
+pub fn ggml_flash_attn_ext_get_prec(a: *const mod.impl.ggml_c.ggml_tensor) callconv(.c) mod.impl.ggml_c.enum_ggml_prec {
+    mod.impl.assert(a.op == mod.impl.ggml_c.GGML_OP_FLASH_ATTN_EXT, "a->op == GGML_OP_FLASH_ATTN_EXT");
 
     return @intCast(mod.impl.getOpParamsI32(a, 3));
 }
@@ -4063,8 +4042,8 @@ pub export fn ggml_flash_attn_ext_get_prec(a: *const mod.impl.c.ggml_tensor) mod
 ///
 /// Treats the finite mask entries as a sparse K/V set of at most `n_kv_max`
 /// per row; 0 disables it. Slot 4, after the precision in slot 3.
-pub export fn ggml_flash_attn_ext_set_n_kv_max(a: *mod.impl.c.ggml_tensor, n_kv_max: i32) void {
-    mod.impl.assert(a.op == mod.impl.c.GGML_OP_FLASH_ATTN_EXT, "a->op == GGML_OP_FLASH_ATTN_EXT");
+pub fn ggml_flash_attn_ext_set_n_kv_max(a: *mod.impl.ggml_c.ggml_tensor, n_kv_max: i32) callconv(.c) void {
+    mod.impl.assert(a.op == mod.impl.ggml_c.GGML_OP_FLASH_ATTN_EXT, "a->op == GGML_OP_FLASH_ATTN_EXT");
     mod.impl.assert(n_kv_max >= 0, "n_kv_max >= 0");
 
     mod.impl.setOpParamsI32(a, 4, n_kv_max);
@@ -4075,16 +4054,16 @@ pub export fn ggml_flash_attn_ext_set_n_kv_max(a: *mod.impl.c.ggml_tensor, n_kv_
 /// Attaches per-head attention sinks as `src[4]`. A null `sinks` clears the
 /// slot and returns before the assertions, so it is valid on any tensor --
 /// which is what lets a caller unconditionally clear.
-pub export fn ggml_flash_attn_ext_add_sinks(a: *mod.impl.c.ggml_tensor, sinks: ?*mod.impl.c.ggml_tensor) void {
+pub fn ggml_flash_attn_ext_add_sinks(a: *mod.impl.ggml_c.ggml_tensor, sinks: ?*mod.impl.ggml_c.ggml_tensor) callconv(.c) void {
     const s = sinks orelse {
         a.src[4] = null;
         return;
     };
 
-    mod.impl.assert(a.op == mod.impl.c.GGML_OP_FLASH_ATTN_EXT, "a->op == GGML_OP_FLASH_ATTN_EXT");
+    mod.impl.assert(a.op == mod.impl.ggml_c.GGML_OP_FLASH_ATTN_EXT, "a->op == GGML_OP_FLASH_ATTN_EXT");
     mod.impl.assert(a.src[4] == null, "a->src[4] == NULL");
-    mod.impl.assert(mod.impl.one(mod.impl.c.ggml_tensor, a.src[0]).ne[2] == s.ne[0], "a->src[0]->ne[2] == sinks->ne[0]");
-    mod.impl.assert(s.type == mod.impl.c.GGML_TYPE_F32, "sinks->type == GGML_TYPE_F32");
+    mod.impl.assert(mod.impl.one(mod.impl.ggml_c.ggml_tensor, a.src[0]).ne[2] == s.ne[0], "a->src[0]->ne[2] == sinks->ne[0]");
+    mod.impl.assert(s.type == mod.impl.ggml_c.GGML_TYPE_F32, "sinks->type == GGML_TYPE_F32");
 
     a.src[4] = s;
 }
@@ -4096,14 +4075,14 @@ pub export fn ggml_flash_attn_ext_add_sinks(a: *mod.impl.c.ggml_tensor, sinks: ?
 /// `noreturn`, so every line after it is dead. The body is not reproduced
 /// here: it cannot run, and transcribing unreachable code would invite a
 /// reader to trust it. The symbol exists because the C exports it.
-pub export fn ggml_flash_attn_back(
+pub fn ggml_flash_attn_back(
     ctx: *mod.context.Context,
-    q: *mod.impl.c.ggml_tensor,
-    k: *mod.impl.c.ggml_tensor,
-    v: *mod.impl.c.ggml_tensor,
-    d: *mod.impl.c.ggml_tensor,
+    q: *mod.impl.ggml_c.ggml_tensor,
+    k: *mod.impl.ggml_c.ggml_tensor,
+    v: *mod.impl.ggml_c.ggml_tensor,
+    d: *mod.impl.ggml_c.ggml_tensor,
     masked: bool,
-) *mod.impl.c.ggml_tensor {
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     _ = .{ ctx, q, k, v, d, masked };
     mod.impl.abort("TODO: adapt to ggml_flash_attn_ext() changes");
 }
@@ -4120,7 +4099,7 @@ pub export fn ggml_flash_attn_back(
 /// The depthwise causal convolution at the front of a Mamba block. `sx` holds
 /// the `d_conv - 1` tokens of left context followed by the tokens themselves,
 /// so the output is shorter than the input by exactly that context.
-pub export fn ggml_ssm_conv(ctx: *mod.context.Context, sx: *mod.impl.c.ggml_tensor, conv: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_ssm_conv(ctx: *mod.context.Context, sx: *mod.impl.ggml_c.ggml_tensor, conv: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_is_3d(sx), "ggml_is_3d(sx)");
     mod.impl.assert(mod.types.ggml_is_matrix(conv), "ggml_is_matrix(c)");
 
@@ -4133,9 +4112,9 @@ pub export fn ggml_ssm_conv(ctx: *mod.context.Context, sx: *mod.impl.c.ggml_tens
     mod.impl.assert(sx.ne[1] == d_inner, "sx->ne[1] == d_inner");
     mod.impl.assert(n_t >= 0, "n_t >= 0");
 
-    const result = mod.context.ggml_new_tensor_3d(ctx, mod.impl.c.GGML_TYPE_F32, d_inner, n_t, n_s);
+    const result = mod.context.ggml_new_tensor_3d(ctx, mod.impl.ggml_c.GGML_TYPE_F32, d_inner, n_t, n_s);
 
-    result.op = mod.impl.c.GGML_OP_SSM_CONV;
+    result.op = mod.impl.ggml_c.GGML_OP_SSM_CONV;
     result.src[0] = sx;
     result.src[1] = conv;
 
@@ -4158,17 +4137,17 @@ pub export fn ggml_ssm_conv(ctx: *mod.context.Context, sx: *mod.impl.c.ggml_tens
 /// - `K`: how many state snapshots to write.
 ///
 /// Return: a new f32 1d tensor owned by `ctx`.
-pub export fn ggml_ssm_scan(
+pub fn ggml_ssm_scan(
     ctx: *mod.context.Context,
-    s: *mod.impl.c.ggml_tensor,
-    x: *mod.impl.c.ggml_tensor,
-    dt: *mod.impl.c.ggml_tensor,
-    a_decay: *mod.impl.c.ggml_tensor,
-    b_proj: *mod.impl.c.ggml_tensor,
-    c_proj: *mod.impl.c.ggml_tensor,
-    ids: *mod.impl.c.ggml_tensor,
+    s: *mod.impl.ggml_c.ggml_tensor,
+    x: *mod.impl.ggml_c.ggml_tensor,
+    dt: *mod.impl.ggml_c.ggml_tensor,
+    a_decay: *mod.impl.ggml_c.ggml_tensor,
+    b_proj: *mod.impl.ggml_c.ggml_tensor,
+    c_proj: *mod.impl.ggml_c.ggml_tensor,
+    ids: *mod.impl.ggml_c.ggml_tensor,
     k_snapshots: i64,
-) *mod.impl.c.ggml_tensor {
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(k_snapshots >= 1, "K >= 1");
     mod.impl.assert(k_snapshots <= std.math.maxInt(i32), "K <= INT32_MAX");
     mod.impl.assert(mod.types.ggml_is_contiguous(s), "ggml_is_contiguous(s)");
@@ -4181,7 +4160,7 @@ pub export fn ggml_ssm_scan(
     mod.impl.assert(b_proj.nb[1] == @as(usize, @intCast(b_proj.ne[0])) * b_proj.nb[0], "B->nb[1] == B->ne[0]*B->nb[0]");
     mod.impl.assert(c_proj.nb[1] == @as(usize, @intCast(c_proj.ne[0])) * c_proj.nb[0], "C->nb[1] == C->ne[0]*C->nb[0]");
     mod.impl.assert(mod.types.ggml_are_same_shape(b_proj, c_proj), "ggml_are_same_shape(B, C)");
-    mod.impl.assert(ids.type == mod.impl.c.GGML_TYPE_I32, "ids->type == GGML_TYPE_I32");
+    mod.impl.assert(ids.type == mod.impl.ggml_c.GGML_TYPE_I32, "ids->type == GGML_TYPE_I32");
 
     {
         const d_state = s.ne[0];
@@ -4213,9 +4192,9 @@ pub export fn ggml_ssm_scan(
 
     // concatenated y + ssm_states
     const n = mod.types.ggml_nelements(x) + k_snapshots * s.ne[0] * s.ne[1] * s.ne[2] * ids.ne[0];
-    const result = mod.context.ggml_new_tensor_1d(ctx, mod.impl.c.GGML_TYPE_F32, n);
+    const result = mod.context.ggml_new_tensor_1d(ctx, mod.impl.ggml_c.GGML_TYPE_F32, n);
 
-    result.op = mod.impl.c.GGML_OP_SSM_SCAN;
+    result.op = mod.impl.ggml_c.GGML_OP_SSM_SCAN;
     result.src[0] = s;
     result.src[1] = x;
     result.src[2] = dt;
@@ -4237,21 +4216,21 @@ pub export fn ggml_ssm_scan(
 // the SSM ops do.
 
 /// The `[S*H, n_tokens + S*n_seqs, 1, 1]` result these three share.
-inline fn wkvResult(ctx: *mod.context.Context, s: i64, h: i64, n_tokens: i64, n_seqs: i64) *mod.impl.c.ggml_tensor {
+inline fn wkvResult(ctx: *mod.context.Context, s: i64, h: i64, n_tokens: i64, n_seqs: i64) *mod.impl.ggml_c.ggml_tensor {
     const ne = [4]i64{ s * h, n_tokens + s * n_seqs, 1, 1 };
-    return mod.context.ggml_new_tensor(ctx, mod.impl.c.GGML_TYPE_F32, 4, &ne);
+    return mod.context.ggml_new_tensor(ctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, &ne);
 }
 
 /// Ports `ggml_rwkv_wkv6` (ggml.c:5810 @b1b770d90).
-pub export fn ggml_rwkv_wkv6(
+pub fn ggml_rwkv_wkv6(
     ctx: *mod.context.Context,
-    k: *mod.impl.c.ggml_tensor,
-    v: *mod.impl.c.ggml_tensor,
-    r: *mod.impl.c.ggml_tensor,
-    tf: *mod.impl.c.ggml_tensor,
-    td: *mod.impl.c.ggml_tensor,
-    state: *mod.impl.c.ggml_tensor,
-) *mod.impl.c.ggml_tensor {
+    k: *mod.impl.ggml_c.ggml_tensor,
+    v: *mod.impl.ggml_c.ggml_tensor,
+    r: *mod.impl.ggml_c.ggml_tensor,
+    tf: *mod.impl.ggml_c.ggml_tensor,
+    td: *mod.impl.ggml_c.ggml_tensor,
+    state: *mod.impl.ggml_c.ggml_tensor,
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_is_contiguous(k), "ggml_is_contiguous(k)");
     mod.impl.assert(mod.types.ggml_is_contiguous(v), "ggml_is_contiguous(v)");
     mod.impl.assert(mod.types.ggml_is_contiguous(r), "ggml_is_contiguous(r)");
@@ -4273,7 +4252,7 @@ pub export fn ggml_rwkv_wkv6(
     // concat output and new_state
     const result = wkvResult(ctx, s, h, n_tokens, n_seqs);
 
-    result.op = mod.impl.c.GGML_OP_RWKV_WKV6;
+    result.op = mod.impl.ggml_c.GGML_OP_RWKV_WKV6;
     result.src[0] = k;
     result.src[1] = v;
     result.src[2] = r;
@@ -4285,15 +4264,15 @@ pub export fn ggml_rwkv_wkv6(
 }
 
 /// Ports `ggml_gated_linear_attn` (ggml.c:5853 @b1b770d90).
-pub export fn ggml_gated_linear_attn(
+pub fn ggml_gated_linear_attn(
     ctx: *mod.context.Context,
-    k: *mod.impl.c.ggml_tensor,
-    v: *mod.impl.c.ggml_tensor,
-    q: *mod.impl.c.ggml_tensor,
-    g: *mod.impl.c.ggml_tensor,
-    state: *mod.impl.c.ggml_tensor,
+    k: *mod.impl.ggml_c.ggml_tensor,
+    v: *mod.impl.ggml_c.ggml_tensor,
+    q: *mod.impl.ggml_c.ggml_tensor,
+    g: *mod.impl.ggml_c.ggml_tensor,
+    state: *mod.impl.ggml_c.ggml_tensor,
     scale: f32,
-) *mod.impl.c.ggml_tensor {
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_is_contiguous(k), "ggml_is_contiguous(k)");
     mod.impl.assert(mod.types.ggml_is_contiguous(v), "ggml_is_contiguous(v)");
     mod.impl.assert(mod.types.ggml_is_contiguous(q), "ggml_is_contiguous(q)");
@@ -4316,7 +4295,7 @@ pub export fn ggml_gated_linear_attn(
 
     mod.impl.setOpParamsF32(result, 0, scale);
 
-    result.op = mod.impl.c.GGML_OP_GATED_LINEAR_ATTN;
+    result.op = mod.impl.ggml_c.GGML_OP_GATED_LINEAR_ATTN;
     result.src[0] = k;
     result.src[1] = v;
     result.src[2] = q;
@@ -4330,16 +4309,16 @@ pub export fn ggml_gated_linear_attn(
 ///
 /// Note the source order: `r, w, k, v, a, b, state`, which is not the order
 /// the shapes are checked in and not `wkv6`'s order either.
-pub export fn ggml_rwkv_wkv7(
+pub fn ggml_rwkv_wkv7(
     ctx: *mod.context.Context,
-    r: *mod.impl.c.ggml_tensor,
-    w: *mod.impl.c.ggml_tensor,
-    k: *mod.impl.c.ggml_tensor,
-    v: *mod.impl.c.ggml_tensor,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
-    state: *mod.impl.c.ggml_tensor,
-) *mod.impl.c.ggml_tensor {
+    r: *mod.impl.ggml_c.ggml_tensor,
+    w: *mod.impl.ggml_c.ggml_tensor,
+    k: *mod.impl.ggml_c.ggml_tensor,
+    v: *mod.impl.ggml_c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
+    state: *mod.impl.ggml_c.ggml_tensor,
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_is_contiguous(r), "ggml_is_contiguous(r)");
     mod.impl.assert(mod.types.ggml_is_contiguous(w), "ggml_is_contiguous(w)");
     mod.impl.assert(mod.types.ggml_is_contiguous(k), "ggml_is_contiguous(k)");
@@ -4364,7 +4343,7 @@ pub export fn ggml_rwkv_wkv7(
     // concat output and new_state
     const result = wkvResult(ctx, s, h, n_tokens, n_seqs);
 
-    result.op = mod.impl.c.GGML_OP_RWKV_WKV7;
+    result.op = mod.impl.ggml_c.GGML_OP_RWKV_WKV7;
     result.src[0] = r;
     result.src[1] = w;
     result.src[2] = k;
@@ -4381,16 +4360,16 @@ pub export fn ggml_rwkv_wkv7(
 /// `state` holds only the initial state; `K` snapshot slots are appended to
 /// the result, as in `ggml_ssm_scan`. When `n_tokens > K` only slot 0 is
 /// guaranteed; a backend may leave slots 1..K-1 unwritten (ggml.h).
-pub export fn ggml_gated_delta_net(
+pub fn ggml_gated_delta_net(
     ctx: *mod.context.Context,
-    q: *mod.impl.c.ggml_tensor,
-    k: *mod.impl.c.ggml_tensor,
-    v: *mod.impl.c.ggml_tensor,
-    g: *mod.impl.c.ggml_tensor,
-    beta: *mod.impl.c.ggml_tensor,
-    state: *mod.impl.c.ggml_tensor,
+    q: *mod.impl.ggml_c.ggml_tensor,
+    k: *mod.impl.ggml_c.ggml_tensor,
+    v: *mod.impl.ggml_c.ggml_tensor,
+    g: *mod.impl.ggml_c.ggml_tensor,
+    beta: *mod.impl.ggml_c.ggml_tensor,
+    state: *mod.impl.ggml_c.ggml_tensor,
     k_snapshots: i64,
-) *mod.impl.c.ggml_tensor {
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_is_contiguous_rows(q), "ggml_is_contiguous_rows(q)");
     mod.impl.assert(mod.types.ggml_is_contiguous_rows(k), "ggml_is_contiguous_rows(k)");
     mod.impl.assert(mod.types.ggml_is_contiguous_rows(v), "ggml_is_contiguous_rows(v)");
@@ -4398,12 +4377,12 @@ pub export fn ggml_gated_delta_net(
     mod.impl.assert(mod.types.ggml_is_contiguous(beta), "ggml_is_contiguous(beta)");
     mod.impl.assert(mod.types.ggml_is_contiguous(state), "ggml_is_contiguous(state)");
 
-    mod.impl.assert(q.type == mod.impl.c.GGML_TYPE_F32, "q->type == GGML_TYPE_F32");
-    mod.impl.assert(k.type == mod.impl.c.GGML_TYPE_F32, "k->type == GGML_TYPE_F32");
-    mod.impl.assert(v.type == mod.impl.c.GGML_TYPE_F32, "v->type == GGML_TYPE_F32");
-    mod.impl.assert(g.type == mod.impl.c.GGML_TYPE_F32, "g->type == GGML_TYPE_F32");
-    mod.impl.assert(beta.type == mod.impl.c.GGML_TYPE_F32, "beta->type == GGML_TYPE_F32");
-    mod.impl.assert(state.type == mod.impl.c.GGML_TYPE_F32, "state->type == GGML_TYPE_F32");
+    mod.impl.assert(q.type == mod.impl.ggml_c.GGML_TYPE_F32, "q->type == GGML_TYPE_F32");
+    mod.impl.assert(k.type == mod.impl.ggml_c.GGML_TYPE_F32, "k->type == GGML_TYPE_F32");
+    mod.impl.assert(v.type == mod.impl.ggml_c.GGML_TYPE_F32, "v->type == GGML_TYPE_F32");
+    mod.impl.assert(g.type == mod.impl.ggml_c.GGML_TYPE_F32, "g->type == GGML_TYPE_F32");
+    mod.impl.assert(beta.type == mod.impl.ggml_c.GGML_TYPE_F32, "beta->type == GGML_TYPE_F32");
+    mod.impl.assert(state.type == mod.impl.ggml_c.GGML_TYPE_F32, "state->type == GGML_TYPE_F32");
 
     const s_v = v.ne[0];
     const h = v.ne[1];
@@ -4423,11 +4402,11 @@ pub export fn ggml_gated_delta_net(
 
     const state_rows = k_snapshots * s_v * n_seqs;
     const ne = [4]i64{ s_v * h, n_tokens * n_seqs + state_rows, 1, 1 };
-    const result = mod.context.ggml_new_tensor(ctx, mod.impl.c.GGML_TYPE_F32, 4, &ne);
+    const result = mod.context.ggml_new_tensor(ctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, &ne);
 
     mod.impl.setOpParamsI32(result, 0, @intCast(k_snapshots));
 
-    result.op = mod.impl.c.GGML_OP_GATED_DELTA_NET;
+    result.op = mod.impl.ggml_c.GGML_OP_GATED_DELTA_NET;
     result.src[0] = q;
     result.src[1] = k;
     result.src[2] = v;
@@ -4442,16 +4421,16 @@ pub export fn ggml_gated_delta_net(
 ///
 /// Scores every key against every query for sparse-attention selection, so the
 /// result is `[n_kv, n_tokens, 1, n_batch]` rather than an attention output.
-pub export fn ggml_lightning_indexer(
+pub fn ggml_lightning_indexer(
     ctx: *mod.context.Context,
-    q: *mod.impl.c.ggml_tensor,
-    k: *mod.impl.c.ggml_tensor,
-    weights: *mod.impl.c.ggml_tensor,
-    mask: *mod.impl.c.ggml_tensor,
-) *mod.impl.c.ggml_tensor {
-    mod.impl.assert(q.type == mod.impl.c.GGML_TYPE_F32, "q->type == GGML_TYPE_F32");
-    mod.impl.assert(weights.type == mod.impl.c.GGML_TYPE_F32, "weights->type == GGML_TYPE_F32");
-    mod.impl.assert(mask.type == mod.impl.c.GGML_TYPE_F16, "mask->type == GGML_TYPE_F16");
+    q: *mod.impl.ggml_c.ggml_tensor,
+    k: *mod.impl.ggml_c.ggml_tensor,
+    weights: *mod.impl.ggml_c.ggml_tensor,
+    mask: *mod.impl.ggml_c.ggml_tensor,
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    mod.impl.assert(q.type == mod.impl.ggml_c.GGML_TYPE_F32, "q->type == GGML_TYPE_F32");
+    mod.impl.assert(weights.type == mod.impl.ggml_c.GGML_TYPE_F32, "weights->type == GGML_TYPE_F32");
+    mod.impl.assert(mask.type == mod.impl.ggml_c.GGML_TYPE_F16, "mask->type == GGML_TYPE_F16");
     mod.impl.assert(q.ne[0] == k.ne[0], "q->ne[0] == k->ne[0]");
     mod.impl.assert(mask.ne[0] == k.ne[2], "mask->ne[0] == k->ne[2]");
     mod.impl.assert(q.ne[1] == weights.ne[0], "q->ne[1] == weights->ne[0]");
@@ -4465,9 +4444,9 @@ pub export fn ggml_lightning_indexer(
     mod.impl.assert(@rem(weights.ne[3], mask.ne[3]) == 0, "weights->ne[3] % mask->ne[3] == 0");
 
     const ne = [4]i64{ k.ne[2], q.ne[2], 1, q.ne[3] };
-    const result = mod.context.ggml_new_tensor(ctx, mod.impl.c.GGML_TYPE_F32, 4, &ne);
+    const result = mod.context.ggml_new_tensor(ctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, &ne);
 
-    result.op = mod.impl.c.GGML_OP_LIGHTNING_INDEXER;
+    result.op = mod.impl.ggml_c.GGML_OP_LIGHTNING_INDEXER;
     result.src[0] = q;
     result.src[1] = k;
     result.src[2] = weights;
@@ -4488,17 +4467,17 @@ pub export fn ggml_lightning_indexer(
 /// `hc` is recovered from the input width by solving `(2 + i)*i == hc_mix_dim`
 /// -- the mixes tensor packs an `hc x hc` matrix plus two `hc`-wide vectors --
 /// and the C then asserts the answer is 4, so only that width works today.
-pub export fn ggml_dsv4_hc_comb(
+pub fn ggml_dsv4_hc_comb(
     ctx: *mod.context.Context,
-    mixes: *mod.impl.c.ggml_tensor,
-    scale: *mod.impl.c.ggml_tensor,
-    base: *mod.impl.c.ggml_tensor,
+    mixes: *mod.impl.ggml_c.ggml_tensor,
+    scale: *mod.impl.ggml_c.ggml_tensor,
+    base: *mod.impl.ggml_c.ggml_tensor,
     eps: f32,
     n_iter: i32,
-) *mod.impl.c.ggml_tensor {
-    mod.impl.assert(mixes.type == mod.impl.c.GGML_TYPE_F32, "mixes->type == GGML_TYPE_F32");
-    mod.impl.assert(scale.type == mod.impl.c.GGML_TYPE_F32, "scale->type == GGML_TYPE_F32");
-    mod.impl.assert(base.type == mod.impl.c.GGML_TYPE_F32, "base->type == GGML_TYPE_F32");
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    mod.impl.assert(mixes.type == mod.impl.ggml_c.GGML_TYPE_F32, "mixes->type == GGML_TYPE_F32");
+    mod.impl.assert(scale.type == mod.impl.ggml_c.GGML_TYPE_F32, "scale->type == GGML_TYPE_F32");
+    mod.impl.assert(base.type == mod.impl.ggml_c.GGML_TYPE_F32, "base->type == GGML_TYPE_F32");
     mod.impl.assert(n_iter > 0, "n_iter > 0");
 
     const hc_mix_dim = mixes.ne[0];
@@ -4526,12 +4505,12 @@ pub export fn ggml_dsv4_hc_comb(
     mod.impl.assert(base.ne[2] == 1, "base->ne[2] == 1");
     mod.impl.assert(base.ne[3] == 1, "base->ne[3] == 1");
 
-    const result = mod.context.ggml_new_tensor_3d(ctx, mod.impl.c.GGML_TYPE_F32, hc, hc, n_tokens);
+    const result = mod.context.ggml_new_tensor_3d(ctx, mod.impl.ggml_c.GGML_TYPE_F32, hc, hc, n_tokens);
 
     mod.impl.setOpParamsF32(result, 0, eps);
     mod.impl.setOpParamsI32(result, 1, n_iter);
 
-    result.op = mod.impl.c.GGML_OP_DSV4_HC_COMB;
+    result.op = mod.impl.ggml_c.GGML_OP_DSV4_HC_COMB;
     result.src[0] = mixes;
     result.src[1] = scale;
     result.src[2] = base;
@@ -4543,9 +4522,9 @@ pub export fn ggml_dsv4_hc_comb(
 /// gated forms share the constructor, and op_params record which one this
 /// is -- `scale` in slot 0, `gated` in slot 1 -- since both are
 /// `GGML_OP_DSV4_HC_PRE`.
-fn dsv4HcPreImpl(ctx: *mod.context.Context, x: *mod.impl.c.ggml_tensor, weights: *mod.impl.c.ggml_tensor, scale: f32, gated: bool) *mod.impl.c.ggml_tensor {
-    mod.impl.assert(x.type == mod.impl.c.GGML_TYPE_F32, "x->type == GGML_TYPE_F32");
-    mod.impl.assert(weights.type == mod.impl.c.GGML_TYPE_F32, "weights->type == GGML_TYPE_F32");
+fn dsv4HcPreImpl(ctx: *mod.context.Context, x: *mod.impl.ggml_c.ggml_tensor, weights: *mod.impl.ggml_c.ggml_tensor, scale: f32, gated: bool) *mod.impl.ggml_c.ggml_tensor {
+    mod.impl.assert(x.type == mod.impl.ggml_c.GGML_TYPE_F32, "x->type == GGML_TYPE_F32");
+    mod.impl.assert(weights.type == mod.impl.ggml_c.GGML_TYPE_F32, "weights->type == GGML_TYPE_F32");
 
     const n_embd = x.ne[0];
     const hc = x.ne[1];
@@ -4564,12 +4543,12 @@ fn dsv4HcPreImpl(ctx: *mod.context.Context, x: *mod.impl.c.ggml_tensor, weights:
     }
     mod.impl.assert(weights.ne[3] == 1, "weights->ne[3] == 1");
 
-    const result = mod.context.ggml_new_tensor_2d(ctx, mod.impl.c.GGML_TYPE_F32, n_embd, n_tokens);
+    const result = mod.context.ggml_new_tensor_2d(ctx, mod.impl.ggml_c.GGML_TYPE_F32, n_embd, n_tokens);
 
     mod.impl.setOpParamsF32(result, 0, scale);
     mod.impl.setOpParamsI32(result, 1, if (gated) 1 else 0);
 
-    result.op = mod.impl.c.GGML_OP_DSV4_HC_PRE;
+    result.op = mod.impl.ggml_c.GGML_OP_DSV4_HC_PRE;
     result.src[0] = x;
     result.src[1] = weights;
 
@@ -4577,28 +4556,28 @@ fn dsv4HcPreImpl(ctx: *mod.context.Context, x: *mod.impl.c.ggml_tensor, weights:
 }
 
 /// Ports `ggml_dsv4_hc_pre` (ggml.c:6485 @b1b770d90).
-pub export fn ggml_dsv4_hc_pre(ctx: *mod.context.Context, x: *mod.impl.c.ggml_tensor, weights: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_dsv4_hc_pre(ctx: *mod.context.Context, x: *mod.impl.ggml_c.ggml_tensor, weights: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return dsv4HcPreImpl(ctx, x, weights, 1.0, false);
 }
 
 /// Ports `ggml_dsv4_hc_pre_gated` (ggml.c:6492 @b1b770d90): `hc_pre` with a
 /// per-element sigmoid gate of shape `[n_embd, hc, n_tokens]`.
-pub export fn ggml_dsv4_hc_pre_gated(ctx: *mod.context.Context, x: *mod.impl.c.ggml_tensor, gate: *mod.impl.c.ggml_tensor, scale: f32) *mod.impl.c.ggml_tensor {
+pub fn ggml_dsv4_hc_pre_gated(ctx: *mod.context.Context, x: *mod.impl.ggml_c.ggml_tensor, gate: *mod.impl.ggml_c.ggml_tensor, scale: f32) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     return dsv4HcPreImpl(ctx, x, gate, scale, true);
 }
 
 /// Ports `ggml_dsv4_hc_post` (ggml.c:6502 @b1b770d90). A null `comb` is
 /// the identity: each stream keeps its own residual.
-pub export fn ggml_dsv4_hc_post(
+pub fn ggml_dsv4_hc_post(
     ctx: *mod.context.Context,
-    x: *mod.impl.c.ggml_tensor,
-    residual: *mod.impl.c.ggml_tensor,
-    post: *mod.impl.c.ggml_tensor,
-    comb: ?*mod.impl.c.ggml_tensor,
-) *mod.impl.c.ggml_tensor {
-    mod.impl.assert(x.type == mod.impl.c.GGML_TYPE_F32, "x->type == GGML_TYPE_F32");
-    mod.impl.assert(residual.type == mod.impl.c.GGML_TYPE_F32, "residual->type == GGML_TYPE_F32");
-    mod.impl.assert(post.type == mod.impl.c.GGML_TYPE_F32, "post->type == GGML_TYPE_F32");
+    x: *mod.impl.ggml_c.ggml_tensor,
+    residual: *mod.impl.ggml_c.ggml_tensor,
+    post: *mod.impl.ggml_c.ggml_tensor,
+    comb: ?*mod.impl.ggml_c.ggml_tensor,
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    mod.impl.assert(x.type == mod.impl.ggml_c.GGML_TYPE_F32, "x->type == GGML_TYPE_F32");
+    mod.impl.assert(residual.type == mod.impl.ggml_c.GGML_TYPE_F32, "residual->type == GGML_TYPE_F32");
+    mod.impl.assert(post.type == mod.impl.ggml_c.GGML_TYPE_F32, "post->type == GGML_TYPE_F32");
 
     const n_embd = x.ne[0];
     const n_tokens = x.ne[1];
@@ -4618,16 +4597,16 @@ pub export fn ggml_dsv4_hc_post(
     mod.impl.assert(post.ne[3] == 1, "post->ne[3] == 1");
 
     if (comb) |cb| {
-        mod.impl.assert(cb.type == mod.impl.c.GGML_TYPE_F32, "comb->type == GGML_TYPE_F32");
+        mod.impl.assert(cb.type == mod.impl.ggml_c.GGML_TYPE_F32, "comb->type == GGML_TYPE_F32");
         mod.impl.assert(cb.ne[0] == hc, "comb->ne[0] == hc");
         mod.impl.assert(cb.ne[1] == hc, "comb->ne[1] == hc");
         mod.impl.assert(cb.ne[2] == n_tokens, "comb->ne[2] == n_tokens");
         mod.impl.assert(cb.ne[3] == 1, "comb->ne[3] == 1");
     }
 
-    const result = mod.context.ggml_new_tensor_3d(ctx, mod.impl.c.GGML_TYPE_F32, n_embd, hc, n_tokens);
+    const result = mod.context.ggml_new_tensor_3d(ctx, mod.impl.ggml_c.GGML_TYPE_F32, n_embd, hc, n_tokens);
 
-    result.op = mod.impl.c.GGML_OP_DSV4_HC_POST;
+    result.op = mod.impl.ggml_c.GGML_OP_DSV4_HC_POST;
     result.src[0] = x;
     result.src[1] = residual;
     result.src[2] = post;
@@ -4639,38 +4618,38 @@ pub export fn ggml_dsv4_hc_post(
 /// Ports `ggml_top_k_mask` (ggml.c:6550 @b1b770d90): the sparse-attention
 /// mask, keeping the cells of each row's live picks and its extra cells and
 /// setting the rest to -inf.
-pub export fn ggml_top_k_mask(
+pub fn ggml_top_k_mask(
     ctx: *mod.context.Context,
-    mask: *mod.impl.c.ggml_tensor,
-    top_k: *mod.impl.c.ggml_tensor,
-    score: ?*mod.impl.c.ggml_tensor,
-    blocks: ?*mod.impl.c.ggml_tensor,
-    extra: ?*mod.impl.c.ggml_tensor,
-) *mod.impl.c.ggml_tensor {
-    mod.impl.assert(mask.type == mod.impl.c.GGML_TYPE_F16 or mask.type == mod.impl.c.GGML_TYPE_F32, "mask->type == GGML_TYPE_F16 || mask->type == GGML_TYPE_F32");
+    mask: *mod.impl.ggml_c.ggml_tensor,
+    top_k: *mod.impl.ggml_c.ggml_tensor,
+    score: ?*mod.impl.ggml_c.ggml_tensor,
+    blocks: ?*mod.impl.ggml_c.ggml_tensor,
+    extra: ?*mod.impl.ggml_c.ggml_tensor,
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    mod.impl.assert(mask.type == mod.impl.ggml_c.GGML_TYPE_F16 or mask.type == mod.impl.ggml_c.GGML_TYPE_F32, "mask->type == GGML_TYPE_F16 || mask->type == GGML_TYPE_F32");
     mod.impl.assert(mask.nb[0] == mod.types.ggml_type_size(mask.type), "mask->nb[0] == ggml_type_size(mask->type)");
-    mod.impl.assert(top_k.type == mod.impl.c.GGML_TYPE_I32, "top_k->type == GGML_TYPE_I32");
+    mod.impl.assert(top_k.type == mod.impl.ggml_c.GGML_TYPE_I32, "top_k->type == GGML_TYPE_I32");
     mod.impl.assert(@rem(top_k.ne[1], mask.ne[1]) == 0 and @rem(top_k.ne[2], mask.ne[2]) == 0 and @rem(top_k.ne[3], mask.ne[3]) == 0, "top_k->ne[1] % mask->ne[1] == 0 && top_k->ne[2] % mask->ne[2] == 0 && top_k->ne[3] % mask->ne[3] == 0");
 
     if (score) |sc| {
-        mod.impl.assert(sc.type == mod.impl.c.GGML_TYPE_F32, "score->type == GGML_TYPE_F32");
+        mod.impl.assert(sc.type == mod.impl.ggml_c.GGML_TYPE_F32, "score->type == GGML_TYPE_F32");
         mod.impl.assert(sc.ne[1] == top_k.ne[1] and sc.ne[2] == top_k.ne[2] and sc.ne[3] == top_k.ne[3], "score->ne[1] == top_k->ne[1] && score->ne[2] == top_k->ne[2] && score->ne[3] == top_k->ne[3]");
     }
 
     if (blocks) |bl| {
-        mod.impl.assert(bl.type == mod.impl.c.GGML_TYPE_I32, "blocks->type == GGML_TYPE_I32");
+        mod.impl.assert(bl.type == mod.impl.ggml_c.GGML_TYPE_I32, "blocks->type == GGML_TYPE_I32");
         mod.impl.assert(bl.ne[2] == 1 and bl.ne[3] == 1, "blocks->ne[2] == 1 && blocks->ne[3] == 1");
         mod.impl.assert(score == null or bl.ne[1] == score.?.ne[0], "!score || blocks->ne[1] == score->ne[0]");
     }
 
     if (extra) |ex| {
-        mod.impl.assert(ex.type == mod.impl.c.GGML_TYPE_I32, "extra->type == GGML_TYPE_I32");
+        mod.impl.assert(ex.type == mod.impl.ggml_c.GGML_TYPE_I32, "extra->type == GGML_TYPE_I32");
         mod.impl.assert(ex.ne[1] == top_k.ne[1] and ex.ne[2] == top_k.ne[2] and ex.ne[3] == top_k.ne[3], "extra->ne[1] == top_k->ne[1] && extra->ne[2] == top_k->ne[2] && extra->ne[3] == top_k->ne[3]");
     }
 
     const result = mod.context.ggml_new_tensor_4d(ctx, mask.type, mask.ne[0], top_k.ne[1], top_k.ne[2], top_k.ne[3]);
 
-    result.op = mod.impl.c.GGML_OP_TOP_K_MASK;
+    result.op = mod.impl.ggml_c.GGML_OP_TOP_K_MASK;
     result.src[0] = mask;
     result.src[1] = top_k;
     result.src[2] = score;
@@ -4696,14 +4675,14 @@ pub export fn ggml_top_k_mask(
 /// generic body covers all three, with `srcs` supplying the difference.
 inline fn mapCustomImpl(
     ctx: *mod.context.Context,
-    srcs: []const *mod.impl.c.ggml_tensor,
-    op: mod.impl.c.enum_ggml_op,
+    srcs: []const *mod.impl.ggml_c.ggml_tensor,
+    op: mod.impl.ggml_c.enum_ggml_op,
     fun: ?*const anyopaque,
     n_tasks: c_int,
     userdata: ?*anyopaque,
     inplace: bool,
-) *mod.impl.c.ggml_tensor {
-    mod.impl.assert(n_tasks == mod.impl.c.GGML_N_TASKS_MAX or n_tasks > 0, "n_tasks == GGML_N_TASKS_MAX || n_tasks > 0");
+) *mod.impl.ggml_c.ggml_tensor {
+    mod.impl.assert(n_tasks == mod.impl.ggml_c.GGML_N_TASKS_MAX or n_tasks > 0, "n_tasks == GGML_N_TASKS_MAX || n_tasks > 0");
 
     const result = dupOrView(ctx, srcs[0], inplace);
 
@@ -4720,75 +4699,75 @@ inline fn mapCustomImpl(
 }
 
 /// Ports `ggml_map_custom1` (ggml.c:6001 @b1b770d90).
-pub export fn ggml_map_custom1(
+pub fn ggml_map_custom1(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    fun: mod.impl.c.ggml_custom1_op_t,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    fun: mod.impl.ggml_c.ggml_custom1_op_t,
     n_tasks: c_int,
     userdata: ?*anyopaque,
-) *mod.impl.c.ggml_tensor {
-    return mapCustomImpl(ctx, &.{a}, mod.impl.c.GGML_OP_MAP_CUSTOM1, @ptrCast(fun), n_tasks, userdata, false);
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return mapCustomImpl(ctx, &.{a}, mod.impl.ggml_c.GGML_OP_MAP_CUSTOM1, @ptrCast(fun), n_tasks, userdata, false);
 }
 
 /// Ports `ggml_map_custom1_inplace` (ggml.c:6010 @b1b770d90).
-pub export fn ggml_map_custom1_inplace(
+pub fn ggml_map_custom1_inplace(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    fun: mod.impl.c.ggml_custom1_op_t,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    fun: mod.impl.ggml_c.ggml_custom1_op_t,
     n_tasks: c_int,
     userdata: ?*anyopaque,
-) *mod.impl.c.ggml_tensor {
-    return mapCustomImpl(ctx, &.{a}, mod.impl.c.GGML_OP_MAP_CUSTOM1, @ptrCast(fun), n_tasks, userdata, true);
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return mapCustomImpl(ctx, &.{a}, mod.impl.ggml_c.GGML_OP_MAP_CUSTOM1, @ptrCast(fun), n_tasks, userdata, true);
 }
 
 /// Ports `ggml_map_custom2` (ggml.c:6047 @b1b770d90).
-pub export fn ggml_map_custom2(
+pub fn ggml_map_custom2(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
-    fun: mod.impl.c.ggml_custom2_op_t,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
+    fun: mod.impl.ggml_c.ggml_custom2_op_t,
     n_tasks: c_int,
     userdata: ?*anyopaque,
-) *mod.impl.c.ggml_tensor {
-    return mapCustomImpl(ctx, &.{ a, b }, mod.impl.c.GGML_OP_MAP_CUSTOM2, @ptrCast(fun), n_tasks, userdata, false);
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return mapCustomImpl(ctx, &.{ a, b }, mod.impl.ggml_c.GGML_OP_MAP_CUSTOM2, @ptrCast(fun), n_tasks, userdata, false);
 }
 
 /// Ports `ggml_map_custom2_inplace` (ggml.c:6057 @b1b770d90).
-pub export fn ggml_map_custom2_inplace(
+pub fn ggml_map_custom2_inplace(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
-    fun: mod.impl.c.ggml_custom2_op_t,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
+    fun: mod.impl.ggml_c.ggml_custom2_op_t,
     n_tasks: c_int,
     userdata: ?*anyopaque,
-) *mod.impl.c.ggml_tensor {
-    return mapCustomImpl(ctx, &.{ a, b }, mod.impl.c.GGML_OP_MAP_CUSTOM2, @ptrCast(fun), n_tasks, userdata, true);
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return mapCustomImpl(ctx, &.{ a, b }, mod.impl.ggml_c.GGML_OP_MAP_CUSTOM2, @ptrCast(fun), n_tasks, userdata, true);
 }
 
 /// Ports `ggml_map_custom3` (ggml.c:6097 @b1b770d90).
-pub export fn ggml_map_custom3(
+pub fn ggml_map_custom3(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
-    c_arg: *mod.impl.c.ggml_tensor,
-    fun: mod.impl.c.ggml_custom3_op_t,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
+    c_arg: *mod.impl.ggml_c.ggml_tensor,
+    fun: mod.impl.ggml_c.ggml_custom3_op_t,
     n_tasks: c_int,
     userdata: ?*anyopaque,
-) *mod.impl.c.ggml_tensor {
-    return mapCustomImpl(ctx, &.{ a, b, c_arg }, mod.impl.c.GGML_OP_MAP_CUSTOM3, @ptrCast(fun), n_tasks, userdata, false);
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return mapCustomImpl(ctx, &.{ a, b, c_arg }, mod.impl.ggml_c.GGML_OP_MAP_CUSTOM3, @ptrCast(fun), n_tasks, userdata, false);
 }
 
 /// Ports `ggml_map_custom3_inplace` (ggml.c:6108 @b1b770d90).
-pub export fn ggml_map_custom3_inplace(
+pub fn ggml_map_custom3_inplace(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
-    c_arg: *mod.impl.c.ggml_tensor,
-    fun: mod.impl.c.ggml_custom3_op_t,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
+    c_arg: *mod.impl.ggml_c.ggml_tensor,
+    fun: mod.impl.ggml_c.ggml_custom3_op_t,
     n_tasks: c_int,
     userdata: ?*anyopaque,
-) *mod.impl.c.ggml_tensor {
-    return mapCustomImpl(ctx, &.{ a, b, c_arg }, mod.impl.c.GGML_OP_MAP_CUSTOM3, @ptrCast(fun), n_tasks, userdata, true);
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    return mapCustomImpl(ctx, &.{ a, b, c_arg }, mod.impl.ggml_c.GGML_OP_MAP_CUSTOM3, @ptrCast(fun), n_tasks, userdata, true);
 }
 
 /// Ports `ggml_custom_4d` (ggml.c:6119 @b1b770d90).
@@ -4802,20 +4781,20 @@ pub export fn ggml_map_custom3_inplace(
 /// - `fun`, `n_tasks`, `userdata`: the kernel and how to schedule it.
 ///
 /// Return: a new tensor owned by `ctx`.
-pub export fn ggml_custom_4d(
+pub fn ggml_custom_4d(
     ctx: *mod.context.Context,
-    t: mod.impl.c.enum_ggml_type,
+    t: mod.impl.ggml_c.enum_ggml_type,
     ne0: i64,
     ne1: i64,
     ne2: i64,
     ne3: i64,
-    args: [*c]?*mod.impl.c.ggml_tensor,
+    args: [*c]?*mod.impl.ggml_c.ggml_tensor,
     n_args: c_int,
-    fun: mod.impl.c.ggml_custom_op_t,
+    fun: mod.impl.ggml_c.ggml_custom_op_t,
     n_tasks: c_int,
     userdata: ?*anyopaque,
-) *mod.impl.c.ggml_tensor {
-    mod.impl.assert(n_args < mod.impl.c.GGML_MAX_SRC, "n_args < GGML_MAX_SRC");
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    mod.impl.assert(n_args < mod.impl.ggml_c.GGML_MAX_SRC, "n_args < GGML_MAX_SRC");
 
     const result = mod.context.ggml_new_tensor_4d(ctx, t, ne0, ne1, ne2, ne3);
 
@@ -4825,7 +4804,7 @@ pub export fn ggml_custom_4d(
         .userdata = userdata,
     });
 
-    result.op = mod.impl.c.GGML_OP_CUSTOM;
+    result.op = mod.impl.ggml_c.GGML_OP_CUSTOM;
     var i: usize = 0;
     while (i < @as(usize, @intCast(n_args))) : (i += 1) {
         result.src[i] = args[i];
@@ -4838,16 +4817,16 @@ pub export fn ggml_custom_4d(
 ///
 /// Note the source shift: `a` takes `src[0]` and the extra arguments start at
 /// `src[1]`, which is why the bound is one lower than `ggml_custom_4d`'s.
-pub export fn ggml_custom_inplace(
+pub fn ggml_custom_inplace(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    args: [*c]?*mod.impl.c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    args: [*c]?*mod.impl.ggml_c.ggml_tensor,
     n_args: c_int,
-    fun: mod.impl.c.ggml_custom_op_t,
+    fun: mod.impl.ggml_c.ggml_custom_op_t,
     n_tasks: c_int,
     userdata: ?*anyopaque,
-) *mod.impl.c.ggml_tensor {
-    mod.impl.assert(n_args < mod.impl.c.GGML_MAX_SRC - 1, "n_args < GGML_MAX_SRC - 1");
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    mod.impl.assert(n_args < mod.impl.ggml_c.GGML_MAX_SRC - 1, "n_args < GGML_MAX_SRC - 1");
 
     const result = mod.context.ggml_view_tensor(ctx, a);
 
@@ -4857,7 +4836,7 @@ pub export fn ggml_custom_inplace(
         .userdata = userdata,
     });
 
-    result.op = mod.impl.c.GGML_OP_CUSTOM;
+    result.op = mod.impl.ggml_c.GGML_OP_CUSTOM;
     result.src[0] = a;
     var i: usize = 0;
     while (i < @as(usize, @intCast(n_args))) : (i += 1) {
@@ -4876,12 +4855,12 @@ pub export fn ggml_custom_inplace(
 /// Ports `ggml_cross_entropy_loss` (ggml.c:6181 @b1b770d90).
 ///
 /// Reduces to a single scalar, which is what `ggml_set_loss` then marks.
-pub export fn ggml_cross_entropy_loss(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_cross_entropy_loss(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_are_same_shape(a, b), "ggml_are_same_shape(a, b)");
 
     const result = mod.context.ggml_new_tensor_1d(ctx, a.type, 1);
 
-    result.op = mod.impl.c.GGML_OP_CROSS_ENTROPY_LOSS;
+    result.op = mod.impl.ggml_c.GGML_OP_CROSS_ENTROPY_LOSS;
     result.src[0] = a;
     result.src[1] = b;
 
@@ -4891,13 +4870,13 @@ pub export fn ggml_cross_entropy_loss(ctx: *mod.context.Context, a: *mod.impl.c.
 /// Ports `ggml_cross_entropy_loss_back` (ggml.c:6198 @b1b770d90).
 ///
 /// `a` is the incoming scalar gradient; the result has `b`'s shape.
-pub export fn ggml_cross_entropy_loss_back(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor, c_arg: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+pub fn ggml_cross_entropy_loss_back(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, b: *mod.impl.ggml_c.ggml_tensor, c_arg: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(mod.types.ggml_is_scalar(a), "ggml_is_scalar(a)");
     mod.impl.assert(mod.types.ggml_are_same_shape(b, c_arg), "ggml_are_same_shape(b, c)");
 
     const result = mod.context.ggml_dup_tensor(ctx, b);
 
-    result.op = mod.impl.c.GGML_OP_CROSS_ENTROPY_LOSS_BACK;
+    result.op = mod.impl.ggml_c.GGML_OP_CROSS_ENTROPY_LOSS_BACK;
     result.src[0] = a;
     result.src[1] = b;
     result.src[2] = c_arg;
@@ -4910,24 +4889,24 @@ pub export fn ggml_cross_entropy_loss_back(ctx: *mod.context.Context, a: *mod.im
 /// Updates `a` in place, so the result is a view of it rather than new
 /// storage. `adamw_params` is a 7-element f32 vector holding the learning
 /// rate, the two betas, epsilon, weight decay, and the two bias corrections.
-pub export fn ggml_opt_step_adamw(
+pub fn ggml_opt_step_adamw(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    grad: *mod.impl.c.ggml_tensor,
-    m: *mod.impl.c.ggml_tensor,
-    v: *mod.impl.c.ggml_tensor,
-    adamw_params: *mod.impl.c.ggml_tensor,
-) *mod.impl.c.ggml_tensor {
-    mod.impl.assert((a.flags & mod.impl.c.GGML_TENSOR_FLAG_PARAM) != 0, "a->flags & GGML_TENSOR_FLAG_PARAM");
+    a: *mod.impl.ggml_c.ggml_tensor,
+    grad: *mod.impl.ggml_c.ggml_tensor,
+    m: *mod.impl.ggml_c.ggml_tensor,
+    v: *mod.impl.ggml_c.ggml_tensor,
+    adamw_params: *mod.impl.ggml_c.ggml_tensor,
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    mod.impl.assert((a.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_PARAM) != 0, "a->flags & GGML_TENSOR_FLAG_PARAM");
     mod.impl.assert(mod.types.ggml_are_same_shape(a, grad), "ggml_are_same_shape(a, grad)");
     mod.impl.assert(mod.types.ggml_are_same_shape(a, m), "ggml_are_same_shape(a, m)");
     mod.impl.assert(mod.types.ggml_are_same_shape(a, v), "ggml_are_same_shape(a, v)");
-    mod.impl.assert(adamw_params.type == mod.impl.c.GGML_TYPE_F32, "adamw_params->type == GGML_TYPE_F32");
+    mod.impl.assert(adamw_params.type == mod.impl.ggml_c.GGML_TYPE_F32, "adamw_params->type == GGML_TYPE_F32");
     mod.impl.assert(mod.types.ggml_nelements(adamw_params) == 7, "ggml_nelements(adamw_params) == 7");
 
     const result = mod.context.ggml_view_tensor(ctx, a);
 
-    result.op = mod.impl.c.GGML_OP_OPT_STEP_ADAMW;
+    result.op = mod.impl.ggml_c.GGML_OP_OPT_STEP_ADAMW;
     result.src[0] = a;
     result.src[1] = grad;
     result.src[2] = m;
@@ -4940,15 +4919,15 @@ pub export fn ggml_opt_step_adamw(
 /// Ports `ggml_opt_step_sgd` (ggml.c:6246 @b1b770d90).
 ///
 /// `params` is a 2-element f32 vector: learning rate and weight decay.
-pub export fn ggml_opt_step_sgd(ctx: *mod.context.Context, a: *mod.impl.c.ggml_tensor, grad: *mod.impl.c.ggml_tensor, params: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-    mod.impl.assert((a.flags & mod.impl.c.GGML_TENSOR_FLAG_PARAM) != 0, "a->flags & GGML_TENSOR_FLAG_PARAM");
+pub fn ggml_opt_step_sgd(ctx: *mod.context.Context, a: *mod.impl.ggml_c.ggml_tensor, grad: *mod.impl.ggml_c.ggml_tensor, params: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    mod.impl.assert((a.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_PARAM) != 0, "a->flags & GGML_TENSOR_FLAG_PARAM");
     mod.impl.assert(mod.types.ggml_are_same_shape(a, grad), "ggml_are_same_shape(a, grad)");
-    mod.impl.assert(params.type == mod.impl.c.GGML_TYPE_F32, "params->type == GGML_TYPE_F32");
+    mod.impl.assert(params.type == mod.impl.ggml_c.GGML_TYPE_F32, "params->type == GGML_TYPE_F32");
     mod.impl.assert(mod.types.ggml_nelements(params) == 2, "ggml_nelements(params) == 2");
 
     const result = mod.context.ggml_view_tensor(ctx, a);
 
-    result.op = mod.impl.c.GGML_OP_OPT_STEP_SGD;
+    result.op = mod.impl.ggml_c.GGML_OP_OPT_STEP_SGD;
     result.src[0] = a;
     result.src[1] = grad;
     result.src[2] = params;
@@ -4966,16 +4945,16 @@ pub export fn ggml_opt_step_sgd(ctx: *mod.context.Context, a: *mod.impl.c.ggml_t
 /// lower-triangular left-sided non-unit case is actually supported -- the
 /// other combinations abort. The parameters are not written to `op_params`:
 /// there is only one legal setting, so a backend has nothing to read.
-pub export fn ggml_solve_tri(
+pub fn ggml_solve_tri(
     ctx: *mod.context.Context,
-    a: *mod.impl.c.ggml_tensor,
-    b: *mod.impl.c.ggml_tensor,
+    a: *mod.impl.ggml_c.ggml_tensor,
+    b: *mod.impl.ggml_c.ggml_tensor,
     left: bool,
     lower: bool,
     uni: bool,
-) *mod.impl.c.ggml_tensor {
-    mod.impl.assert(a.type == mod.impl.c.GGML_TYPE_F32, "a->type == GGML_TYPE_F32");
-    mod.impl.assert(b.type == mod.impl.c.GGML_TYPE_F32, "b->type == GGML_TYPE_F32");
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
+    mod.impl.assert(a.type == mod.impl.ggml_c.GGML_TYPE_F32, "a->type == GGML_TYPE_F32");
+    mod.impl.assert(b.type == mod.impl.ggml_c.GGML_TYPE_F32, "b->type == GGML_TYPE_F32");
 
     // A must be square and lower diagonal
     mod.impl.assert(a.ne[0] == a.ne[1], "a->ne[0] == a->ne[1]");
@@ -4991,9 +4970,9 @@ pub export fn ggml_solve_tri(
 
     mod.impl.assert(lower and left and !uni, "lower && left && !uni");
 
-    const result = mod.context.ggml_new_tensor_4d(ctx, mod.impl.c.GGML_TYPE_F32, b.ne[0], b.ne[1], b.ne[2], b.ne[3]);
+    const result = mod.context.ggml_new_tensor_4d(ctx, mod.impl.ggml_c.GGML_TYPE_F32, b.ne[0], b.ne[1], b.ne[2], b.ne[3]);
 
-    result.op = mod.impl.c.GGML_OP_SOLVE_TRI;
+    result.op = mod.impl.ggml_c.GGML_OP_SOLVE_TRI;
     result.src[0] = a;
     result.src[1] = b;
 
@@ -5006,18 +4985,18 @@ pub export fn ggml_solve_tri(
 test "argsort returns indices, top_k narrows them" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const logits = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 32000, 4);
+    const logits = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 32000, 4);
 
-    const sorted = ggml_argsort(&ctx, logits, mod.impl.c.GGML_SORT_ORDER_DESC);
+    const sorted = ggml_argsort(&ctx, logits, mod.impl.ggml_c.GGML_SORT_ORDER_DESC);
     // Indices, so i32 regardless of input type, and the same shape.
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_type, mod.impl.c.GGML_TYPE_I32), sorted.type);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_type, mod.impl.ggml_c.GGML_TYPE_I32), sorted.type);
     try std.testing.expect(mod.types.ggml_are_same_shape(sorted, logits));
-    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.c.GGML_SORT_ORDER_DESC)), mod.impl.getOpParamsI32(sorted, 0));
+    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.ggml_c.GGML_SORT_ORDER_DESC)), mod.impl.getOpParamsI32(sorted, 0));
 
     // The dedicated op produces a narrow result directly.
     const top = ggml_top_k(&ctx, logits, 40);
     try std.testing.expectEqual(@as(i64, 40), top.ne[0]);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, mod.impl.c.GGML_OP_TOP_K), top.op);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, mod.impl.ggml_c.GGML_OP_TOP_K), top.op);
 
     // The composite sorts everything, then views the head of each row.
     const via_sort = ggml_argsort_top_k(&ctx, logits, 40);
@@ -5047,7 +5026,7 @@ test "roll and tri keep their shape" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
 
-    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 16, 8);
+    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 16, 8);
     const rolled = ggml_roll(&ctx, a, 3, -2, 0, 0);
     try std.testing.expect(mod.types.ggml_are_same_shape(rolled, a));
     try std.testing.expectEqual(@as(i32, 3), mod.impl.getOpParamsI32(rolled, 0));
@@ -5055,16 +5034,16 @@ test "roll and tri keep their shape" {
     try std.testing.expectEqual(@as(i32, -2), mod.impl.getOpParamsI32(rolled, 1));
 
     // tri needs a square matrix.
-    const sq = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 8);
-    const t = ggml_tri(&ctx, sq, mod.impl.c.GGML_TRI_TYPE_LOWER);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, mod.impl.c.GGML_OP_TRI), t.op);
-    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.c.GGML_TRI_TYPE_LOWER)), mod.impl.getOpParamsI32(t, 0));
+    const sq = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 8);
+    const t = ggml_tri(&ctx, sq, mod.impl.ggml_c.GGML_TRI_TYPE_LOWER);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, mod.impl.ggml_c.GGML_OP_TRI), t.op);
+    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.ggml_c.GGML_TRI_TYPE_LOWER)), mod.impl.getOpParamsI32(t, 0));
 }
 
 test "fill and leaky_relu carry a float parameter" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const a = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.c.GGML_TYPE_F32, 16);
+    const a = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 16);
 
     const f = ggml_fill(&ctx, a, -1.5);
     try std.testing.expectEqual(@as(f32, -1.5), mod.impl.getOpParamsF32(f, 0));
@@ -5072,19 +5051,19 @@ test "fill and leaky_relu carry a float parameter" {
 
     // leaky_relu has its own op code, unlike the parameterless activations.
     const lr = ggml_leaky_relu(&ctx, a, 0.01, false);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_op, mod.impl.c.GGML_OP_LEAKY_RELU), lr.op);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_op, mod.impl.ggml_c.GGML_OP_LEAKY_RELU), lr.op);
     try std.testing.expectEqual(@as(f32, 0.01), mod.impl.getOpParamsF32(lr, 0));
 }
 
 test "swiglu_oai adds its parameters above the glu slots" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
-    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 16, 4);
-    const b = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 16, 4);
+    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 16, 4);
+    const b = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 16, 4);
 
     const r = ggml_swiglu_oai(&ctx, a, b, 1.702, 7.0);
     // Slots 0 and 1 belong to the GLU op and swap flag.
-    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.c.GGML_GLU_OP_SWIGLU_OAI)), mod.impl.getOpParamsI32(r, 0));
+    try std.testing.expectEqual(@as(i32, @intCast(mod.impl.ggml_c.GGML_GLU_OP_SWIGLU_OAI)), mod.impl.getOpParamsI32(r, 0));
     try std.testing.expectEqual(@as(i32, 0), mod.impl.getOpParamsI32(r, 1));
     try std.testing.expectEqual(@as(f32, 1.702), mod.impl.getOpParamsF32(r, 2));
     try std.testing.expectEqual(@as(f32, 7.0), mod.impl.getOpParamsF32(r, 3));
@@ -5095,7 +5074,7 @@ test "win_part pads up to whole windows" {
     var ctx = testContext(&buf);
 
     // [C, H, W, 1] = [64, 14, 14, 1] split into 8x8 windows needs 2x2 of them.
-    const a = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.c.GGML_TYPE_F32, 64, 14, 14, 1);
+    const a = mod.context.ggml_new_tensor_4d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 64, 14, 14, 1);
     const r = ggml_win_part(&ctx, a, 8);
     try std.testing.expectEqual(@as(i64, 64), r.ne[0]);
     try std.testing.expectEqual(@as(i64, 8), r.ne[1]);
@@ -5115,36 +5094,36 @@ test "relative position embeddings expand into a query-key matrix" {
     var ctx = testContext(&buf);
 
     // A table of 2*8-1 = 15 offsets, each 64 wide.
-    const table = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F16, 64, 15);
+    const table = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F16, 64, 15);
     const r = ggml_get_rel_pos(&ctx, table, 8, 8);
     try std.testing.expectEqual(@as(i64, 64), r.ne[0]);
     try std.testing.expectEqual(@as(i64, 8), r.ne[1]);
     try std.testing.expectEqual(@as(i64, 8), r.ne[2]);
-    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_type, mod.impl.c.GGML_TYPE_F16), r.type);
+    try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_type, mod.impl.ggml_c.GGML_TYPE_F16), r.type);
 }
 
 test "flags mark a tensor's role, and output walks the view chain" {
     var buf: [1 << 16]u8 align(16) = undefined;
     var ctx = testContext(&buf);
 
-    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.c.GGML_TYPE_F32, 8, 4);
+    const a = mod.context.ggml_new_tensor_2d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 8, 4);
     ggml_set_input(a);
-    try std.testing.expect((a.flags & mod.impl.c.GGML_TENSOR_FLAG_INPUT) != 0);
+    try std.testing.expect((a.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_INPUT) != 0);
 
     // Marking a view as output must also protect what it views into,
     // or the allocator would reuse the underlying storage.
     const view = ggml_reshape_2d(&ctx, a, 4, 8);
     ggml_set_output(view);
-    try std.testing.expect((view.flags & mod.impl.c.GGML_TENSOR_FLAG_OUTPUT) != 0);
-    try std.testing.expect((a.flags & mod.impl.c.GGML_TENSOR_FLAG_OUTPUT) != 0);
+    try std.testing.expect((view.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_OUTPUT) != 0);
+    try std.testing.expect((a.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_OUTPUT) != 0);
 
     // Only a leaf can be a parameter.
-    const leaf = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.c.GGML_TYPE_F32, 4);
+    const leaf = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 4);
     ggml_set_param(leaf);
-    try std.testing.expect((leaf.flags & mod.impl.c.GGML_TENSOR_FLAG_PARAM) != 0);
+    try std.testing.expect((leaf.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_PARAM) != 0);
 
     // A loss must be a scalar f32.
-    const loss = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.c.GGML_TYPE_F32, 1);
+    const loss = mod.context.ggml_new_tensor_1d(&ctx, mod.impl.ggml_c.GGML_TYPE_F32, 1);
     ggml_set_loss(loss);
-    try std.testing.expect((loss.flags & mod.impl.c.GGML_TENSOR_FLAG_LOSS) != 0);
+    try std.testing.expect((loss.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_LOSS) != 0);
 }

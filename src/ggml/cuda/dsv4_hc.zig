@@ -24,20 +24,20 @@ fn fs(nb: usize) i64 {
     return @bitCast(nb / @sizeOf(f32));
 }
 
-fn srcOf(dst: *const ggml.impl.c.ggml_tensor, i: usize) *const ggml.impl.c.ggml_tensor {
-    return ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[i]);
+fn srcOf(dst: *const ggml.impl.ggml_c.ggml_tensor, i: usize) *const ggml.impl.ggml_c.ggml_tensor {
+    return ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[i]);
 }
 
 /// Ports `ggml_cuda_op_dsv4_hc_comb` (dsv4-hc.cu:205 @b1b770d90).
-pub fn opDsv4HcComb(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+pub fn opDsv4HcComb(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const mixes = srcOf(dst, 0);
     const scale = srcOf(dst, 1);
     const base = srcOf(dst, 2);
 
-    ggml.impl.assert(mixes.type == ggml.impl.c.GGML_TYPE_F32, "mixes->type == GGML_TYPE_F32");
-    ggml.impl.assert(scale.type == ggml.impl.c.GGML_TYPE_F32, "scale->type == GGML_TYPE_F32");
-    ggml.impl.assert(base.type == ggml.impl.c.GGML_TYPE_F32, "base->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(mixes.type == ggml.impl.ggml_c.GGML_TYPE_F32, "mixes->type == GGML_TYPE_F32");
+    ggml.impl.assert(scale.type == ggml.impl.ggml_c.GGML_TYPE_F32, "scale->type == GGML_TYPE_F32");
+    ggml.impl.assert(base.type == ggml.impl.ggml_c.GGML_TYPE_F32, "base->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
 
     const hc_mix_dim: i64 = (2 + hc_n) * hc_n;
 
@@ -71,13 +71,13 @@ pub fn opDsv4HcComb(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tenso
 /// weights are gated: `ggml_dsv4_hc_pre_gated` gives one weight per
 /// element, put through a sigmoid in the kernel, where the plain op gives
 /// one per stream.
-pub fn opDsv4HcPre(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+pub fn opDsv4HcPre(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const x = srcOf(dst, 0);
     const weights = srcOf(dst, 1);
 
-    ggml.impl.assert(x.type == ggml.impl.c.GGML_TYPE_F32, "x->type == GGML_TYPE_F32");
-    ggml.impl.assert(weights.type == ggml.impl.c.GGML_TYPE_F32, "weights->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(x.type == ggml.impl.ggml_c.GGML_TYPE_F32, "x->type == GGML_TYPE_F32");
+    ggml.impl.assert(weights.type == ggml.impl.ggml_c.GGML_TYPE_F32, "weights->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
 
     const n_embd = x.ne[0];
     const hc = x.ne[1];
@@ -110,10 +110,10 @@ pub fn opDsv4HcPre(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor
 /// `gate_scale_out` are the `SCALE` nodes of a fused `SCALE -> SIGMOID ->
 /// SCALE` chain feeding `src[2]` (qwen4exp's `hc_combine`): the kernel reads
 /// the raw weights from before the chain and applies it.
-pub fn opDsv4HcPost(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor, gate_scale_in: ?*const ggml.impl.c.ggml_tensor, gate_scale_out: ?*const ggml.impl.c.ggml_tensor) void {
+pub fn opDsv4HcPost(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor, gate_scale_in: ?*const ggml.impl.ggml_c.ggml_tensor, gate_scale_out: ?*const ggml.impl.ggml_c.ggml_tensor) void {
     const x = srcOf(dst, 0);
     const residual = srcOf(dst, 1);
-    const comb: ?*const ggml.impl.c.ggml_tensor = dst.src[3];
+    const comb: ?*const ggml.impl.ggml_c.ggml_tensor = dst.src[3];
 
     // when fused, read the raw post weights from before the SCALE -> SIGMOID -> SCALE chain
     const gated = gate_scale_in != null;
@@ -122,11 +122,11 @@ pub fn opDsv4HcPost(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tenso
     const gate_in: f32 = if (gate_scale_in) |g| ggml.impl.getOpParamsF32(g, 0) else 1.0;
     const gate_out: f32 = if (gated) ggml.impl.getOpParamsF32(gate_scale_out.?, 0) else 1.0;
 
-    ggml.impl.assert(x.type == ggml.impl.c.GGML_TYPE_F32, "x->type == GGML_TYPE_F32");
-    ggml.impl.assert(residual.type == ggml.impl.c.GGML_TYPE_F32, "residual->type == GGML_TYPE_F32");
-    ggml.impl.assert(post.type == ggml.impl.c.GGML_TYPE_F32, "post->type == GGML_TYPE_F32");
-    ggml.impl.assert(comb == null or comb.?.type == ggml.impl.c.GGML_TYPE_F32, "comb == nullptr || comb->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(x.type == ggml.impl.ggml_c.GGML_TYPE_F32, "x->type == GGML_TYPE_F32");
+    ggml.impl.assert(residual.type == ggml.impl.ggml_c.GGML_TYPE_F32, "residual->type == GGML_TYPE_F32");
+    ggml.impl.assert(post.type == ggml.impl.ggml_c.GGML_TYPE_F32, "post->type == GGML_TYPE_F32");
+    ggml.impl.assert(comb == null or comb.?.type == ggml.impl.ggml_c.GGML_TYPE_F32, "comb == nullptr || comb->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
 
     const nbc0: usize = if (comb) |t| t.nb[0] else 0;
     const nbc1: usize = if (comb) |t| t.nb[1] else 0;

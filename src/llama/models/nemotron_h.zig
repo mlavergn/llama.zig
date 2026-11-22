@@ -247,7 +247,7 @@ pub fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder
     llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/nemotron-h.cpp", 205, "n_embd_head == hparams.n_embd_head_k()");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
-    llama.impl.c.ggml_build_forward_expand(b.gf, inpL);
+    llama.impl.llama_c.ggml_build_forward_expand(b.gf, inpL);
 
     const inp = b.buildInpMemHybrid();
 
@@ -255,7 +255,7 @@ pub fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder
     const n_layer: usize = @intCast(b.n_layer);
     const extract_final_inp = n_layer < cp.embeddings_layer_inp.len and cp.embeddings_layer_inp[n_layer];
 
-    var cur: *llama.impl.c.ggml_tensor = undefined;
+    var cur: *llama.impl.llama_c.ggml_tensor = undefined;
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
         b.res.t_layer_inp[@intCast(il)] = inpL;
@@ -278,12 +278,12 @@ pub fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder
         }
 
         if (il == b.n_layer - 1 and b.cropBeforeNextn(inp_out_ids) and !extract_final_inp) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
         // The residual.
-        cur = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(cur, "nemotron_h_block_out", il);
 
         // The next layer's input.
@@ -295,7 +295,7 @@ pub fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder
         b.res.t_layer_inp[n_layer] = cur;
 
         if (b.cropBeforeNextn(inp_out_ids)) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
         }
     }
 
@@ -306,7 +306,7 @@ pub fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder
     b.res.t_h_nextn = cur;
 
     if (b.cropAfterNextn(inp_out_ids)) {
-        cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+        cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
     }
 
     b.cb(cur, "result_norm", -1);
@@ -320,7 +320,7 @@ pub fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder
 
 /// Ports `llama_model_nemotron_h::graph`'s `build_attention_layer`
 /// (models/nemotron-h.cpp:278 @b1b770d90): attention without RoPE.
-fn buildAttentionLayer(model: *const llama.model.Model, b: *const llama.graph.Builder, cur_: *llama.impl.c.ggml_tensor, inp_attn: *llama.graph.InpAttnKv, n_embd_head: i64, il: c_int) *llama.impl.c.ggml_tensor {
+fn buildAttentionLayer(model: *const llama.model.Model, b: *const llama.graph.Builder, cur_: *llama.impl.llama_c.ggml_tensor, inp_attn: *llama.graph.InpAttnKv, n_embd_head: i64, il: c_int) *llama.impl.llama_c.ggml_tensor {
     const hp = b.hparams;
     const layer = &model.layers[@intCast(il)];
     const qkv = b.buildQkv(layer, cur_, n_embd_head, hp.nHead(@intCast(il)), hp.nHeadKv(@intCast(il)), il);
@@ -334,7 +334,7 @@ fn buildAttentionLayer(model: *const llama.model.Model, b: *const llama.graph.Bu
 /// Ports `llama_model_nemotron_h::graph`'s `build_ffn_layer`
 /// (models/nemotron-h.cpp:293 @b1b770d90): a squared-ReLU FFN, or the
 /// mixture of experts beside a shared expert.
-fn buildFfnLayer(model: *const llama.model.Model, b: *const llama.graph.Builder, cur_: *llama.impl.c.ggml_tensor, il: c_int) *llama.impl.c.ggml_tensor {
+fn buildFfnLayer(model: *const llama.model.Model, b: *const llama.graph.Builder, cur_: *llama.impl.llama_c.ggml_tensor, il: c_int) *llama.impl.llama_c.ggml_tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const layer = &model.layers[@intCast(il)];
@@ -348,7 +348,7 @@ fn buildFfnLayer(model: *const llama.model.Model, b: *const llama.graph.Builder,
         var inp_latent = cur;
 
         if (layer.ffn_latent_down) |w| {
-            inp_latent = llama.impl.c.ggml_mul_mat(ctx, w, cur);
+            inp_latent = llama.impl.llama_c.ggml_mul_mat(ctx, w, cur);
         }
 
         const router_logits = b.buildLoraMm(layer.ffn_gate_inp.?, cur, null);
@@ -376,13 +376,13 @@ fn buildFfnLayer(model: *const llama.model.Model, b: *const llama.graph.Builder,
         b.cb(moe_out, "ffn_moe_out", il);
 
         if (layer.ffn_latent_up) |w| {
-            moe_out = llama.impl.c.ggml_mul_mat(ctx, w, moe_out);
+            moe_out = llama.impl.llama_c.ggml_mul_mat(ctx, w, moe_out);
         }
 
         const ffn_shexp = b.buildFfn(inp_emb, layer.ffn_up_shexp, null, layer.ffn_up_shexp_s, null, null, null, layer.ffn_down_shexp, null, layer.ffn_down_shexp_s, null, .relu_sqr, .par, il);
         b.cb(ffn_shexp, "ffn_shexp", il);
 
-        cur = llama.impl.c.ggml_add(ctx, moe_out, ffn_shexp);
+        cur = llama.impl.llama_c.ggml_add(ctx, moe_out, ffn_shexp);
         b.cb(cur, "ffn_out", il);
     }
 

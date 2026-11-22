@@ -32,13 +32,13 @@ pub const ToNcFn = *const fn (x: ?*const anyopaque, y: ?*anyopaque, ne00: i64, n
 /// its name and its `qk`/`qr`.
 const Deq = struct { name: []const u8, qk: comptime_int, qr: comptime_int };
 
-const q1_0: Deq = .{ .name = "dequantize_q1_0", .qk = ggml.impl.c.QK1_0, .qr = 1 };
-const q2_0: Deq = .{ .name = "dequantize_q2_0", .qk = ggml.impl.c.QK2_0, .qr = 1 };
-const q4_0: Deq = .{ .name = "dequantize_q4_0", .qk = ggml.impl.c.QK4_0, .qr = 2 };
-const q4_1: Deq = .{ .name = "dequantize_q4_1", .qk = ggml.impl.c.QK4_1, .qr = 2 };
-const q5_0: Deq = .{ .name = "dequantize_q5_0", .qk = ggml.impl.c.QK5_0, .qr = 2 };
-const q5_1: Deq = .{ .name = "dequantize_q5_1", .qk = ggml.impl.c.QK5_1, .qr = 2 };
-const q8_0: Deq = .{ .name = "dequantize_q8_0", .qk = ggml.impl.c.QK8_0, .qr = 1 };
+const q1_0: Deq = .{ .name = "dequantize_q1_0", .qk = ggml.impl.ggml_c.QK1_0, .qr = 1 };
+const q2_0: Deq = .{ .name = "dequantize_q2_0", .qk = ggml.impl.ggml_c.QK2_0, .qr = 1 };
+const q4_0: Deq = .{ .name = "dequantize_q4_0", .qk = ggml.impl.ggml_c.QK4_0, .qr = 2 };
+const q4_1: Deq = .{ .name = "dequantize_q4_1", .qk = ggml.impl.ggml_c.QK4_1, .qr = 2 };
+const q5_0: Deq = .{ .name = "dequantize_q5_0", .qk = ggml.impl.ggml_c.QK5_0, .qr = 2 };
+const q5_1: Deq = .{ .name = "dequantize_q5_1", .qk = ggml.impl.ggml_c.QK5_1, .qr = 2 };
+const q8_0: Deq = .{ .name = "dequantize_q8_0", .qk = ggml.impl.ggml_c.QK8_0, .qr = 1 };
 
 fn i32Of(x: i64) c_int {
     return @truncate(x);
@@ -106,11 +106,11 @@ fn DequantizeRow(comptime name: []const u8, comptime threads: comptime_int, comp
         fn run(vx: ?*const anyopaque, y: ?*anyopaque, kk: i64, stream: ggml.cuda.common.cu.cudaStream_t) void {
             switch (grid) {
                 .per_block => {
-                    const nb: c_int = @truncate(@divTrunc(kk, ggml.impl.c.QK_K));
+                    const nb: c_int = @truncate(@divTrunc(kk, ggml.impl.ggml_c.QK_K));
                     ggml.cuda.kernels.launch(k, .{ .grid = .{ .x = @bitCast(nb) }, .block = .{ .x = threads }, .stream = stream }, .{ vx, y });
                 },
                 .per_block_ceil => {
-                    const nb: c_int = @truncate(@divTrunc(kk + ggml.impl.c.QK_K - 1, ggml.impl.c.QK_K));
+                    const nb: c_int = @truncate(@divTrunc(kk + ggml.impl.ggml_c.QK_K - 1, ggml.impl.ggml_c.QK_K));
                     ggml.cuda.kernels.launch(k, .{ .grid = .{ .x = @bitCast(nb) }, .block = .{ .x = threads }, .stream = stream }, .{ vx, y });
                 },
                 .q4 => {
@@ -119,8 +119,8 @@ fn DequantizeRow(comptime name: []const u8, comptime threads: comptime_int, comp
                     ggml.cuda.kernels.launch(k, .{ .grid = .{ .x = @bitCast(nb) }, .block = .{ .x = threads }, .stream = stream }, .{ vx, y, nb32 });
                 },
                 .per_block_ceil_nb32 => {
-                    const nb32: c_int = @truncate(@divTrunc(kk, ggml.impl.c.QK4_NL));
-                    const nb: c_int = @truncate(@divTrunc(kk + ggml.impl.c.QK_K - 1, ggml.impl.c.QK_K));
+                    const nb32: c_int = @truncate(@divTrunc(kk, ggml.impl.ggml_c.QK4_NL));
+                    const nb: c_int = @truncate(@divTrunc(kk + ggml.impl.ggml_c.QK_K - 1, ggml.impl.ggml_c.QK_K));
                     ggml.cuda.kernels.launch(k, .{ .grid = .{ .x = @bitCast(nb) }, .block = .{ .x = threads }, .stream = stream }, .{ vx, y, nb32 });
                 },
             }
@@ -134,8 +134,8 @@ fn DequantizeRowNvfp4(comptime T: type) type {
         const k = ggml.cuda.kernels.get("convert", ggml.cuda.kernels.tmpl("dequantize_block_nvfp4", &.{ggml.cuda.kernels.typeName(T)}));
 
         fn run(vx: ?*const anyopaque, y: ?*anyopaque, kk: i64, stream: ggml.cuda.common.cu.cudaStream_t) void {
-            ggml.impl.assert(@rem(kk, ggml.impl.c.QK_NVFP4) == 0, "k % QK_NVFP4 == 0");
-            const nb: c_int = @truncate(@divTrunc(kk, ggml.impl.c.QK_NVFP4));
+            ggml.impl.assert(@rem(kk, ggml.impl.ggml_c.QK_NVFP4) == 0, "k % QK_NVFP4 == 0");
+            const nb: c_int = @truncate(@divTrunc(kk, ggml.impl.ggml_c.QK_NVFP4));
             ggml.cuda.kernels.launch(k, .{ .grid = .{ .x = @bitCast(nb) }, .block = .{ .x = 32 }, .stream = stream }, .{ vx, y, kk });
         }
     };
@@ -187,110 +187,110 @@ fn ConvertUnary(comptime S: type, comptime T: type) type {
 
 /// The cases the three contiguous getters share: every quantized type,
 /// each to `T`.
-fn quantizedTo(comptime T: type, t: ggml.impl.c.enum_ggml_type) ?ToFn {
+fn quantizedTo(comptime T: type, t: ggml.impl.ggml_c.enum_ggml_type) ?ToFn {
     return switch (t) {
-        ggml.impl.c.GGML_TYPE_Q1_0 => DequantizeBlock(q1_0, T).cont,
-        ggml.impl.c.GGML_TYPE_Q2_0 => DequantizeBlock(q2_0, T).cont,
-        ggml.impl.c.GGML_TYPE_Q4_0 => DequantizeRow("q4_0", 32, .q4, T).run,
-        ggml.impl.c.GGML_TYPE_Q4_1 => DequantizeRow("q4_1", 32, .q4, T).run,
-        ggml.impl.c.GGML_TYPE_Q5_0 => DequantizeBlock(q5_0, T).cont,
-        ggml.impl.c.GGML_TYPE_Q5_1 => DequantizeBlock(q5_1, T).cont,
-        ggml.impl.c.GGML_TYPE_Q8_0 => DequantizeBlock(q8_0, T).cont,
-        ggml.impl.c.GGML_TYPE_Q2_K => DequantizeRow("q2_K", 64, .per_block, T).run,
-        ggml.impl.c.GGML_TYPE_Q3_K => DequantizeRow("q3_K", 64, .per_block, T).run,
-        ggml.impl.c.GGML_TYPE_Q4_K => DequantizeRow("q4_K", 32, .per_block, T).run,
-        ggml.impl.c.GGML_TYPE_Q5_K => DequantizeRow("q5_K", 64, .per_block, T).run,
-        ggml.impl.c.GGML_TYPE_Q6_K => DequantizeRow("q6_K", 64, .per_block, T).run,
-        ggml.impl.c.GGML_TYPE_IQ2_XXS => DequantizeRow("iq2_xxs", 32, .per_block, T).run,
-        ggml.impl.c.GGML_TYPE_IQ2_XS => DequantizeRow("iq2_xs", 32, .per_block, T).run,
-        ggml.impl.c.GGML_TYPE_IQ2_S => DequantizeRow("iq2_s", 32, .per_block, T).run,
-        ggml.impl.c.GGML_TYPE_IQ3_XXS => DequantizeRow("iq3_xxs", 32, .per_block, T).run,
-        ggml.impl.c.GGML_TYPE_IQ1_S => DequantizeRow("iq1_s", 32, .per_block, T).run,
-        ggml.impl.c.GGML_TYPE_IQ1_M => DequantizeRow("iq1_m", 32, .per_block, T).run,
-        ggml.impl.c.GGML_TYPE_IQ4_NL => DequantizeRow("iq4_nl", 32, .per_block_ceil_nb32, T).run,
-        ggml.impl.c.GGML_TYPE_IQ4_XS => DequantizeRow("iq4_xs", 32, .per_block_ceil, T).run,
-        ggml.impl.c.GGML_TYPE_IQ3_S => DequantizeRow("iq3_s", 32, .per_block, T).run,
-        ggml.impl.c.GGML_TYPE_MXFP4 => DequantizeRow("mxfp4", 32, .per_block_ceil, T).run,
-        ggml.impl.c.GGML_TYPE_NVFP4 => DequantizeRowNvfp4(T).run,
+        ggml.impl.ggml_c.GGML_TYPE_Q1_0 => DequantizeBlock(q1_0, T).cont,
+        ggml.impl.ggml_c.GGML_TYPE_Q2_0 => DequantizeBlock(q2_0, T).cont,
+        ggml.impl.ggml_c.GGML_TYPE_Q4_0 => DequantizeRow("q4_0", 32, .q4, T).run,
+        ggml.impl.ggml_c.GGML_TYPE_Q4_1 => DequantizeRow("q4_1", 32, .q4, T).run,
+        ggml.impl.ggml_c.GGML_TYPE_Q5_0 => DequantizeBlock(q5_0, T).cont,
+        ggml.impl.ggml_c.GGML_TYPE_Q5_1 => DequantizeBlock(q5_1, T).cont,
+        ggml.impl.ggml_c.GGML_TYPE_Q8_0 => DequantizeBlock(q8_0, T).cont,
+        ggml.impl.ggml_c.GGML_TYPE_Q2_K => DequantizeRow("q2_K", 64, .per_block, T).run,
+        ggml.impl.ggml_c.GGML_TYPE_Q3_K => DequantizeRow("q3_K", 64, .per_block, T).run,
+        ggml.impl.ggml_c.GGML_TYPE_Q4_K => DequantizeRow("q4_K", 32, .per_block, T).run,
+        ggml.impl.ggml_c.GGML_TYPE_Q5_K => DequantizeRow("q5_K", 64, .per_block, T).run,
+        ggml.impl.ggml_c.GGML_TYPE_Q6_K => DequantizeRow("q6_K", 64, .per_block, T).run,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS => DequantizeRow("iq2_xxs", 32, .per_block, T).run,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XS => DequantizeRow("iq2_xs", 32, .per_block, T).run,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_S => DequantizeRow("iq2_s", 32, .per_block, T).run,
+        ggml.impl.ggml_c.GGML_TYPE_IQ3_XXS => DequantizeRow("iq3_xxs", 32, .per_block, T).run,
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_S => DequantizeRow("iq1_s", 32, .per_block, T).run,
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_M => DequantizeRow("iq1_m", 32, .per_block, T).run,
+        ggml.impl.ggml_c.GGML_TYPE_IQ4_NL => DequantizeRow("iq4_nl", 32, .per_block_ceil_nb32, T).run,
+        ggml.impl.ggml_c.GGML_TYPE_IQ4_XS => DequantizeRow("iq4_xs", 32, .per_block_ceil, T).run,
+        ggml.impl.ggml_c.GGML_TYPE_IQ3_S => DequantizeRow("iq3_s", 32, .per_block, T).run,
+        ggml.impl.ggml_c.GGML_TYPE_MXFP4 => DequantizeRow("mxfp4", 32, .per_block_ceil, T).run,
+        ggml.impl.ggml_c.GGML_TYPE_NVFP4 => DequantizeRowNvfp4(T).run,
         else => null,
     };
 }
 
 /// Ports `ggml_get_to_bf16_cuda` (convert.cu:496 @b1b770d90). Every getter
 /// below takes `F8_E4M3`.
-pub fn getToBf16(t: ggml.impl.c.enum_ggml_type) ?ToFn {
+pub fn getToBf16(t: ggml.impl.ggml_c.enum_ggml_type) ?ToFn {
     return switch (t) {
-        ggml.impl.c.GGML_TYPE_F8_E4M3 => ConvertUnary(ggml.cuda.kernels.fp8_e4m3, ggml.cuda.kernels.bf16).cont,
-        ggml.impl.c.GGML_TYPE_F32 => ConvertUnary(f32, ggml.cuda.kernels.bf16).cont,
-        ggml.impl.c.GGML_TYPE_F16 => ConvertUnary(ggml.cuda.kernels.half, ggml.cuda.kernels.bf16).cont,
+        ggml.impl.ggml_c.GGML_TYPE_F8_E4M3 => ConvertUnary(ggml.cuda.kernels.fp8_e4m3, ggml.cuda.kernels.bf16).cont,
+        ggml.impl.ggml_c.GGML_TYPE_F32 => ConvertUnary(f32, ggml.cuda.kernels.bf16).cont,
+        ggml.impl.ggml_c.GGML_TYPE_F16 => ConvertUnary(ggml.cuda.kernels.half, ggml.cuda.kernels.bf16).cont,
         else => quantizedTo(ggml.cuda.kernels.bf16, t),
     };
 }
 
 /// Ports `ggml_get_to_fp16_cuda` (convert.cu:555 @b1b770d90).
-pub fn getToFp16(t: ggml.impl.c.enum_ggml_type) ?ToFn {
+pub fn getToFp16(t: ggml.impl.ggml_c.enum_ggml_type) ?ToFn {
     return switch (t) {
-        ggml.impl.c.GGML_TYPE_Q8_0 => if (ggml.cuda.common.fp16Available(ggml.cuda.common.info().devices[@intCast(ggml.cuda.common.getDevice())].cc))
+        ggml.impl.ggml_c.GGML_TYPE_Q8_0 => if (ggml.cuda.common.fp16Available(ggml.cuda.common.info().devices[@intCast(ggml.cuda.common.getDevice())].cc))
             dequantizeBlockQ8_0F16
         else
             DequantizeBlock(q8_0, ggml.cuda.kernels.half).cont,
-        ggml.impl.c.GGML_TYPE_F8_E4M3 => ConvertUnary(ggml.cuda.kernels.fp8_e4m3, ggml.cuda.kernels.half).cont,
-        ggml.impl.c.GGML_TYPE_F32 => ConvertUnary(f32, ggml.cuda.kernels.half).cont,
-        ggml.impl.c.GGML_TYPE_BF16 => ConvertUnary(ggml.cuda.kernels.bf16, ggml.cuda.kernels.half).cont,
+        ggml.impl.ggml_c.GGML_TYPE_F8_E4M3 => ConvertUnary(ggml.cuda.kernels.fp8_e4m3, ggml.cuda.kernels.half).cont,
+        ggml.impl.ggml_c.GGML_TYPE_F32 => ConvertUnary(f32, ggml.cuda.kernels.half).cont,
+        ggml.impl.ggml_c.GGML_TYPE_BF16 => ConvertUnary(ggml.cuda.kernels.bf16, ggml.cuda.kernels.half).cont,
         else => quantizedTo(ggml.cuda.kernels.half, t),
     };
 }
 
 /// Ports `ggml_get_to_fp32_cuda` (convert.cu:617 @b1b770d90).
-pub fn getToFp32(t: ggml.impl.c.enum_ggml_type) ?ToFn {
+pub fn getToFp32(t: ggml.impl.ggml_c.enum_ggml_type) ?ToFn {
     return switch (t) {
-        ggml.impl.c.GGML_TYPE_F8_E4M3 => ConvertUnary(ggml.cuda.kernels.fp8_e4m3, f32).cont,
-        ggml.impl.c.GGML_TYPE_F16 => ConvertUnary(ggml.cuda.kernels.half, f32).cont,
-        ggml.impl.c.GGML_TYPE_BF16 => ConvertUnary(ggml.cuda.kernels.bf16, f32).cont,
+        ggml.impl.ggml_c.GGML_TYPE_F8_E4M3 => ConvertUnary(ggml.cuda.kernels.fp8_e4m3, f32).cont,
+        ggml.impl.ggml_c.GGML_TYPE_F16 => ConvertUnary(ggml.cuda.kernels.half, f32).cont,
+        ggml.impl.ggml_c.GGML_TYPE_BF16 => ConvertUnary(ggml.cuda.kernels.bf16, f32).cont,
         else => quantizedTo(f32, t),
     };
 }
 
 /// The cases the three `_nc` getters share.
-fn quantizedNcTo(comptime T: type, t: ggml.impl.c.enum_ggml_type) ?ToNcFn {
+fn quantizedNcTo(comptime T: type, t: ggml.impl.ggml_c.enum_ggml_type) ?ToNcFn {
     return switch (t) {
-        ggml.impl.c.GGML_TYPE_Q1_0 => DequantizeBlock(q1_0, T).nc,
-        ggml.impl.c.GGML_TYPE_Q2_0 => DequantizeBlock(q2_0, T).nc,
-        ggml.impl.c.GGML_TYPE_Q4_0 => DequantizeBlock(q4_0, T).nc,
-        ggml.impl.c.GGML_TYPE_Q4_1 => DequantizeBlock(q4_1, T).nc,
-        ggml.impl.c.GGML_TYPE_Q5_0 => DequantizeBlock(q5_0, T).nc,
-        ggml.impl.c.GGML_TYPE_Q5_1 => DequantizeBlock(q5_1, T).nc,
-        ggml.impl.c.GGML_TYPE_Q8_0 => DequantizeBlock(q8_0, T).nc,
+        ggml.impl.ggml_c.GGML_TYPE_Q1_0 => DequantizeBlock(q1_0, T).nc,
+        ggml.impl.ggml_c.GGML_TYPE_Q2_0 => DequantizeBlock(q2_0, T).nc,
+        ggml.impl.ggml_c.GGML_TYPE_Q4_0 => DequantizeBlock(q4_0, T).nc,
+        ggml.impl.ggml_c.GGML_TYPE_Q4_1 => DequantizeBlock(q4_1, T).nc,
+        ggml.impl.ggml_c.GGML_TYPE_Q5_0 => DequantizeBlock(q5_0, T).nc,
+        ggml.impl.ggml_c.GGML_TYPE_Q5_1 => DequantizeBlock(q5_1, T).nc,
+        ggml.impl.ggml_c.GGML_TYPE_Q8_0 => DequantizeBlock(q8_0, T).nc,
         else => null,
     };
 }
 
 /// Ports `ggml_get_to_fp16_nc_cuda` (convert.cu:676 @b1b770d90).
-pub fn getToFp16Nc(t: ggml.impl.c.enum_ggml_type) ?ToNcFn {
+pub fn getToFp16Nc(t: ggml.impl.ggml_c.enum_ggml_type) ?ToNcFn {
     return switch (t) {
-        ggml.impl.c.GGML_TYPE_F8_E4M3 => ConvertUnary(ggml.cuda.kernels.fp8_e4m3, ggml.cuda.kernels.half).nc,
-        ggml.impl.c.GGML_TYPE_F32 => ConvertUnary(f32, ggml.cuda.kernels.half).nc,
-        ggml.impl.c.GGML_TYPE_BF16 => ConvertUnary(ggml.cuda.kernels.bf16, ggml.cuda.kernels.half).nc,
+        ggml.impl.ggml_c.GGML_TYPE_F8_E4M3 => ConvertUnary(ggml.cuda.kernels.fp8_e4m3, ggml.cuda.kernels.half).nc,
+        ggml.impl.ggml_c.GGML_TYPE_F32 => ConvertUnary(f32, ggml.cuda.kernels.half).nc,
+        ggml.impl.ggml_c.GGML_TYPE_BF16 => ConvertUnary(ggml.cuda.kernels.bf16, ggml.cuda.kernels.half).nc,
         else => quantizedNcTo(ggml.cuda.kernels.half, t),
     };
 }
 
 /// Ports `ggml_get_to_bf16_nc_cuda` (convert.cu:703 @b1b770d90).
-pub fn getToBf16Nc(t: ggml.impl.c.enum_ggml_type) ?ToNcFn {
+pub fn getToBf16Nc(t: ggml.impl.ggml_c.enum_ggml_type) ?ToNcFn {
     return switch (t) {
-        ggml.impl.c.GGML_TYPE_F8_E4M3 => ConvertUnary(ggml.cuda.kernels.fp8_e4m3, ggml.cuda.kernels.bf16).nc,
-        ggml.impl.c.GGML_TYPE_F32 => ConvertUnary(f32, ggml.cuda.kernels.bf16).nc,
-        ggml.impl.c.GGML_TYPE_F16 => ConvertUnary(ggml.cuda.kernels.half, ggml.cuda.kernels.bf16).nc,
+        ggml.impl.ggml_c.GGML_TYPE_F8_E4M3 => ConvertUnary(ggml.cuda.kernels.fp8_e4m3, ggml.cuda.kernels.bf16).nc,
+        ggml.impl.ggml_c.GGML_TYPE_F32 => ConvertUnary(f32, ggml.cuda.kernels.bf16).nc,
+        ggml.impl.ggml_c.GGML_TYPE_F16 => ConvertUnary(ggml.cuda.kernels.half, ggml.cuda.kernels.bf16).nc,
         else => quantizedNcTo(ggml.cuda.kernels.bf16, t),
     };
 }
 
 /// Ports `ggml_get_to_fp32_nc_cuda` (convert.cu:730 @b1b770d90).
-pub fn getToFp32Nc(t: ggml.impl.c.enum_ggml_type) ?ToNcFn {
+pub fn getToFp32Nc(t: ggml.impl.ggml_c.enum_ggml_type) ?ToNcFn {
     return switch (t) {
-        ggml.impl.c.GGML_TYPE_F8_E4M3 => ConvertUnary(ggml.cuda.kernels.fp8_e4m3, f32).nc,
-        ggml.impl.c.GGML_TYPE_F16 => ConvertUnary(ggml.cuda.kernels.half, f32).nc,
-        ggml.impl.c.GGML_TYPE_BF16 => ConvertUnary(ggml.cuda.kernels.bf16, f32).nc,
+        ggml.impl.ggml_c.GGML_TYPE_F8_E4M3 => ConvertUnary(ggml.cuda.kernels.fp8_e4m3, f32).nc,
+        ggml.impl.ggml_c.GGML_TYPE_F16 => ConvertUnary(ggml.cuda.kernels.half, f32).nc,
+        ggml.impl.ggml_c.GGML_TYPE_BF16 => ConvertUnary(ggml.cuda.kernels.bf16, f32).nc,
         else => quantizedNcTo(f32, t),
     };
 }

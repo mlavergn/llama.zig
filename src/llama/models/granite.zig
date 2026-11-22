@@ -108,7 +108,7 @@ pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *
         layer.ffn_norm = try self.createTensor(.{ .tensor = .ffn_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, 0, exc);
 
         const rope_dup: u32 = if (i != 0) dup else 0;
-        if (hp.rope_scaling_type_train == llama.impl.c.LLAMA_ROPE_SCALING_TYPE_LONGROPE) {
+        if (hp.rope_scaling_type_train == llama.impl.llama_c.LLAMA_ROPE_SCALING_TYPE_LONGROPE) {
             layer.rope_long = try self.createTensor(.{ .tensor = .rope_factors_long, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, nr | rope_dup, exc);
             layer.rope_short = try self.createTensor(.{ .tensor = .rope_factors_short, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, nr | rope_dup, exc);
         } else {
@@ -165,7 +165,7 @@ pub fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
     // The positions, built only when RoPE is enabled.
-    var inp_pos: ?*llama.impl.c.ggml_tensor = null;
+    var inp_pos: ?*llama.impl.llama_c.ggml_tensor = null;
     if (hp.hasRope(0)) {
         inp_pos = b.buildInpPos();
     }
@@ -180,9 +180,9 @@ pub fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder
         // deepstack layer is skipped, since that is `inpL`.
         const deepstack_emb_idx = hp.deepstack_mapping_arr[@intCast(il)];
         if (il > 0 and deepstack_emb_idx >= 0) {
-            const inp_embd: *llama.impl.c.ggml_tensor = b.res.t_inp_embd.?;
-            const ds: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, inp_embd, b.n_embd, b.n_tokens, inp_embd.nb[1], @as(usize, @intCast(deepstack_emb_idx)) * @as(usize, @intCast(b.n_embd)) * @sizeOf(f32));
-            inpL = llama.impl.c.ggml_add(ctx, inpL, ds);
+            const inp_embd: *llama.impl.llama_c.ggml_tensor = b.res.t_inp_embd.?;
+            const ds: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_2d(ctx, inp_embd, b.n_embd, b.n_tokens, inp_embd.nb[1], @as(usize, @intCast(deepstack_emb_idx)) * @as(usize, @intCast(b.n_embd)) * @sizeOf(f32));
+            inpL = llama.impl.llama_c.ggml_add(ctx, inpL, ds);
             b.cb(inpL, "deepstack_in", il);
         }
 
@@ -198,8 +198,8 @@ pub fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder
         cur = buildAttentionLayer(b, cur, inp_pos, inp_attn, model, n_embd_head, il);
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
         // The feed-forward network.
         cur = buildLayerFfn(b, cur, inpSA, model, il);
@@ -218,7 +218,7 @@ pub fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder
     cur = b.buildLoraMm(model.output.?, cur, model.output_s);
 
     // Granite scales the logits.
-    cur = llama.impl.c.ggml_scale(ctx, cur, 1.0 / hp.f_logit_scale);
+    cur = llama.impl.llama_c.ggml_scale(ctx, cur, 1.0 / hp.f_logit_scale);
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;
 }
@@ -227,13 +227,13 @@ pub fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder
 /// (models/granite.cpp:202 @b1b770d90).
 fn buildAttentionLayer(
     b: *const llama.graph.Builder,
-    cur_: *llama.impl.c.ggml_tensor,
-    inp_pos: ?*llama.impl.c.ggml_tensor,
+    cur_: *llama.impl.llama_c.ggml_tensor,
+    inp_pos: ?*llama.impl.llama_c.ggml_tensor,
     inp_attn: *llama.graph.InpAttnKv,
     model: *const llama.model.Model,
     n_embd_head: i64,
     il: c_int,
-) *llama.impl.c.ggml_tensor {
+) *llama.impl.llama_c.ggml_tensor {
     const hp = b.hparams;
     const ilu: u32 = @intCast(il);
     const layer = &model.layers[ilu];
@@ -259,7 +259,7 @@ fn buildAttentionLayer(
 
 /// Ports `llama_model_granite`'s `graph`'s `build_layer_ffn`
 /// (models/granite.cpp:227 @b1b770d90).
-fn buildLayerFfn(b: *const llama.graph.Builder, cur_: *llama.impl.c.ggml_tensor, inpSA: *llama.impl.c.ggml_tensor, model: *const llama.model.Model, il: c_int) *llama.impl.c.ggml_tensor {
+fn buildLayerFfn(b: *const llama.graph.Builder, cur_: *llama.impl.llama_c.ggml_tensor, inpSA: *llama.impl.llama_c.ggml_tensor, model: *const llama.model.Model, il: c_int) *llama.impl.llama_c.ggml_tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const layer = &model.layers[@intCast(il)];
@@ -267,9 +267,9 @@ fn buildLayerFfn(b: *const llama.graph.Builder, cur_: *llama.impl.c.ggml_tensor,
 
     // Granite scales the residual.
     if (hp.f_residual_scale != 0.0) {
-        cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_residual_scale);
+        cur = llama.impl.llama_c.ggml_scale(ctx, cur, hp.f_residual_scale);
     }
-    const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+    const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
     b.cb(ffn_inp, "ffn_inp", il);
 
     if (layer.ffn_gate_inp == null) {
@@ -306,7 +306,7 @@ fn buildLayerFfn(b: *const llama.graph.Builder, cur_: *llama.impl.c.ggml_tensor,
             const ffn_shexp = b.buildFfn(cur, layer.ffn_up_shexp, null, layer.ffn_up_shexp_s, layer.ffn_gate_shexp, null, layer.ffn_gate_shexp_s, layer.ffn_down_shexp, null, layer.ffn_down_shexp_s, null, .silu, .par, il);
             b.cb(ffn_shexp, "ffn_shexp", il);
 
-            cur = llama.impl.c.ggml_add(ctx, moe_out, ffn_shexp);
+            cur = llama.impl.llama_c.ggml_add(ctx, moe_out, ffn_shexp);
             b.cb(cur, "ffn_out", il);
         } else {
             cur = moe_out;
@@ -315,9 +315,9 @@ fn buildLayerFfn(b: *const llama.graph.Builder, cur_: *llama.impl.c.ggml_tensor,
 
     // Granite scales the residual.
     if (hp.f_residual_scale != 0.0) {
-        cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_residual_scale);
+        cur = llama.impl.llama_c.ggml_scale(ctx, cur, hp.f_residual_scale);
     }
-    cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+    cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
     b.cb(cur, "ffn_out", il);
 
     cur = b.buildCvec(cur, il);

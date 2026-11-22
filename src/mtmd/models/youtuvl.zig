@@ -7,10 +7,11 @@
 //! Ports `llama.cpp/tools/mtmd/models/youtuvl.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
+const llama = @import("llama");
 const mtmd = @import("../module.zig");
 
 /// Ports `build` (youtuvl.cpp:3 @b1b770d90), a member of `mtmd_graph_youtuvl`.
-pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*llama.impl.llama_c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
     const model = g.model;
@@ -40,48 +41,48 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     // change conv3d to linear
     // reshape and permute to get patches, permute from (patch_size, m, Wm, patch_size, m, Hm, C) to (C, patch_size, patch_size, m, m, Wm, Hm)
     {
-        inp = mtmd.impl.c.ggml_reshape_4d(ctx0, inp, Wm * m * patch_size, m * patch_size, Hm, 3);
-        inp = mtmd.impl.c.ggml_permute(ctx0, inp, 1, 2, 3, 0);
-        inp = mtmd.impl.c.ggml_cont_4d(ctx0, inp, m * patch_size * 3, Wm, m * patch_size, Hm);
+        inp = llama.impl.llama_c.ggml_reshape_4d(ctx0, inp, Wm * m * patch_size, m * patch_size, Hm, 3);
+        inp = llama.impl.llama_c.ggml_permute(ctx0, inp, 1, 2, 3, 0);
+        inp = llama.impl.llama_c.ggml_cont_4d(ctx0, inp, m * patch_size * 3, Wm, m * patch_size, Hm);
 
-        inp = mtmd.impl.c.ggml_permute(ctx0, inp, 0, 2, 1, 3);
-        inp = mtmd.impl.c.ggml_cont_4d(ctx0, inp, m * patch_size * 3, patch_size, m, Hm * Wm);
+        inp = llama.impl.llama_c.ggml_permute(ctx0, inp, 0, 2, 1, 3);
+        inp = llama.impl.llama_c.ggml_cont_4d(ctx0, inp, m * patch_size * 3, patch_size, m, Hm * Wm);
 
-        inp = mtmd.impl.c.ggml_permute(ctx0, inp, 1, 0, 2, 3);
-        inp = mtmd.impl.c.ggml_cont_4d(ctx0, inp, patch_size, 3, patch_size, Hm * Wm * m * m);
+        inp = llama.impl.llama_c.ggml_permute(ctx0, inp, 1, 0, 2, 3);
+        inp = llama.impl.llama_c.ggml_cont_4d(ctx0, inp, patch_size, 3, patch_size, Hm * Wm * m * m);
 
-        inp = mtmd.impl.c.ggml_permute(ctx0, inp, 2, 0, 1, 3);
-        inp = mtmd.impl.c.ggml_cont_3d(ctx0, inp, 3 * patch_size * patch_size, Hm * Wm * m * m, 1);
+        inp = llama.impl.llama_c.ggml_permute(ctx0, inp, 2, 0, 1, 3);
+        inp = llama.impl.llama_c.ggml_cont_3d(ctx0, inp, 3 * patch_size * patch_size, Hm * Wm * m * m, 1);
     }
     inp = g.buildMm(model.patch_embeddings_0, inp);
 
-    if (model.patch_bias != null) inp = mtmd.impl.c.ggml_add(ctx0, inp, model.patch_bias);
+    if (model.patch_bias != null) inp = llama.impl.llama_c.ggml_add(ctx0, inp, model.patch_bias);
 
-    inp = mtmd.impl.c.ggml_reshape_2d(ctx0, inp, n_embd, n_patches);
+    inp = llama.impl.llama_c.ggml_reshape_2d(ctx0, inp, n_embd, n_patches);
 
     var inpL = inp;
     var window_mask: mtmd.graph.T = null;
     var window_idx: mtmd.graph.T = null;
     var inv_window_idx: mtmd.graph.T = null;
 
-    const positions = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, num_position_ids);
-    _ = mtmd.impl.c.ggml_set_name(positions, "positions");
-    mtmd.impl.c.ggml_set_input(positions);
+    const positions = llama.impl.llama_c.ggml_new_tensor_1d(ctx0, llama.impl.llama_c.GGML_TYPE_I32, num_position_ids);
+    _ = llama.impl.llama_c.ggml_set_name(positions, "positions");
+    llama.impl.llama_c.ggml_set_input(positions);
 
     // pre-layernorm
     if (model.pre_ln_w != null) inpL = g.buildNorm(inpL, model.pre_ln_w, model.pre_ln_b, norm_t, eps, -1);
     if (use_window_attn) {
-        inv_window_idx = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, @divTrunc(n_pos, 4));
-        _ = mtmd.impl.c.ggml_set_name(inv_window_idx, "inv_window_idx");
-        mtmd.impl.c.ggml_set_input(inv_window_idx);
+        inv_window_idx = llama.impl.llama_c.ggml_new_tensor_1d(ctx0, llama.impl.llama_c.GGML_TYPE_I32, @divTrunc(n_pos, 4));
+        _ = llama.impl.llama_c.ggml_set_name(inv_window_idx, "inv_window_idx");
+        llama.impl.llama_c.ggml_set_input(inv_window_idx);
         // mask for window attention
         window_mask = g.buildInpAttnMask(n_pos, n_pos, 0);
 
         // inpL shape: [n_embd, n_patches_x * n_patches_y, batch_size]
         mtmd.impl.ggmlAssert(batch_size == 1, "youtuvl.cpp", 75, "batch_size == 1");
-        inpL = mtmd.impl.c.ggml_reshape_2d(ctx0, inpL, n_embd * 4, @divTrunc(g.n_patches_x * g.n_patches_y * batch_size, 4));
-        inpL = mtmd.impl.c.ggml_get_rows(ctx0, inpL, inv_window_idx);
-        inpL = mtmd.impl.c.ggml_reshape_3d(ctx0, inpL, n_embd, g.n_patches_x * g.n_patches_y, batch_size);
+        inpL = llama.impl.llama_c.ggml_reshape_2d(ctx0, inpL, n_embd * 4, @divTrunc(g.n_patches_x * g.n_patches_y * batch_size, 4));
+        inpL = llama.impl.llama_c.ggml_get_rows(ctx0, inpL, inv_window_idx);
+        inpL = llama.impl.llama_c.ggml_reshape_3d(ctx0, inpL, n_embd, g.n_patches_x * g.n_patches_y, batch_size);
     }
 
     // loop over layers
@@ -96,23 +97,23 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
         cur = g.buildNorm(cur, layer.ln_1_w, layer.ln_1_b, norm_t, eps, il);
         // self-attention
         {
-            var Qcur = mtmd.impl.c.ggml_add(ctx0, g.buildMm(layer.q_w, cur), layer.q_b);
-            var Kcur = mtmd.impl.c.ggml_add(ctx0, g.buildMm(layer.k_w, cur), layer.k_b);
-            var Vcur = mtmd.impl.c.ggml_add(ctx0, g.buildMm(layer.v_w, cur), layer.v_b);
+            var Qcur = llama.impl.llama_c.ggml_add(ctx0, g.buildMm(layer.q_w, cur), layer.q_b);
+            var Kcur = llama.impl.llama_c.ggml_add(ctx0, g.buildMm(layer.k_w, cur), layer.k_b);
+            var Vcur = llama.impl.llama_c.ggml_add(ctx0, g.buildMm(layer.v_w, cur), layer.v_b);
 
-            Qcur = mtmd.impl.c.ggml_reshape_3d(ctx0, Qcur, d_head, g.n_head, n_patches);
-            Kcur = mtmd.impl.c.ggml_reshape_3d(ctx0, Kcur, d_head, g.n_head, n_patches);
-            Vcur = mtmd.impl.c.ggml_reshape_3d(ctx0, Vcur, d_head, g.n_head, n_patches);
+            Qcur = llama.impl.llama_c.ggml_reshape_3d(ctx0, Qcur, d_head, g.n_head, n_patches);
+            Kcur = llama.impl.llama_c.ggml_reshape_3d(ctx0, Kcur, d_head, g.n_head, n_patches);
+            Vcur = llama.impl.llama_c.ggml_reshape_3d(ctx0, Vcur, d_head, g.n_head, n_patches);
 
-            Qcur = mtmd.impl.c.ggml_rope_multi(ctx0, Qcur, positions, null, @divTrunc(d_head, 2), &mrope_sections, mtmd.impl.c.GGML_ROPE_TYPE_VISION, 32768, 10000, 1, 0, 1, 32, 1);
-            Kcur = mtmd.impl.c.ggml_rope_multi(ctx0, Kcur, positions, null, @divTrunc(d_head, 2), &mrope_sections, mtmd.impl.c.GGML_ROPE_TYPE_VISION, 32768, 10000, 1, 0, 1, 32, 1);
+            Qcur = llama.impl.llama_c.ggml_rope_multi(ctx0, Qcur, positions, null, @divTrunc(d_head, 2), &mrope_sections, llama.impl.llama_c.GGML_ROPE_TYPE_VISION, 32768, 10000, 1, 0, 1, 32, 1);
+            Kcur = llama.impl.llama_c.ggml_rope_multi(ctx0, Kcur, positions, null, @divTrunc(d_head, 2), &mrope_sections, llama.impl.llama_c.GGML_ROPE_TYPE_VISION, 32768, 10000, 1, 0, 1, 32, 1);
 
             const attn_mask: mtmd.graph.T = if (full_attn) null else window_mask;
 
             cur = g.buildAttn(layer.o_w, layer.o_b, Qcur, Kcur, Vcur, attn_mask, g.kq_scale, il, null);
         }
         // re-add the layer input, e.g., residual
-        cur = mtmd.impl.c.ggml_add(ctx0, cur, inpL);
+        cur = llama.impl.llama_c.ggml_add(ctx0, cur, inpL);
 
         inpL = cur; // inpL = residual, cur = hidden_states
 
@@ -123,7 +124,7 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
         cur = g.buildFfn(cur, layer.ff_up_w, layer.ff_up_b, null, null, layer.ff_down_w, layer.ff_down_b, hparams.ffn_op, il);
 
         // residual 2
-        cur = mtmd.impl.c.ggml_add(ctx0, inpL, cur);
+        cur = llama.impl.llama_c.ggml_add(ctx0, inpL, cur);
 
         inpL = cur;
     }
@@ -131,13 +132,13 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     var embeddings = inpL;
     if (use_window_attn) {
         const spatial_merge_unit: c_int = 4;
-        window_idx = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, @divTrunc(n_pos, spatial_merge_unit));
-        _ = mtmd.impl.c.ggml_set_name(window_idx, "window_idx");
-        mtmd.impl.c.ggml_set_input(window_idx);
+        window_idx = llama.impl.llama_c.ggml_new_tensor_1d(ctx0, llama.impl.llama_c.GGML_TYPE_I32, @divTrunc(n_pos, spatial_merge_unit));
+        _ = llama.impl.llama_c.ggml_set_name(window_idx, "window_idx");
+        llama.impl.llama_c.ggml_set_input(window_idx);
         mtmd.impl.ggmlAssert(batch_size == 1, "youtuvl.cpp", 142, "batch_size == 1");
-        embeddings = mtmd.impl.c.ggml_reshape_2d(ctx0, embeddings, n_embd * spatial_merge_unit, @divTrunc(n_patches, spatial_merge_unit));
-        embeddings = mtmd.impl.c.ggml_get_rows(ctx0, embeddings, window_idx);
-        embeddings = mtmd.impl.c.ggml_reshape_3d(ctx0, embeddings, n_embd, n_patches, batch_size);
+        embeddings = llama.impl.llama_c.ggml_reshape_2d(ctx0, embeddings, n_embd * spatial_merge_unit, @divTrunc(n_patches, spatial_merge_unit));
+        embeddings = llama.impl.llama_c.ggml_get_rows(ctx0, embeddings, window_idx);
+        embeddings = llama.impl.llama_c.ggml_reshape_3d(ctx0, embeddings, n_embd, n_patches, batch_size);
         g.cb(embeddings, "window_order_restored", -1);
     }
 
@@ -150,11 +151,11 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     g.cb(embeddings, "merger_normed", -1);
 
     // 2. First reshape for spatial merge (merge 2x2 patches)
-    embeddings = mtmd.impl.c.ggml_reshape_3d(ctx0, embeddings, n_embd * 4, @divTrunc(n_pos, 4), batch_size);
+    embeddings = llama.impl.llama_c.ggml_reshape_3d(ctx0, embeddings, n_embd * 4, @divTrunc(n_pos, 4), batch_size);
     g.cb(embeddings, "merger_reshaped", -1);
 
     embeddings = g.buildFfn(embeddings, model.mm_0_w, model.mm_0_b, null, null, model.mm_1_w, model.mm_1_b, .gelu, -1);
-    mtmd.impl.c.ggml_build_forward_expand(g.gf, embeddings);
+    llama.impl.llama_c.ggml_build_forward_expand(g.gf, embeddings);
 
     return g.gf;
 }

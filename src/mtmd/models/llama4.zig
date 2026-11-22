@@ -6,10 +6,11 @@
 //! Ports `llama.cpp/tools/mtmd/models/llama4.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
+const llama = @import("llama");
 const mtmd = @import("../module.zig");
 
 /// Ports `build` (mtmd/models/llama4.cpp:3 @b1b770d90), a member of `mtmd_graph_llama4`.
-pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*llama.impl.llama_c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
     const model = g.model;
@@ -22,34 +23,34 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     const n_pos = g.n_patches + 1; // +1 for [CLS]
 
     // 2D input positions
-    const pos_h = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, n_pos);
-    _ = mtmd.impl.c.ggml_set_name(pos_h, "pos_h");
-    mtmd.impl.c.ggml_set_input(pos_h);
+    const pos_h = llama.impl.llama_c.ggml_new_tensor_1d(ctx0, llama.impl.llama_c.GGML_TYPE_I32, n_pos);
+    _ = llama.impl.llama_c.ggml_set_name(pos_h, "pos_h");
+    llama.impl.llama_c.ggml_set_input(pos_h);
 
-    const pos_w = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, n_pos);
-    _ = mtmd.impl.c.ggml_set_name(pos_w, "pos_w");
-    mtmd.impl.c.ggml_set_input(pos_w);
+    const pos_w = llama.impl.llama_c.ggml_new_tensor_1d(ctx0, llama.impl.llama_c.GGML_TYPE_I32, n_pos);
+    _ = llama.impl.llama_c.ggml_set_name(pos_w, "pos_w");
+    llama.impl.llama_c.ggml_set_input(pos_w);
 
     var inp = g.buildInpRaw(3);
 
     // Llama4UnfoldConvolution
     {
-        const kernel = mtmd.impl.c.ggml_reshape_4d(ctx0, model.patch_embeddings_0, patch_size, patch_size, 3, n_embd);
-        inp = mtmd.impl.c.ggml_im2col(ctx0, kernel, inp, patch_size, patch_size, 0, 0, 1, 1, true, inp.?.type);
+        const kernel = llama.impl.llama_c.ggml_reshape_4d(ctx0, model.patch_embeddings_0, patch_size, patch_size, 3, n_embd);
+        inp = llama.impl.llama_c.ggml_im2col(ctx0, kernel, inp, patch_size, patch_size, 0, 0, 1, 1, true, inp.?.type);
         inp = g.buildMm(model.patch_embeddings_0, inp);
-        inp = mtmd.impl.c.ggml_reshape_2d(ctx0, inp, n_embd, g.n_patches);
+        inp = llama.impl.llama_c.ggml_reshape_2d(ctx0, inp, n_embd, g.n_patches);
         g.cb(inp, "patch_conv", -1);
     }
 
     // add CLS token
-    inp = mtmd.impl.c.ggml_concat(ctx0, inp, model.class_embedding, 1);
+    inp = llama.impl.llama_c.ggml_concat(ctx0, inp, model.class_embedding, 1);
 
     // build ViT with 2D position embeddings; the first half is X axis and the second half is Y axis
     var rope: mtmd.models.kimivl.Rope2d = .{ .pos_a = pos_w, .pos_b = pos_h, .freq_base = hparams.rope_theta };
     var cur = g.buildVit(inp, n_pos, .normal, hparams.ffn_op, model.position_embeddings, .{ .ctx = &rope, .f = mtmd.models.kimivl.Rope2d.addPos }, .{});
 
     // remove CLS token
-    cur = mtmd.impl.c.ggml_view_2d(ctx0, cur, n_embd, g.n_patches, mtmd.impl.c.ggml_row_size(cur.?.type, n_embd), 0);
+    cur = llama.impl.llama_c.ggml_view_2d(ctx0, cur, n_embd, g.n_patches, llama.impl.llama_c.ggml_row_size(cur.?.type, n_embd), 0);
 
     // pixel shuffle, based on Llama4VisionPixelShuffleMLP
     {
@@ -57,20 +58,20 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
         const bsz = 1; // batch size, always 1 for now since we don't support batching
         mtmd.impl.ggmlAssert(scale_factor > 0, "llama4.cpp", 58, "scale_factor > 0");
         mtmd.impl.ggmlAssert(g.n_patches_x == g.n_patches_y, "llama4.cpp", 59, "n_patches_x == n_patches_y"); // llama4 only supports square images
-        cur = mtmd.impl.c.ggml_reshape_4d(ctx0, cur, n_embd * scale_factor, @divTrunc(g.n_patches_x, scale_factor), g.n_patches_y, bsz);
-        cur = mtmd.impl.c.ggml_permute(ctx0, cur, 0, 2, 1, 3);
-        cur = mtmd.impl.c.ggml_cont_4d(ctx0, cur, n_embd * scale_factor * scale_factor, @divTrunc(g.n_patches_x, scale_factor), @divTrunc(g.n_patches_y, scale_factor), bsz);
+        cur = llama.impl.llama_c.ggml_reshape_4d(ctx0, cur, n_embd * scale_factor, @divTrunc(g.n_patches_x, scale_factor), g.n_patches_y, bsz);
+        cur = llama.impl.llama_c.ggml_permute(ctx0, cur, 0, 2, 1, 3);
+        cur = llama.impl.llama_c.ggml_cont_4d(ctx0, cur, n_embd * scale_factor * scale_factor, @divTrunc(g.n_patches_x, scale_factor), @divTrunc(g.n_patches_y, scale_factor), bsz);
         // flatten to 2D
-        cur = mtmd.impl.c.ggml_cont_2d(ctx0, cur, n_embd * scale_factor * scale_factor, @divTrunc(@divTrunc(g.n_patches, scale_factor), scale_factor));
+        cur = llama.impl.llama_c.ggml_cont_2d(ctx0, cur, n_embd * scale_factor * scale_factor, @divTrunc(@divTrunc(g.n_patches, scale_factor), scale_factor));
         g.cb(cur, "pixel_shuffle", -1);
     }
 
     // based on Llama4VisionMLP2 (always uses GELU activation, no bias)
     {
         cur = g.buildMm(model.mm_model_mlp_1_w, cur);
-        cur = mtmd.impl.c.ggml_gelu(ctx0, cur);
+        cur = llama.impl.llama_c.ggml_gelu(ctx0, cur);
         cur = g.buildMm(model.mm_model_mlp_2_w, cur);
-        cur = mtmd.impl.c.ggml_gelu(ctx0, cur);
+        cur = llama.impl.llama_c.ggml_gelu(ctx0, cur);
         g.cb(cur, "adapter_mlp", -1);
     }
 
@@ -79,7 +80,7 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     g.cb(cur, "projected", -1);
 
     // build the graph
-    mtmd.impl.c.ggml_build_forward_expand(g.gf, cur);
+    llama.impl.llama_c.ggml_build_forward_expand(g.gf, cur);
     return g.gf;
 }
 

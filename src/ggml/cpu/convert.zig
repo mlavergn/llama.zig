@@ -71,7 +71,7 @@ pub export var ggml_table_f32_f8_e4m3: [1 << 8]f32 = @splat(0);
 /// routine. Widening is exact both ways for every number. They differ only
 /// on a signalling NaN, which the hardware quiets and the table does not --
 /// so the arm matters, and it is the one the C takes.
-pub inline fn cpuFp16ToFp32(h: ggml.impl.c.ggml_fp16_t) f32 {
+pub inline fn cpuFp16ToFp32(h: ggml.impl.ggml_c.ggml_fp16_t) f32 {
     if (comptime builtin.cpu.arch == .aarch64) return @floatCast(@as(f16, @bitCast(h)));
     return ggml_table_f32_f16[h];
 }
@@ -90,7 +90,7 @@ pub inline fn cpuFp16ToFp32(h: ggml.impl.c.ggml_fp16_t) f32 {
 /// ported site of the C's `GGML_CPU_FP32_TO_FP16` calls this; the one
 /// `GGML_FP32_TO_FP16` in `ops.cpp` (the f16 `swiglu`) calls
 /// `impl.fp32ToFp16` directly.
-pub inline fn cpuFp32ToFp16(f: f32) ggml.impl.c.ggml_fp16_t {
+pub inline fn cpuFp32ToFp16(f: f32) ggml.impl.ggml_c.ggml_fp16_t {
     if (comptime builtin.cpu.arch == .aarch64) return @bitCast(@as(f16, @floatCast(f)));
     if (comptime has_f16c) {
         const v: @Vector(4, f32) = .{ f, 0, 0, 0 };
@@ -112,7 +112,7 @@ pub inline fn cpuFp32ToFp16(f: f32) ggml.impl.c.ggml_fp16_t {
 /// - `x`: source row.
 /// - `y`: destination row, `n` floats.
 /// - `n`: element count.
-pub export fn ggml_cpu_fp32_to_fp32(x: [*c]const f32, y: [*c]f32, n: i64) void {
+pub fn ggml_cpu_fp32_to_fp32(x: [*c]const f32, y: [*c]f32, n: i64) callconv(.c) void {
     if (n <= 0) return;
     @memcpy(y[0..@intCast(n)], x[0..@intCast(n)]);
 }
@@ -136,7 +136,7 @@ const round_nearest: i32 = 0;
 /// blocks of sixteen under `__AVX512F__`, then eight and four, through
 /// `vcvtps2ph`, then the tail through `GGML_CPU_FP32_TO_FP16` -- F16C again.
 /// The s390x `__VXE__` block is not a target here.
-pub export fn ggml_cpu_fp32_to_fp16(x: [*c]const f32, y: [*c]ggml.impl.c.ggml_fp16_t, n: i64) void {
+pub fn ggml_cpu_fp32_to_fp16(x: [*c]const f32, y: [*c]ggml.impl.ggml_c.ggml_fp16_t, n: i64) callconv(.c) void {
     const nn: usize = @intCast(n);
     var i: usize = 0;
     if (comptime has_f16c) {
@@ -162,7 +162,7 @@ pub export fn ggml_cpu_fp32_to_fp16(x: [*c]const f32, y: [*c]ggml.impl.c.ggml_fp
 /// Ports `ggml_cpu_fp16_to_fp32` (ggml-cpu.c:3528 @b1b770d90): with F16C,
 /// blocks of sixteen under `__AVX512F__`, then eight and four, through
 /// `vcvtph2ps`, then the tail through `GGML_CPU_FP16_TO_FP32`.
-pub export fn ggml_cpu_fp16_to_fp32(x: [*c]const ggml.impl.c.ggml_fp16_t, y: [*c]f32, n: i64) void {
+pub fn ggml_cpu_fp16_to_fp32(x: [*c]const ggml.impl.ggml_c.ggml_fp16_t, y: [*c]f32, n: i64) callconv(.c) void {
     const nn: usize = @intCast(n);
     var i: usize = 0;
     if (comptime has_f16c) {
@@ -185,7 +185,7 @@ pub export fn ggml_cpu_fp16_to_fp32(x: [*c]const ggml.impl.c.ggml_fp16_t, y: [*c
 }
 
 /// Ports `ggml_cpu_fp32_to_bf16` (ggml-cpu.c:3582 @b1b770d90).
-pub export fn ggml_cpu_fp32_to_bf16(x: [*c]const f32, y: [*c]ggml.impl.c.ggml_bf16_t, n: i64) void {
+pub fn ggml_cpu_fp32_to_bf16(x: [*c]const f32, y: [*c]ggml.impl.ggml_c.ggml_bf16_t, n: i64) callconv(.c) void {
     for (0..@intCast(n)) |i| y[i] = .{ .bits = ggml.impl.fp32ToBf16(x[i]) };
 }
 
@@ -194,7 +194,7 @@ pub export fn ggml_cpu_fp32_to_bf16(x: [*c]const f32, y: [*c]ggml.impl.c.ggml_bf
 /// The `__AVX2__` arm widens eight at a time by shifting each `u16` left 16
 /// bits, and its `__AVX512F__` block sixteen, which is exactly what the
 /// scalar `GGML_BF16_TO_FP32` does to one, so one loop covers every arm.
-pub export fn ggml_cpu_bf16_to_fp32(x: [*c]const ggml.impl.c.ggml_bf16_t, y: [*c]f32, n: i64) void {
+pub fn ggml_cpu_bf16_to_fp32(x: [*c]const ggml.impl.ggml_c.ggml_bf16_t, y: [*c]f32, n: i64) callconv(.c) void {
     for (0..@intCast(n)) |i| y[i] = ggml.impl.bf16ToFp32(x[i].bits);
 }
 
@@ -204,7 +204,7 @@ pub export fn ggml_cpu_bf16_to_fp32(x: [*c]const ggml.impl.c.ggml_bf16_t, y: [*c
 /// zero, and undefined once the value leaves `int32_t`'s range. `impl.truncTo`
 /// saturates instead of trapping, which is what Zig needs and what the
 /// hardware does anyway.
-pub export fn ggml_cpu_fp32_to_i32(x: [*c]const f32, y: [*c]i32, n: i64) void {
+pub fn ggml_cpu_fp32_to_i32(x: [*c]const f32, y: [*c]i32, n: i64) callconv(.c) void {
     for (0..@intCast(n)) |i| y[i] = ggml.impl.truncTo(i32, x[i]);
 }
 
@@ -299,7 +299,7 @@ test "fp32 to fp32 copies and tolerates an empty row" {
 
 test "bf16 keeps the top half of the float" {
     const x = [_]f32{ 1.0, -2.5, 0.0 };
-    var y: [3]ggml.impl.c.ggml_bf16_t = undefined;
+    var y: [3]ggml.impl.ggml_c.ggml_bf16_t = undefined;
     var back: [3]f32 = undefined;
 
     ggml_cpu_fp32_to_bf16(&x, &y, 3);

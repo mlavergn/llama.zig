@@ -89,8 +89,3 @@ pub const tsembd = @import("tsembd.zig");
 pub const unary = @import("unary.zig");
 pub const upscale = @import("upscale.zig");
 pub const wkv = @import("wkv.zig");
-
-comptime {
-    // `backend.zig` exports `ggml-cuda.h`.
-    _ = backend;
-}

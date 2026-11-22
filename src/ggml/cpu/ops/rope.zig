@@ -229,19 +229,19 @@ inline fn rotatePairs(comptime T: type, n: i64, n_offset: i64, cache: [*]const f
 /// - `T`: `f32` or `ggml_fp16_t`.
 /// - `forward`: false for `rope_back`, which rotates by the transpose — the
 ///   same rotation with the sine negated.
-fn ropeFlt(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor, forward: bool) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const src2: ?*ggml.impl.c.ggml_tensor = dst.src[2];
+fn ropeFlt(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor, forward: bool) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const src2: ?*ggml.impl.ggml_c.ggml_tensor = dst.src[2];
 
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32 or src0.type == ggml.impl.c.GGML_TYPE_F16, "src0->type == GGML_TYPE_F32 || src0->type == GGML_TYPE_F16");
-    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_I32, "src1->type == GGML_TYPE_I32");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32 or src0.type == ggml.impl.ggml_c.GGML_TYPE_F16, "src0->type == GGML_TYPE_F32 || src0->type == GGML_TYPE_F16");
+    ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_I32, "src1->type == GGML_TYPE_I32");
 
     //const n_past     = ((int32_t *) dst->op_params)[0];
     const n_dims: c_int = ggml.impl.getOpParamsI32(dst, 1);
     const mode: c_int = ggml.impl.getOpParamsI32(dst, 2);
     const n_ctx_orig: c_int = ggml.impl.getOpParamsI32(dst, 4);
-    const truncate = ggml.impl.c.ggml_rope_get_truncate(dst);
+    const truncate = ggml.impl.ggml_c.ggml_rope_get_truncate(dst);
 
     const freq_base = ggml.impl.getOpParamsF32(dst, 5);
     const freq_scale = ggml.impl.getOpParamsF32(dst, 6);
@@ -266,7 +266,7 @@ fn ropeFlt(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *g
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const nr: i64 = ggml.impl.c.ggml_nrows(dst);
+    const nr: i64 = ggml.impl.ggml_c.ggml_nrows(dst);
 
     ggml.impl.assert(n_dims <= l.ne0, "n_dims <= ne0");
     ggml.impl.assert(@rem(n_dims, 2) == 0, "n_dims % 2 == 0");
@@ -288,11 +288,11 @@ fn ropeFlt(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *g
     const theta_scale = stdlib.libm.powf(freq_base, -2.0 / @as(f32, @floatFromInt(n_dims)));
 
     var corr_dims: [2]f32 = undefined;
-    ggml.impl.c.ggml_rope_yarn_corr_dims(n_dims, n_ctx_orig, freq_base, beta_fast, beta_slow, truncate, &corr_dims);
+    ggml.impl.ggml_c.ggml_rope_yarn_corr_dims(n_dims, n_ctx_orig, freq_base, beta_fast, beta_slow, truncate, &corr_dims);
 
-    const is_imrope = mode == ggml.impl.c.GGML_ROPE_TYPE_IMROPE; // qwen3vl apply interleaved mrope
-    const mrope_used = (mode & ggml.impl.c.GGML_ROPE_TYPE_MROPE) != 0; // ggml_rope_multi, note: also true for vision (24 & 8 == true) and for imrope
-    const is_vision = mode == ggml.impl.c.GGML_ROPE_TYPE_VISION;
+    const is_imrope = mode == ggml.impl.ggml_c.GGML_ROPE_TYPE_IMROPE; // qwen3vl apply interleaved mrope
+    const mrope_used = (mode & ggml.impl.ggml_c.GGML_ROPE_TYPE_MROPE) != 0; // ggml_rope_multi, note: also true for vision (24 & 8 == true) and for imrope
+    const is_vision = mode == ggml.impl.ggml_c.GGML_ROPE_TYPE_VISION;
 
     if (mrope_used) {
         ggml.impl.assert(sections[0] > 0 or sections[1] > 0 or sections[2] > 0, "sections[0] > 0 || sections[1] > 0 || sections[2] > 0");
@@ -305,7 +305,7 @@ fn ropeFlt(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *g
 
     var freq_factors: ?[*]const f32 = null;
     if (src2) |f| {
-        ggml.impl.assert(f.type == ggml.impl.c.GGML_TYPE_F32, "src2->type == GGML_TYPE_F32");
+        ggml.impl.assert(f.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src2->type == GGML_TYPE_F32");
         ggml.impl.assert(f.ne[0] >= @divTrunc(n_dims, 2), "src2->ne[0] >= n_dims / 2");
         freq_factors = ggml.cpu.ops.common.ptr(f32, f.data, 0);
     }
@@ -374,12 +374,12 @@ fn ropeFlt(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *g
 
                 const offs: usize = @intCast(n_offs);
                 switch (mode) {
-                    ggml.impl.c.GGML_ROPE_TYPE_NORMAL => rotatePairs(T, n_dims, 1, cache, src + offs, dst_data + offs, 1),
-                    ggml.impl.c.GGML_ROPE_TYPE_NEOX,
-                    ggml.impl.c.GGML_ROPE_TYPE_MROPE,
-                    ggml.impl.c.GGML_ROPE_TYPE_IMROPE,
+                    ggml.impl.ggml_c.GGML_ROPE_TYPE_NORMAL => rotatePairs(T, n_dims, 1, cache, src + offs, dst_data + offs, 1),
+                    ggml.impl.ggml_c.GGML_ROPE_TYPE_NEOX,
+                    ggml.impl.ggml_c.GGML_ROPE_TYPE_MROPE,
+                    ggml.impl.ggml_c.GGML_ROPE_TYPE_IMROPE,
                     => rotatePairs(T, n_dims, @divTrunc(n_dims, 2), cache, src + offs, dst_data + offs, 2),
-                    ggml.impl.c.GGML_ROPE_TYPE_VISION => rotatePairs(T, l.ne0, n_dims, cache, src, dst_data, 2),
+                    ggml.impl.ggml_c.GGML_ROPE_TYPE_VISION => rotatePairs(T, l.ne0, n_dims, cache, src, dst_data, 2),
                     else => ggml.impl.abort("rope type not supported"),
                 }
 
@@ -404,23 +404,23 @@ fn ropeFlt(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *g
 }
 
 /// Ports `ggml_compute_forward_rope` (ops.cpp:6365 @b1b770d90).
-pub export fn ggml_compute_forward_rope(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_rope(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F16 => ropeFlt(ggml.impl.c.ggml_fp16_t, params, dst, true),
-        ggml.impl.c.GGML_TYPE_F32 => ropeFlt(f32, params, dst, true),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => ropeFlt(ggml.impl.ggml_c.ggml_fp16_t, params, dst, true),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => ropeFlt(f32, params, dst, true),
         else => ggml.impl.abort("fatal error"),
     }
 }
 
 /// Ports `ggml_compute_forward_rope_back` (ops.cpp:6389 @b1b770d90).
-pub export fn ggml_compute_forward_rope_back(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_rope_back(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F16 => ropeFlt(ggml.impl.c.ggml_fp16_t, params, dst, false),
-        ggml.impl.c.GGML_TYPE_F32 => ropeFlt(f32, params, dst, false),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => ropeFlt(ggml.impl.ggml_c.ggml_fp16_t, params, dst, false),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => ropeFlt(f32, params, dst, false),
         else => ggml.impl.abort("fatal error"),
     }
 }

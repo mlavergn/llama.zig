@@ -17,15 +17,11 @@
 //! does.
 
 const std = @import("std");
-const generated = @import("ui_assets");
-
-/// Ports `llama_ui_asset` (ui.h.in:11 @b1b770d90): one embedded file. `data`
-/// carries `size`.
-pub const Asset = generated.Asset;
+const ui_assets = @import("ui_assets");
 
 /// `LLAMA_UI_HAS_ASSETS` (ui.h.in:9 @b1b770d90): defined only when assets
 /// were embedded.
-pub const has_assets = generated.assets.len > 0;
+pub const has_assets = ui_assets.assets.len > 0;
 
 /// Ports `llama_ui_find_asset` (ui.cpp.in:12 @b1b770d90): the asset named
 /// `name`, by a linear search as the C's.
@@ -34,9 +30,9 @@ pub const has_assets = generated.assets.len > 0;
 /// - `name`: the asset's path in the bundle, with no leading `/`.
 ///
 /// Return: the table's entry, static; null when there is none.
-pub fn findAsset(name: []const u8) ?*const Asset {
+pub fn findAsset(name: []const u8) ?*const ui_assets.Asset {
     if (!has_assets) return null;
-    for (&generated.assets) |*a| {
+    for (&ui_assets.assets) |*a| {
         if (std.mem.eql(u8, a.name, name)) return a;
     }
     return null;
@@ -45,14 +41,14 @@ pub fn findAsset(name: []const u8) ?*const Asset {
 /// Ports `llama_ui_get_assets` (ui.cpp.in:25 @b1b770d90).
 ///
 /// Return: the whole table, static; empty without a UI.
-pub fn getAssets() []const Asset {
-    return &generated.assets;
+pub fn getAssets() []const ui_assets.Asset {
+    return &ui_assets.assets;
 }
 
 /// Ports `llama_ui_use_gzip` (ui.cpp.in:34 @b1b770d90): whether every
 /// asset is stored gzip-compressed and served with `Content-Encoding: gzip`.
 pub fn useGzip() bool {
-    return generated.use_gzip;
+    return ui_assets.use_gzip;
 }
 
 // -----------------------------------------------------------------------------
@@ -64,5 +60,5 @@ test {
 
 test "findAsset agrees with the table" {
     for (getAssets()) |*a| try std.testing.expectEqual(a, findAsset(a.name).?);
-    try std.testing.expectEqual(@as(?*const Asset, null), findAsset("no/such/asset"));
+    try std.testing.expectEqual(@as(?*const ui_assets.Asset, null), findAsset("no/such/asset"));
 }

@@ -115,30 +115,30 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
-        inpL = llama.impl.c.ggml_reshape_3d(ctx, inpL, n_embd, n_seq_tokens, n_seqs);
+        inpL = llama.impl.llama_c.ggml_reshape_3d(ctx, inpL, n_embd, n_seq_tokens, n_seqs);
 
         var token_shift = b.buildRwkvTokenShiftLoad(rs_inp, ubatch, il);
 
         const att_norm = b.buildNorm(inpL, layer.attn_norm, layer.attn_norm_b, .rms, il);
         b.cb(att_norm, "attn_norm", il);
 
-        const x_prev: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_concat(ctx, token_shift, llama.impl.c.ggml_view_3d(ctx, att_norm, n_embd, n_seq_tokens - 1, n_seqs, att_norm.nb[1], att_norm.nb[2], 0), 1);
+        const x_prev: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_concat(ctx, token_shift, llama.impl.llama_c.ggml_view_3d(ctx, att_norm, n_embd, n_seq_tokens - 1, n_seqs, att_norm.nb[1], att_norm.nb[2], 0), 1);
 
         var cur = llama.models.rwkv6_base.buildRwkv6TimeMix(model, b, rs_inp, att_norm, x_prev, ubatch, il);
 
         const last: usize = @intCast((n_seq_tokens - 1) * n_embd);
-        token_shift = llama.impl.c.ggml_view_3d(ctx, att_norm, n_embd, 1, n_seqs, att_norm.nb[1], att_norm.nb[2], last * llama.impl.c.ggml_element_size(att_norm));
-        llama.impl.c.ggml_build_forward_expand(b.gf, b.buildRwkvTokenShiftStore(token_shift, ubatch, il));
+        token_shift = llama.impl.llama_c.ggml_view_3d(ctx, att_norm, n_embd, 1, n_seqs, att_norm.nb[1], att_norm.nb[2], last * llama.impl.llama_c.ggml_element_size(att_norm));
+        llama.impl.llama_c.ggml_build_forward_expand(b.gf, b.buildRwkvTokenShiftStore(token_shift, ubatch, il));
 
-        var ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpL);
+        var ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpL);
         b.cb(ffn_inp, "ffn_inp", il);
 
-        cur = llama.impl.c.ggml_reshape_2d(ctx, cur, n_embd, n_tokens);
-        ffn_inp = llama.impl.c.ggml_reshape_2d(ctx, ffn_inp, n_embd, n_tokens);
+        cur = llama.impl.llama_c.ggml_reshape_2d(ctx, cur, n_embd, n_tokens);
+        ffn_inp = llama.impl.llama_c.ggml_reshape_2d(ctx, ffn_inp, n_embd, n_tokens);
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            ffn_inp = llama.impl.c.ggml_get_rows(ctx, ffn_inp, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            ffn_inp = llama.impl.llama_c.ggml_get_rows(ctx, ffn_inp, inp_out_ids);
         }
 
         // The feed-forward network.
@@ -148,7 +148,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         cur = b.buildFfn(cur, layer.ffn_up, null, null, layer.ffn_gate, null, null, layer.ffn_down, null, null, null, .silu, .par, il);
         b.cb(cur, "ffn_out", il);
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

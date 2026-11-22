@@ -26,24 +26,24 @@ const llama = @import("../module.zig");
 
 /// Ports `llama_sampler_infill` (llama-sampler.cpp:4066 @b1b770d90).
 const Infill = struct {
-    vocab: ?*const llama.impl.c.struct_llama_vocab,
+    vocab: ?*const llama.impl.llama_c.struct_llama_vocab,
 
     buf0: [512]u8,
     buf1: [512]u8,
 };
 
 /// Ports `llama_sampler_infill_name` (llama-sampler.cpp:4073 @b1b770d90).
-fn infillName(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]const u8 {
+fn infillName(smpl: [*c]const llama.impl.llama_c.struct_llama_sampler) callconv(.c) [*c]const u8 {
     _ = smpl;
     return "infill";
 }
 
 /// `vocab->token_to_piece(id, buf, size, 0, false)`, terminating as the C++
 /// does when the piece does not fit -- see the file header.
-fn pieceInto(vocab: ?*const llama.impl.c.struct_llama_vocab, id: llama.impl.c.llama_token, buf: []u8) usize {
+fn pieceInto(vocab: ?*const llama.impl.llama_c.struct_llama_vocab, id: llama.impl.llama_c.llama_token, buf: []u8) usize {
     const len = llama.api.vocab.llama_token_to_piece(vocab, id, buf.ptr, @intCast(buf.len), 0, false);
     if (len < 0) {
-        llama.impl.c.ggml_abort(llama.sampler.core.src, 4152, "terminating due to uncaught exception of type std::length_error: %s", "vector");
+        llama.impl.llama_c.ggml_abort(llama.sampler.core.src, 4152, "terminating due to uncaught exception of type std::length_error: %s", "vector");
     }
     return @intCast(len);
 }
@@ -53,7 +53,7 @@ fn pieceInto(vocab: ?*const llama.impl.c.struct_llama_vocab, id: llama.impl.c.ll
 /// Picks end-of-generation when its mass is high enough; otherwise merges
 /// each candidate into any it is a text prefix of, then drops the weak ones
 /// in two rounds, falling back to EOT (or EOS) when nothing non-EOG is left.
-fn infillApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.impl.c.llama_token_data_array) callconv(.c) void {
+fn infillApply(smpl: [*c]llama.impl.llama_c.struct_llama_sampler, cur_p: [*c]llama.impl.llama_c.llama_token_data_array) callconv(.c) void {
     const ctx = llama.sampler.core.ctxOf(Infill, smpl);
 
     llama.sampler.core.softmaxImpl(cur_p, true);
@@ -143,12 +143,12 @@ fn infillApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.imp
     if (n_non_eog == 0) {
         cur_p.*.size = 1;
         cur_p.*.data[0].id = llama.api.vocab.llama_vocab_eot(ctx.vocab);
-        if (cur_p.*.data[0].id == llama.impl.c.LLAMA_TOKEN_NULL) {
+        if (cur_p.*.data[0].id == llama.impl.llama_c.LLAMA_TOKEN_NULL) {
             cur_p.*.data[0].id = llama.api.vocab.llama_vocab_eos(ctx.vocab);
         }
         cur_p.*.data[0].logit = 1.0;
 
-        llama.impl.assert(cur_p.*.data[0].id != llama.impl.c.LLAMA_TOKEN_NULL, llama.sampler.core.src, 4252, "cur_p->data[0].id != LLAMA_TOKEN_NULL");
+        llama.impl.assert(cur_p.*.data[0].id != llama.impl.llama_c.LLAMA_TOKEN_NULL, llama.sampler.core.src, 4252, "cur_p->data[0].id != LLAMA_TOKEN_NULL");
 
         return;
     }
@@ -176,17 +176,17 @@ fn infillApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.imp
 }
 
 /// Ports `llama_sampler_infill_clone` (llama-sampler.cpp:4260 @b1b770d90).
-fn infillClone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+fn infillClone(smpl: [*c]const llama.impl.llama_c.struct_llama_sampler) callconv(.c) [*c]llama.impl.llama_c.struct_llama_sampler {
     return llama_sampler_init_infill(llama.sampler.core.ctxOf(Infill, smpl).vocab);
 }
 
 /// Ports `llama_sampler_infill_free` (llama-sampler.cpp:4265 @b1b770d90).
-fn infillFree(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+fn infillFree(smpl: [*c]llama.impl.llama_c.struct_llama_sampler) callconv(.c) void {
     llama.sampler.core.destroy(Infill, llama.sampler.core.ctxOf(Infill, smpl));
 }
 
 /// Ports `llama_sampler_infill_i` (llama-sampler.cpp:4269 @b1b770d90).
-var infill_iface: llama.impl.c.struct_llama_sampler_i = .{
+var infill_iface: llama.impl.llama_c.struct_llama_sampler_i = .{
     .name = infillName,
     .accept = null,
     .apply = infillApply,
@@ -201,7 +201,7 @@ var infill_iface: llama.impl.c.struct_llama_sampler_i = .{
 /// - `vocab`: the vocabulary; borrowed for the sampler's lifetime.
 ///
 /// Return: the sampler.
-pub export fn llama_sampler_init_infill(vocab: ?*const llama.impl.c.struct_llama_vocab) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+pub fn llama_sampler_init_infill(vocab: ?*const llama.impl.llama_c.struct_llama_vocab) callconv(.c) [*c]llama.impl.llama_c.struct_llama_sampler {
     return llama.sampler.core.llama_sampler_init(&infill_iface, llama.sampler.core.create(Infill, .{
         .vocab = vocab,
         .buf0 = std.mem.zeroes([512]u8),

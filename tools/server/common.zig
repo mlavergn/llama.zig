@@ -29,29 +29,11 @@ const std = @import("std");
 const llama = @import("llama");
 const stdlib = @import("stdlib");
 const json = @import("json");
-const chat = @import("common_chat");
-const tools = @import("tools_common");
-
-pub const c = tools.c;
-pub const exception = chat.exception;
-
-pub const Value = json.Value;
-pub const Allocator = std.mem.Allocator;
-
-/// Every throwing call in the server's data layer returns one of these.
-pub const Error = exception.Error;
-
-/// `e.what()` for an error the data layer returned on this thread.
-pub const what = exception.what;
-
-/// `throw std::runtime_error(...)` / `throw std::invalid_argument(...)`.
-pub const throw = exception.throw;
-
-/// `llama_token`.
-pub const Token = c.llama_token;
+const common_chat = @import("common_chat");
+const tools_common = @import("tools_common");
 
 /// `LLAMA_TOKEN_NULL`.
-pub const token_null: Token = c.LLAMA_TOKEN_NULL;
+pub const token_null: llama.impl.llama_c.llama_token = llama.impl.llama_c.LLAMA_TOKEN_NULL;
 
 // -----------------------------------------------------------------------------
 // logging and assertions
@@ -86,11 +68,11 @@ pub fn srv(comptime level: SrvLevel, comptime func: []const u8, comptime fmt: []
     const f = "srv  %12.*s: " ++ fmt;
     const pre = .{ @as(c_int, 12), @as([*:0]const u8, func ++ "") };
     switch (level) {
-        .dbg => tools.log.dbg(f, pre ++ args),
-        .trc => tools.log.trc(f, pre ++ args),
-        .inf => tools.log.inf(f, pre ++ args),
-        .wrn => tools.log.wrn(f, pre ++ args),
-        .err => tools.log.err(f, pre ++ args),
+        .dbg => tools_common.log.dbg(f, pre ++ args),
+        .trc => tools_common.log.trc(f, pre ++ args),
+        .inf => tools_common.log.inf(f, pre ++ args),
+        .wrn => tools_common.log.wrn(f, pre ++ args),
+        .err => tools_common.log.err(f, pre ++ args),
     }
 }
 
@@ -121,7 +103,7 @@ pub fn freeZ(z: [*:0]const u8) void {
 ///   `body`).
 ///
 /// Return: the value or the default.
-pub fn jsonValue(body: *const Value, key: []const u8, comptime T: type, default_value: T) T {
+pub fn jsonValue(body: *const json.Value, key: []const u8, comptime T: type, default_value: T) T {
     // Fallback null to default value
     if (body.contains(key) and !(body.at(key) catch |err| switch (err) {
         error.OutOfMemory, error.JsonError => unreachable,
@@ -141,7 +123,7 @@ pub fn jsonValue(body: *const Value, key: []const u8, comptime T: type, default_
 /// `default_value` (which is consumed). `get<common_json>()` cannot fail.
 ///
 /// Return: owned by the caller.
-pub fn jsonValueJson(gpa: Allocator, body: *const Value, key: []const u8, default_value: Value) Error!Value {
+pub fn jsonValueJson(gpa: std.mem.Allocator, body: *const json.Value, key: []const u8, default_value: json.Value) common_chat.exception.Error!json.Value {
     var def = default_value;
     if (body.contains(key) and !(body.at(key) catch |err| switch (err) {
         error.OutOfMemory, error.JsonError => unreachable,
@@ -158,7 +140,7 @@ pub fn jsonValueJson(gpa: Allocator, body: *const Value, key: []const u8, defaul
 ///
 /// Return: owned by the caller (the list; the strings are borrowed from
 /// `body`).
-pub fn jsonValueStrings(gpa: Allocator, body: *const Value, key: []const u8) Error![]const []const u8 {
+pub fn jsonValueStrings(gpa: std.mem.Allocator, body: *const json.Value, key: []const u8) common_chat.exception.Error![]const []const u8 {
     if (body.contains(key) and !(body.at(key) catch |err| switch (err) {
         error.OutOfMemory, error.JsonError => unreachable,
     }).isNull()) {
@@ -181,7 +163,7 @@ fn wrongType(key: []const u8) void {
     defer freeZ(k);
     const w = dupZ(json.what());
     defer freeZ(w);
-    tools.log.wrn("Wrong type supplied for parameter '%s', using default value: %s\n", .{ k, w });
+    tools_common.log.wrn("Wrong type supplied for parameter '%s', using default value: %s\n", .{ k, w });
 }
 
 // -----------------------------------------------------------------------------
@@ -196,11 +178,11 @@ pub const Bytes = struct { s: []const u8 };
 /// and strings (as slices), `Bytes`, and `Value` itself (moved in).
 ///
 /// Return: owned by the caller.
-pub fn from(a: Allocator, x: anytype) Error!Value {
+pub fn from(a: std.mem.Allocator, x: anytype) common_chat.exception.Error!json.Value {
     const T = @TypeOf(x);
-    if (T == Value) return x;
+    if (T == json.Value) return x;
     if (T == Bytes) {
-        var arr = Value.emptyArray();
+        var arr = json.Value.emptyArray();
         errdefer arr.deinit(a);
         for (x.s) |b| try arr.pushBack(a, .{ .number_unsigned = b });
         return arr;
@@ -215,32 +197,32 @@ pub fn from(a: Allocator, x: anytype) Error!Value {
                 },
                 else => @compileError("not a JSON value"),
             };
-            if (Elem == u8) return Value.from(a, x);
-            var arr = Value.emptyArray();
+            if (Elem == u8) return json.Value.from(a, x);
+            var arr = json.Value.emptyArray();
             errdefer arr.deinit(a);
             for (x) |e| try arr.pushBack(a, try from(a, e));
             return arr;
         },
-        else => return Value.from(a, x),
+        else => return json.Value.from(a, x),
     }
 }
 
 /// A JSON object under construction, members in insertion order.
 pub const Obj = struct {
-    a: Allocator,
-    v: Value = Value.emptyObject(),
+    a: std.mem.Allocator,
+    v: json.Value = json.Value.emptyObject(),
 
-    pub fn init(a: Allocator) Obj {
+    pub fn init(a: std.mem.Allocator) Obj {
         return .{ .a = a };
     }
 
     /// `obj[key] = x`.
-    pub fn put(self: *Obj, key: []const u8, x: anytype) Error!void {
+    pub fn put(self: *Obj, key: []const u8, x: anytype) common_chat.exception.Error!void {
         try self.v.set(self.a, key, try from(self.a, x));
     }
 
     /// Return: the object, owned by the caller.
-    pub fn done(self: *Obj) Value {
+    pub fn done(self: *Obj) json.Value {
         const v = self.v;
         self.v = .null;
         return v;
@@ -269,7 +251,7 @@ pub const ErrorType = enum(c_int) {
 /// Ports `format_error_response` (server-common.cpp:97 @b1b770d90).
 ///
 /// Return: `{"code", "message", "type"}`, owned by the caller.
-pub fn formatErrorResponse(a: Allocator, message: []const u8, ty: ErrorType) Error!Value {
+pub fn formatErrorResponse(a: std.mem.Allocator, message: []const u8, ty: ErrorType) common_chat.exception.Error!json.Value {
     var type_str: []const u8 = "";
     var code: c_int = 500;
     switch (ty) {
@@ -329,13 +311,13 @@ pub const trigger_type_pattern_full: c_int = 3;
 pub const GrammarTrigger = struct {
     type: c_int = 0,
     value: []const u8 = "",
-    token: Token = token_null,
+    token: llama.impl.llama_c.llama_token = token_null,
 
     /// Ports `server_grammar_trigger`'s constructor from JSON
     /// (server-common.h:72 @b1b770d90).
     ///
     /// Return: `value` is `a`'s.
-    pub fn fromJson(a: Allocator, in: *const Value) Error!GrammarTrigger {
+    pub fn fromJson(a: std.mem.Allocator, in: *const json.Value) common_chat.exception.Error!GrammarTrigger {
         var t: GrammarTrigger = .{};
         t.type = try (try in.at("type")).get(c_int);
         t.value = try a.dupe(u8, try (try in.at("value")).get([]const u8));
@@ -348,7 +330,7 @@ pub const GrammarTrigger = struct {
     /// Ports `server_grammar_trigger`'s `to_json` (server-common.h:85 @b1b770d90).
     ///
     /// Return: owned by the caller.
-    pub fn toJson(self: GrammarTrigger, a: Allocator) Error!Value {
+    pub fn toJson(self: GrammarTrigger, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         var o = Obj.init(a);
         errdefer o.deinit();
         try o.put("type", self.type);
@@ -367,7 +349,7 @@ pub const GrammarTrigger = struct {
 /// `[0-9A-Za-z]` from an `mt19937` seeded by the random device.
 ///
 /// Return: owned by the caller.
-pub fn randomString(a: Allocator) Error![]u8 {
+pub fn randomString(a: std.mem.Allocator) common_chat.exception.Error![]u8 {
     const str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
     var generator = stdlib.libcxx.Mt19937.init(stdlib.libcxx.randomDevice());
     const result = try a.alloc(u8, 32);
@@ -376,14 +358,14 @@ pub fn randomString(a: Allocator) Error![]u8 {
 }
 
 /// Ports `gen_chatcmplid` (server-common.cpp:187 @b1b770d90).
-pub fn genChatcmplid(a: Allocator) Error![]u8 {
+pub fn genChatcmplid(a: std.mem.Allocator) common_chat.exception.Error![]u8 {
     const r = try randomString(a);
     defer a.free(r);
     return std.mem.concat(a, u8, &.{ "chatcmpl-", r });
 }
 
 /// Ports `gen_tool_call_id` (server-common.cpp:191 @b1b770d90).
-pub fn genToolCallId(a: Allocator) Error![]u8 {
+pub fn genToolCallId(a: std.mem.Allocator) common_chat.exception.Error![]u8 {
     return randomString(a);
 }
 
@@ -427,7 +409,7 @@ pub fn getMediaMarker() [:0]const u8 {
 /// to signed 16-bit PCM bytes, clamped to [-1, 1].
 ///
 /// Return: owned by `a`.
-pub fn pcmF32ToS16(a: Allocator, samples: []const f32) Allocator.Error![]u8 {
+pub fn pcmF32ToS16(a: std.mem.Allocator, samples: []const f32) std.mem.Allocator.Error![]u8 {
     const bytes = try a.alloc(u8, samples.len * @sizeOf(i16));
     for (samples, 0..) |x, i| {
         // std::max(-1.0f, std::min(1.0f, x)), NaN clamped as the C++'s comparisons do
@@ -452,7 +434,7 @@ pub fn pcmF32ToS16(a: Allocator, samples: []const f32) Allocator.Error![]u8 {
 /// - `has_cap_tts`: the model can generate audio.
 ///
 /// Return: static strings.
-pub fn serverModelOutputModalities(decision_type: tools.common.DecisionType, has_cap_chat: bool, has_cap_tts: bool) []const []const u8 {
+pub fn serverModelOutputModalities(decision_type: tools_common.common.DecisionType, has_cap_chat: bool, has_cap_tts: bool) []const []const u8 {
     return switch (decision_type) {
         .openjev, .lev, .kev, .nimble, .laya, .clef, .pplx_decider, .vllm_decision2, .vllm_d3, .lfm2_d1, .lfm2_d1_omni, .h2o_lightning, .minicpm_ocr_jev, .lfm3_d1, .lfm3_d1_omni => if (has_cap_tts) &.{ "decisions", "audio" } else &.{"decisions"},
         .granite_switch => if (has_cap_tts) &.{ "text", "decisions", "audio" } else &.{ "text", "decisions" },
@@ -472,7 +454,7 @@ pub fn serverModelOutputModalities(decision_type: tools.common.DecisionType, has
 /// direct server and the router.
 ///
 /// Return: owned by `a`.
-pub fn serverModelArchitectureJson(a: Allocator, inp_image: bool, inp_audio: bool, inp_video: bool, output_modalities: []const []const u8) Error!Value {
+pub fn serverModelArchitectureJson(a: std.mem.Allocator, inp_image: bool, inp_audio: bool, inp_video: bool, output_modalities: []const []const u8) common_chat.exception.Error!json.Value {
     var input_modalities: [4][]const u8 = undefined;
     var n: usize = 0;
     input_modalities[n] = "text";
@@ -500,15 +482,12 @@ pub fn serverModelArchitectureJson(a: Allocator, inp_image: bool, inp_audio: boo
 // -----------------------------------------------------------------------------
 // lora utils
 
-/// `common_adapter_lora_info`, as the server's LoRA helpers read it.
-pub const LoraInfo = tools.params.LoraInfo;
-
 /// Ports `lora_all_alora` (server-common.cpp:291 @b1b770d90).
-pub fn loraAllAlora(loras: []const LoraInfo) bool {
+pub fn loraAllAlora(loras: []const tools_common.params.LoraInfo) bool {
     var found_alora = false;
     for (loras) |lora| {
         if (lora.scale != 0) {
-            if (c.llama_adapter_get_alora_n_invocation_tokens(lora.ptr) == 0) {
+            if (llama.api.adapter.llama_adapter_get_alora_n_invocation_tokens(lora.ptr) == 0) {
                 return false;
             }
             found_alora = true;
@@ -518,16 +497,16 @@ pub fn loraAllAlora(loras: []const LoraInfo) bool {
 }
 
 /// Ports `lora_should_clear_cache` (server-common.cpp:304 @b1b770d90).
-pub fn loraShouldClearCache(current: []const LoraInfo, next: []const LoraInfo) bool {
+pub fn loraShouldClearCache(current: []const tools_common.params.LoraInfo, next: []const tools_common.params.LoraInfo) bool {
     // This should always be called after determining that the two sets are
     // _not_ equal. This assert is therefore some slightly wasted work and
     // should be safe to remove as long as this method is called correctly.
-    tools.ggml.ggmlAssert(!areLoraEqual(current, next), "server-common.cpp", 311, "!are_lora_equal(current, next)");
+    tools_common.ggml.ggmlAssert(!areLoraEqual(current, next), "server-common.cpp", 311, "!are_lora_equal(current, next)");
 
     return (!(loraEnabledEmpty(current) or loraAllAlora(current)) or !loraAllAlora(next));
 }
 
-fn loraEnabledEmpty(loras: []const LoraInfo) bool {
+fn loraEnabledEmpty(loras: []const tools_common.params.LoraInfo) bool {
     for (loras) |l| if (l.scale > 0) return false;
     return true;
 }
@@ -540,7 +519,7 @@ pub const LoraMap = struct {
     entries: std.ArrayList(LoraScale) = .empty,
 
     /// `lora[id] = scale`.
-    pub fn put(self: *LoraMap, a: Allocator, id: c_int, scale: f32) Error!void {
+    pub fn put(self: *LoraMap, a: std.mem.Allocator, id: c_int, scale: f32) common_chat.exception.Error!void {
         var i: usize = 0;
         while (i < self.entries.items.len) : (i += 1) {
             const e = &self.entries.items[i];
@@ -553,12 +532,12 @@ pub const LoraMap = struct {
         try self.entries.insert(a, i, .{ .id = id, .scale = scale });
     }
 
-    pub fn deinit(self: *LoraMap, a: Allocator) void {
+    pub fn deinit(self: *LoraMap, a: std.mem.Allocator) void {
         self.entries.deinit(a);
     }
 
     /// A copy owned by `a`.
-    pub fn clone(self: *const LoraMap, a: Allocator) Error!LoraMap {
+    pub fn clone(self: *const LoraMap, a: std.mem.Allocator) common_chat.exception.Error!LoraMap {
         return .{ .entries = .fromOwnedSlice(try a.dupe(LoraScale, self.entries.items)) };
     }
 };
@@ -566,7 +545,7 @@ pub const LoraMap = struct {
 /// Ports `parse_lora_request` (server-common.cpp:318 @b1b770d90).
 ///
 /// Return: owned by `a`.
-pub fn parseLoraRequest(a: Allocator, data: *Value) Error!LoraMap {
+pub fn parseLoraRequest(a: std.mem.Allocator, data: *json.Value) common_chat.exception.Error!LoraMap {
     var lora: LoraMap = .{};
     errdefer lora.deinit(a);
 
@@ -582,7 +561,7 @@ pub fn parseLoraRequest(a: Allocator, data: *Value) Error!LoraMap {
 }
 
 /// Ports `are_lora_equal` (server-common.cpp:331 @b1b770d90).
-pub fn areLoraEqual(l1: []const LoraInfo, l2: []const LoraInfo) bool {
+pub fn areLoraEqual(l1: []const tools_common.params.LoraInfo, l2: []const tools_common.params.LoraInfo) bool {
     if (l1.len != l2.len) {
         return false;
     }
@@ -598,7 +577,7 @@ pub fn areLoraEqual(l1: []const LoraInfo, l2: []const LoraInfo) bool {
 /// Ports `lora_get_enabled_ids` (server-common.cpp:346 @b1b770d90).
 ///
 /// Return: owned by `a`.
-pub fn loraGetEnabledIds(a: Allocator, loras: []const LoraInfo) Error![]usize {
+pub fn loraGetEnabledIds(a: std.mem.Allocator, loras: []const tools_common.params.LoraInfo) common_chat.exception.Error![]usize {
     var enabled_ids: std.ArrayList(usize) = .empty;
     errdefer enabled_ids.deinit(a);
     for (loras, 0..) |l, i| {
@@ -613,7 +592,7 @@ pub fn loraGetEnabledIds(a: Allocator, loras: []const LoraInfo) Error![]usize {
 // json helpers
 
 /// Ports `json_is_array_of_numbers` (server-common.cpp:948 @b1b770d90).
-pub fn jsonIsArrayOfNumbers(data: *const Value) bool {
+pub fn jsonIsArrayOfNumbers(data: *const json.Value) bool {
     if (data.isArray()) {
         for (data.array.items) |*e| {
             if (!e.isNumberInteger()) {
@@ -626,7 +605,7 @@ pub fn jsonIsArrayOfNumbers(data: *const Value) bool {
 }
 
 /// Ports `json_is_array_of_mixed_numbers_strings` (server-common.cpp:960 @b1b770d90).
-pub fn jsonIsArrayOfMixedNumbersStrings(data: *const Value) bool {
+pub fn jsonIsArrayOfMixedNumbersStrings(data: *const json.Value) bool {
     var seen_string = false;
     var seen_number = false;
     if (data.isArray()) {
@@ -642,7 +621,7 @@ pub fn jsonIsArrayOfMixedNumbersStrings(data: *const Value) bool {
 }
 
 /// Ports `json_is_array_and_contains_numbers` (server-common.cpp:975 @b1b770d90).
-pub fn jsonIsArrayAndContainsNumbers(data: *const Value) bool {
+pub fn jsonIsArrayAndContainsNumbers(data: *const json.Value) bool {
     if (data.isArray()) {
         for (data.array.items) |*e| {
             if (e.isNumberInteger()) {
@@ -658,12 +637,12 @@ pub fn jsonIsArrayAndContainsNumbers(data: *const Value) bool {
 /// path's value, keyed by the path, when every key along it exists.
 ///
 /// Return: owned by `a`.
-pub fn jsonGetNestedValues(a: Allocator, paths: []const []const u8, js: *const Value) Error!Value {
-    var result = Value.emptyObject();
+pub fn jsonGetNestedValues(a: std.mem.Allocator, paths: []const []const u8, js: *const json.Value) common_chat.exception.Error!json.Value {
+    var result = json.Value.emptyObject();
     errdefer result.deinit(a);
 
     for (paths) |path| {
-        var current: *const Value = js;
+        var current: *const json.Value = js;
         var it = std.mem.splitScalar(u8, path, '/');
         var valid_path = true;
         while (it.next()) |k| {
@@ -772,30 +751,30 @@ pub const SlotStats = struct {
 
     /// Ports `update_prompt_start` (server-common.h:440 @b1b770d90).
     pub fn updatePromptStart(self: *SlotStats) void {
-        tools.ggml.ggmlAssert(self.t_start == 0, "server-common.h", 441, "t_start == 0");
-        self.t_start = c.ggml_time_us();
+        tools_common.ggml.ggmlAssert(self.t_start == 0, "server-common.h", 441, "t_start == 0");
+        self.t_start = llama.impl.llama_c.ggml_time_us();
     }
 
     /// Ports `set_prompt_last` (server-common.h:444 @b1b770d90).
     pub fn setPromptLast(self: *SlotStats, t_us: i64) void {
-        tools.ggml.ggmlAssert(self.t_start > 0, "server-common.h", 445, "t_start > 0");
+        tools_common.ggml.ggmlAssert(self.t_start > 0, "server-common.h", 445, "t_start > 0");
         self.t_prompt_last = t_us;
     }
 
     /// Ports `update_prompt_last` (server-common.h:448 @b1b770d90).
     pub fn updatePromptLast(self: *SlotStats) void {
-        self.setPromptLast(c.ggml_time_us());
+        self.setPromptLast(llama.impl.llama_c.ggml_time_us());
     }
 
     /// Ports `update_gen_last` (server-common.h:451 @b1b770d90).
     pub fn updateGenLast(self: *SlotStats) void {
-        tools.ggml.ggmlAssert(self.t_prompt_last > 0, "server-common.h", 452, "t_prompt_last > 0");
-        self.t_gen_last = c.ggml_time_us();
+        tools_common.ggml.ggmlAssert(self.t_prompt_last > 0, "server-common.h", 452, "t_prompt_last > 0");
+        self.t_gen_last = llama.impl.llama_c.ggml_time_us();
     }
 
     /// Ports `t_elapsed_us` (server-common.h:457 @b1b770d90).
     pub fn tElapsedUs(self: *const SlotStats) i64 {
-        return c.ggml_time_us() - self.t_start;
+        return llama.impl.llama_c.ggml_time_us() - self.t_start;
     }
 
     /// Ports `t_prompt_ms` (server-common.h:460 @b1b770d90).
@@ -855,7 +834,7 @@ pub const SlotStats = struct {
     /// Ports `server_slot_stats`'s `to_json` (server-common.cpp:145 @b1b770d90).
     ///
     /// Return: owned by `a`.
-    pub fn toJson(self: *const SlotStats, a: Allocator) Error!Value {
+    pub fn toJson(self: *const SlotStats, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         var base = Obj.init(a);
         errdefer base.deinit();
         try base.put("cache_n", self.n_prompt_cached);
@@ -928,7 +907,7 @@ pub const Metrics = struct {
 
     /// Ports `init` (server-common.h:552 @b1b770d90).
     pub fn init(self: *Metrics) void {
-        self.t_start = c.ggml_time_us();
+        self.t_start = llama.impl.llama_c.ggml_time_us();
     }
 
     /// Ports `reset_bucket` (server-common.h:556 @b1b770d90).
@@ -949,13 +928,13 @@ pub const Metrics = struct {
     }
 
     /// A copy whose list `a` owns, as the C++ copy constructor makes one.
-    pub fn clone(self: *const Metrics, a: Allocator) Error!Metrics {
+    pub fn clone(self: *const Metrics, a: std.mem.Allocator) common_chat.exception.Error!Metrics {
         var m = self.*;
         m.n_accepted_per_pos = .fromOwnedSlice(try a.dupe(u64, self.n_accepted_per_pos.items));
         return m;
     }
 
-    pub fn deinit(self: *Metrics, a: Allocator) void {
+    pub fn deinit(self: *Metrics, a: std.mem.Allocator) void {
         self.n_accepted_per_pos.deinit(a);
     }
 };
@@ -963,10 +942,7 @@ pub const Metrics = struct {
 // -----------------------------------------------------------------------------
 // other utils
 
-/// `llama_token_data`.
-pub const TokenData = c.llama_token_data;
-
-fn logitGreater(_: void, x: TokenData, y: TokenData) bool {
+fn logitGreater(_: void, x: llama.impl.llama_c.llama_token_data, y: llama.impl.llama_c.llama_token_data) bool {
     return x.logit > y.logit;
 }
 
@@ -975,17 +951,17 @@ fn logitGreater(_: void, x: TokenData, y: TokenData) bool {
 /// (libc++'s `partial_sort`), with their softmax.
 ///
 /// Return: owned by `a`.
-pub fn getTokenProbabilities(a: Allocator, ctx: ?*c.llama_context, idx: c_int, n_top_in: usize) Error![]TokenData {
+pub fn getTokenProbabilities(a: std.mem.Allocator, ctx: ?*llama.impl.llama_c.llama_context, idx: c_int, n_top_in: usize) common_chat.exception.Error![]llama.impl.llama_c.llama_token_data {
     var n_top = n_top_in;
-    const logits = c.llama_get_logits_ith(ctx, idx);
-    const sampled_ids = c.llama_get_sampled_candidates_ith(ctx, idx);
+    const logits = llama.api.context.llama_get_logits_ith(ctx, idx).?;
+    const sampled_ids: ?[*]llama.impl.llama_c.llama_token = llama.api.context.llama_get_sampled_candidates_ith(ctx, idx);
 
-    const n_logits: c_int = @bitCast(c.llama_get_sampled_logits_count_ith(ctx, idx));
+    const n_logits: c_int = @bitCast(llama.api.context.llama_get_sampled_logits_count_ith(ctx, idx));
 
-    const cur = try a.alloc(TokenData, @intCast(n_logits));
+    const cur = try a.alloc(llama.impl.llama_c.llama_token_data, @intCast(n_logits));
     errdefer a.free(cur);
     if (sampled_ids != null) {
-        for (cur, 0..) |*t, i| t.* = .{ .id = sampled_ids[i], .logit = logits[i], .p = 0.0 };
+        for (cur, 0..) |*t, i| t.* = .{ .id = sampled_ids.?[i], .logit = logits[i], .p = 0.0 };
     } else {
         for (cur, 0..) |*t, i| t.* = .{ .id = @intCast(i), .logit = logits[i], .p = 0.0 };
     }
@@ -995,7 +971,7 @@ pub fn getTokenProbabilities(a: Allocator, ctx: ?*c.llama_context, idx: c_int, n
         n_top = cur.len;
     }
     if (n_top > 0) {
-        stdlib.libcxx.partialSort(TokenData, cur, n_top, {}, logitGreater);
+        stdlib.libcxx.partialSort(llama.impl.llama_c.llama_token_data, cur, n_top, {}, logitGreater);
     }
 
     // apply softmax
@@ -1024,7 +1000,7 @@ pub fn getTokenProbabilities(a: Allocator, ctx: ?*c.llama_context, idx: c_int, n
 /// bad UTF-8 replaced instead of throwing.
 ///
 /// Return: owned by `a`.
-pub fn safeJsonToStr(a: Allocator, data: *const Value) error{OutOfMemory}![]u8 {
+pub fn safeJsonToStr(a: std.mem.Allocator, data: *const json.Value) error{OutOfMemory}![]u8 {
     return json.dumpSafe(a, data, -1);
 }
 
@@ -1033,7 +1009,7 @@ pub fn safeJsonToStr(a: Allocator, data: *const Value) error{OutOfMemory}![]u8 {
 /// @b1b770d90): every token's piece, concatenated.
 ///
 /// Return: owned by `a`.
-pub fn tokensToStr(a: Allocator, vocab: ?*const c.llama_vocab, tokens: []const Token) Error![]u8 {
+pub fn tokensToStr(a: std.mem.Allocator, vocab: ?*const llama.impl.llama_c.llama_vocab, tokens: []const llama.impl.llama_c.llama_token) common_chat.exception.Error![]u8 {
     var ret: std.ArrayList(u8) = .empty;
     errdefer ret.deinit(a);
     for (tokens) |t| {
@@ -1045,18 +1021,18 @@ pub fn tokensToStr(a: Allocator, vocab: ?*const c.llama_vocab, tokens: []const T
 }
 
 /// Ports the `tokens_to_str` overload over a context (server-common.cpp:1800 @b1b770d90).
-pub fn tokensToStrCtx(a: Allocator, ctx: ?*c.llama_context, tokens: []const Token) Error![]u8 {
-    const model = c.llama_get_model(ctx);
-    return tokensToStr(a, c.llama_model_get_vocab(model), tokens);
+pub fn tokensToStrCtx(a: std.mem.Allocator, ctx: ?*llama.impl.llama_c.llama_context, tokens: []const llama.impl.llama_c.llama_token) common_chat.exception.Error![]u8 {
+    const model = llama.api.context.llama_get_model(ctx);
+    return tokensToStr(a, llama.api.model.llama_model_get_vocab(model), tokens);
 }
 
 /// Ports `common_tokenize` (common/common.cpp:1866 @b1b770d90).
 ///
 /// Return: owned by `a`.
-pub fn tokenize(a: Allocator, vocab: ?*const c.llama_vocab, text: []const u8, add_special: bool, parse_special: bool) Error![]Token {
+pub fn tokenize(a: std.mem.Allocator, vocab: ?*const llama.impl.llama_c.llama_vocab, text: []const u8, add_special: bool, parse_special: bool) common_chat.exception.Error![]llama.impl.llama_c.llama_token {
     // upper limit for the number of tokens
     var n_tokens: c_int = @truncate(@as(i64, @intCast(text.len)) + 2 * @as(i64, @intFromBool(add_special)));
-    var result = try a.alloc(Token, @intCast(@max(n_tokens, 0)));
+    var result = try a.alloc(llama.impl.llama_c.llama_token, @intCast(@max(n_tokens, 0)));
     errdefer a.free(result);
     // libllama's throw -- a vocabulary with no byte token for a byte of the
     // text -- reaches the caller as an exception, which the handlers'
@@ -1064,15 +1040,15 @@ pub fn tokenize(a: Allocator, vocab: ?*const c.llama_vocab, text: []const u8, ad
     // itself would terminate: an exception cannot leave its C ABI.
     var exc: llama.impl.Exception = .{};
     n_tokens = llama.api.vocab.tokenize(@ptrCast(vocab), text, result, add_special, parse_special, &exc) catch
-        return throw(error.RuntimeError, "{s}", .{exc.what()});
+        return common_chat.exception.throw(error.RuntimeError, "{s}", .{exc.what()});
     if (n_tokens == std.math.minInt(i32)) {
-        return throw(error.RuntimeError, "Tokenization failed: input text too large, tokenization result exceeds int32_t limit", .{});
+        return common_chat.exception.throw(error.RuntimeError, "Tokenization failed: input text too large, tokenization result exceeds int32_t limit", .{});
     }
     if (n_tokens < 0) {
         result = try a.realloc(result, @intCast(-n_tokens));
         const check = llama.api.vocab.tokenize(@ptrCast(vocab), text, result, add_special, parse_special, &exc) catch
-            return throw(error.RuntimeError, "{s}", .{exc.what()});
-        tools.ggml.ggmlAssert(check == -n_tokens, "common.cpp", 1881, "check == -n_tokens");
+            return common_chat.exception.throw(error.RuntimeError, "{s}", .{exc.what()});
+        tools_common.ggml.ggmlAssert(check == -n_tokens, "common.cpp", 1881, "check == -n_tokens");
     } else {
         result = try a.realloc(result, @intCast(n_tokens));
     }
@@ -1083,18 +1059,18 @@ pub fn tokenize(a: Allocator, vocab: ?*const c.llama_vocab, text: []const u8, ad
 /// over a vocabulary.
 ///
 /// Return: owned by `a`.
-pub fn detokenize(a: Allocator, vocab: ?*const c.llama_vocab, tokens: []const Token, special: bool) Error![]u8 {
+pub fn detokenize(a: std.mem.Allocator, vocab: ?*const llama.impl.llama_c.llama_vocab, tokens: []const llama.impl.llama_c.llama_token, special: bool) common_chat.exception.Error![]u8 {
     var text = try a.alloc(u8, @max(22, tokens.len));
     errdefer a.free(text);
     // A token outside the vocabulary throws in libllama, as in `tokenize`.
     var exc: llama.impl.Exception = .{};
     var n_chars = llama.api.vocab.detokenize(@ptrCast(vocab), tokens, text, false, special, &exc) catch
-        return throw(error.RuntimeError, "{s}", .{exc.what()});
+        return common_chat.exception.throw(error.RuntimeError, "{s}", .{exc.what()});
     if (n_chars < 0) {
         text = try a.realloc(text, @intCast(-n_chars));
         n_chars = llama.api.vocab.detokenize(@ptrCast(vocab), tokens, text, false, special, &exc) catch
-            return throw(error.RuntimeError, "{s}", .{exc.what()});
-        tools.ggml.ggmlAssert(n_chars <= @as(i32, @intCast(text.len)), "common.cpp", 1923, "n_chars <= (int32_t)text.size()"); // whitespace trimming is performed after per-token detokenization
+            return common_chat.exception.throw(error.RuntimeError, "{s}", .{exc.what()});
+        tools_common.ggml.ggmlAssert(n_chars <= @as(i32, @intCast(text.len)), "common.cpp", 1923, "n_chars <= (int32_t)text.size()"); // whitespace trimming is performed after per-token detokenization
     }
 
     // NOTE: the original tokenizer decodes bytes after collecting the pieces.
@@ -1103,20 +1079,20 @@ pub fn detokenize(a: Allocator, vocab: ?*const c.llama_vocab, tokens: []const To
 
 /// Ports `common_token_to_piece` (common/common.cpp:1894 @b1b770d90), the
 /// overload over a vocabulary, with `special = true`, the default.
-pub fn piece(a: Allocator, vocab: ?*const c.llama_vocab, t: Token) Error![]u8 {
+pub fn piece(a: std.mem.Allocator, vocab: ?*const llama.impl.llama_c.llama_vocab, t: llama.impl.llama_c.llama_token) common_chat.exception.Error![]u8 {
     // the first try fits libc++'s short-string buffer
     var buf: [22]u8 = undefined;
     // A token outside the vocabulary -- `/detokenize` takes them from the
     // client -- throws in libllama, as in `tokenize`.
     var exc: llama.impl.Exception = .{};
     const n_chars = llama.api.vocab.tokenToPiece(@ptrCast(vocab), t, &buf, 0, true, &exc) catch
-        return throw(error.RuntimeError, "{s}", .{exc.what()});
+        return common_chat.exception.throw(error.RuntimeError, "{s}", .{exc.what()});
     if (n_chars < 0) {
         const out = try a.alloc(u8, @intCast(-n_chars));
         errdefer a.free(out);
         const check = llama.api.vocab.tokenToPiece(@ptrCast(vocab), t, out, 0, true, &exc) catch
-            return throw(error.RuntimeError, "{s}", .{exc.what()});
-        tools.ggml.ggmlAssert(check == -n_chars, "common.cpp", 1901, "check == -n_chars");
+            return common_chat.exception.throw(error.RuntimeError, "{s}", .{exc.what()});
+        tools_common.ggml.ggmlAssert(check == -n_chars, "common.cpp", 1901, "check == -n_chars");
         return out;
     }
     return a.dupe(u8, buf[0..@intCast(n_chars)]);
@@ -1127,10 +1103,10 @@ pub fn piece(a: Allocator, vocab: ?*const c.llama_vocab, t: Token) Error![]u8 {
 /// character.
 ///
 /// Return: owned by `a`.
-pub fn tokensToOutputFormattedString(a: Allocator, ctx: ?*const c.llama_context, token: Token) Error![]u8 {
+pub fn tokensToOutputFormattedString(a: std.mem.Allocator, ctx: ?*const llama.impl.llama_c.llama_context, token: llama.impl.llama_c.llama_token) common_chat.exception.Error![]u8 {
     var out: []u8 = if (token == token_null) try a.alloc(u8, 0) else blk: {
-        const model = c.llama_get_model(ctx);
-        break :blk try piece(a, c.llama_model_get_vocab(model), token);
+        const model = llama.api.context.llama_get_model(ctx);
+        break :blk try piece(a, llama.api.model.llama_model_get_vocab(model), token);
     };
 
     // if the size is 1 and first bit is 1, meaning it's a partial character
@@ -1151,7 +1127,7 @@ pub fn tokensToOutputFormattedString(a: Allocator, ctx: ?*const c.llama_context,
 /// event per array element, or one for the value.
 ///
 /// Return: owned by `a`.
-pub fn formatOaiSse(a: Allocator, data: *const Value) Error![]u8 {
+pub fn formatOaiSse(a: std.mem.Allocator, data: *const json.Value) common_chat.exception.Error![]u8 {
     var ss: std.ArrayList(u8) = .empty;
     errdefer ss.deinit(a);
     if (data.isArray()) {
@@ -1162,7 +1138,7 @@ pub fn formatOaiSse(a: Allocator, data: *const Value) Error![]u8 {
     return ss.toOwnedSlice(a);
 }
 
-fn sendSingle(a: Allocator, ss: *std.ArrayList(u8), data: *const Value) Error!void {
+fn sendSingle(a: std.mem.Allocator, ss: *std.ArrayList(u8), data: *const json.Value) common_chat.exception.Error!void {
     const s = try safeJsonToStr(a, data);
     defer a.free(s);
     try ss.appendSlice(a, "data: ");
@@ -1174,7 +1150,7 @@ fn sendSingle(a: Allocator, ss: *std.ArrayList(u8), data: *const Value) Error!vo
 /// and `data:` lines from each `{event, data}`.
 ///
 /// Return: owned by `a`.
-pub fn formatOaiRespSse(a: Allocator, data: *const Value) Error![]u8 {
+pub fn formatOaiRespSse(a: std.mem.Allocator, data: *const json.Value) common_chat.exception.Error![]u8 {
     var ss: std.ArrayList(u8) = .empty;
     errdefer ss.deinit(a);
     if (data.isArray()) {
@@ -1185,7 +1161,7 @@ pub fn formatOaiRespSse(a: Allocator, data: *const Value) Error![]u8 {
     return ss.toOwnedSlice(a);
 }
 
-fn sendEvent(a: Allocator, ss: *std.ArrayList(u8), event_obj: *const Value) Error!void {
+fn sendEvent(a: std.mem.Allocator, ss: *std.ArrayList(u8), event_obj: *const json.Value) common_chat.exception.Error!void {
     try ss.appendSlice(a, "event: ");
     try ss.appendSlice(a, try (try event_obj.at("event")).get([]const u8));
     try ss.appendSlice(a, "\n");
@@ -1201,7 +1177,7 @@ fn sendEvent(a: Allocator, ss: *std.ArrayList(u8), event_obj: *const Value) Erro
 /// otherwise.
 ///
 /// Return: owned by `a`.
-pub fn formatAnthropicSse(a: Allocator, data: *const Value) Error![]u8 {
+pub fn formatAnthropicSse(a: std.mem.Allocator, data: *const json.Value) common_chat.exception.Error![]u8 {
     var ss: std.ArrayList(u8) = .empty;
     errdefer ss.deinit(a);
     if (data.isArray()) {
@@ -1212,7 +1188,7 @@ pub fn formatAnthropicSse(a: Allocator, data: *const Value) Error![]u8 {
     return ss.toOwnedSlice(a);
 }
 
-fn sendAnthropic(a: Allocator, ss: *std.ArrayList(u8), event_obj: *const Value) Error!void {
+fn sendAnthropic(a: std.mem.Allocator, ss: *std.ArrayList(u8), event_obj: *const json.Value) common_chat.exception.Error!void {
     if (event_obj.contains("event") and event_obj.contains("data")) {
         try sendEvent(a, ss, event_obj);
     } else {
@@ -1235,7 +1211,7 @@ pub fn Pipe(comptime T: type) type {
         head: usize = 0,
         writer_closed: std.atomic.Value(bool) = .init(false),
         reader_closed: std.atomic.Value(bool) = .init(false),
-        gpa: Allocator,
+        gpa: std.mem.Allocator,
 
         // 0 = unbounded (default)
         // > 0, write() drops the oldest item once the queue is full
@@ -1247,7 +1223,7 @@ pub fn Pipe(comptime T: type) type {
             f: *const fn (*anyopaque) bool,
         };
 
-        pub fn init(gpa: Allocator) Self {
+        pub fn init(gpa: std.mem.Allocator) Self {
             return .{ .gpa = gpa };
         }
 
@@ -1313,7 +1289,7 @@ pub fn Pipe(comptime T: type) type {
         /// Ports `write` (server-common.h:678 @b1b770d90).
         ///
         /// Return: false when the reader is gone (a broken pipe).
-        pub fn write(self: *Self, data: T) Error!bool {
+        pub fn write(self: *Self, data: T) common_chat.exception.Error!bool {
             self.mutex.lock();
             defer self.mutex.unlock();
             if (self.reader_closed.load(.seq_cst)) {

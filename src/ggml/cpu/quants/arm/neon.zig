@@ -43,6 +43,7 @@
 //! pair together. See `dotq_s32` and `mmlaq_s32`.
 
 const std = @import("std");
+const ggml = @import("../../../module.zig");
 const builtin = @import("builtin");
 
 // -----------------------------------------------------------------------------
@@ -929,14 +930,13 @@ test "cvtnq_s32_f32 rounds halves to even, not away from zero" {
 
 test "cvtnq_s32_f32 agrees with ggml's scalar nearest_int" {
     // They must: ggml's scalar and NEON quantizers produce the same bytes.
-    const helpers = @import("../../../quants/helpers.zig");
 
     var seed: u32 = 1;
     for (0..4096) |_| {
         seed = 1103515245 *% seed +% 12345;
         const x = (@as(f32, @floatFromInt(seed >> 8)) / 65536.0) - 128.0;
         const v: f32x4 = @splat(x);
-        try std.testing.expectEqual(helpers.nearestInt(x), cvtnq_s32_f32(v)[0]);
+        try std.testing.expectEqual(ggml.quants.helpers.nearestInt(x), cvtnq_s32_f32(v)[0]);
     }
 }
 

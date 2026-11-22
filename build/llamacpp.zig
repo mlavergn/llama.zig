@@ -937,7 +937,7 @@ pub fn addCudaLibraries(b: *std.Build, mod: *std.Build.Module, cuda: ?Cuda) void
 /// `compiler_rt`, as `scripts/platform-libs` gives the references.
 ///
 /// glibc has no `__divti3`, so on Linux a Zig program that divides an
-/// `i128` -- zigjinja's clock and `random`, `std.Io.Threaded`'s timestamps --
+/// `i128` -- jinja's clock and `random`, `std.Io.Threaded`'s timestamps --
 /// takes it from `compiler_rt`, which Zig links as one object, and with it
 /// `compiler_rt`'s weak `expf` and `logf` in place of glibc's. Every
 /// CPU op, the samplers and the server's token probabilities then round

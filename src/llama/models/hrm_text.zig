@@ -120,7 +120,7 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
 /// Ports `llama_model_hrm_text::graph`'s `build_stack` (models/hrm-text.cpp:93
 /// @b1b770d90): one stack invocation, `lps` pre-norm decoder layers in the
 /// cache slots from `slot_base`, then the parameterless final norm.
-fn buildStack(model: *const llama.model.Model, b: *const llama.graph.Builder, inp_attn: *llama.graph.InpAttnKv, inp_pos: *llama.impl.c.ggml_tensor, cur_: *llama.impl.c.ggml_tensor, slot_base: c_int) *llama.impl.c.ggml_tensor {
+fn buildStack(model: *const llama.model.Model, b: *const llama.graph.Builder, inp_attn: *llama.graph.InpAttnKv, inp_pos: *llama.impl.llama_c.ggml_tensor, cur_: *llama.impl.llama_c.ggml_tensor, slot_base: c_int) *llama.impl.llama_c.ggml_tensor {
     const ctx = b.ctx0;
     var cur = cur_;
     const kq_scale: f32 = 1.0 / stdlib.libm.sqrtfInt(b.n_embd_head_k);
@@ -156,17 +156,17 @@ fn buildStack(model: *const llama.model.Model, b: *const llama.graph.Builder, in
             cur = b.buildAttn(inp_attn, null, null, null, Qcur, Kcur, qkv.v, null, null, null, kq_scale, s);
             b.cb(cur, "attn_pregate", s);
 
-            gate = llama.impl.c.ggml_sigmoid(ctx, gate);
+            gate = llama.impl.llama_c.ggml_sigmoid(ctx, gate);
             b.cb(gate, "attn_gate_sigmoid", s);
 
-            cur = llama.impl.c.ggml_mul(ctx, cur, gate);
+            cur = llama.impl.llama_c.ggml_mul(ctx, cur, gate);
             b.cb(cur, "attn_gated", s);
 
             cur = b.buildLoraMm(layer.wo.?, cur, layer.wo_s);
             b.cb(cur, "attn_out", s);
         }
 
-        cur = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(cur, "attn_add", s);
 
         inpSA = cur;
@@ -176,7 +176,7 @@ fn buildStack(model: *const llama.model.Model, b: *const llama.graph.Builder, in
         cur = b.buildFfn(cur, layer.ffn_up, null, null, layer.ffn_gate, null, null, layer.ffn_down, null, null, null, .silu, .par, s);
         b.cb(cur, "ffn_out", s);
 
-        cur = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(cur, "ffn_add", s);
 
         cur = b.buildCvec(cur, s);
@@ -196,7 +196,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     const hp = &model.hparams;
 
     // {n_embd, n_tokens}, scaled by f_embedding_scale inside buildInpEmbd.
-    var zH: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
+    var zH: *llama.impl.llama_c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
 
     const inp_pos = b.buildInpPos();
 
@@ -206,7 +206,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 
     // The learned low-cycle state is [n_embd]; the binary ops broadcast it
     // over [n_embd, n_tokens].
-    var zL: *llama.impl.c.ggml_tensor = model.hrm_z_l_init.?;
+    var zL: *llama.impl.llama_c.ggml_tensor = model.hrm_z_l_init.?;
 
     const n_l: u32 = hp.n_hrm_l_cycles;
     const lps: u32 = hp.n_hrm_layers_per_stack;
@@ -217,17 +217,17 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         while (lc < n_l) : (lc += 1) {
             const slot_base: c_int = @bitCast((h *% (n_l +% 1) +% lc) *% lps);
 
-            zL = buildStack(model, b, inp_attn, inp_pos, llama.impl.c.ggml_add(ctx, zH, zL), slot_base);
+            zL = buildStack(model, b, inp_attn, inp_pos, llama.impl.llama_c.ggml_add(ctx, zH, zL), slot_base);
         }
 
         const slot_base: c_int = @bitCast((h *% (n_l +% 1) +% n_l) *% lps);
 
-        zH = buildStack(model, b, inp_attn, inp_pos, llama.impl.c.ggml_add(ctx, zH, zL), slot_base);
+        zH = buildStack(model, b, inp_attn, inp_pos, llama.impl.llama_c.ggml_add(ctx, zH, zL), slot_base);
     }
 
     var cur = zH;
 
-    cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+    cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
 
     b.cb(cur, "result_norm", -1);
     b.res.t_embd = cur;

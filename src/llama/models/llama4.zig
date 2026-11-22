@@ -144,13 +144,13 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
     llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/llama4.cpp", 112, "n_embd_head == hparams.n_embd_head_k()");
     llama.impl.assert(n_embd_head == b.n_rot, "models/llama4.cpp", 113, "n_embd_head == n_rot");
 
-    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.llama_c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
 
     // The positions.
     const inp_pos = b.buildInpPos();
 
     // Temperature tuning.
-    const inp_attn_scale: ?*llama.impl.c.ggml_tensor = b.buildInpAttnScale();
+    const inp_attn_scale: ?*llama.impl.llama_c.ggml_tensor = b.buildInpAttnScale();
 
     const inp_attn = if (iswa) b.buildAttnInpKvIswa() else b.buildAttnInpKv();
 
@@ -185,7 +185,7 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
                 Qcur = b.buildRope(Qcur, inp_pos, il);
                 Kcur = b.buildRope(Kcur, inp_pos, il);
             } else if (inp_attn_scale) |s| {
-                Qcur = llama.impl.c.ggml_mul(ctx, Qcur, s);
+                Qcur = llama.impl.llama_c.ggml_mul(ctx, Qcur, s);
             }
             b.cb(Qcur, "Qcur", il);
             b.cb(Kcur, "Kcur", il);
@@ -193,8 +193,8 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
 
             if (use_rope and hp.use_kq_norm) {
                 // Llama4TextL2Norm.
-                Qcur = llama.impl.c.ggml_rms_norm(ctx, Qcur, hp.f_norm_rms_eps);
-                Kcur = llama.impl.c.ggml_rms_norm(ctx, Kcur, hp.f_norm_rms_eps);
+                Qcur = llama.impl.llama_c.ggml_rms_norm(ctx, Qcur, hp.f_norm_rms_eps);
+                Kcur = llama.impl.llama_c.ggml_rms_norm(ctx, Kcur, hp.f_norm_rms_eps);
                 b.cb(Qcur, "Qcur_normed", il);
                 b.cb(Kcur, "Kcur_normed", il);
             }
@@ -202,10 +202,10 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
             b.cb(cur, "attn_out", il);
         }
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         if (layer.ffn_gate_inp == null) {
@@ -237,10 +237,10 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
             const shexp_out = b.buildFfn(ffn_inp_normed, layer.ffn_up_shexp, null, null, layer.ffn_gate_shexp, null, null, layer.ffn_down_shexp, null, null, null, .silu, .par, il);
             b.cb(shexp_out, "ffn_moe_shexp", il);
 
-            cur = llama.impl.c.ggml_add(ctx, moe_out, shexp_out);
+            cur = llama.impl.llama_c.ggml_add(ctx, moe_out, shexp_out);
             b.cb(cur, "ffn_moe_out_merged", il);
         }
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
         b.cb(cur, "ffn_out", il);
 
         cur = b.buildCvec(cur, il);

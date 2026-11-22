@@ -33,14 +33,6 @@ pub const iq = @import("iq.zig");
 pub const avx2 = @import("avx2.zig");
 pub const common = @import("common.zig");
 
-comptime {
-    _ = rows;
-    _ = legacy;
-    _ = k;
-    _ = ternary;
-    _ = iq;
-}
-
 // -----------------------------------------------------------------------------
 // Unit Tests
 

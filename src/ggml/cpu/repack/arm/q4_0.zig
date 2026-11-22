@@ -28,7 +28,6 @@
 //! `4x8` broadcasts an 8-byte group into both halves of a vector and uses
 //! two accumulators merged by the **pairwise** `vpaddq_s32`.
 
-const std = @import("std");
 const ggml = @import("../../../module.zig");
 
 // The `_generic` bodies, in `cpu/repack/`, that each export below falls to
@@ -54,7 +53,7 @@ inline fn hi4(v: ggml.cpu.quants.arch.neon.i8x16) ggml.cpu.quants.arch.neon.i8x1
 }
 
 /// Ports `ggml_gemv_q4_0_4x4_q8_0` (arch/arm/repack.cpp:230 @b1b770d90).
-pub export fn ggml_gemv_q4_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemv_q4_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.q4_0.ggml_gemv_q4_0_4x4_q8_0_generic(n, s_out, bs, vx, vy, nr, nc);
     const qk: c_int = 32;
     const nb = @divTrunc(n, qk);
@@ -65,7 +64,7 @@ pub export fn ggml_gemv_q4_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
 
     var col: c_int = 0;
     while (col < nc) : (col += ncols_interleaved) {
-        var a_ptr: [*]const ggml.impl.c.block_q8_0 = @ptrCast(@alignCast(vy));
+        var a_ptr: [*]const ggml.impl.ggml_c.block_q8_0 = @ptrCast(@alignCast(vy));
         var acc: ggml.cpu.quants.arch.neon.f32x4 = @splat(0);
         var b: c_int = 0;
         while (b < nb) : (b += 1) {
@@ -101,7 +100,7 @@ pub export fn ggml_gemv_q4_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
 }
 
 /// Ports `ggml_gemv_q4_0_4x8_q8_0` (arch/arm/repack.cpp:291 @b1b770d90).
-pub export fn ggml_gemv_q4_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemv_q4_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.q4_0.ggml_gemv_q4_0_4x8_q8_0_generic(n, s_out, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 32);
     const ncols_interleaved: c_int = 4;
@@ -111,7 +110,7 @@ pub export fn ggml_gemv_q4_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
 
     var col: c_int = 0;
     while (col < nc) : (col += ncols_interleaved) {
-        var a_ptr: [*]const ggml.impl.c.block_q8_0 = @ptrCast(@alignCast(vy));
+        var a_ptr: [*]const ggml.impl.ggml_c.block_q8_0 = @ptrCast(@alignCast(vy));
         var acc: ggml.cpu.quants.arch.neon.f32x4 = @splat(0);
         var b: c_int = 0;
         while (b < nb) : (b += 1) {
@@ -149,8 +148,4 @@ pub export fn ggml_gemv_q4_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
         s[0..4].* = acc;
         s += @intCast(ncols_interleaved);
     }
-}
-
-comptime {
-    _ = std;
 }

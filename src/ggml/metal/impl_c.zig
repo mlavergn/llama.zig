@@ -485,7 +485,7 @@ const all = [_]Entry{
 };
 
 /// Return: the `i`th constant's value, or `maxInt` past the end.
-export fn zz_fc_value(i: usize) c_long {
+pub fn zz_fc_value(i: usize) callconv(.c) c_long {
     inline for (all, 0..) |e, k| {
         if (k == i) return e.value;
     }
@@ -493,14 +493,14 @@ export fn zz_fc_value(i: usize) c_long {
 }
 
 /// Return: the `i`th constant's name, NUL-terminated, or null past the end.
-export fn zz_fc_name(i: usize) ?[*:0]const u8 {
+pub fn zz_fc_name(i: usize) callconv(.c) ?[*:0]const u8 {
     inline for (all, 0..) |e, k| {
         if (k == i) return e.name;
     }
     return null;
 }
 
-export fn zz_fc_count() usize {
+pub fn zz_fc_count() callconv(.c) usize {
     return count;
 }
 

@@ -9,11 +9,11 @@
 
 const ggml = @import("../module.zig");
 /// Ports `ggml_cuda_op_col2im_1d` (col2im-1d.cu:41 @b1b770d90).
-pub fn opCol2im1d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn opCol2im1d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
     const stream = ctx.stream();
 
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
 
     const s0 = ggml.impl.getOpParamsI32(dst, 0);
     const OC = ggml.impl.getOpParamsI32(dst, 1);
@@ -33,9 +33,9 @@ pub fn opCol2im1d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor)
     const p: ggml.cuda.kernels.LaunchParams = .{ .grid = .{ .x = @bitCast(num_blocks) }, .block = .{ .x = @bitCast(block_size) }, .shmem = 0, .stream = stream };
     const args = .{ @as(?*const anyopaque, src0.data), @as(?*anyopaque, dst.data), T_in, T_out_fd, OC, K, K_OC, s0, p0, total };
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => ggml.cuda.kernels.launch(ggml.cuda.kernels.get("col2im-1d", "col2im_1d_kernel<float>"), p, args),
-        ggml.impl.c.GGML_TYPE_F16 => ggml.cuda.kernels.launch(ggml.cuda.kernels.get("col2im-1d", "col2im_1d_kernel<__half>"), p, args),
-        ggml.impl.c.GGML_TYPE_BF16 => ggml.cuda.kernels.launch(ggml.cuda.kernels.get("col2im-1d", "col2im_1d_kernel<__nv_bfloat16>"), p, args),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => ggml.cuda.kernels.launch(ggml.cuda.kernels.get("col2im-1d", "col2im_1d_kernel<float>"), p, args),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => ggml.cuda.kernels.launch(ggml.cuda.kernels.get("col2im-1d", "col2im_1d_kernel<__half>"), p, args),
+        ggml.impl.ggml_c.GGML_TYPE_BF16 => ggml.cuda.kernels.launch(ggml.cuda.kernels.get("col2im-1d", "col2im_1d_kernel<__nv_bfloat16>"), p, args),
         else => ggml.impl.abort("col2im_1d: unsupported type"),
     }
 }

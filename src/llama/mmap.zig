@@ -48,8 +48,6 @@ const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 
 /// `errno`'s location: `__error` on Darwin, `__errno_location` on glibc.
-const errnoPtr = std.c._errno;
-
 /// Ports `LLAMA_DIRECT_IO_BUFFER_SIZE` (llama-mmap.h:10 @b1b770d90): the
 /// staging buffer for direct I/O reads; 64 MiB works well for NVMe drives.
 pub const direct_io_buffer_size: usize = 64 * 1024 * 1024;
@@ -64,7 +62,7 @@ const is_windows = builtin.os.tag == .windows;
 /// text for a Win32 error code, `"FormatMessageA failed"` when there is none.
 ///
 /// Return: the text, owned by the caller; free with `allocator.free`.
-fn formatWinErr(err: mod.win32.DWORD) []u8 {
+fn formatWinErr(err: std.os.windows.DWORD) []u8 {
     var buf: ?[*]u8 = null;
     const size = mod.win32.FormatMessageA(
         mod.win32.FORMAT_MESSAGE_ALLOCATE_BUFFER | mod.win32.FORMAT_MESSAGE_FROM_SYSTEM | mod.win32.FORMAT_MESSAGE_IGNORE_INSERTS,
@@ -88,7 +86,7 @@ fn formatWinErr(err: mod.win32.DWORD) []u8 {
 /// `\n` trimmed.
 ///
 /// Return: the text, owned by the caller; free with `allocator.free`.
-fn errorMessageWin32(error_code: mod.win32.DWORD) []u8 {
+fn errorMessageWin32(error_code: std.os.windows.DWORD) []u8 {
     var buf: ?[*]u8 = null;
     const len = mod.win32.FormatMessageA(
         mod.win32.FORMAT_MESSAGE_ALLOCATE_BUFFER | mod.win32.FORMAT_MESSAGE_FROM_SYSTEM | mod.win32.FORMAT_MESSAGE_IGNORE_INSERTS,
@@ -109,7 +107,7 @@ fn errorMessageWin32(error_code: mod.win32.DWORD) []u8 {
 
 /// How `fp_win32` (llama-mmap.cpp:176 @b1b770d90) is set: `(HANDLE)
 /// _get_osfhandle(_fileno(fp))`.
-fn osHandle(fp: *mod.impl.c.FILE) mod.win32.HANDLE {
+fn osHandle(fp: *mod.impl.llama_c.FILE) std.os.windows.HANDLE {
     return @ptrFromInt(@as(usize, @bitCast(stdlib.libc._get_osfhandle(stdlib.libc._fileno(fp)))));
 }
 
@@ -123,7 +121,7 @@ const _SC_PAGESIZE: c_int = if (@import("builtin").os.tag.isDarwin()) 29 else 30
 const PATH_MAX: usize = if (is_windows) 260 else if (@import("builtin").os.tag.isDarwin()) 1024 else 4096;
 
 fn errnoText() []const u8 {
-    return std.mem.span(stdlib.errno.strerror(errnoPtr().*));
+    return std.mem.span(stdlib.errno.strerror(std.c._errno().*));
 }
 
 // -----------------------------------------------------------------------------
@@ -141,12 +139,12 @@ fn errnoText() []const u8 {
 /// only issues aligned reads.
 pub const File = struct {
     /// `fp_win32`: the Win32 handle behind `fp`. Windows only.
-    fp_win32: if (is_windows) mod.win32.HANDLE else void = if (is_windows) mod.win32.INVALID_HANDLE_VALUE else {},
+    fp_win32: if (is_windows) std.os.windows.HANDLE else void = if (is_windows) mod.win32.INVALID_HANDLE_VALUE else {},
     /// `fp_win32_direct`: the unbuffered handle, `INVALID_HANDLE_VALUE`
     /// without direct I/O. Windows only.
-    fp_win32_direct: if (is_windows) mod.win32.HANDLE else void = if (is_windows) mod.win32.INVALID_HANDLE_VALUE else {},
+    fp_win32_direct: if (is_windows) std.os.windows.HANDLE else void = if (is_windows) mod.win32.INVALID_HANDLE_VALUE else {},
     /// `fp`: null while `fd` is open.
-    fp: ?*mod.impl.c.FILE,
+    fp: ?*mod.impl.llama_c.FILE,
     owns_fp: bool,
     size: usize,
     /// `alignment`: the read alignment, 1 without direct I/O.
@@ -183,7 +181,7 @@ pub const File = struct {
         if (comptime is_windows) {
             try f.initFp(mode, exc);
             if (use_direct_io and std.mem.eql(u8, mode, "rb")) {
-                var err: mod.win32.DWORD = mod.win32.ERROR_SUCCESS;
+                var err: std.os.windows.DWORD = mod.win32.ERROR_SUCCESS;
                 if (!f.initDirectIo(&err)) {
                     const msg = errorMessageWin32(err);
                     defer std.heap.c_allocator.free(msg);
@@ -199,7 +197,7 @@ pub const File = struct {
                 mod.impl.logInfo("%s: file '%s' opened with direct I/O (alignment: %zu bytes)\n", .{ "impl", fname.ptr, f.alignment });
                 return f;
             }
-            mod.impl.logWarn("Failed to open file '%s' with unbuffered I/O: %s. Falling back to buffered I/O\n", .{ fname.ptr, stdlib.errno.strerror(errnoPtr().*) });
+            mod.impl.logWarn("Failed to open file '%s' with unbuffered I/O: %s. Falling back to buffered I/O\n", .{ fname.ptr, stdlib.errno.strerror(std.c._errno().*) });
         }
         try f.initFp(mode, exc);
         return f;
@@ -238,7 +236,7 @@ pub const File = struct {
     /// - `err`: receives the Win32 error on failure, `ERROR_SUCCESS` otherwise.
     ///
     /// Return: whether the direct handle opened.
-    fn initDirectIo(self: *File, err: *mod.win32.DWORD) bool {
+    fn initDirectIo(self: *File, err: *std.os.windows.DWORD) bool {
         if (comptime !is_windows) unreachable;
         err.* = mod.win32.ERROR_SUCCESS;
         self.alignment = 1;
@@ -301,18 +299,18 @@ pub const File = struct {
     ///
     /// Return: nothing, or `error.Thrown`.
     fn initFp(self: *File, mode: [:0]const u8, exc: *mod.impl.Exception) mod.impl.Thrown!void {
-        const fp = mod.impl.c.ggml_fopen(self.fname.ptr, mode.ptr) orelse {
+        const fp = mod.impl.llama_c.ggml_fopen(self.fname.ptr, mode.ptr) orelse {
             return exc.throw(.runtime_error, "failed to open {s}: {s}", .{ self.fname, errnoText() });
         };
         self.fp = fp;
         if (comptime is_windows) self.fp_win32 = osHandle(fp);
         errdefer {
-            _ = mod.impl.c.fclose(fp);
+            _ = mod.impl.llama_c.fclose(fp);
             self.fp = null;
         }
-        try self.seek(0, mod.impl.c.SEEK_END, exc);
+        try self.seek(0, mod.impl.llama_c.SEEK_END, exc);
         self.size = try self.tell(exc);
-        try self.seek(0, mod.impl.c.SEEK_SET, exc);
+        try self.seek(0, mod.impl.llama_c.SEEK_SET, exc);
     }
 
     /// Ports `llama_file`'s `impl`'s `FILE *` constructors, the Windows one
@@ -324,7 +322,7 @@ pub const File = struct {
     /// - `exc`: receives what is thrown.
     ///
     /// Return: the file, or `error.Thrown` when it cannot be measured.
-    pub fn borrow(fp: *mod.impl.c.FILE, exc: *mod.impl.Exception) mod.impl.Thrown!File {
+    pub fn borrow(fp: *mod.impl.llama_c.FILE, exc: *mod.impl.Exception) mod.impl.Thrown!File {
         var f: File = .{
             .fp = fp,
             .owns_fp = false,
@@ -333,9 +331,9 @@ pub const File = struct {
         };
         errdefer std.heap.c_allocator.free(f.fname);
         if (comptime is_windows) f.fp_win32 = osHandle(fp);
-        try f.seek(0, mod.impl.c.SEEK_END, exc);
+        try f.seek(0, mod.impl.llama_c.SEEK_END, exc);
         f.size = try f.tell(exc);
-        try f.seek(0, mod.impl.c.SEEK_SET, exc);
+        try f.seek(0, mod.impl.llama_c.SEEK_SET, exc);
         return f;
     }
 
@@ -350,12 +348,12 @@ pub const File = struct {
                 _ = mod.win32.CloseHandle(self.fp_win32_direct);
             }
             if (self.owns_fp) if (self.fp) |fp| {
-                _ = mod.impl.c.fclose(fp);
+                _ = mod.impl.llama_c.fclose(fp);
             };
         } else if (self.fd != -1) {
             _ = std.c.close(self.fd);
         } else if (self.owns_fp) {
-            if (self.fp) |fp| _ = mod.impl.c.fclose(fp);
+            if (self.fp) |fp| _ = mod.impl.llama_c.fclose(fp);
         }
         std.heap.c_allocator.free(self.fname);
     }
@@ -374,7 +372,7 @@ pub const File = struct {
             return @intCast(li);
         }
         if (self.fd == -1) {
-            const ret = mod.impl.c.ftello(self.fp.?);
+            const ret = mod.impl.llama_c.ftello(self.fp.?);
             if (ret == -1) return exc.throw(.runtime_error, "ftell error: {s}", .{errnoText()});
             return @intCast(ret);
         }
@@ -397,7 +395,7 @@ pub const File = struct {
             return;
         }
         const ret: i64 = if (self.fd == -1)
-            mod.impl.c.fseeko(self.fp.?, @bitCast(offset), whence)
+            mod.impl.llama_c.fseeko(self.fp.?, @bitCast(offset), whence)
         else
             std.c.lseek(self.fd, @bitCast(offset), @intCast(whence));
         if (ret == -1) {
@@ -415,12 +413,12 @@ pub const File = struct {
     pub fn readRawUnsafe(self: *File, ptr: *anyopaque, len: usize, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         if (comptime is_windows) return self.readRawUnsafeWin32(ptr, len, exc);
         if (len == 0) return;
-        errnoPtr().* = 0;
+        std.c._errno().* = 0;
         if (self.fd == -1) {
             const read_offset = try self.tell(exc);
             const to_read = @min(len, self.size -% read_offset);
-            const ret = mod.impl.c.fread(ptr, to_read, 1, self.fp.?);
-            if (mod.impl.c.ferror(self.fp.?) != 0) return exc.throw(.runtime_error, "read error: {s}", .{errnoText()});
+            const ret = mod.impl.llama_c.fread(ptr, to_read, 1, self.fp.?);
+            if (mod.impl.llama_c.ferror(self.fp.?) != 0) return exc.throw(.runtime_error, "read error: {s}", .{errnoText()});
             if (to_read > 0 and ret != 1) return exc.throw(.runtime_error, "unexpectedly reached end of file", .{});
             return;
         }
@@ -430,16 +428,16 @@ pub const File = struct {
             const to_read = len - bytes_read;
             const ret = std.c.read(self.fd, bytes + bytes_read, to_read);
             if (ret == -1) {
-                const err: std.c.E = @fromBackingInt(@intCast(errnoPtr().*));
+                const err: std.c.E = @fromBackingInt(@intCast(std.c._errno().*));
                 if (err == .INTR) continue;
                 if (err == .FAULT or err == .INVAL) {
-                    mod.impl.logWarn("%s: file '%s' falling back to buffered I/O due to %s\n", .{ "read_raw_unsafe", self.fname.ptr, stdlib.errno.strerror(errnoPtr().*) });
+                    mod.impl.logWarn("%s: file '%s' falling back to buffered I/O due to %s\n", .{ "read_raw_unsafe", self.fname.ptr, stdlib.errno.strerror(std.c._errno().*) });
                     const read_offset = try self.tell(exc);
                     _ = std.c.close(self.fd);
                     self.fd = -1;
                     self.alignment = 1;
                     try self.initFp("rb", exc);
-                    try self.seek(read_offset, mod.impl.c.SEEK_SET, exc);
+                    try self.seek(read_offset, mod.impl.llama_c.SEEK_SET, exc);
                     return self.readRawUnsafe(ptr, len, exc);
                 }
                 return exc.throw(.runtime_error, "read error: {s}", .{errnoText()});
@@ -475,19 +473,19 @@ pub const File = struct {
         const buffer_size = @min(bytes_to_read, direct_io_buffer_size);
 
         var raw_buffer: ?*anyopaque = null;
-        const ret = stdlib.libc.posix_memalign(&raw_buffer, alignment, buffer_size);
+        const ret = std.c.posix_memalign(&raw_buffer, alignment, buffer_size);
         if (ret != 0) {
             mod.impl.logWarn("%s: file '%s' falling back to buffered I/O due to %s\n", .{ "read_aligned_chunk", self.fname.ptr, stdlib.errno.strerror(ret) });
             _ = std.c.close(self.fd);
             self.fd = -1;
             self.alignment = 1;
             try self.initFp("rb", exc);
-            try self.seek(offset, mod.impl.c.SEEK_SET, exc);
+            try self.seek(offset, mod.impl.llama_c.SEEK_SET, exc);
             return self.readRawUnsafe(dest, len, exc);
         }
-        defer stdlib.libc.free(raw_buffer);
+        defer std.c.free(raw_buffer);
 
-        try self.seek(aligned_offset, mod.impl.c.SEEK_SET, exc);
+        try self.seek(aligned_offset, mod.impl.llama_c.SEEK_SET, exc);
 
         const buf: [*]const u8 = @ptrCast(raw_buffer.?);
         const out: [*]u8 = @ptrCast(dest);
@@ -506,7 +504,7 @@ pub const File = struct {
             done += n;
         }
 
-        try self.seek(offset + len, mod.impl.c.SEEK_SET, exc);
+        try self.seek(offset + len, mod.impl.llama_c.SEEK_SET, exc);
     }
 
     /// Ports `llama_file`'s `impl`'s `read_raw`, the Windows one
@@ -542,8 +540,8 @@ pub const File = struct {
     pub fn writeRaw(self: *const File, ptr: *const anyopaque, len: usize, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         if (comptime is_windows) return self.writeRawWin32(ptr, len, exc);
         if (len == 0) return;
-        errnoPtr().* = 0;
-        if (mod.impl.c.fwrite(ptr, len, 1, self.fp.?) != 1) return exc.throw(.runtime_error, "write error: {s}", .{errnoText()});
+        std.c._errno().* = 0;
+        if (mod.impl.llama_c.fwrite(ptr, len, 1, self.fp.?) != 1) return exc.throw(.runtime_error, "write error: {s}", .{errnoText()});
     }
 
     /// Ports `llama_file`'s `impl`'s `write_u32` (llama-mmap.cpp:616 @b1b770d90).
@@ -572,7 +570,7 @@ pub const File = struct {
 
     /// Throws `fmt` with `GetErrorMessageWin32(error_code)` as its one
     /// argument, as each Win32 failure in `llama_file` does.
-    fn throwWin32(exc: *mod.impl.Exception, comptime fmt: []const u8, error_code: mod.win32.DWORD) mod.impl.Thrown {
+    fn throwWin32(exc: *mod.impl.Exception, comptime fmt: []const u8, error_code: std.os.windows.DWORD) mod.impl.Thrown {
         const msg = errorMessageWin32(error_code);
         defer std.heap.c_allocator.free(msg);
         return exc.throw(.runtime_error, fmt, .{msg});
@@ -580,7 +578,7 @@ pub const File = struct {
 
     /// Logs `fmt` with `__func__`, `fname` and `GetErrorMessageWin32(error_code)`,
     /// as the `_WIN32` arm's falls back to buffered I/O do.
-    fn warnWin32Fallback(self: *const File, comptime func: [:0]const u8, error_code: mod.win32.DWORD) void {
+    fn warnWin32Fallback(self: *const File, comptime func: [:0]const u8, error_code: std.os.windows.DWORD) void {
         const msg = errorMessageWin32(error_code);
         defer std.heap.c_allocator.free(msg);
         const msg_z = std.heap.c_allocator.dupeSentinel(u8, msg, 0) catch mod.impl.abort("llama-mmap.cpp", 283, "out of memory");
@@ -618,8 +616,8 @@ pub const File = struct {
             const read_size = @min(len, self.size - read_offset);
             var bytes_read: usize = 0;
             while (bytes_read < read_size) {
-                const to_read: mod.win32.DWORD = @intCast(@min(read_size - bytes_read, mod.win32.MAXDWORD));
-                var chunk_read: mod.win32.DWORD = 0;
+                const to_read: std.os.windows.DWORD = @intCast(@min(read_size - bytes_read, mod.win32.MAXDWORD));
+                var chunk_read: std.os.windows.DWORD = 0;
                 if (mod.win32.ReadFile(self.fp_win32, bytes + bytes_read, to_read, &chunk_read, null) == 0) {
                     return throwWin32(exc, "read error: {s}", mod.win32.GetLastError());
                 }
@@ -632,7 +630,7 @@ pub const File = struct {
         }
 
         const alignment = self.alignment;
-        var err: mod.win32.DWORD = mod.win32.ERROR_SUCCESS;
+        var err: std.os.windows.DWORD = mod.win32.ERROR_SUCCESS;
         if ((read_offset & (alignment - 1)) != 0 or
             (len & (alignment - 1)) != 0 or
             (@intFromPtr(ptr) & (alignment - 1)) != 0)
@@ -645,8 +643,8 @@ pub const File = struct {
         var bytes_read: usize = 0;
         const max_read_size: usize = @as(usize, mod.win32.MAXDWORD) & ~(alignment - 1);
         while (err == mod.win32.ERROR_SUCCESS and bytes_read < len) {
-            const to_read: mod.win32.DWORD = @intCast(@min(len - bytes_read, max_read_size));
-            var chunk_read: mod.win32.DWORD = 0;
+            const to_read: std.os.windows.DWORD = @intCast(@min(len - bytes_read, max_read_size));
+            var chunk_read: std.os.windows.DWORD = 0;
             if (mod.win32.ReadFile(self.fp_win32_direct, bytes + bytes_read, to_read, &chunk_read, null) == 0) {
                 err = mod.win32.GetLastError();
                 if (err == mod.win32.ERROR_HANDLE_EOF and bytes_read == self.size - read_offset) {
@@ -666,14 +664,14 @@ pub const File = struct {
         if (err == mod.win32.ERROR_INVALID_PARAMETER or err == mod.win32.ERROR_INVALID_USER_BUFFER or err == mod.win32.ERROR_NOACCESS) {
             self.warnWin32Fallback("read_raw_unsafe", err);
             self.dropDirectWin32();
-            try self.seek(read_offset, mod.impl.c.SEEK_SET, exc);
+            try self.seek(read_offset, mod.impl.llama_c.SEEK_SET, exc);
             return self.readRawUnsafeWin32(ptr, len, exc);
         }
         if (err != mod.win32.ERROR_SUCCESS) {
             return throwWin32(exc, "read error: {s}", err);
         }
 
-        try self.seek(if (len > self.size - read_offset) self.size else read_offset + len, mod.impl.c.SEEK_SET, exc);
+        try self.seek(if (len > self.size - read_offset) self.size else read_offset + len, mod.impl.llama_c.SEEK_SET, exc);
     }
 
     /// Ports `llama_file`'s `_WIN32` `impl`'s `read_aligned_chunk`
@@ -703,12 +701,12 @@ pub const File = struct {
             defer std.heap.c_allocator.free(msg_z);
             mod.impl.logWarn("%s: Falling back to buffered I/O due to %s\n", .{ "read_aligned_chunk", msg_z.ptr });
             self.dropDirectWin32();
-            try self.seek(offset, mod.impl.c.SEEK_SET, exc);
+            try self.seek(offset, mod.impl.llama_c.SEEK_SET, exc);
             return self.readRawUnsafeWin32(dest, len, exc);
         };
         defer stdlib.libc._aligned_free(raw_buffer);
 
-        try self.seek(aligned_offset, mod.impl.c.SEEK_SET, exc);
+        try self.seek(aligned_offset, mod.impl.llama_c.SEEK_SET, exc);
 
         const buf: [*]const u8 = @ptrCast(raw_buffer);
         const out: [*]u8 = @ptrCast(dest);
@@ -728,7 +726,7 @@ pub const File = struct {
             done += n;
         }
 
-        try self.seek(offset + len, mod.impl.c.SEEK_SET, exc);
+        try self.seek(offset + len, mod.impl.llama_c.SEEK_SET, exc);
     }
 
     /// Ports `llama_file`'s `_WIN32` `impl`'s `write_raw` (llama-mmap.cpp:372
@@ -741,7 +739,7 @@ pub const File = struct {
         var bytes_written: usize = 0;
         while (bytes_written < len) {
             const chunk_size = @min(len - bytes_written, direct_io_buffer_size);
-            var chunk_written: mod.win32.DWORD = 0;
+            var chunk_written: std.os.windows.DWORD = 0;
             if (mod.win32.WriteFile(self.fp_win32, bytes + bytes_written, @intCast(chunk_size), &chunk_written, null) == 0) {
                 return throwWin32(exc, "write error: {s}", mod.win32.GetLastError());
             }
@@ -807,7 +805,7 @@ pub const Mmap = struct {
     /// `mapped_fragments`: the byte ranges still mapped. POSIX only.
     fragments: std.ArrayList([2]usize) = .empty,
     /// `hMapping`: the file-mapping object. Windows only.
-    mapping: if (is_windows) ?mod.win32.HANDLE else void = if (is_windows) null else {},
+    mapping: if (is_windows) ?std.os.windows.HANDLE else void = if (is_windows) null else {},
 
     /// `llama_mmap`'s `SUPPORTED` (llama-mmap.cpp:919 @b1b770d90):
     /// `_POSIX_MEMLOCK_RANGE` or `_WIN32`, which every target this builds
@@ -835,12 +833,12 @@ pub const Mmap = struct {
         if (numa) prefetch = 0;
         if (is_linux) {
             if (std.os.linux.errno(std.os.linux.fadvise(fd, 0, 0, std.os.linux.POSIX_FADV.SEQUENTIAL)) != .SUCCESS) {
-                mod.impl.logWarn("warning: posix_fadvise(.., POSIX_FADV_SEQUENTIAL) failed: %s\n", .{stdlib.errno.strerror(errnoPtr().*)});
+                mod.impl.logWarn("warning: posix_fadvise(.., POSIX_FADV_SEQUENTIAL) failed: %s\n", .{stdlib.errno.strerror(std.c._errno().*)});
             }
             // MAP_POPULATE would fault in the lazy ranges too.
             if (prefetch != 0 and lazy_ranges.len == 0) flags.POPULATE = true;
         }
-        const addr = stdlib.libc.mmap(null, file.size, .{ .READ = true }, flags, fd, 0);
+        const addr = std.c.mmap(null, file.size, .{ .READ = true }, flags, fd, 0);
         if (addr == std.c.MAP_FAILED) {
             return exc.throw(.runtime_error, "mmap failed: {s}", .{errnoText()});
         }
@@ -853,7 +851,7 @@ pub const Mmap = struct {
         for (lazy_ranges) |range| advise(addr, file.size, range[0], range[1], POSIX_MADV_RANDOM, "POSIX_MADV_RANDOM");
         if (numa) {
             if (stdlib.libc.posix_madvise(addr, file.size, POSIX_MADV_RANDOM) != 0) {
-                mod.impl.logWarn("warning: posix_madvise(.., POSIX_MADV_RANDOM) failed: %s\n", .{stdlib.errno.strerror(errnoPtr().*)});
+                mod.impl.logWarn("warning: posix_madvise(.., POSIX_MADV_RANDOM) failed: %s\n", .{stdlib.errno.strerror(std.c._errno().*)});
             }
         }
         var m: Mmap = .{ .addr = addr, .size = size };
@@ -865,12 +863,12 @@ pub const Mmap = struct {
     /// (llama-mmap.cpp:712 @b1b770d90): a page-aligned `posix_madvise` over
     /// `[beg, end)`, clamped to the file.
     fn advise(addr: *anyopaque, file_size: usize, beg_: usize, end_: usize, advice: c_int, name: [*:0]const u8) void {
-        const page_size: usize = @intCast(stdlib.libc.sysconf(_SC_PAGESIZE));
+        const page_size: usize = @intCast(std.c.sysconf(_SC_PAGESIZE));
         const beg = beg_ & ~(page_size - 1);
         const end = @min((end_ +% page_size -% 1) & ~(page_size - 1), file_size);
         if (beg >= end) return;
         if (stdlib.libc.posix_madvise(@ptrFromInt(@intFromPtr(addr) + beg), end - beg, advice) != 0) {
-            mod.impl.logWarn("warning: posix_madvise(.., %s) failed: %s\n", .{ name, stdlib.errno.strerror(errnoPtr().*) });
+            mod.impl.logWarn("warning: posix_madvise(.., %s) failed: %s\n", .{ name, stdlib.errno.strerror(std.c._errno().*) });
         }
     }
 
@@ -879,7 +877,7 @@ pub const Mmap = struct {
     fn initWin32(file: *const File, prefetch: usize, lazy_ranges: []const [2]usize, exc: *mod.impl.Exception) mod.impl.Thrown!Mmap {
         const size = file.size;
 
-        const h_file: mod.win32.HANDLE = @ptrFromInt(@as(usize, @bitCast(stdlib.libc._get_osfhandle(file.fileId()))));
+        const h_file: std.os.windows.HANDLE = @ptrFromInt(@as(usize, @bitCast(stdlib.libc._get_osfhandle(file.fileId()))));
 
         const mapping = mod.win32.CreateFileMappingA(h_file, null, mod.win32.PAGE_READONLY, 0, 0, null) orelse {
             const msg = formatWinErr(mod.win32.GetLastError());
@@ -944,7 +942,7 @@ pub const Mmap = struct {
         if (comptime is_windows) return;
         var first = first_;
         var last = last_;
-        const page_size: c_int = @intCast(stdlib.libc.sysconf(_SC_PAGESIZE));
+        const page_size: c_int = @intCast(std.c.sysconf(_SC_PAGESIZE));
         const ps: usize = @intCast(page_size);
         alignRange(&first, &last, ps);
         const len = last - first;
@@ -955,8 +953,8 @@ pub const Mmap = struct {
         mod.impl.assert(last > first, "llama-mmap.cpp", 784, "last > first");
 
         const next_page_start: *anyopaque = @ptrFromInt(@intFromPtr(self.addr) + first);
-        if (stdlib.libc.munmap(@alignCast(next_page_start), len) != 0) {
-            mod.impl.logWarn("warning: munmap failed: %s\n", .{stdlib.errno.strerror(errnoPtr().*)});
+        if (std.c.munmap(@alignCast(next_page_start), len) != 0) {
+            mod.impl.logWarn("warning: munmap failed: %s\n", .{stdlib.errno.strerror(std.c._errno().*)});
         }
 
         var next: std.ArrayList([2]usize) = .empty;
@@ -990,8 +988,8 @@ pub const Mmap = struct {
     pub fn deinit(self: *Mmap) void {
         if (comptime is_windows) return self.deinitWin32();
         for (self.fragments.items) |frag| {
-            if (stdlib.libc.munmap(@ptrFromInt(@intFromPtr(self.addr) + frag[0]), frag[1] - frag[0]) != 0) {
-                mod.impl.logWarn("warning: munmap failed: %s\n", .{stdlib.errno.strerror(errnoPtr().*)});
+            if (std.c.munmap(@ptrFromInt(@intFromPtr(self.addr) + frag[0]), frag[1] - frag[0]) != 0) {
+                mod.impl.logWarn("warning: munmap failed: %s\n", .{stdlib.errno.strerror(std.c._errno().*)});
             }
         }
         self.fragments.deinit(std.heap.c_allocator);
@@ -1044,7 +1042,7 @@ pub const Mlock = struct {
             mod.win32.GetSystemInfo(&si);
             return si.dwPageSize;
         }
-        return @intCast(stdlib.libc.sysconf(_SC_PAGESIZE));
+        return @intCast(std.c.sysconf(_SC_PAGESIZE));
     }
 
     /// Ports `llama_mlock`'s `_WIN32` `impl`'s `raw_lock` (llama-mmap.cpp:979
@@ -1085,8 +1083,8 @@ pub const Mlock = struct {
         if (comptime is_windows) return self.rawLockWin32(@constCast(addr), size);
         if (stdlib.libc.mlock(addr, size) == 0) return true;
 
-        const errmsg = stdlib.errno.strerror(errnoPtr().*);
-        var suggest = errnoPtr().* == @backingInt(std.c.E.NOMEM);
+        const errmsg = stdlib.errno.strerror(std.c._errno().*);
+        var suggest = std.c._errno().* == @backingInt(std.c.E.NOMEM);
         if (comptime builtin.os.tag.isDarwin()) {
             suggest = false;
         } else {
@@ -1178,7 +1176,7 @@ pub fn prefetchRanges(mr: []MemoryRange) void {
         var info: mod.win32.SYSTEM_INFO = undefined;
         mod.win32.GetSystemInfo(&info);
         break :blk @intCast(info.dwPageSize);
-    } else stdlib.libc.sysconf(_SC_PAGESIZE);
+    } else std.c.sysconf(_SC_PAGESIZE);
     if (page_size <= 0) return;
 
     const page: usize = @intCast(page_size);
@@ -1219,8 +1217,8 @@ pub fn prefetchRanges(mr: []MemoryRange) void {
         }
     } else {
         for (merged) |range| {
-            if (stdlib.libc.madvise(@ptrCast(@alignCast(@constCast(range.addr))), range.size, MADV_WILLNEED) != 0) {
-                mod.impl.logWarn("llama_prefetch: madvise(MADV_WILLNEED) failed: %s\n", .{stdlib.errno.strerror(errnoPtr().*)});
+            if (std.c.madvise(@ptrCast(@alignCast(@constCast(range.addr))), range.size, MADV_WILLNEED) != 0) {
+                mod.impl.logWarn("llama_prefetch: madvise(MADV_WILLNEED) failed: %s\n", .{stdlib.errno.strerror(std.c._errno().*)});
                 return;
             }
         }

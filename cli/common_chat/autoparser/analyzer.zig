@@ -31,8 +31,6 @@ const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
 
-const Allocator = std.mem.Allocator;
-
 // -----------------------------------------------------------------------------
 // Probes
 
@@ -86,7 +84,7 @@ const assistant_content = "{\"role\":\"assistant\",\"content\":\"" ++ ASSISTANT_
 
 /// A probe's params: these messages, the probe tools when `with_tools`, no
 /// generation prompt, thinking on.
-fn probe(a: Allocator, comptime messages: []const u8, with_tools: bool) common_chat.exception.Error!common_chat.autoparser.types.TemplateParams {
+fn probe(a: std.mem.Allocator, comptime messages: []const u8, with_tools: bool) common_chat.exception.Error!common_chat.autoparser.types.TemplateParams {
     return .{
         .messages = json.parse(a, messages) catch |e| return common_chat.util.fromJson(e),
         .tools = if (with_tools) json.parse(a, probe_tools) catch |e| return common_chat.util.fromJson(e) else .null,
@@ -96,7 +94,7 @@ fn probe(a: Allocator, comptime messages: []const u8, with_tools: bool) common_c
 }
 
 /// `params` with its messages replaced, as the C++'s modifier lambdas do.
-fn withMessages(a: Allocator, params: common_chat.autoparser.types.TemplateParams, comptime messages: []const u8) common_chat.exception.Error!common_chat.autoparser.types.TemplateParams {
+fn withMessages(a: std.mem.Allocator, params: common_chat.autoparser.types.TemplateParams, comptime messages: []const u8) common_chat.exception.Error!common_chat.autoparser.types.TemplateParams {
     var p = params;
     p.messages = json.parse(a, messages) catch |e| return common_chat.util.fromJson(e);
     return p;
@@ -118,7 +116,7 @@ const Tagged = struct {
 };
 
 /// `build_tagged_peg_parser(f).parse_anywhere_and_extract(input)`.
-fn anywhere(a: Allocator, ctx: anytype, comptime f: fn (@TypeOf(ctx), *peg.Builder) peg.Error!peg.ParserId, input: []const u8) common_chat.exception.Error!Tagged {
+fn anywhere(a: std.mem.Allocator, ctx: anytype, comptime f: fn (@TypeOf(ctx), *peg.Builder) peg.Error!peg.ParserId, input: []const u8) common_chat.exception.Error!Tagged {
     var tp = common_chat.chat_peg.buildTaggedPegParser(a, ctx, f) catch |e| return common_chat.util.fromPeg(e);
     defer tp.deinit();
     const r = tp.parseAnywhereAndExtract(a, input) catch |e| return common_chat.util.fromPeg(e);
@@ -126,7 +124,7 @@ fn anywhere(a: Allocator, ctx: anytype, comptime f: fn (@TypeOf(ctx), *peg.Build
 }
 
 /// `build_tagged_peg_parser(f).parse_and_extract(input)`.
-fn extract(a: Allocator, ctx: anytype, comptime f: fn (@TypeOf(ctx), *peg.Builder) peg.Error!peg.ParserId, input: []const u8) common_chat.exception.Error!Tagged {
+fn extract(a: std.mem.Allocator, ctx: anytype, comptime f: fn (@TypeOf(ctx), *peg.Builder) peg.Error!peg.ParserId, input: []const u8) common_chat.exception.Error!Tagged {
     var tp = common_chat.chat_peg.buildTaggedPegParser(a, ctx, f) catch |e| return common_chat.util.fromPeg(e);
     defer tp.deinit();
     const r = tp.parseAndExtract(a, input, peg.Flags.none) catch |e| return common_chat.util.fromPeg(e);
@@ -166,7 +164,7 @@ fn srcHas(tmpl: *const common_chat.template.Template, needle: []const u8) bool {
 
 /// Ports `workarounds` (chat-diff-analyzer.cpp:36 @b1b770d90): the
 /// templates the analysis reads wrong, patched by name.
-fn applyWorkarounds(tmpl: *const common_chat.template.Template, analysis: *common_chat.autoparser.types.Autoparser, a: Allocator) common_chat.exception.Error!void {
+fn applyWorkarounds(tmpl: *const common_chat.template.Template, analysis: *common_chat.autoparser.types.Autoparser, a: std.mem.Allocator) common_chat.exception.Error!void {
     // Old reasoning Qwen templates - they don't really display reasoning content, but we still want to
     // support reasoning on them
     if (srcHas(tmpl, "content.split('</think>')") and
@@ -321,7 +319,7 @@ fn applyWorkarounds(tmpl: *const common_chat.template.Template, analysis: *commo
 
 /// Ports `autoparser`'s `analyze_template` (chat-diff-analyzer.cpp:257
 /// @b1b770d90): every phase of the analysis, then the workarounds.
-pub fn analyzeTemplate(self: *common_chat.autoparser.types.Autoparser, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
+pub fn analyzeTemplate(self: *common_chat.autoparser.types.Autoparser, a: std.mem.Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     self.jinja_caps = tmpl.originalCaps();
     self.reasoning = try analyzeReasoning(a, tmpl, self.jinja_caps.supports_tool_calls);
     self.content = try analyzeContent(a, tmpl, &self.reasoning);
@@ -337,7 +335,7 @@ pub fn analyzeTemplate(self: *common_chat.autoparser.types.Autoparser, a: Alloca
 }
 
 /// The `LOG_DBG` report at the end of `analyze_template`.
-fn logAnalysis(self: *const common_chat.autoparser.types.Autoparser, a: Allocator) common_chat.exception.Error!void {
+fn logAnalysis(self: *const common_chat.autoparser.types.Autoparser, a: std.mem.Allocator) common_chat.exception.Error!void {
     common_chat.log.dbg("\n--- Reasoning & Content Structure ---\n", .{});
     common_chat.log.dbg("user_msg_start: {s}\n", .{self.user_start});
     common_chat.log.dbg("assistant_msg_start: {s}\n", .{self.assistant_start});
@@ -385,7 +383,7 @@ fn logAnalysis(self: *const common_chat.autoparser.types.Autoparser, a: Allocato
 
 /// Ports `autoparser`'s `collect_preserved_tokens` (chat-diff-analyzer.cpp:313
 /// @b1b770d90): every marker found, trimmed, once.
-fn collectPreservedTokens(self: *common_chat.autoparser.types.Autoparser, a: Allocator) common_chat.exception.Error!void {
+fn collectPreservedTokens(self: *common_chat.autoparser.types.Autoparser, a: std.mem.Allocator) common_chat.exception.Error!void {
     const t = &self.tools;
     const all = [_][]const u8{
         self.reasoning.start,      self.reasoning.end,
@@ -411,7 +409,7 @@ fn collectPreservedTokens(self: *common_chat.autoparser.types.Autoparser, a: All
 
 /// Ports `autoparser`'s `detect_assistant_start_marker` (chat-diff-analyzer.cpp:347
 /// @b1b770d90): what a template writes before an assistant message's text.
-fn detectAssistantStartMarker(self: *const common_chat.autoparser.types.Autoparser, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error![]const u8 {
+fn detectAssistantStartMarker(self: *const common_chat.autoparser.types.Autoparser, a: std.mem.Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error![]const u8 {
     const params = try probe(a, "[" ++ user_msg ++ "]", false);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ assistant_content ++ "]");
     const comparison = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b) orelse {
@@ -437,7 +435,7 @@ fn detectAssistantStartMarker(self: *const common_chat.autoparser.types.Autopars
 /// Ports `autoparser`'s `detect_user_start_marker` (chat-diff-analyzer.cpp:389
 /// @b1b770d90): what a template writes before a user message's text, an
 /// end marker of the turn before skipped.
-fn detectUserStartMarker(a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error![]const u8 {
+fn detectUserStartMarker(a: std.mem.Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error![]const u8 {
     const user_msg_two = "{\"role\":\"user\",\"content\":\"" ++ USER_MSG_TWO ++ "\"}";
     var params = try probe(a, "[]", false);
     var b = try withMessages(a, params, "[" ++ user_msg ++ "]");
@@ -489,7 +487,7 @@ fn detectUserStartMarker(a: Allocator, tmpl: *const common_chat.template.Templat
 
 /// Ports `analyze_reasoning`'s constructor (chat-diff-analyzer.cpp:461
 /// @b1b770d90).
-fn analyzeReasoning(a: Allocator, tmpl: *const common_chat.template.Template, supports_tools: bool) common_chat.exception.Error!common_chat.autoparser.types.AnalyzeReasoning {
+fn analyzeReasoning(a: std.mem.Allocator, tmpl: *const common_chat.template.Template, supports_tools: bool) common_chat.exception.Error!common_chat.autoparser.types.AnalyzeReasoning {
     common_chat.log.dbg("\x1b[1m\x1b[38;5;126m=== Starting differential analysis ===\n\x1b[0m", .{});
     common_chat.log.dbg("\x1b[1m\x1b[38;5;214mPhase 1: Reasoning analysis\n\x1b[0m", .{});
     var r: common_chat.autoparser.types.AnalyzeReasoning = .{};
@@ -531,7 +529,7 @@ const ReasoningParsers = struct {
 
 /// Ports `analyze_reasoning`'s `compare_reasoning_presence` (chat-diff-analyzer.cpp:473
 /// @b1b770d90): the markers around reasoning content in an assistant turn.
-fn compareReasoningPresence(r: *common_chat.autoparser.types.AnalyzeReasoning, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
+fn compareReasoningPresence(r: *common_chat.autoparser.types.AnalyzeReasoning, a: std.mem.Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     const assistant_with_reasoning = "{\"role\":\"assistant\",\"content\":\"" ++ ASSISTANT_MSG ++ "\",\"reasoning_content\":\"" ++ THINKING_CONTENT ++ "\"}";
     const params = try probe(a, "[" ++ user_msg ++ "," ++ assistant_content ++ "]", false);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ assistant_with_reasoning ++ "]");
@@ -562,7 +560,7 @@ fn compareReasoningPresence(r: *common_chat.autoparser.types.AnalyzeReasoning, a
 
 /// Ports `analyze_reasoning`'s `compare_thinking_enabled` (chat-diff-analyzer.cpp:532
 /// @b1b770d90): what `enable_thinking` changes in the generation prompt.
-fn compareThinkingEnabled(r: *common_chat.autoparser.types.AnalyzeReasoning, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
+fn compareThinkingEnabled(r: *common_chat.autoparser.types.AnalyzeReasoning, a: std.mem.Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     var params = try probe(a, "[" ++ user_msg ++ "]", false);
     params.add_generation_prompt = true;
     params.enable_thinking = false;
@@ -636,7 +634,7 @@ fn compareThinkingEnabled(r: *common_chat.autoparser.types.AnalyzeReasoning, a: 
 
 /// Ports `analyze_reasoning`'s `compare_reasoning_scope` (chat-diff-analyzer.cpp:616
 /// @b1b770d90): reasoning that a template shows only beside tool calls.
-fn compareReasoningScope(r: *common_chat.autoparser.types.AnalyzeReasoning, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
+fn compareReasoningScope(r: *common_chat.autoparser.types.AnalyzeReasoning, a: std.mem.Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     const assistant_reasoning_content = "{\"role\":\"assistant\",\"content\":\"" ++ ASSISTANT_MSG ++ "\",\"reasoning_content\":\"" ++ THINKING_CONTENT ++ "\"}";
     const assistant_reasoning_tools = "{\"role\":\"assistant\",\"content\":null,\"reasoning_content\":\"" ++ THINKING_CONTENT ++ "\",\"tool_calls\":[" ++
         comptime buildToolCall(FUN_FIRST, "{\"" ++ ARG_FIRST ++ "\":\"VVVV\",\"" ++ ARG_SECOND ++ "\":\"XXXX\"}", CALL_ID_001) ++ "]}";
@@ -701,7 +699,7 @@ const ContentParsers = struct {
 
 /// Ports `analyze_content`'s constructor (chat-diff-analyzer.cpp:677
 /// @b1b770d90): the markers around an assistant message's text.
-fn analyzeContent(a: Allocator, tmpl: *const common_chat.template.Template, reasoning: *const common_chat.autoparser.types.AnalyzeReasoning) common_chat.exception.Error!common_chat.autoparser.types.AnalyzeContent {
+fn analyzeContent(a: std.mem.Allocator, tmpl: *const common_chat.template.Template, reasoning: *const common_chat.autoparser.types.AnalyzeReasoning) common_chat.exception.Error!common_chat.autoparser.types.AnalyzeContent {
     common_chat.log.dbg("\x1b[1m\x1b[38;5;214mPhase 2: Content analysis\n\x1b[0m", .{});
     var c: common_chat.autoparser.types.AnalyzeContent = .{};
 
@@ -764,7 +762,7 @@ fn analyzeContent(a: Allocator, tmpl: *const common_chat.template.Template, reas
 /// Ports `analyze_tools`'s constructor (chat-diff-analyzer.cpp:768
 /// @b1b770d90): the tool-call format, then, outside JSON, the function,
 /// argument and call-id markers.
-fn analyzeTools(a: Allocator, tmpl: *const common_chat.template.Template, caps: *const @import("../caps.zig").Caps, reasoning: *const common_chat.autoparser.types.AnalyzeReasoning) common_chat.exception.Error!common_chat.autoparser.types.AnalyzeTools {
+fn analyzeTools(a: std.mem.Allocator, tmpl: *const common_chat.template.Template, caps: *const common_chat.caps.Caps, reasoning: *const common_chat.autoparser.types.AnalyzeReasoning) common_chat.exception.Error!common_chat.autoparser.types.AnalyzeTools {
     common_chat.log.dbg("\x1b[1m\x1b[38;5;214mPhase 3: Tool call analysis\n\x1b[0m", .{});
     var t: common_chat.autoparser.types.AnalyzeTools = .{};
 
@@ -790,7 +788,7 @@ fn analyzeTools(a: Allocator, tmpl: *const common_chat.template.Template, caps: 
 
 /// Ports `analyze_tools`'s `analyze_tool_calls` (chat-diff-analyzer.cpp:793
 /// @b1b770d90): the text one tool call adds to an assistant turn.
-fn analyzeToolCalls(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, tmpl: *const common_chat.template.Template, reasoning: *const common_chat.autoparser.types.AnalyzeReasoning, supports_parallel_tool_calls: bool) common_chat.exception.Error!void {
+fn analyzeToolCalls(t: *common_chat.autoparser.types.AnalyzeTools, a: std.mem.Allocator, tmpl: *const common_chat.template.Template, reasoning: *const common_chat.autoparser.types.AnalyzeReasoning, supports_parallel_tool_calls: bool) common_chat.exception.Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ assistant_content ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call) ++ "]");
     const comparison = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b) orelse {
@@ -816,7 +814,7 @@ const ToolParsers = struct {
 /// Ports `analyze_tools`'s `analyze_tool_call_format` (chat-diff-analyzer.cpp:830
 /// @b1b770d90): JSON, tagged with JSON arguments, or tagged throughout,
 /// decided by whether the names appear quoted after `{` or `:`.
-fn analyzeToolCallFormat(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, tmpl: *const common_chat.template.Template, haystack: []const u8, fun_name_needle: []const u8, arg_name_needle: []const u8, reasoning: *const common_chat.autoparser.types.AnalyzeReasoning, supports_parallel_tool_calls: bool) common_chat.exception.Error!void {
+fn analyzeToolCallFormat(t: *common_chat.autoparser.types.AnalyzeTools, a: std.mem.Allocator, tmpl: *const common_chat.template.Template, haystack: []const u8, fun_name_needle: []const u8, arg_name_needle: []const u8, reasoning: *const common_chat.autoparser.types.AnalyzeReasoning, supports_parallel_tool_calls: bool) common_chat.exception.Error!void {
     if (fun_name_needle.len == 0 or arg_name_needle.len == 0 or haystack.len == 0) return;
 
     const fun_quote = (try anywhere(a, fun_name_needle, ToolParsers.inJson, haystack)).ok;
@@ -861,7 +859,7 @@ fn analyzeToolCallFormat(t: *common_chat.autoparser.types.AnalyzeTools, a: Alloc
 
 /// Ports `analyze_tools`'s `analyze_json_native_parallel_calls` (chat-diff-analyzer.cpp:888
 /// @b1b770d90): a section marker repeated per call is a per-call marker.
-fn analyzeJsonNativeParallelCalls(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
+fn analyzeJsonNativeParallelCalls(t: *common_chat.autoparser.types.AnalyzeTools, a: std.mem.Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call) ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call ++ "," ++ second_tool_call) ++ "]");
     const comparison = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b) orelse {
@@ -888,7 +886,7 @@ fn substrInt(s: []const u8, pos: i64, n: i64) common_chat.exception.Error![]cons
 /// Ports `analyze_tools`'s `analyze_tool_call_format_json_native` (chat-diff-analyzer.cpp:924
 /// @b1b770d90): the call's JSON parsed, its fields named by what they hold,
 /// and the markers around it.
-fn analyzeToolCallFormatJsonNative(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, clean_haystack: []const u8, fun_name_needle: []const u8, arg_name_needle: []const u8) common_chat.exception.Error!void {
+fn analyzeToolCallFormatJsonNative(t: *common_chat.autoparser.types.AnalyzeTools, a: std.mem.Allocator, clean_haystack: []const u8, fun_name_needle: []const u8, arg_name_needle: []const u8) common_chat.exception.Error!void {
     // we might not have the typical OpenAI tool calling structure
     var json_start: i64 = if (std.mem.indexOfScalar(u8, clean_haystack, '{')) |i| @intCast(i) else -1;
     var json_end: i64 = if (std.mem.lastIndexOfScalar(u8, clean_haystack, '}')) |i| @intCast(i) else -1;
@@ -897,7 +895,7 @@ fn analyzeToolCallFormatJsonNative(t: *common_chat.autoparser.types.AnalyzeTools
 
     const Reg = struct {
         t: *common_chat.autoparser.types.AnalyzeTools,
-        a: Allocator,
+        a: std.mem.Allocator,
         fun: []const u8,
         arg: []const u8,
 
@@ -994,7 +992,7 @@ fn analyzeToolCallFormatJsonNative(t: *common_chat.autoparser.types.AnalyzeTools
 
 /// Ports `analyze_tools`'s `analyze_tool_call_format_non_json` (chat-diff-analyzer.cpp:1003
 /// @b1b770d90): the section and per-call markers around a tagged call.
-fn analyzeToolCallFormatNonJson(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, clean_haystack: []const u8, fun_name_needle: []const u8) common_chat.exception.Error!void {
+fn analyzeToolCallFormatNonJson(t: *common_chat.autoparser.types.AnalyzeTools, a: std.mem.Allocator, clean_haystack: []const u8, fun_name_needle: []const u8) common_chat.exception.Error!void {
     const P = struct {
         // first, let's find out if the function is inside a tag or standalone
         fn funMarker(fun: []const u8, b: *peg.Builder) peg.Error!peg.ParserId {
@@ -1057,7 +1055,7 @@ fn analyzeToolCallFormatNonJson(t: *common_chat.autoparser.types.AnalyzeTools, a
 
 /// Ports `analyze_tools`'s `check_per_call_markers` (chat-diff-analyzer.cpp:1047
 /// @b1b770d90): whether a second call repeats the section markers.
-fn checkPerCallMarkers(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
+fn checkPerCallMarkers(t: *common_chat.autoparser.types.AnalyzeTools, a: std.mem.Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call) ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call ++ "," ++ second_tool_call) ++ "]");
     const one_vs_two = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b) orelse {
@@ -1138,7 +1136,7 @@ const FunctionParsers = struct {
 /// Ports `analyze_tools`'s `extract_function_markers` (chat-diff-analyzer.cpp:1103
 /// @b1b770d90): the markers around a function's name, before its arguments
 /// and after them.
-fn extractFunctionMarkers(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
+fn extractFunctionMarkers(t: *common_chat.autoparser.types.AnalyzeTools, a: std.mem.Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call) ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(second_tool_call) ++ "]");
     const comparison = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b) orelse {
@@ -1221,7 +1219,7 @@ fn extractFunctionMarkers(t: *common_chat.autoparser.types.AnalyzeTools, a: Allo
 }
 
 /// Ports `analyze_tools`'s `analyze_arguments` (chat-diff-analyzer.cpp:1246 @b1b770d90).
-fn analyzeArguments(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
+fn analyzeArguments(t: *common_chat.autoparser.types.AnalyzeTools, a: std.mem.Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     try extractArgumentNameMarkers(t, a, tmpl);
     try extractArgumentValueMarkers(t, a, tmpl);
 }
@@ -1253,7 +1251,7 @@ const ArgumentParsers = struct {
 
 /// Ports `analyze_tools`'s `extract_argument_name_markers` (chat-diff-analyzer.cpp:1251
 /// @b1b770d90): the markers around an argument's name.
-fn extractArgumentNameMarkers(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
+fn extractArgumentNameMarkers(t: *common_chat.autoparser.types.AnalyzeTools, a: std.mem.Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_one_arg) ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_other_arg) ++ "]");
     const comparison = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b) orelse {
@@ -1294,7 +1292,7 @@ fn extractArgumentNameMarkers(t: *common_chat.autoparser.types.AnalyzeTools, a: 
 
 /// Ports `analyze_tools`'s `extract_argument_value_markers` (chat-diff-analyzer.cpp:1325
 /// @b1b770d90): the markers around an argument's value.
-fn extractArgumentValueMarkers(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
+fn extractArgumentValueMarkers(t: *common_chat.autoparser.types.AnalyzeTools, a: std.mem.Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_one_arg) ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_one_arg_other_val) ++ "]");
     const comparison = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b) orelse {
@@ -1337,7 +1335,7 @@ fn extractArgumentValueMarkers(t: *common_chat.autoparser.types.AnalyzeTools, a:
 
 /// Ports `analyze_tools`'s `extract_argument_separator` (chat-diff-analyzer.cpp:1390
 /// @b1b770d90): what a second argument is preceded by.
-fn extractArgumentSeparator(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
+fn extractArgumentSeparator(t: *common_chat.autoparser.types.AnalyzeTools, a: std.mem.Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_one_arg) ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call) ++ "]");
     const comparison = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b) orelse {
@@ -1354,7 +1352,7 @@ fn extractArgumentSeparator(t: *common_chat.autoparser.types.AnalyzeTools, a: Al
 
 /// Ports `analyze_tools`'s `extract_args_markers` (chat-diff-analyzer.cpp:1425
 /// @b1b770d90): markers around a JSON call's arguments.
-fn extractArgsMarkers(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
+fn extractArgsMarkers(t: *common_chat.autoparser.types.AnalyzeTools, a: std.mem.Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_zero_args) ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_one_arg) ++ "]");
     const comparison = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b) orelse {
@@ -1416,20 +1414,20 @@ const CallIdParsers = struct {
 
 /// `find_last_marker` in `extract_call_id_markers`: the last marker in
 /// `str`, without the text after it.
-fn findLastMarker(a: Allocator, str: []const u8) common_chat.exception.Error![]const u8 {
+fn findLastMarker(a: std.mem.Allocator, str: []const u8) common_chat.exception.Error![]const u8 {
     const res = try anywhere(a, {}, CallIdParsers.last, str);
     return if (res.ok) res.get("m") else "";
 }
 
 /// `find_first_marker` in `extract_call_id_markers`.
-fn findFirstMarker(a: Allocator, str: []const u8) common_chat.exception.Error![]const u8 {
+fn findFirstMarker(a: std.mem.Allocator, str: []const u8) common_chat.exception.Error![]const u8 {
     const res = try anywhere(a, {}, CallIdParsers.first, str);
     return if (res.ok) res.get("m") else "";
 }
 
 /// Ports `analyze_tools`'s `extract_call_id_markers` (chat-diff-analyzer.cpp:1486
 /// @b1b770d90): where a call's id sits, and the markers around it.
-fn extractCallIdMarkers(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
+fn extractCallIdMarkers(t: *common_chat.autoparser.types.AnalyzeTools, a: std.mem.Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call) ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_alt_id) ++ "]");
     const comparison = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b) orelse {

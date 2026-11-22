@@ -525,8 +525,8 @@ fn hasConflictingContentLength(headers: *const mod.detail.Headers) bool {
 
 /// Ports `set_nonblocking` (httplib.cpp:2655 @b1b770d90).
 fn setNonblocking(sock: mod.socket.Socket, nonblocking: bool) void {
-    const flags = stdlib.libc.fcntl(sock, F_GETFL, @as(c_int, 0));
-    _ = stdlib.libc.fcntl(sock, F_SETFL, if (nonblocking) flags | O_NONBLOCK else flags & ~O_NONBLOCK);
+    const flags = std.c.fcntl(sock, F_GETFL, @as(c_int, 0));
+    _ = std.c.fcntl(sock, F_SETFL, if (nonblocking) flags | O_NONBLOCK else flags & ~O_NONBLOCK);
 }
 
 /// Ports `wait_until_socket_is_ready` (httplib.cpp:1933 @b1b770d90): a non-blocking
@@ -536,7 +536,7 @@ fn waitUntilSocketIsReady(sock: mod.socket.Socket, sec: i64, usec: i64) Error {
     const timeout: c_int = @intCast(sec * 1000 + @divTrunc(usec, 1000));
     var poll_res: c_int = undefined;
     while (true) {
-        poll_res = stdlib.libc.poll(&pfd, 1, timeout);
+        poll_res = std.c.poll(&pfd, 1, timeout);
         if (poll_res < 0 and mod.socket.errno() == mod.socket.k.EINTR) continue;
         break;
     }
@@ -544,7 +544,7 @@ fn waitUntilSocketIsReady(sock: mod.socket.Socket, sec: i64, usec: i64) Error {
     if (poll_res > 0 and (pfd[0].revents & (mod.socket.k.POLLIN | mod.socket.k.POLLOUT)) != 0) {
         var err: c_int = 0;
         var len: u32 = @sizeOf(c_int);
-        const res = stdlib.libc.getsockopt(sock, mod.socket.k.SOL_SOCKET, @intCast(SO_ERROR), &err, &len);
+        const res = std.c.getsockopt(sock, mod.socket.k.SOL_SOCKET, @intCast(SO_ERROR), &err, &len);
         return if (res >= 0 and err == 0) .success else .connection;
     }
     return .connection;
@@ -768,7 +768,7 @@ pub const ClientImpl = struct {
             fn bindOrConnect(ctx: ?*anyopaque, sock2: mod.socket.Socket, addr: ?*const anyopaque, addrlen: u32, quit: *bool) bool {
                 const c: *@This() = @ptrCast(@alignCast(ctx.?));
                 setNonblocking(sock2, true);
-                const ret = stdlib.libc.connect(sock2, @ptrCast(@alignCast(addr.?)), addrlen);
+                const ret = std.c.connect(sock2, @ptrCast(@alignCast(addr.?)), addrlen);
                 if (ret < 0) {
                     // is_connection_error
                     if (mod.socket.errno() != EINPROGRESS) {
@@ -1367,9 +1367,6 @@ pub const ErrorCode = Error;
 pub fn errorToString(e: Error) []const u8 {
     return e.toString();
 }
-
-/// `Headers`.
-pub const HeadersMap = mod.detail.Headers;
 
 /// Ports `Client` (httplib.h:3234 @b1b770d90) for a plain-HTTP host: the
 /// verbs over a `ClientImpl`. A failure to allocate is reported as

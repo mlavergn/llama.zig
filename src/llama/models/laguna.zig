@@ -130,7 +130,7 @@ pub fn loadArchTensors(self: *llama.model.Model, ml: *llama.loader.Loader, exc: 
         if (gate_meta) |gm| {
             n_gate_out = gm.ne[1];
             if (n_gate_out != n_gate_per_head and n_gate_out != n_gate_per_elem) {
-                llama.impl.c.ggml_abort("models/laguna.cpp", 120, "Laguna: unexpected attention gate width %lld at layer %d (expected %lld per-head or %lld per-element)", @as(c_longlong, n_gate_out), @as(c_int, i), @as(c_longlong, n_gate_per_head), @as(c_longlong, n_gate_per_elem));
+                llama.impl.llama_c.ggml_abort("models/laguna.cpp", 120, "Laguna: unexpected attention gate width %lld at layer %d (expected %lld per-head or %lld per-element)", @as(c_longlong, n_gate_out), @as(c_int, i), @as(c_longlong, n_gate_per_head), @as(c_longlong, n_gate_per_elem));
             }
         } else {
             n_gate_out = n_gate_per_head;
@@ -201,7 +201,7 @@ fn buildGraph(comptime has_swa: bool, model: *const llama.model.Model, b: *const
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
     llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/laguna.cpp", 172, "n_embd_head == hparams.n_embd_head_k()");
 
-    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.llama_c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
     // No MuP embedding scale: laguna omits it, where afmoe scales by
     // sqrt(hidden).
 
@@ -237,7 +237,7 @@ fn buildGraph(comptime has_swa: bool, model: *const llama.model.Model, b: *const
             // g_proj on the hidden state before attention, as in the HF
             // reference: the gate reads the same input as Q, K and V, not
             // the attention output.
-            var gate: *llama.impl.c.ggml_tensor = b.buildLoraMm(layer.wqkv_gate.?, attn_inp, null);
+            var gate: *llama.impl.llama_c.ggml_tensor = b.buildLoraMm(layer.wqkv_gate.?, attn_inp, null);
             b.cb(gate, "attn_gate_proj", il);
 
             // The Q and K RMS norms at head_dim (Qwen3 style).
@@ -263,17 +263,17 @@ fn buildGraph(comptime has_swa: bool, model: *const llama.model.Model, b: *const
             // [head_dim, n_head, T]; per element in M.1, gate
             // [n_head_il*head_dim, n_tokens] spans the whole attention
             // output, a direct ggml_mul.
-            gate = llama.impl.c.ggml_softplus(ctx, gate);
+            gate = llama.impl.llama_c.ggml_softplus(ctx, gate);
             b.cb(gate, "attn_gate_softplus", il);
 
             const n_tokens = cur.ne[1];
             if (layer.wqkv_gate.?.ne[1] == n_head_il) {
-                cur = llama.impl.c.ggml_reshape_3d(ctx, cur, n_embd_head, n_head_il, n_tokens);
-                gate = llama.impl.c.ggml_reshape_3d(ctx, gate, 1, n_head_il, n_tokens);
-                cur = llama.impl.c.ggml_mul(ctx, cur, gate);
-                cur = llama.impl.c.ggml_reshape_2d(ctx, cur, n_embd_head * n_head_il, n_tokens);
+                cur = llama.impl.llama_c.ggml_reshape_3d(ctx, cur, n_embd_head, n_head_il, n_tokens);
+                gate = llama.impl.llama_c.ggml_reshape_3d(ctx, gate, 1, n_head_il, n_tokens);
+                cur = llama.impl.llama_c.ggml_mul(ctx, cur, gate);
+                cur = llama.impl.llama_c.ggml_reshape_2d(ctx, cur, n_embd_head * n_head_il, n_tokens);
             } else {
-                cur = llama.impl.c.ggml_mul(ctx, cur, gate);
+                cur = llama.impl.llama_c.ggml_mul(ctx, cur, gate);
             }
             b.cb(cur, "attn_gated", il);
 
@@ -282,11 +282,11 @@ fn buildGraph(comptime has_swa: bool, model: *const llama.model.Model, b: *const
         }
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The pre-norm only, no norm after the attention.
@@ -316,7 +316,7 @@ fn buildGraph(comptime has_swa: bool, model: *const llama.model.Model, b: *const
             const ffn_shexp = b.buildFfn(cur, layer.ffn_up_shexp, null, null, layer.ffn_gate_shexp, null, null, layer.ffn_down_shexp, null, null, null, .silu, .par, il);
             b.cb(ffn_shexp, "ffn_shexp", il);
 
-            cur = llama.impl.c.ggml_add(ctx, moe_out, ffn_shexp);
+            cur = llama.impl.llama_c.ggml_add(ctx, moe_out, ffn_shexp);
             b.cb(cur, "ffn_out", il);
         } else {
             // The dense feed-forward of the leading n_layer_dense_lead
@@ -326,7 +326,7 @@ fn buildGraph(comptime has_swa: bool, model: *const llama.model.Model, b: *const
         }
 
         // No norm after the feed-forward.
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
 

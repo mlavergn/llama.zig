@@ -26,21 +26,16 @@
 //! `HF_ENDPOINT` pointing at a plain-HTTP mirror works on both sides.
 
 const std = @import("std");
+const common_chat = @import("common_chat");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const tc = @import("tools_common");
+const tools_common = @import("tools_common");
 const json = @import("json");
-
-const Allocator = std.mem.Allocator;
-
-/// A thrown exception: `RuntimeError` and `InvalidArgument` carry their
-/// `what()` in `common.what`, `JsonError` in `json.what`.
-pub const Error = mod.common.Error;
 
 // -----------------------------------------------------------------------------
 // hf_cache
 
-fn zpath(a: Allocator, p: []const u8) Allocator.Error![:0]u8 {
+fn zpath(a: std.mem.Allocator, p: []const u8) std.mem.Allocator.Error![:0]u8 {
     return a.dupeSentinel(u8, p, 0);
 }
 
@@ -55,7 +50,7 @@ var cache_dir_mutex: stdlib.sync.Mutex = .{};
 /// `LLAMA_CACHE`, `HF_HUB_CACHE`, `HUGGINGFACE_HUB_CACHE`, `$HF_HOME/hub`,
 /// `$XDG_CACHE_HOME/huggingface/hub`, `$HOME/.cache/huggingface/hub` and
 /// the password database's home, decided on the first call.
-fn getCacheDirectory() Error![]const u8 {
+fn getCacheDirectory() common_chat.exception.Error![]const u8 {
     cache_dir_mutex.lock();
     defer cache_dir_mutex.unlock();
     if (cache_dir_value) |v| return v;
@@ -82,12 +77,12 @@ fn getCacheDirectory() Error![]const u8 {
             return cache_dir_value.?;
         }
     }
-    return mod.common.throw(error.RuntimeError, "Failed to determine HF cache directory", .{});
+    return common_chat.exception.throw(error.RuntimeError, "Failed to determine HF cache directory", .{});
 }
 
 /// Ports `folder_name_to_repo` (hf-cache.cpp:69 @b1b770d90): `models--a--b`
 /// as `a/b`, anything else as nothing.
-fn folderNameToRepo(a: Allocator, folder: []const u8) Allocator.Error![]u8 {
+fn folderNameToRepo(a: std.mem.Allocator, folder: []const u8) std.mem.Allocator.Error![]u8 {
     const prefix = "models--";
     if (!std.mem.startsWith(u8, folder, prefix)) {
         return a.dupe(u8, "");
@@ -96,13 +91,13 @@ fn folderNameToRepo(a: Allocator, folder: []const u8) Allocator.Error![]u8 {
 }
 
 /// Ports `repo_to_folder_name` (hf-cache.cpp:79 @b1b770d90).
-fn repoToFolderName(a: Allocator, repo_id: []const u8) Allocator.Error![]u8 {
+fn repoToFolderName(a: std.mem.Allocator, repo_id: []const u8) std.mem.Allocator.Error![]u8 {
     const result = try std.mem.concat(a, u8, &.{ "models--", repo_id });
     return std.mem.replaceOwned(u8, a, result, "/", "--");
 }
 
 /// Ports `get_repo_path` (hf-cache.cpp:86 @b1b770d90).
-fn getRepoPath(a: Allocator, repo_id: []const u8) Error![]u8 {
+fn getRepoPath(a: std.mem.Allocator, repo_id: []const u8) common_chat.exception.Error![]u8 {
     return stdlib.path.join(a, try getCacheDirectory(), try repoToFolderName(a, repo_id));
 }
 
@@ -194,7 +189,7 @@ fn isValidOid(oid: []const u8) bool {
 /// pure path computation: creates nothing.
 ///
 /// Return: an empty string on an invalid repo or oid.
-pub fn getLockPath(a: Allocator, repo_id: []const u8, oid: []const u8) Error![]const u8 {
+pub fn getLockPath(a: std.mem.Allocator, repo_id: []const u8, oid: []const u8) common_chat.exception.Error![]const u8 {
     if (!isValidRepoId(repo_id) or !isValidOid(oid)) return "";
     const dir = try stdlib.path.join(a, try stdlib.path.join(a, try getCachePath(), ".locks"), try repoToFolderName(a, repo_id));
     return stdlib.path.join(a, dir, try std.mem.concat(a, u8, &.{ oid, ".lock" }));
@@ -202,7 +197,7 @@ pub fn getLockPath(a: Allocator, repo_id: []const u8, oid: []const u8) Error![]c
 
 /// Ports `is_valid_subpath` (hf-cache.cpp:173 @b1b770d90): `subpath`, a
 /// relative path, stays under `path` once normalized.
-fn isValidSubpath(a: Allocator, path: []const u8, subpath: []const u8) Allocator.Error!bool {
+fn isValidSubpath(a: std.mem.Allocator, path: []const u8, subpath: []const u8) std.mem.Allocator.Error!bool {
     if (subpath.len != 0 and subpath[0] == '/') {
         return false; // never do a / b with b absolute
     }
@@ -219,18 +214,18 @@ fn isValidSubpath(a: Allocator, path: []const u8, subpath: []const u8) Allocator
 /// Ports `api_get` (hf-cache.cpp:184 @b1b770d90): a hub API GET, its body
 /// parsed as JSON; any other status throws with the body's `error`, or the
 /// body itself.
-fn apiGet(a: Allocator, url: []const u8, token: []const u8) Error!json.Value {
+fn apiGet(a: std.mem.Allocator, url: []const u8, token: []const u8) common_chat.exception.Error!json.Value {
     var http = try mod.download.commonHttpClient(a, url);
     defer http.deinit();
 
-    var headers: mod.download.Headers = .{};
+    var headers: mod.httplib.detail.Headers = .{};
     _ = try headers.emplace(a, "User-Agent", try std.mem.concat(a, u8, &.{ "llama-cpp/", mod.download.buildInfo() }));
     _ = try headers.emplace(a, "Accept", "application/json");
 
     if (isValidHfToken(token)) {
         _ = try headers.emplace(a, "Authorization", try std.mem.concat(a, u8, &.{ "Bearer ", token }));
     } else if (token.len != 0) {
-        tc.log.wrn("%s: invalid token, authentication disabled\n", .{@as([*:0]const u8, "api_get")});
+        tools_common.log.wrn("%s: invalid token, authentication disabled\n", .{@as([*:0]const u8, "api_get")});
     }
 
     const result = http.get(a, http.parts.path, &headers);
@@ -251,9 +246,9 @@ fn apiGet(a: Allocator, url: []const u8, token: []const u8) Error!json.Value {
             }
         } else |_| {}
 
-        return mod.common.throw(error.RuntimeError, "GET failed ({d}): {s}", .{ res.status, body });
+        return common_chat.exception.throw(error.RuntimeError, "GET failed ({d}): {s}", .{ res.status, body });
     } else {
-        return mod.common.throw(error.RuntimeError, "HTTPLIB failed: {s}", .{mod.download.errorToString(result.err)});
+        return common_chat.exception.throw(error.RuntimeError, "HTTPLIB failed: {s}", .{mod.httplib.client.errorToString(result.err)});
     }
 }
 
@@ -265,12 +260,12 @@ fn logCaught(comptime func: [*:0]const u8, e: anyerror) void {
         error.JsonError => {
             const z = a.dupeSentinel(u8, json.what(), 0) catch return;
             defer a.free(z);
-            tc.log.err("%s: JSON error: %s\n", .{ func, z.ptr });
+            tools_common.log.err("%s: JSON error: %s\n", .{ func, z.ptr });
         },
         else => {
-            const z = a.dupeSentinel(u8, mod.common.what(e), 0) catch return;
+            const z = a.dupeSentinel(u8, common_chat.exception.what(e), 0) catch return;
             defer a.free(z);
-            tc.log.err("%s: error: %s\n", .{ func, z.ptr });
+            tools_common.log.err("%s: error: %s\n", .{ func, z.ptr });
         },
     }
 }
@@ -278,7 +273,7 @@ fn logCaught(comptime func: [*:0]const u8, e: anyerror) void {
 /// Ports `get_repo_commit` (hf-cache.cpp:215 @b1b770d90): the commit of the
 /// `main` branch, or of the first valid one, recorded under `refs/`; empty
 /// on any failure, which is logged.
-fn getRepoCommit(a: Allocator, repo_id: []const u8, token: []const u8) Allocator.Error![]const u8 {
+fn getRepoCommit(a: std.mem.Allocator, repo_id: []const u8, token: []const u8) std.mem.Allocator.Error![]const u8 {
     const func = "get_repo_commit";
     return getRepoCommitImpl(a, repo_id, token) catch |e| {
         if (e == error.OutOfMemory) return error.OutOfMemory;
@@ -287,7 +282,7 @@ fn getRepoCommit(a: Allocator, repo_id: []const u8, token: []const u8) Allocator
     };
 }
 
-fn getRepoCommitImpl(a: Allocator, repo_id: []const u8, token: []const u8) Error![]const u8 {
+fn getRepoCommitImpl(a: std.mem.Allocator, repo_id: []const u8, token: []const u8) common_chat.exception.Error![]const u8 {
     const func = "get_repo_commit";
     const endpoint = try mod.download.commonGetModelEndpoint(a);
     var js = try apiGet(a, try std.mem.concat(a, u8, &.{ endpoint, "api/models/", repo_id, "/refs" }), token);
@@ -295,7 +290,7 @@ fn getRepoCommitImpl(a: Allocator, repo_id: []const u8, token: []const u8) Error
     if (!js.isObject() or
         !js.contains("branches") or !(try js.at("branches")).isArray())
     {
-        tc.log.wrn("%s: missing 'branches' for '%s'\n", .{ func, (try zpath(a, repo_id)).ptr });
+        tools_common.log.wrn("%s: missing 'branches' for '%s'\n", .{ func, (try zpath(a, repo_id)).ptr });
         return "";
     }
 
@@ -314,13 +309,13 @@ fn getRepoCommitImpl(a: Allocator, repo_id: []const u8, token: []const u8) Error
         const _commit = try (try branch.at("targetCommit")).get([]const u8);
 
         if (!isValidCommit(_commit)) {
-            tc.log.wrn("%s: skip invalid commit: %s\n", .{ func, (try zpath(a, _commit)).ptr });
+            tools_common.log.wrn("%s: skip invalid commit: %s\n", .{ func, (try zpath(a, _commit)).ptr });
             continue;
         }
         const candidate = _name; // fs::u8path(_name): the same bytes on POSIX
 
         if (!try isValidSubpath(a, refs_path, candidate)) {
-            tc.log.wrn("%s: skip invalid branch: %s\n", .{ func, (try zpath(a, _name)).ptr });
+            tools_common.log.wrn("%s: skip invalid branch: %s\n", .{ func, (try zpath(a, _name)).ptr });
             continue;
         }
 
@@ -337,7 +332,7 @@ fn getRepoCommitImpl(a: Allocator, repo_id: []const u8, token: []const u8) Error
     }
 
     if (name.len == 0 or commit.len == 0) {
-        tc.log.wrn("%s: no valid branch for '%s'\n", .{ func, (try zpath(a, repo_id)).ptr });
+        tools_common.log.wrn("%s: no valid branch for '%s'\n", .{ func, (try zpath(a, repo_id)).ptr });
         return "";
     }
 
@@ -362,16 +357,16 @@ pub const HfFiles = []HfFile;
 /// repository at its current commit, from the hub's tree API; a blob not
 /// yet in a snapshot downloads to `blobs/<oid>`. Empty on any failure,
 /// which is logged.
-pub fn getRepoFiles(a: Allocator, repo_id: []const u8, token: []const u8) Error!HfFiles {
+pub fn getRepoFiles(a: std.mem.Allocator, repo_id: []const u8, token: []const u8) common_chat.exception.Error!HfFiles {
     const func = "get_repo_files";
     if (!isValidRepoId(repo_id)) {
-        tc.log.wrn("%s: invalid repository: %s\n", .{ func, (try zpath(a, repo_id)).ptr });
+        tools_common.log.wrn("%s: invalid repository: %s\n", .{ func, (try zpath(a, repo_id)).ptr });
         return &.{};
     }
 
     const commit = try getRepoCommit(a, repo_id, token);
     if (commit.len == 0) {
-        tc.log.wrn("%s: failed to resolve commit for %s\n", .{ func, (try zpath(a, repo_id)).ptr });
+        tools_common.log.wrn("%s: failed to resolve commit for %s\n", .{ func, (try zpath(a, repo_id)).ptr });
         return &.{};
     }
 
@@ -387,13 +382,13 @@ pub fn getRepoFiles(a: Allocator, repo_id: []const u8, token: []const u8) Error!
     return files.items;
 }
 
-fn getRepoFilesImpl(a: Allocator, repo_id: []const u8, token: []const u8, commit: []const u8, blobs_path: []const u8, commit_path: []const u8, files: *std.ArrayList(HfFile)) Error!void {
+fn getRepoFilesImpl(a: std.mem.Allocator, repo_id: []const u8, token: []const u8, commit: []const u8, blobs_path: []const u8, commit_path: []const u8, files: *std.ArrayList(HfFile)) common_chat.exception.Error!void {
     const func = "get_repo_files";
     const endpoint = try mod.download.commonGetModelEndpoint(a);
     var js = try apiGet(a, try std.mem.concat(a, u8, &.{ endpoint, "api/models/", repo_id, "/tree/", commit, "?recursive=true" }), token);
 
     if (!js.isArray()) {
-        tc.log.wrn("%s: response is not an array for '%s'\n", .{ func, (try zpath(a, repo_id)).ptr });
+        tools_common.log.wrn("%s: response is not an array for '%s'\n", .{ func, (try zpath(a, repo_id)).ptr });
         files.clearRetainingCapacity();
         return;
     }
@@ -411,7 +406,7 @@ fn getRepoFilesImpl(a: Allocator, repo_id: []const u8, token: []const u8, commit
         file.path = try (try item.at("path")).get([]const u8);
 
         if (!try isValidSubpath(a, commit_path, file.path)) {
-            tc.log.wrn("%s: skip invalid path: %s\n", .{ func, (try zpath(a, file.path)).ptr });
+            tools_common.log.wrn("%s: skip invalid path: %s\n", .{ func, (try zpath(a, file.path)).ptr });
             continue;
         }
 
@@ -425,7 +420,7 @@ fn getRepoFilesImpl(a: Allocator, repo_id: []const u8, token: []const u8, commit
         }
 
         if (file.oid.len != 0 and !isValidOid(file.oid)) {
-            tc.log.wrn("%s: skip invalid oid: %s\n", .{ func, (try zpath(a, file.oid)).ptr });
+            tools_common.log.wrn("%s: skip invalid oid: %s\n", .{ func, (try zpath(a, file.oid)).ptr });
             continue;
         }
 
@@ -446,7 +441,7 @@ fn getRepoFilesImpl(a: Allocator, repo_id: []const u8, token: []const u8, commit
 
 /// Ports `get_cached_ref` (hf-cache.cpp:362 @b1b770d90): the commit `refs/main`
 /// names, or the first valid one under `refs/`.
-fn getCachedRef(a: Allocator, repo_path: []const u8) Allocator.Error![]const u8 {
+fn getCachedRef(a: std.mem.Allocator, repo_path: []const u8) std.mem.Allocator.Error![]const u8 {
     const refs_path = try stdlib.path.join(a, repo_path, "refs");
     if (!stdlib.fs.isDirectory(refs_path)) {
         return "";
@@ -461,7 +456,7 @@ fn getCachedRef(a: Allocator, repo_path: []const u8) Allocator.Error![]const u8 
         const commit = (try stdlib.file.readFirstLine(stdlib.file.defaultIo(), a, entry)) orelse continue;
         if (commit.len == 0) continue;
         if (!isValidCommit(commit)) {
-            tc.log.wrn("%s: skip invalid commit: %s\n", .{ @as([*:0]const u8, "get_cached_ref"), (try zpath(a, commit)).ptr });
+            tools_common.log.wrn("%s: skip invalid commit: %s\n", .{ @as([*:0]const u8, "get_cached_ref"), (try zpath(a, commit)).ptr });
             continue;
         }
         if (std.mem.eql(u8, name, "main")) {
@@ -477,7 +472,7 @@ fn getCachedRef(a: Allocator, repo_path: []const u8) Allocator.Error![]const u8 
 /// `recursive_directory_iterator` over `root`: each entry's path, a
 /// directory before what it holds, in `readdir`'s order; a symbolic link to
 /// a directory is listed and not entered.
-fn walk(a: Allocator, root: []const u8, out: *std.ArrayList([]const u8)) Allocator.Error!void {
+fn walk(a: std.mem.Allocator, root: []const u8, out: *std.ArrayList([]const u8)) std.mem.Allocator.Error!void {
     for (try stdlib.fs.listNames(a, root)) |name| {
         const p = try stdlib.path.join(a, root, name);
         try out.append(a, p);
@@ -491,21 +486,21 @@ fn walk(a: Allocator, root: []const u8, out: *std.ArrayList([]const u8)) Allocat
 ///
 /// Return: process-lifetime; the error `get_cache_directory` throws when no
 /// home directory is known.
-pub fn getCachePath() Error![]const u8 {
+pub fn getCachePath() common_chat.exception.Error![]const u8 {
     return getCacheDirectory();
 }
 
 /// Ports `get_cached_files` (hf-cache.cpp:392 @b1b770d90): every file in
 /// the snapshot of each cached repository's current commit, or of `repo_id`'s
 /// alone.
-pub fn getCachedFiles(a: Allocator, repo_id: []const u8) Error!HfFiles {
+pub fn getCachedFiles(a: std.mem.Allocator, repo_id: []const u8) common_chat.exception.Error!HfFiles {
     const cache_dir = try getCacheDirectory();
     if (!stdlib.fs.exists(cache_dir)) {
         return &.{};
     }
 
     if (repo_id.len != 0 and !isValidRepoId(repo_id)) {
-        tc.log.wrn("%s: invalid repository: %s\n", .{ @as([*:0]const u8, "get_cached_files"), (try zpath(a, repo_id)).ptr });
+        tools_common.log.wrn("%s: invalid repository: %s\n", .{ @as([*:0]const u8, "get_cached_files"), (try zpath(a, repo_id)).ptr });
         return &.{};
     }
 
@@ -570,7 +565,7 @@ var symlinks_disabled: std.atomic.Value(bool) = .init(false);
 ///
 /// Return: the snapshot path, owned by `a`; throws when the lock cannot be
 /// taken or `keep_waiting` returns false.
-pub fn finalizeFile(a: Allocator, file: *const HfFile, keep_waiting: ?mod.file_lock.KeepWaiting) Error![]const u8 {
+pub fn finalizeFile(a: std.mem.Allocator, file: *const HfFile, keep_waiting: ?mod.file_lock.KeepWaiting) common_chat.exception.Error![]const u8 {
     const func = "finalize_file";
     const local_path = file.local_path;
     const final_path = file.final_path;
@@ -589,12 +584,12 @@ pub fn finalizeFile(a: Allocator, file: *const HfFile, keep_waiting: ?mod.file_l
     defer lock.deinit();
     if (!try lock.acquire(keep_waiting)) {
         // without the lock, another process could move the blob while we check it
-        return mod.common.throw(error.RuntimeError, "failed to lock cache for finalization: {s}", .{final_path});
+        return common_chat.exception.throw(error.RuntimeError, "failed to lock cache for finalization: {s}", .{final_path});
     }
 
     // acquire() only polls keep_waiting while waiting for a busy lock
     if (keep_waiting) |kw| if (!kw.call()) {
-        return mod.common.throw(error.RuntimeError, "download cancelled before finalization: {s}", .{final_path});
+        return common_chat.exception.throw(error.RuntimeError, "download cancelled before finalization: {s}", .{final_path});
     };
 
     // re-check under the lock: the winner may have created the link already
@@ -621,16 +616,16 @@ pub fn finalizeFile(a: Allocator, file: *const HfFile, keep_waiting: ?mod.file_l
     }
 
     if (!symlinks_disabled.swap(true, .seq_cst)) {
-        tc.log.wrn("%s: failed to create symlink: %s\n", .{ func, stdlib.errno.strerror(ec) });
-        tc.log.wrn("%s: switching to degraded mode\n", .{func});
+        tools_common.log.wrn("%s: failed to create symlink: %s\n", .{ func, stdlib.errno.strerror(ec) });
+        tools_common.log.wrn("%s: switching to degraded mode\n", .{func});
     }
 
     ec = stdlib.fs.rename(local_path, final_path);
     if (ec != 0) {
-        tc.log.wrn("%s: failed to move file to snapshots: %s\n", .{ func, stdlib.errno.strerror(ec) });
+        tools_common.log.wrn("%s: failed to move file to snapshots: %s\n", .{ func, stdlib.errno.strerror(ec) });
         ec = stdlib.fs.copyFile(a, local_path, final_path);
         if (ec != 0) {
-            tc.log.err("%s: failed to copy file to snapshots: %s\n", .{ func, stdlib.errno.strerror(ec) });
+            tools_common.log.err("%s: failed to copy file to snapshots: %s\n", .{ func, stdlib.errno.strerror(ec) });
         }
     }
     return file.final_path;
@@ -640,16 +635,16 @@ pub fn finalizeFile(a: Allocator, file: *const HfFile, keep_waiting: ?mod.file_l
 /// cached directory of a repository.
 ///
 /// Return: whether anything was removed.
-pub fn removeCachedRepo(a: Allocator, repo_id: []const u8) Error!bool {
+pub fn removeCachedRepo(a: std.mem.Allocator, repo_id: []const u8) common_chat.exception.Error!bool {
     const func = "remove_cached_repo";
     if (!isValidRepoId(repo_id)) {
-        tc.log.wrn("%s: invalid repository: %s\n", .{ func, (try zpath(a, repo_id)).ptr });
+        tools_common.log.wrn("%s: invalid repository: %s\n", .{ func, (try zpath(a, repo_id)).ptr });
         return false;
     }
     const repo_path = try getRepoPath(a, repo_id);
     const r = stdlib.fs.removeAll(a, repo_path);
     if (r.err != 0) {
-        tc.log.err("%s: failed to remove repo cache %s: %s\n", .{ func, (try zpath(a, repo_path)).ptr, stdlib.errno.strerror(r.err) });
+        tools_common.log.err("%s: failed to remove repo cache %s: %s\n", .{ func, (try zpath(a, repo_path)).ptr, stdlib.errno.strerror(r.err) });
         return false;
     }
     return r.n > 0;

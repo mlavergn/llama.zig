@@ -165,14 +165,14 @@ pub const SlotInfo = struct {
 /// rotations.
 const KvLayer = struct {
     il: u32,
-    k: *mod.impl.c.ggml_tensor,
-    v: ?*mod.impl.c.ggml_tensor,
-    k_scale: ?*mod.impl.c.ggml_tensor = null,
-    v_scale: ?*mod.impl.c.ggml_tensor = null,
-    k_stream: std.ArrayList(*mod.impl.c.ggml_tensor) = .empty,
-    v_stream: std.ArrayList(?*mod.impl.c.ggml_tensor) = .empty,
-    k_rot: ?*mod.impl.c.ggml_tensor = null,
-    v_rot: ?*mod.impl.c.ggml_tensor = null,
+    k: *mod.impl.llama_c.ggml_tensor,
+    v: ?*mod.impl.llama_c.ggml_tensor,
+    k_scale: ?*mod.impl.llama_c.ggml_tensor = null,
+    v_scale: ?*mod.impl.llama_c.ggml_tensor = null,
+    k_stream: std.ArrayList(*mod.impl.llama_c.ggml_tensor) = .empty,
+    v_stream: std.ArrayList(?*mod.impl.llama_c.ggml_tensor) = .empty,
+    k_rot: ?*mod.impl.llama_c.ggml_tensor = null,
+    v_rot: ?*mod.impl.llama_c.ggml_tensor = null,
 };
 
 /// The cells, shared between a cache and the caches viewing it.
@@ -207,8 +207,8 @@ pub const KvCache = struct {
     attn_rot_bufs: mod.memory.Bufs,
     /// `get_k_rot()` and `get_v_rot()`, built once: each layer's rotation by
     /// model layer, `[n_layer_all]`.
-    k_rot_il: []?*mod.impl.c.ggml_tensor = &.{},
-    v_rot_il: []?*mod.impl.c.ggml_tensor = &.{},
+    k_rot_il: []?*mod.impl.llama_c.ggml_tensor = &.{},
+    v_rot_il: []?*mod.impl.llama_c.ggml_tensor = &.{},
 
     debug: c_int = 0,
     swa_type: mod.hparams.SwaType = .none,
@@ -242,8 +242,8 @@ pub const KvCache = struct {
         model: *const mod.model.Model,
         no_alloc: bool,
         hparams: *const mod.hparams.Hparams,
-        type_k: mod.impl.c.enum_ggml_type,
-        type_v: mod.impl.c.enum_ggml_type,
+        type_k: mod.impl.llama_c.enum_ggml_type,
+        type_v: mod.impl.llama_c.enum_ggml_type,
         v_trans: bool,
         offload: bool,
         unified: bool,
@@ -271,8 +271,8 @@ pub const KvCache = struct {
         model: *const mod.model.Model,
         no_alloc: bool,
         hparams: *const mod.hparams.Hparams,
-        type_k: mod.impl.c.enum_ggml_type,
-        type_v: mod.impl.c.enum_ggml_type,
+        type_k: mod.impl.llama_c.enum_ggml_type,
+        type_v: mod.impl.llama_c.enum_ggml_type,
         v_trans: bool,
         offload: bool,
         unified: bool,
@@ -328,12 +328,12 @@ pub const KvCache = struct {
         const n_stream = self.n_stream;
 
         // One context per buffer type, ordered by the buffer type's name.
-        var ctx_map: std.ArrayList(struct { buft: mod.impl.c.ggml_backend_buffer_type_t, ctx: *mod.impl.c.ggml_context }) = .empty;
+        var ctx_map: std.ArrayList(struct { buft: mod.impl.llama_c.ggml_backend_buffer_type_t, ctx: *mod.impl.llama_c.ggml_context }) = .empty;
         // The contexts not yet handed to `ctxs_bufs` are freed with the map,
         // as the C++'s `ggml_context_ptr`s are.
         var n_moved: usize = 0;
         defer {
-            for (ctx_map.items[n_moved..]) |e| mod.impl.c.ggml_free(e.ctx);
+            for (ctx_map.items[n_moved..]) |e| mod.impl.llama_c.ggml_free(e.ctx);
             ctx_map.deinit(std.heap.c_allocator);
         }
 
@@ -416,11 +416,11 @@ pub const KvCache = struct {
             const n_embd_v_gqa: i64 = if (!v_trans) hparams.nEmbdVGqa(il) else hparams.nEmbdVGqaMax();
 
             var dev_name: [*:0]const u8 = "CPU";
-            var buft = mod.impl.c.ggml_backend_cpu_buffer_type();
+            var buft = mod.impl.llama_c.ggml_backend_cpu_buffer_type();
             if (offload) {
                 const dev = model.devLayer(il);
-                buft = mod.impl.c.ggml_backend_dev_buffer_type(dev);
-                dev_name = mod.impl.c.ggml_backend_dev_name(dev);
+                buft = mod.impl.llama_c.ggml_backend_dev_buffer_type(dev);
+                dev_name = mod.impl.llama_c.ggml_backend_dev_name(dev);
             }
 
             mod.impl.logDebug("%s: layer %3d: dev = %s\n", .{ func, il, dev_name });
@@ -429,17 +429,17 @@ pub const KvCache = struct {
                 return exc.throw(.runtime_error, "failed to create ggml context for kv cache", .{});
 
             const has_v = !is_mla;
-            const k = mod.impl.c.ggml_new_tensor_3d(ctx, type_k, n_embd_k_gqa, kv_size, n_stream);
-            const v: ?*mod.impl.c.ggml_tensor = if (has_v) mod.impl.c.ggml_new_tensor_3d(ctx, type_v, n_embd_v_gqa, kv_size, n_stream) else null;
+            const k = mod.impl.llama_c.ggml_new_tensor_3d(ctx, type_k, n_embd_k_gqa, kv_size, n_stream);
+            const v: ?*mod.impl.llama_c.ggml_tensor = if (has_v) mod.impl.llama_c.ggml_new_tensor_3d(ctx, type_v, n_embd_v_gqa, kv_size, n_stream) else null;
 
-            _ = mod.impl.c.ggml_format_name(k, "cache_%sk_l%d", name_tag, il);
-            if (v) |t| _ = mod.impl.c.ggml_format_name(t, "cache_%sv_l%d", name_tag, il);
+            _ = mod.impl.llama_c.ggml_format_name(k, "cache_%sk_l%d", name_tag, il);
+            if (v) |t| _ = mod.impl.llama_c.ggml_format_name(t, "cache_%sv_l%d", name_tag, il);
 
             var layer: KvLayer = .{ .il = il, .k = k, .v = v, .k_scale = model.layers[il].k_cache_s, .v_scale = model.layers[il].v_cache_s };
             var s: u32 = 0;
             while (s < n_stream) : (s += 1) {
-                layer.k_stream.append(std.heap.c_allocator, mod.impl.c.ggml_view_2d(ctx, k, n_embd_k_gqa, kv_size, k.*.nb[1], s * k.*.nb[2])) catch oom();
-                layer.v_stream.append(std.heap.c_allocator, if (v) |t| mod.impl.c.ggml_view_2d(ctx, t, n_embd_v_gqa, kv_size, t.*.nb[1], s * t.*.nb[2]) else null) catch oom();
+                layer.k_stream.append(std.heap.c_allocator, mod.impl.llama_c.ggml_view_2d(ctx, k, n_embd_k_gqa, kv_size, k.*.nb[1], s * k.*.nb[2])) catch oom();
+                layer.v_stream.append(std.heap.c_allocator, if (v) |t| mod.impl.llama_c.ggml_view_2d(ctx, t, n_embd_v_gqa, kv_size, t.*.nb[1], s * t.*.nb[2]) else null) catch oom();
             }
 
             self.map_layer_ids.put(std.heap.c_allocator, @intCast(il), @intCast(self.layers.items.len)) catch oom();
@@ -470,7 +470,7 @@ pub const KvCache = struct {
         for (ctx_map.items) |e| {
             const buf = try self.ctxs_bufs.emplace(e.ctx, e.buft, "kv cache", exc);
             n_moved += 1;
-            mod.impl.logInfo("%s: %10s KV buffer size = %8.2f MiB\n", .{ func, mod.impl.c.ggml_backend_buffer_name(buf), @as(f64, @floatFromInt(mod.impl.c.ggml_backend_buffer_get_size(buf))) / 1024.0 / 1024.0 });
+            mod.impl.logInfo("%s: %10s KV buffer size = %8.2f MiB\n", .{ func, mod.impl.llama_c.ggml_backend_buffer_name(buf), @as(f64, @floatFromInt(mod.impl.llama_c.ggml_backend_buffer_get_size(buf))) / 1024.0 / 1024.0 });
         }
 
         {
@@ -483,9 +483,9 @@ pub const KvCache = struct {
                 @as(c_int, @intCast(self.layers.items.len)),
                 n_seq_max,
                 n_stream,
-                mod.impl.c.ggml_type_name(type_k),
+                mod.impl.llama_c.ggml_type_name(type_k),
                 @as(f64, @as(f32, @floatFromInt(memory_size_k)) / (1024.0 * 1024.0)),
-                mod.impl.c.ggml_type_name(type_v),
+                mod.impl.llama_c.ggml_type_name(type_v),
                 @as(f64, @as(f32, @floatFromInt(memory_size_v)) / (1024.0 * 1024.0)),
             });
         }
@@ -507,7 +507,7 @@ pub const KvCache = struct {
                 mod.impl.logInfo("%s: attention rotation force disabled (%s)\n", .{ func, @as([*:0]const u8, if (model.attn_rot) "LLAMA_ATTN_ROT_DISABLE" else "llama_model_set_attn_rot") });
             }
 
-            var attn_rot_k = !attn_rot_disable and self.n_embd_head_k_all > 0 and mod.impl.c.ggml_is_quantized(type_k) and hparams.nEmbdHeadK(0) % 64 == 0;
+            var attn_rot_k = !attn_rot_disable and self.n_embd_head_k_all > 0 and mod.impl.llama_c.ggml_is_quantized(type_k) and hparams.nEmbdHeadK(0) % 64 == 0;
 
             // Always rotate for the DeepSeek lightning indexers.
             const a = model.arch;
@@ -517,7 +517,7 @@ pub const KvCache = struct {
                 attn_rot_k = true;
             }
 
-            const attn_rot_v = !attn_rot_disable and self.n_embd_head_v_all > 0 and mod.impl.c.ggml_is_quantized(type_v) and hparams.nEmbdHeadV(0) % 64 == 0;
+            const attn_rot_v = !attn_rot_disable and self.n_embd_head_v_all > 0 and mod.impl.llama_c.ggml_is_quantized(type_v) and hparams.nEmbdHeadV(0) % 64 == 0;
 
             if (attn_rot_k) {
                 // the C++'s TODO: is the smallest rotation better for K too?
@@ -567,27 +567,27 @@ pub const KvCache = struct {
         }
 
         // The C++'s `std::map` keyed by the buffer type's address.
-        var ctx_map: std.ArrayList(struct { buft: mod.impl.c.ggml_backend_buffer_type_t, ctx: *mod.impl.c.ggml_context }) = .empty;
+        var ctx_map: std.ArrayList(struct { buft: mod.impl.llama_c.ggml_backend_buffer_type_t, ctx: *mod.impl.llama_c.ggml_context }) = .empty;
         var n_moved: usize = 0;
         defer {
-            for (ctx_map.items[n_moved..]) |e| mod.impl.c.ggml_free(e.ctx);
+            for (ctx_map.items[n_moved..]) |e| mod.impl.llama_c.ggml_free(e.ctx);
             ctx_map.deinit(std.heap.c_allocator);
         }
 
         for (self.layers.items) |*layer| {
             for ([_]bool{ true, false }) |is_k| {
                 const n_rot = if (is_k) self.n_rot_k else self.n_rot_v;
-                const cache: ?*mod.impl.c.ggml_tensor = if (is_k) layer.k else layer.v;
+                const cache: ?*mod.impl.llama_c.ggml_tensor = if (is_k) layer.k else layer.v;
                 if (n_rot == 0 or cache == null) {
                     continue;
                 }
 
-                const buft = mod.impl.c.ggml_backend_buffer_get_type(cache.?.buffer);
+                const buft = mod.impl.llama_c.ggml_backend_buffer_get_type(cache.?.buffer);
                 var pos: usize = 0;
                 while (pos < ctx_map.items.len and @intFromPtr(ctx_map.items[pos].buft) < @intFromPtr(buft)) pos += 1;
                 if (pos == ctx_map.items.len or ctx_map.items[pos].buft != buft) {
-                    const ctx = mod.impl.c.ggml_init(.{
-                        .mem_size = 2 * self.layers.items.len * mod.impl.c.ggml_tensor_overhead(),
+                    const ctx = mod.impl.llama_c.ggml_init(.{
+                        .mem_size = 2 * self.layers.items.len * mod.impl.llama_c.ggml_tensor_overhead(),
                         .mem_buffer = null,
                         .no_alloc = true,
                     }) orelse return exc.throw(.runtime_error, "failed to create ggml context for rotation matrices", .{});
@@ -595,8 +595,8 @@ pub const KvCache = struct {
                 }
                 const ctx = ctx_map.items[pos].ctx;
 
-                const rot = mod.impl.c.ggml_new_tensor_2d(ctx, mod.impl.c.GGML_TYPE_F32, n_rot, n_rot);
-                _ = mod.impl.c.ggml_format_name(rot, "cache_%s%s_rot_l%d", name_tag, @as([*:0]const u8, if (is_k) "k" else "v"), layer.il);
+                const rot = mod.impl.llama_c.ggml_new_tensor_2d(ctx, mod.impl.llama_c.GGML_TYPE_F32, n_rot, n_rot);
+                _ = mod.impl.llama_c.ggml_format_name(rot, "cache_%s%s_rot_l%d", name_tag, @as([*:0]const u8, if (is_k) "k" else "v"), layer.il);
                 if (is_k) layer.k_rot = rot else layer.v_rot = rot;
             }
         }
@@ -604,17 +604,17 @@ pub const KvCache = struct {
         for (ctx_map.items) |e| {
             const buf = try self.attn_rot_bufs.emplace(e.ctx, e.buft, "rotation matrices", exc);
             n_moved += 1;
-            mod.impl.c.ggml_backend_buffer_set_usage(buf, mod.impl.c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
-            mod.impl.logInfo("%s: %10s rotation buffer size = %8.2f MiB\n", .{ "init_rotation", mod.impl.c.ggml_backend_buffer_name(buf), @as(f64, @floatFromInt(mod.impl.c.ggml_backend_buffer_get_size(buf))) / 1024.0 / 1024.0 });
+            mod.impl.llama_c.ggml_backend_buffer_set_usage(buf, mod.impl.llama_c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
+            mod.impl.logInfo("%s: %10s rotation buffer size = %8.2f MiB\n", .{ "init_rotation", mod.impl.llama_c.ggml_backend_buffer_name(buf), @as(f64, @floatFromInt(mod.impl.llama_c.ggml_backend_buffer_get_size(buf))) / 1024.0 / 1024.0 });
         }
 
         if (!self.attn_rot_bufs.no_alloc) {
             for (self.layers.items) |*layer| {
-                for ([_]?*mod.impl.c.ggml_tensor{ layer.k_rot, layer.v_rot }) |t_| {
+                for ([_]?*mod.impl.llama_c.ggml_tensor{ layer.k_rot, layer.v_rot }) |t_| {
                     if (t_) |t| {
                         // `attn_rot_hadamard.at()`: every rotation size was precomputed.
                         const m = self.attn_rot_hadamard.get(t.ne[0]).?;
-                        mod.impl.c.ggml_backend_tensor_set(t, m.ptr, 0, mod.impl.c.ggml_nbytes(t));
+                        mod.impl.llama_c.ggml_backend_tensor_set(t, m.ptr, 0, mod.impl.llama_c.ggml_nbytes(t));
                     }
                 }
             }
@@ -623,8 +623,8 @@ pub const KvCache = struct {
 
     fn buildRotIndex(self: *KvCache) void {
         const n_layer = self.hparams.n_layer_all;
-        self.k_rot_il = std.heap.c_allocator.alloc(?*mod.impl.c.ggml_tensor, n_layer) catch oom();
-        self.v_rot_il = std.heap.c_allocator.alloc(?*mod.impl.c.ggml_tensor, n_layer) catch oom();
+        self.k_rot_il = std.heap.c_allocator.alloc(?*mod.impl.llama_c.ggml_tensor, n_layer) catch oom();
+        self.v_rot_il = std.heap.c_allocator.alloc(?*mod.impl.llama_c.ggml_tensor, n_layer) catch oom();
         @memset(self.k_rot_il, null);
         @memset(self.v_rot_il, null);
         var it = self.map_layer_ids.iterator();
@@ -636,16 +636,16 @@ pub const KvCache = struct {
         }
     }
 
-    fn ctxForBuft(map: anytype, buft: mod.impl.c.ggml_backend_buffer_type_t, n_stream: u32, n_layer: u32) ?*mod.impl.c.ggml_context {
-        const name = std.mem.span(mod.impl.c.ggml_backend_buft_name(buft));
+    fn ctxForBuft(map: anytype, buft: mod.impl.llama_c.ggml_backend_buffer_type_t, n_stream: u32, n_layer: u32) ?*mod.impl.llama_c.ggml_context {
+        const name = std.mem.span(mod.impl.llama_c.ggml_backend_buft_name(buft));
         var pos: usize = 0;
         while (pos < map.items.len) : (pos += 1) {
-            const order = std.mem.order(u8, std.mem.span(mod.impl.c.ggml_backend_buft_name(map.items[pos].buft)), name);
+            const order = std.mem.order(u8, std.mem.span(mod.impl.llama_c.ggml_backend_buft_name(map.items[pos].buft)), name);
             if (order == .eq) return map.items[pos].ctx;
             if (order == .gt) break;
         }
-        const ctx = mod.impl.c.ggml_init(.{
-            .mem_size = 2 * (1 + @as(usize, n_stream)) * n_layer * mod.impl.c.ggml_tensor_overhead(),
+        const ctx = mod.impl.llama_c.ggml_init(.{
+            .mem_size = 2 * (1 + @as(usize, n_stream)) * n_layer * mod.impl.llama_c.ggml_tensor_overhead(),
             .mem_buffer = null,
             .no_alloc = true,
         }) orelse return null;
@@ -690,7 +690,7 @@ pub const KvCache = struct {
             self.v_heads.items[s] = 0;
         }
         if (data) {
-            for (self.ctxs_bufs.bufs.items) |e| mod.impl.c.ggml_backend_buffer_clear(e.buf, 0);
+            for (self.ctxs_bufs.bufs.items) |e| mod.impl.llama_c.ggml_backend_buffer_clear(e.buf, 0);
         }
     }
 
@@ -1009,8 +1009,8 @@ pub const KvCache = struct {
                 std.debug.assert(ssrc < self.n_stream and sdst < self.n_stream and ssrc != sdst);
                 mod.impl.logDebug("%s: copying KV buffer: stream %d to stream %d\n", .{ "update", ssrc, sdst });
                 for (self.layers.items) |*layer| {
-                    mod.impl.c.ggml_backend_tensor_copy(layer.k_stream.items[ssrc], layer.k_stream.items[sdst]);
-                    if (layer.v_stream.items[ssrc] != null) mod.impl.c.ggml_backend_tensor_copy(layer.v_stream.items[ssrc], layer.v_stream.items[sdst]);
+                    mod.impl.llama_c.ggml_backend_tensor_copy(layer.k_stream.items[ssrc], layer.k_stream.items[sdst]);
+                    if (layer.v_stream.items[ssrc] != null) mod.impl.llama_c.ggml_backend_tensor_copy(layer.v_stream.items[ssrc], layer.v_stream.items[sdst]);
                 }
             }
         }
@@ -1022,17 +1022,17 @@ pub const KvCache = struct {
             const has_rope = for (self.layers.items) |*layer| {
                 if (self.hparams.hasRope(layer.il)) break true;
             } else false;
-            if (self.hparams.rope_type != mod.impl.c.LLAMA_ROPE_TYPE_NONE and has_rope) {
-                mod.impl.c.ggml_backend_sched_reset(sched);
+            if (self.hparams.rope_type != mod.impl.llama_c.LLAMA_ROPE_TYPE_NONE and has_rope) {
+                mod.impl.llama_c.ggml_backend_sched_reset(sched);
                 const res = lctx.getGfResReserve();
                 res.reset();
                 const gf = self.buildGraphShift(res, lctx);
-                if (!mod.impl.c.ggml_backend_sched_alloc_graph(sched, gf)) {
+                if (!mod.impl.llama_c.ggml_backend_sched_alloc_graph(sched, gf)) {
                     mod.impl.logError("%s: failed to allocate compute graph for K-shift\n", .{"update"});
                     return updated;
                 }
                 res.setInputs(null);
-                if (lctx.graphCompute(gf, false) != mod.impl.c.GGML_STATUS_SUCCESS) {
+                if (lctx.graphCompute(gf, false) != mod.impl.llama_c.GGML_STATUS_SUCCESS) {
                     mod.impl.logError("%s: failed to compute K-shift\n", .{"update"});
                     return updated;
                 }
@@ -1285,12 +1285,12 @@ pub const KvCache = struct {
     }
 
     /// Ports `llama_kv_cache`'s `type_k` (llama-kv-cache.cpp:1275 @b1b770d90).
-    pub fn typeK(self: *const KvCache) mod.impl.c.enum_ggml_type {
+    pub fn typeK(self: *const KvCache) mod.impl.llama_c.enum_ggml_type {
         return self.layers.items[0].k.type;
     }
 
     /// Ports `llama_kv_cache`'s `type_v` (llama-kv-cache.cpp:1279 @b1b770d90).
-    pub fn typeV(self: *const KvCache) mod.impl.c.enum_ggml_type {
+    pub fn typeV(self: *const KvCache) mod.impl.llama_c.enum_ggml_type {
         return self.layers.items[0].v.?.type;
     }
 
@@ -1306,7 +1306,7 @@ pub const KvCache = struct {
     }
 
     /// Ports `llama_kv_cache`'s `get_k_storage` (llama-kv-cache.cpp:1294 @b1b770d90).
-    pub fn getKStorage(self: *const KvCache, il: i32) *mod.impl.c.ggml_tensor {
+    pub fn getKStorage(self: *const KvCache, il: i32) *mod.impl.llama_c.ggml_tensor {
         return self.layers.items[@intCast(self.map_layer_ids.get(il).?)].k;
     }
 
@@ -1418,17 +1418,17 @@ pub const KvCache = struct {
     }
 
     /// Ports `llama_kv_cache`'s `get_k` (llama-kv-cache.cpp:1421 @b1b770d90).
-    pub fn getK(self: *const KvCache, ctx: *mod.impl.c.ggml_context, il: i32, n_kv: u32, sinfo: *const SlotInfo) *mod.impl.c.ggml_tensor {
+    pub fn getK(self: *const KvCache, ctx: *mod.impl.llama_c.ggml_context, il: i32, n_kv: u32, sinfo: *const SlotInfo) *mod.impl.llama_c.ggml_tensor {
         const k = self.layerAt(il).k;
         const kv_size: u64 = self.getSize();
         const n_embd_k_gqa: u64 = @intCast(k.ne[0]);
         const ns: u32 = sinfo.s1 - sinfo.s0 + 1;
         const ilu: u32 = @intCast(il);
-        return mod.impl.c.ggml_view_4d(ctx, k, self.hparams.nEmbdHeadK(ilu), self.hparams.nHeadKv(ilu), n_kv, ns, mod.impl.c.ggml_row_size(k.type, self.hparams.nEmbdHeadK(ilu)), mod.impl.c.ggml_row_size(k.type, @intCast(n_embd_k_gqa)), mod.impl.c.ggml_row_size(k.type, @intCast(n_embd_k_gqa * kv_size)), mod.impl.c.ggml_row_size(k.type, @intCast(n_embd_k_gqa * kv_size)) * sinfo.s0);
+        return mod.impl.llama_c.ggml_view_4d(ctx, k, self.hparams.nEmbdHeadK(ilu), self.hparams.nHeadKv(ilu), n_kv, ns, mod.impl.llama_c.ggml_row_size(k.type, self.hparams.nEmbdHeadK(ilu)), mod.impl.llama_c.ggml_row_size(k.type, @intCast(n_embd_k_gqa)), mod.impl.llama_c.ggml_row_size(k.type, @intCast(n_embd_k_gqa * kv_size)), mod.impl.llama_c.ggml_row_size(k.type, @intCast(n_embd_k_gqa * kv_size)) * sinfo.s0);
     }
 
     /// Ports `llama_kv_cache`'s `get_v` (llama-kv-cache.cpp:1441 @b1b770d90).
-    pub fn getV(self: *const KvCache, ctx: *mod.impl.c.ggml_context, il: i32, n_kv: u32, sinfo: *const SlotInfo) *mod.impl.c.ggml_tensor {
+    pub fn getV(self: *const KvCache, ctx: *mod.impl.llama_c.ggml_context, il: i32, n_kv: u32, sinfo: *const SlotInfo) *mod.impl.llama_c.ggml_tensor {
         const v = self.layerAt(il).v.?;
         const kv_size: u64 = self.getSize();
         const n_embd_v_gqa: u64 = @intCast(v.ne[0]);
@@ -1437,21 +1437,21 @@ pub const KvCache = struct {
         const hv = self.hparams.nEmbdHeadV(ilu);
         if (!self.v_trans) {
             // v->nb[1] <= v->nb[2]
-            return mod.impl.c.ggml_view_4d(ctx, v, hv, self.hparams.nHeadKv(ilu), n_kv, ns, mod.impl.c.ggml_row_size(v.type, hv), mod.impl.c.ggml_row_size(v.type, @intCast(n_embd_v_gqa)), mod.impl.c.ggml_row_size(v.type, @intCast(n_embd_v_gqa * kv_size)), mod.impl.c.ggml_row_size(v.type, @intCast(n_embd_v_gqa * kv_size)) * sinfo.s0);
+            return mod.impl.llama_c.ggml_view_4d(ctx, v, hv, self.hparams.nHeadKv(ilu), n_kv, ns, mod.impl.llama_c.ggml_row_size(v.type, hv), mod.impl.llama_c.ggml_row_size(v.type, @intCast(n_embd_v_gqa)), mod.impl.llama_c.ggml_row_size(v.type, @intCast(n_embd_v_gqa * kv_size)), mod.impl.llama_c.ggml_row_size(v.type, @intCast(n_embd_v_gqa * kv_size)) * sinfo.s0);
         }
         // v->nb[1] > v->nb[2]
-        return mod.impl.c.ggml_view_4d(ctx, v, n_kv, self.hparams.nHeadKv(ilu), hv, ns, mod.impl.c.ggml_row_size(v.type, @intCast(kv_size * hv)), mod.impl.c.ggml_row_size(v.type, @intCast(kv_size)), mod.impl.c.ggml_row_size(v.type, @intCast(kv_size * n_embd_v_gqa)), mod.impl.c.ggml_row_size(v.type, @intCast(kv_size * n_embd_v_gqa)) * sinfo.s0);
+        return mod.impl.llama_c.ggml_view_4d(ctx, v, n_kv, self.hparams.nHeadKv(ilu), hv, ns, mod.impl.llama_c.ggml_row_size(v.type, @intCast(kv_size * hv)), mod.impl.llama_c.ggml_row_size(v.type, @intCast(kv_size)), mod.impl.llama_c.ggml_row_size(v.type, @intCast(kv_size * n_embd_v_gqa)), mod.impl.llama_c.ggml_row_size(v.type, @intCast(kv_size * n_embd_v_gqa)) * sinfo.s0);
     }
 
     /// Ports `is_type_scaled` (llama-kv-cache.cpp:1473 @b1b770d90).
-    fn isTypeScaled(t: mod.impl.c.enum_ggml_type) bool {
-        return t == mod.impl.c.GGML_TYPE_F8_E4M3;
+    fn isTypeScaled(t: mod.impl.llama_c.enum_ggml_type) bool {
+        return t == mod.impl.llama_c.GGML_TYPE_F8_E4M3;
     }
 
     /// Ports `llama_kv_cache`'s `get_k_scale` (llama-kv-cache.cpp:1477 @b1b770d90).
     ///
     /// Return: layer `il`'s K dequant scale for a scaled cache type, else null.
-    pub fn getKScale(self: *const KvCache, il: i32) ?*mod.impl.c.ggml_tensor {
+    pub fn getKScale(self: *const KvCache, il: i32) ?*mod.impl.llama_c.ggml_tensor {
         if (!isTypeScaled(self.typeK())) {
             return null;
         }
@@ -1459,7 +1459,7 @@ pub const KvCache = struct {
     }
 
     /// Ports `llama_kv_cache`'s `get_v_scale` (llama-kv-cache.cpp:1487 @b1b770d90).
-    pub fn getVScale(self: *const KvCache, il: i32) ?*mod.impl.c.ggml_tensor {
+    pub fn getVScale(self: *const KvCache, il: i32) ?*mod.impl.llama_c.ggml_tensor {
         if (!isTypeScaled(self.typeV())) {
             return null;
         }
@@ -1468,7 +1468,7 @@ pub const KvCache = struct {
 
     /// Ports `llama_kv_cache`'s `cpy_k` (llama-kv-cache.cpp:1497 @b1b770d90):
     /// store the current K values into the cache.
-    pub fn cpyK(self: *const KvCache, ctx: *mod.impl.c.ggml_context, k_cur_: *mod.impl.c.ggml_tensor, k_idxs: *mod.impl.c.ggml_tensor, il: i32, sinfo: *const SlotInfo) *mod.impl.c.ggml_tensor {
+    pub fn cpyK(self: *const KvCache, ctx: *mod.impl.llama_c.ggml_context, k_cur_: *mod.impl.llama_c.ggml_tensor, k_idxs: *mod.impl.llama_c.ggml_tensor, il: i32, sinfo: *const SlotInfo) *mod.impl.llama_c.ggml_tensor {
         _ = sinfo;
         var k = self.layerAt(il).k;
         const n_embd_head = k_cur_.ne[0];
@@ -1477,20 +1477,20 @@ pub const KvCache = struct {
         const n_embd_gqa = n_embd_head * n_head;
 
         // Dims 0 and 1 merge.
-        mod.impl.assert(mod.impl.c.ggml_row_size(k_cur_.type, n_embd_head) == k_cur_.nb[1], "llama-kv-cache.cpp", 1512, "ggml_row_size(k_cur->type, n_embd_head) == k_cur->nb[1]");
-        const k_cur = mod.impl.c.ggml_view_2d(ctx, k_cur_, n_embd_gqa, n_tokens, k_cur_.nb[2], 0);
+        mod.impl.assert(mod.impl.llama_c.ggml_row_size(k_cur_.type, n_embd_head) == k_cur_.nb[1], "llama-kv-cache.cpp", 1512, "ggml_row_size(k_cur->type, n_embd_head) == k_cur->nb[1]");
+        const k_cur = mod.impl.llama_c.ggml_view_2d(ctx, k_cur_, n_embd_gqa, n_tokens, k_cur_.nb[2], 0);
 
         const n_stream = k.ne[2];
         if (n_stream > 1) {
             const kv_size: i64 = self.getSize();
             // The indices are global across streams.
-            k = mod.impl.c.ggml_reshape_2d(ctx, k, n_embd_gqa, kv_size * n_stream);
+            k = mod.impl.llama_c.ggml_reshape_2d(ctx, k, n_embd_gqa, kv_size * n_stream);
         }
-        return mod.impl.c.ggml_set_rows(ctx, k, k_cur, k_idxs);
+        return mod.impl.llama_c.ggml_set_rows(ctx, k, k_cur, k_idxs);
     }
 
     /// Ports `llama_kv_cache`'s `cpy_v` (llama-kv-cache.cpp:1532 @b1b770d90).
-    pub fn cpyV(self: *const KvCache, ctx: *mod.impl.c.ggml_context, v_cur_: *mod.impl.c.ggml_tensor, v_idxs: *mod.impl.c.ggml_tensor, il: i32, sinfo: *const SlotInfo) *mod.impl.c.ggml_tensor {
+    pub fn cpyV(self: *const KvCache, ctx: *mod.impl.llama_c.ggml_context, v_cur_: *mod.impl.llama_c.ggml_tensor, v_idxs: *mod.impl.llama_c.ggml_tensor, il: i32, sinfo: *const SlotInfo) *mod.impl.llama_c.ggml_tensor {
         _ = sinfo;
         var v = self.layerAt(il).v.?;
         var v_cur = v_cur_;
@@ -1499,54 +1499,54 @@ pub const KvCache = struct {
         const n_tokens = v_cur.ne[2];
         const n_embd_gqa = n_embd_head * n_head;
 
-        mod.impl.assert(mod.impl.c.ggml_row_size(v_cur.type, n_embd_head) == v_cur.nb[1], "llama-kv-cache.cpp", 1546, "ggml_row_size(v_cur->type, n_embd_head) == v_cur->nb[1]");
+        mod.impl.assert(mod.impl.llama_c.ggml_row_size(v_cur.type, n_embd_head) == v_cur.nb[1], "llama-kv-cache.cpp", 1546, "ggml_row_size(v_cur->type, n_embd_head) == v_cur->nb[1]");
 
         const n_stream = v.ne[2];
 
         // With FA, the V cache is not transposed.
         if (!self.v_trans) {
-            v_cur = mod.impl.c.ggml_view_2d(ctx, v_cur, n_embd_gqa, n_tokens, v_cur.nb[2], 0);
+            v_cur = mod.impl.llama_c.ggml_view_2d(ctx, v_cur, n_embd_gqa, n_tokens, v_cur.nb[2], 0);
             if (n_stream > 1) {
                 const kv_size: i64 = self.getSize();
-                v = mod.impl.c.ggml_reshape_2d(ctx, v, n_embd_gqa, kv_size * n_stream);
+                v = mod.impl.llama_c.ggml_reshape_2d(ctx, v, n_embd_gqa, kv_size * n_stream);
             }
-            return mod.impl.c.ggml_set_rows(ctx, v, v_cur, v_idxs);
+            return mod.impl.llama_c.ggml_set_rows(ctx, v, v_cur, v_idxs);
         }
 
-        if (mod.impl.c.ggml_row_size(v_cur.type, n_embd_gqa) == v_cur.nb[2]) {
+        if (mod.impl.llama_c.ggml_row_size(v_cur.type, n_embd_gqa) == v_cur.nb[2]) {
             // Dims 0, 1 and 2 merge.
-            v_cur = mod.impl.c.ggml_reshape_2d(ctx, v_cur, n_embd_gqa, n_tokens);
+            v_cur = mod.impl.llama_c.ggml_reshape_2d(ctx, v_cur, n_embd_gqa, n_tokens);
         } else {
-            v_cur = mod.impl.c.ggml_cont_2d(ctx, v_cur, n_embd_gqa, n_tokens);
+            v_cur = mod.impl.llama_c.ggml_cont_2d(ctx, v_cur, n_embd_gqa, n_tokens);
         }
 
         // [TAG_V_CACHE_VARIABLE]
-        if (n_embd_gqa < v.ne[0]) v_cur = mod.impl.c.ggml_pad(ctx, v_cur, @intCast(v.ne[0] - n_embd_gqa), 0, 0, 0);
+        if (n_embd_gqa < v.ne[0]) v_cur = mod.impl.llama_c.ggml_pad(ctx, v_cur, @intCast(v.ne[0] - n_embd_gqa), 0, 0, 0);
 
         // Each row of the indices is a single head element.
-        const v_view = mod.impl.c.ggml_reshape_2d(ctx, v, 1, mod.impl.c.ggml_nelements(v));
-        v_cur = mod.impl.c.ggml_reshape_2d(ctx, v_cur, 1, mod.impl.c.ggml_nelements(v_cur));
-        return mod.impl.c.ggml_set_rows(ctx, v_view, v_cur, v_idxs);
+        const v_view = mod.impl.llama_c.ggml_reshape_2d(ctx, v, 1, mod.impl.llama_c.ggml_nelements(v));
+        v_cur = mod.impl.llama_c.ggml_reshape_2d(ctx, v_cur, 1, mod.impl.llama_c.ggml_nelements(v_cur));
+        return mod.impl.llama_c.ggml_set_rows(ctx, v_view, v_cur, v_idxs);
     }
 
     /// Ports `llama_kv_cache`'s `build_input_k_idxs` (llama-kv-cache.cpp:1588 @b1b770d90).
-    pub fn buildInputKIdxs(self: *const KvCache, ctx: *mod.impl.c.ggml_context, ubatch: *const mod.batch.Ubatch) *mod.impl.c.ggml_tensor {
+    pub fn buildInputKIdxs(self: *const KvCache, ctx: *mod.impl.llama_c.ggml_context, ubatch: *const mod.batch.Ubatch) *mod.impl.llama_c.ggml_tensor {
         _ = self;
-        const k_idxs = mod.impl.c.ggml_new_tensor_1d(ctx, mod.impl.c.GGML_TYPE_I64, ubatch.n_tokens);
-        mod.impl.c.ggml_set_input(k_idxs);
-        _ = mod.impl.c.ggml_set_name(k_idxs, "attn_inp_k_idxs");
+        const k_idxs = mod.impl.llama_c.ggml_new_tensor_1d(ctx, mod.impl.llama_c.GGML_TYPE_I64, ubatch.n_tokens);
+        mod.impl.llama_c.ggml_set_input(k_idxs);
+        _ = mod.impl.llama_c.ggml_set_name(k_idxs, "attn_inp_k_idxs");
         return k_idxs;
     }
 
     /// Ports `llama_kv_cache`'s `build_input_v_idxs` (llama-kv-cache.cpp:1599 @b1b770d90).
-    pub fn buildInputVIdxs(self: *const KvCache, ctx: *mod.impl.c.ggml_context, ubatch: *const mod.batch.Ubatch) *mod.impl.c.ggml_tensor {
+    pub fn buildInputVIdxs(self: *const KvCache, ctx: *mod.impl.llama_c.ggml_context, ubatch: *const mod.batch.Ubatch) *mod.impl.llama_c.ggml_tensor {
         const n_tokens: i64 = ubatch.n_tokens;
         const v_idxs = if (!self.v_trans)
-            mod.impl.c.ggml_new_tensor_1d(ctx, mod.impl.c.GGML_TYPE_I64, n_tokens)
+            mod.impl.llama_c.ggml_new_tensor_1d(ctx, mod.impl.llama_c.GGML_TYPE_I64, n_tokens)
         else
-            mod.impl.c.ggml_new_tensor_1d(ctx, mod.impl.c.GGML_TYPE_I64, n_tokens * self.hparams.nEmbdVGqaMax());
-        mod.impl.c.ggml_set_input(v_idxs);
-        _ = mod.impl.c.ggml_set_name(v_idxs, "attn_inp_v_idxs");
+            mod.impl.llama_c.ggml_new_tensor_1d(ctx, mod.impl.llama_c.GGML_TYPE_I64, n_tokens * self.hparams.nEmbdVGqaMax());
+        mod.impl.llama_c.ggml_set_input(v_idxs);
+        _ = mod.impl.llama_c.ggml_set_name(v_idxs, "attn_inp_v_idxs");
         return v_idxs;
     }
 
@@ -1554,7 +1554,7 @@ pub const KvCache = struct {
     /// @b1b770d90): each model layer's K rotation, null where it has none.
     ///
     /// Return: `[n_layer_all]`, borrowed until the cache is destroyed.
-    pub fn getKRot(self: *const KvCache) []const ?*mod.impl.c.ggml_tensor {
+    pub fn getKRot(self: *const KvCache) []const ?*mod.impl.llama_c.ggml_tensor {
         return self.k_rot_il;
     }
 
@@ -1562,14 +1562,14 @@ pub const KvCache = struct {
     /// @b1b770d90): each model layer's V rotation, null where it has none.
     ///
     /// Return: `[n_layer_all]`, borrowed until the cache is destroyed.
-    pub fn getVRot(self: *const KvCache) []const ?*mod.impl.c.ggml_tensor {
+    pub fn getVRot(self: *const KvCache) []const ?*mod.impl.llama_c.ggml_tensor {
         return self.v_rot_il;
     }
 
     /// Ports `llama_kv_cache`'s `set_input_k_idxs` (llama-kv-cache.cpp:1632 @b1b770d90).
-    pub fn setInputKIdxs(self: *const KvCache, dst: *mod.impl.c.ggml_tensor, ubatch: *const mod.batch.Ubatch, sinfo: *const SlotInfo) void {
+    pub fn setInputKIdxs(self: *const KvCache, dst: *mod.impl.llama_c.ggml_tensor, ubatch: *const mod.batch.Ubatch, sinfo: *const SlotInfo) void {
         mod.impl.assert(ubatch.n_tokens == sinfo.size() * sinfo.nStream(), "llama-kv-cache.cpp", 1634, "n_tokens == (int64_t) sinfo.size()*sinfo.n_stream()");
-        mod.impl.assert(mod.impl.c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache.cpp", 1636, "ggml_backend_buffer_is_host(dst->buffer)");
+        mod.impl.assert(mod.impl.llama_c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache.cpp", 1636, "ggml_backend_buffer_is_host(dst->buffer)");
         const data: [*]i64 = @ptrCast(@alignCast(dst.data));
         for (0..sinfo.nStream()) |s| {
             const offs: i64 = @as(i64, sinfo.strm.items[s]) * self.getSize();
@@ -1578,9 +1578,9 @@ pub const KvCache = struct {
     }
 
     /// Ports `llama_kv_cache`'s `set_input_v_idxs` (llama-kv-cache.cpp:1648 @b1b770d90).
-    pub fn setInputVIdxs(self: *const KvCache, dst: *mod.impl.c.ggml_tensor, ubatch: *const mod.batch.Ubatch, sinfo: *const SlotInfo) void {
+    pub fn setInputVIdxs(self: *const KvCache, dst: *mod.impl.llama_c.ggml_tensor, ubatch: *const mod.batch.Ubatch, sinfo: *const SlotInfo) void {
         mod.impl.assert(ubatch.n_tokens == sinfo.size() * sinfo.nStream(), "llama-kv-cache.cpp", 1650, "n_tokens == (int64_t) sinfo.size()*sinfo.n_stream()");
-        mod.impl.assert(mod.impl.c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache.cpp", 1652, "ggml_backend_buffer_is_host(dst->buffer)");
+        mod.impl.assert(mod.impl.llama_c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache.cpp", 1652, "ggml_backend_buffer_is_host(dst->buffer)");
         const data: [*]i64 = @ptrCast(@alignCast(dst.data));
         if (!self.v_trans) {
             for (0..sinfo.nStream()) |s| {
@@ -1603,8 +1603,8 @@ pub const KvCache = struct {
     }
 
     /// Ports `llama_kv_cache`'s `set_input_k_shift` (llama-kv-cache.cpp:1681 @b1b770d90).
-    pub fn setInputKShift(self: *const KvCache, dst: *mod.impl.c.ggml_tensor) void {
-        mod.impl.assert(mod.impl.c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache.cpp", 1682, "ggml_backend_buffer_is_host(dst->buffer)");
+    pub fn setInputKShift(self: *const KvCache, dst: *mod.impl.llama_c.ggml_tensor) void {
+        mod.impl.assert(mod.impl.llama_c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache.cpp", 1682, "ggml_backend_buffer_is_host(dst->buffer)");
         const data: [*]i32 = @ptrCast(@alignCast(dst.data));
         for (0..self.n_stream) |s| {
             const cl = &self.cells()[s];
@@ -1624,7 +1624,7 @@ pub const KvCache = struct {
         // The cell rows of each slice.
         if (attn_mask.rows) |rows_t| {
             if (rows_t.buffer != null) {
-                mod.impl.assert(mod.impl.c.ggml_backend_buffer_is_host(rows_t.buffer), "llama-kv-cache.cpp", 1925, "ggml_backend_buffer_is_host(attn_mask.rows->buffer)");
+                mod.impl.assert(mod.impl.llama_c.ggml_backend_buffer_is_host(rows_t.buffer), "llama-kv-cache.cpp", 1925, "ggml_backend_buffer_is_host(attn_mask.rows->buffer)");
                 mod.impl.assert(self.n_stream == 1, "llama-kv-cache.cpp", 1926, "n_stream == 1");
 
                 const n_rows = rows_t.ne[0];
@@ -1652,7 +1652,7 @@ pub const KvCache = struct {
         // The streams in the current ubatch.
         const n_stream = dst.ne[3];
 
-        mod.impl.assert(mod.impl.c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache.cpp", 1947, "ggml_backend_buffer_is_host(dst->buffer)");
+        mod.impl.assert(mod.impl.llama_c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache.cpp", 1947, "ggml_backend_buffer_is_host(dst->buffer)");
 
         if (rows != null) {
             mod.impl.assert(attn_mask.rows.?.ne[0] == n_kv and attn_mask.rows.?.ne[1] == n_stream, "llama-kv-cache.cpp", 1950, "attn_mask.rows->ne[0] == n_kv && attn_mask.rows->ne[1] == n_stream");
@@ -1686,7 +1686,7 @@ pub const KvCache = struct {
         const swa = self.swa_type != .none;
         const is_2d = ubatch.isPos2d();
         const alibi = self.hparams.use_alibi;
-        if (dst.type == mod.impl.c.GGML_TYPE_F16) {
+        if (dst.type == mod.impl.llama_c.GGML_TYPE_F16) {
             maskDispatch(u16, args, @ptrCast(@alignCast(dst.data)), causal_attn, swa, is_2d, alibi);
         } else {
             maskDispatch(f32, args, @ptrCast(@alignCast(dst.data)), causal_attn, swa, is_2d, alibi);
@@ -1694,11 +1694,11 @@ pub const KvCache = struct {
     }
 
     /// Ports `llama_kv_cache`'s `set_input_pos_bucket` (llama-kv-cache.cpp:1995 @b1b770d90).
-    pub fn setInputPosBucket(self: *const KvCache, dst: *mod.impl.c.ggml_tensor, ubatch: *const mod.batch.Ubatch) void {
+    pub fn setInputPosBucket(self: *const KvCache, dst: *mod.impl.llama_c.ggml_tensor, ubatch: *const mod.batch.Ubatch) void {
         const n_tokens: usize = ubatch.n_tokens;
         mod.impl.assert(self.n_stream == 1, "llama-kv-cache.cpp", 1998, "n_stream == 1 && \"TODO: support multiple streams\"");
         const cl = &self.cells()[0];
-        mod.impl.assert(mod.impl.c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache.cpp", 2001, "ggml_backend_buffer_is_host(dst->buffer)");
+        mod.impl.assert(mod.impl.llama_c.ggml_backend_buffer_is_host(dst.buffer), "llama-kv-cache.cpp", 2001, "ggml_backend_buffer_is_host(dst->buffer)");
         mod.impl.assert(!ubatch.equalSeqs(), "llama-kv-cache.cpp", 2002, "!ubatch->equal_seqs()");
         const data: [*]i32 = @ptrCast(@alignCast(dst.data));
         const n_kv: usize = @intCast(dst.ne[0]);
@@ -1788,50 +1788,50 @@ pub const KvCache = struct {
     /// Ports `llama_kv_cache`'s `total_size` (llama-kv-cache.cpp:2084 @b1b770d90).
     pub fn totalSize(self: *const KvCache) usize {
         var size: usize = 0;
-        for (self.ctxs_bufs.bufs.items) |e| size += mod.impl.c.ggml_backend_buffer_get_size(e.buf);
+        for (self.ctxs_bufs.bufs.items) |e| size += mod.impl.llama_c.ggml_backend_buffer_get_size(e.buf);
         return size;
     }
 
     /// Ports `llama_kv_cache`'s `size_k_bytes` (llama-kv-cache.cpp:2094 @b1b770d90).
     fn sizeKBytes(self: *const KvCache) usize {
         var size: usize = 0;
-        for (self.layers.items) |l| size += mod.impl.c.ggml_nbytes(l.k);
+        for (self.layers.items) |l| size += mod.impl.llama_c.ggml_nbytes(l.k);
         return size;
     }
 
     /// Ports `llama_kv_cache`'s `size_v_bytes` (llama-kv-cache.cpp:2104 @b1b770d90).
     fn sizeVBytes(self: *const KvCache) usize {
         var size: usize = 0;
-        for (self.layers.items) |l| size += if (l.v) |v| mod.impl.c.ggml_nbytes(v) else 0;
+        for (self.layers.items) |l| size += if (l.v) |v| mod.impl.llama_c.ggml_nbytes(v) else 0;
         return size;
     }
 
     /// Ports `llama_kv_cache`'s `build_rope_shift` (llama-kv-cache.cpp:2114
     /// @b1b770d90): re-rotate layer `il`'s cached keys `k` by `shift`, with
     /// the layer's RoPE -- the indexer's for an indexer cache.
-    fn buildRopeShift(self: *const KvCache, cparams: *const mod.cparams.Cparams, ctx: *mod.impl.c.ggml_context, k: *mod.impl.c.ggml_tensor, shift: *mod.impl.c.ggml_tensor, rot: ?*mod.impl.c.ggml_tensor, il: u32) *mod.impl.c.ggml_tensor {
+    fn buildRopeShift(self: *const KvCache, cparams: *const mod.cparams.Cparams, ctx: *mod.impl.llama_c.ggml_context, k: *mod.impl.llama_c.ggml_tensor, shift: *mod.impl.llama_c.ggml_tensor, rot: ?*mod.impl.llama_c.ggml_tensor, il: u32) *mod.impl.llama_c.ggml_tensor {
         const rp = if (self.is_indexer) self.model.getRopeParamsIndexer(cparams, il) else self.model.getRopeParams(cparams, il);
 
         // For M-RoPE the whole vector rotates on a shift; a normal RoPE with
         // the NEOX ordering does it (@ngxson's workaround, ref:
         // https://github.com/ggml-org/llama.cpp/pull/13870).
-        const rope_type: c_int = if (rp.type == mod.impl.c.LLAMA_ROPE_TYPE_MROPE or rp.type == mod.impl.c.LLAMA_ROPE_TYPE_IMROPE) mod.impl.c.LLAMA_ROPE_TYPE_NEOX else rp.type;
+        const rope_type: c_int = if (rp.type == mod.impl.llama_c.LLAMA_ROPE_TYPE_MROPE or rp.type == mod.impl.llama_c.LLAMA_ROPE_TYPE_IMROPE) mod.impl.llama_c.LLAMA_ROPE_TYPE_NEOX else rp.type;
 
         const n_head_kv: i64 = self.hparams.nHeadKv(il);
         const n_embd_k_gqa: i64 = self.hparams.nEmbdKGqa(il);
         const n_embd_head_k: i64 = self.hparams.nEmbdHeadK(il);
-        const n_cells: i64 = @divTrunc(mod.impl.c.ggml_nelements(k), n_embd_k_gqa);
+        const n_cells: i64 = @divTrunc(mod.impl.llama_c.ggml_nelements(k), n_embd_k_gqa);
 
-        if (!mod.impl.c.ggml_is_quantized(k.type) and k.type != mod.impl.c.GGML_TYPE_F8_E4M3 and rot == null and rp.k_norm == null) {
+        if (!mod.impl.llama_c.ggml_is_quantized(k.type) and k.type != mod.impl.llama_c.GGML_TYPE_F8_E4M3 and rot == null and rp.k_norm == null) {
             // only the n_rot dimensions rotate
-            const k_rope = mod.impl.c.ggml_view_3d(ctx, k, rp.n_rot, n_head_kv, n_cells, mod.impl.c.ggml_row_size(k.type, n_embd_head_k), mod.impl.c.ggml_row_size(k.type, n_embd_k_gqa), mod.impl.c.ggml_row_size(k.type, rp.n_offs));
+            const k_rope = mod.impl.llama_c.ggml_view_3d(ctx, k, rp.n_rot, n_head_kv, n_cells, mod.impl.llama_c.ggml_row_size(k.type, n_embd_head_k), mod.impl.llama_c.ggml_row_size(k.type, n_embd_k_gqa), mod.impl.llama_c.ggml_row_size(k.type, rp.n_offs));
 
-            return mod.impl.c.ggml_rope_ext_inplace(ctx, k_rope, shift, rp.factors, rp.n_rot, rope_type, rp.n_ctx_orig, rp.freq_base, rp.freq_scale, rp.ext_factor, rp.attn_factor, rp.beta_fast, rp.beta_slow);
+            return mod.impl.llama_c.ggml_rope_ext_inplace(ctx, k_rope, shift, rp.factors, rp.n_rot, rope_type, rp.n_ctx_orig, rp.freq_base, rp.freq_scale, rp.ext_factor, rp.attn_factor, rp.beta_fast, rp.beta_slow);
         }
 
         // convert to f32 -> RoPE -> convert back, on whole rows as a head is
         // not always a multiple of the block size
-        var tmp = mod.impl.c.ggml_reshape_3d(ctx, mod.impl.c.ggml_cast(ctx, k, mod.impl.c.GGML_TYPE_F32), n_embd_head_k, n_head_kv, n_cells);
+        var tmp = mod.impl.llama_c.ggml_reshape_3d(ctx, mod.impl.llama_c.ggml_cast(ctx, k, mod.impl.llama_c.GGML_TYPE_F32), n_embd_head_k, n_head_kv, n_cells);
 
         // rotate back
         if (rot) |r| {
@@ -1840,16 +1840,16 @@ pub const KvCache = struct {
 
         // the RMS norm commutes with RoPE, but the weight does not
         if (rp.k_norm) |kn| {
-            tmp = mod.impl.c.ggml_div(ctx, tmp, kn);
+            tmp = mod.impl.llama_c.ggml_div(ctx, tmp, kn);
         }
 
-        tmp = mod.impl.c.ggml_rope_ext(ctx, tmp, shift, rp.factors, rp.n_rot, rope_type, rp.n_ctx_orig, rp.freq_base, rp.freq_scale, rp.ext_factor, rp.attn_factor, rp.beta_fast, rp.beta_slow);
+        tmp = mod.impl.llama_c.ggml_rope_ext(ctx, tmp, shift, rp.factors, rp.n_rot, rope_type, rp.n_ctx_orig, rp.freq_base, rp.freq_scale, rp.ext_factor, rp.attn_factor, rp.beta_fast, rp.beta_slow);
         if (rp.n_offs > 0) {
-            tmp = mod.impl.c.ggml_rope_set_offset(tmp, rp.n_offs);
+            tmp = mod.impl.llama_c.ggml_rope_set_offset(tmp, rp.n_offs);
         }
 
         if (rp.k_norm) |kn| {
-            tmp = mod.impl.c.ggml_mul(ctx, tmp, kn);
+            tmp = mod.impl.llama_c.ggml_mul(ctx, tmp, kn);
         }
 
         // rotate fwd
@@ -1857,19 +1857,19 @@ pub const KvCache = struct {
             tmp = mod.graph.mulMatHadamard(ctx, tmp, r);
         }
 
-        return mod.impl.c.ggml_cpy(ctx, tmp, k);
+        return mod.impl.llama_c.ggml_cpy(ctx, tmp, k);
     }
 
     /// Ports `llama_kv_cache`'s `build_graph_shift` (llama-kv-cache.cpp:2202 @b1b770d90).
-    fn buildGraphShift(self: *const KvCache, res: *mod.graph.Result, lctx: *mod.context.Context) *mod.impl.c.ggml_cgraph {
+    fn buildGraphShift(self: *const KvCache, res: *mod.graph.Result, lctx: *mod.context.Context) *mod.impl.llama_c.ggml_cgraph {
         mod.impl.assert(self.other == null, "llama-kv-cache.cpp", 2204, "!other");
         const ctx = res.getCtx();
         const gf = res.getGf();
 
         const inp = std.heap.c_allocator.create(InpKShift) catch oom();
         inp.* = .{ .kv_self = self };
-        inp.k_shift = mod.impl.c.ggml_new_tensor_1d(ctx, mod.impl.c.GGML_TYPE_I32, @as(i64, self.getSize()) * self.n_stream);
-        mod.impl.c.ggml_set_input(inp.k_shift);
+        inp.k_shift = mod.impl.llama_c.ggml_new_tensor_1d(ctx, mod.impl.llama_c.GGML_TYPE_I32, @as(i64, self.getSize()) * self.n_stream);
+        mod.impl.llama_c.ggml_set_input(inp.k_shift);
 
         const cparams = lctx.getCparams();
         for (self.layers.items) |*layer| {
@@ -1877,7 +1877,7 @@ pub const KvCache = struct {
             if (!self.hparams.hasRope(il)) continue;
 
             const cur = self.buildRopeShift(cparams, ctx, layer.k, inp.k_shift.?, layer.k_rot, il);
-            mod.impl.c.ggml_build_forward_expand(gf, cur);
+            mod.impl.llama_c.ggml_build_forward_expand(gf, cur);
         }
         _ = res.addInput(InpKShift, inp);
         return gf;
@@ -1889,7 +1889,7 @@ pub const KvCache = struct {
     pub fn stateWrite(self: *const KvCache, w: mod.io.Writer, seq_id: i32, flags: u32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         if (self.other != null) return;
 
-        if ((flags & mod.impl.c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) != 0 and self.swa_type == .none) {
+        if ((flags & mod.impl.llama_c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) != 0 and self.swa_type == .none) {
             return;
         }
         try w.writeValue(self.n_stream, exc);
@@ -1956,7 +1956,7 @@ pub const KvCache = struct {
     pub fn stateReadSinfo(self: *KvCache, r: mod.io.Reader, seq_id: i32, flags: u32, sinfos_out: ?*std.ArrayList(SlotInfo), sinfos_in: ?[]const SlotInfo, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         if (self.other != null) return;
 
-        if ((flags & mod.impl.c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) != 0 and self.swa_type == .none) {
+        if ((flags & mod.impl.llama_c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) != 0 and self.swa_type == .none) {
             return;
         }
         mod.impl.assert(seq_id == -1 or (seq_id >= 0 and @as(usize, @intCast(seq_id)) < self.seq_to_stream.items.len), "llama-kv-cache.cpp", 2325, "seq_id == -1 || (seq_id >= 0 && (size_t) seq_id < seq_to_stream.size())");
@@ -2068,7 +2068,7 @@ pub const KvCache = struct {
             const il = layer.il;
             const n_embd_k_gqa = self.hparams.nEmbdKGqa(il);
             const k = layer.k_stream.items[strm];
-            const k_size_row = mod.impl.c.ggml_row_size(k.type, n_embd_k_gqa);
+            const k_size_row = mod.impl.llama_c.ggml_row_size(k.type, n_embd_k_gqa);
 
             if (contiguous) {
                 mod.impl.clearTensorData(k, sinfo.head() * k_size_row, cell_count * k_size_row);
@@ -2083,14 +2083,14 @@ pub const KvCache = struct {
             const v = layer.v_stream.items[strm] orelse continue;
 
             if (!self.v_trans) {
-                const v_size_row = mod.impl.c.ggml_row_size(v.type, n_embd_v_gqa);
+                const v_size_row = mod.impl.llama_c.ggml_row_size(v.type, n_embd_v_gqa);
                 if (contiguous) {
                     mod.impl.clearTensorData(v, sinfo.head() * v_size_row, cell_count * v_size_row);
                 } else {
                     for (idxs) |idx| mod.impl.clearTensorData(v, idx * v_size_row, v_size_row);
                 }
             } else {
-                const v_size_el = mod.impl.c.ggml_type_size(v.type);
+                const v_size_el = mod.impl.llama_c.ggml_type_size(v.type);
                 const n_cells: usize = cl.size();
                 if (contiguous) {
                     const h: usize = sinfo.head();
@@ -2146,7 +2146,7 @@ pub const KvCache = struct {
             const k = layer.k_stream.items[cr.strm];
             const k_type_i: i32 = @intCast(k.type);
             try w.writeValue(k_type_i, exc);
-            const k_size_row: u64 = mod.impl.c.ggml_row_size(k.type, n_embd_k_gqa);
+            const k_size_row: u64 = mod.impl.llama_c.ggml_row_size(k.type, n_embd_k_gqa);
             try w.writeValue(k_size_row, exc);
             for (cr.data.items) |range| {
                 const range_size: usize = range[1] - range[0];
@@ -2160,7 +2160,7 @@ pub const KvCache = struct {
                 const v = layer.v_stream.items[cr.strm] orelse continue;
                 const v_type_i: i32 = @intCast(v.type);
                 try w.writeValue(v_type_i, exc);
-                const v_size_row: u64 = mod.impl.c.ggml_row_size(v.type, n_embd_v_gqa);
+                const v_size_row: u64 = mod.impl.llama_c.ggml_row_size(v.type, n_embd_v_gqa);
                 try w.writeValue(v_size_row, exc);
                 for (cr.data.items) |range| {
                     const range_size: usize = range[1] - range[0];
@@ -2175,7 +2175,7 @@ pub const KvCache = struct {
                 const v = layer.v_stream.items[cr.strm] orelse continue;
                 const v_type_i: i32 = @intCast(v.type);
                 try w.writeValue(v_type_i, exc);
-                const v_size_el: u32 = @intCast(mod.impl.c.ggml_type_size(v.type));
+                const v_size_el: u32 = @intCast(mod.impl.llama_c.ggml_type_size(v.type));
                 try w.writeValue(v_size_el, exc);
                 try w.writeValue(n_embd_v_gqa, exc);
                 for (0..n_embd_v_gqa) |j| {
@@ -2401,7 +2401,7 @@ pub const KvCache = struct {
                 return false;
             }
             const k_size_row_ref = try r.readValue(u64, exc);
-            const k_size_row = mod.impl.c.ggml_row_size(k.type, n_embd_k_gqa);
+            const k_size_row = mod.impl.llama_c.ggml_row_size(k.type, n_embd_k_gqa);
             if (k_size_row != k_size_row_ref) {
                 mod.impl.logError("%s: mismatched key row size (%zu != %zu, layer %d)\n", .{ func, k_size_row, @as(usize, @intCast(k_size_row_ref)), il });
                 return false;
@@ -2421,7 +2421,7 @@ pub const KvCache = struct {
                     return false;
                 }
                 const v_size_row_ref = try r.readValue(u64, exc);
-                const v_size_row = mod.impl.c.ggml_row_size(v.type, n_embd_v_gqa);
+                const v_size_row = mod.impl.llama_c.ggml_row_size(v.type, n_embd_v_gqa);
                 if (v_size_row != v_size_row_ref) {
                     mod.impl.logError("%s: mismatched value row size (%zu != %zu, layer %d)\n", .{ func, v_size_row, @as(usize, @intCast(v_size_row_ref)), il });
                     return false;
@@ -2441,7 +2441,7 @@ pub const KvCache = struct {
                     return false;
                 }
                 const v_size_el_ref = try r.readValue(u32, exc);
-                const v_size_el = mod.impl.c.ggml_type_size(v.type);
+                const v_size_el = mod.impl.llama_c.ggml_type_size(v.type);
                 if (v_size_el != v_size_el_ref) {
                     mod.impl.logError("%s: mismatched value element size (%zu != %zu, layer %d)\n", .{ func, v_size_el, @as(usize, v_size_el_ref), il });
                     return false;
@@ -2546,7 +2546,7 @@ fn releaseUbatches(list: *std.ArrayList(mod.batch.Ubatch)) void {
 /// Mirrors `llm_graph_input_k_shift` (llama-kv-cache.cpp:2182 @b1b770d90).
 const InpKShift = struct {
     /// I32 `[kv_size*n_stream]`.
-    k_shift: ?*mod.impl.c.ggml_tensor = null,
+    k_shift: ?*mod.impl.llama_c.ggml_tensor = null,
     kv_self: *const KvCache,
 
     /// Ports `llm_graph_input_k_shift`'s `set_input` (llama-kv-cache.cpp:2194
@@ -2641,7 +2641,7 @@ fn maskDispatch(comptime T: type, args: MaskArgs, data: [*]T, causal: bool, swa:
 }
 
 fn maskCast(comptime T: type, v: f32) T {
-    if (T == u16) return mod.impl.c.ggml_fp32_to_fp16(v);
+    if (T == u16) return mod.impl.llama_c.ggml_fp32_to_fp16(v);
     return v;
 }
 
@@ -2883,10 +2883,10 @@ pub const KvCacheContext = struct {
         return self.n_kv_rows;
     }
 
-    pub fn typeK(self: *const KvCacheContext) mod.impl.c.enum_ggml_type {
+    pub fn typeK(self: *const KvCacheContext) mod.impl.llama_c.enum_ggml_type {
         return self.kv.?.typeK();
     }
-    pub fn typeV(self: *const KvCacheContext) mod.impl.c.enum_ggml_type {
+    pub fn typeV(self: *const KvCacheContext) mod.impl.llama_c.enum_ggml_type {
         return self.kv.?.typeV();
     }
 
@@ -2894,54 +2894,54 @@ pub const KvCacheContext = struct {
         return &self.sinfos.items[self.i_cur];
     }
 
-    pub fn getK(self: *const KvCacheContext, ctx: *mod.impl.c.ggml_context, il: i32) *mod.impl.c.ggml_tensor {
+    pub fn getK(self: *const KvCacheContext, ctx: *mod.impl.llama_c.ggml_context, il: i32) *mod.impl.llama_c.ggml_tensor {
         return self.kv.?.getK(ctx, il, self.n_kv, self.sinfo());
     }
-    pub fn getV(self: *const KvCacheContext, ctx: *mod.impl.c.ggml_context, il: i32) *mod.impl.c.ggml_tensor {
+    pub fn getV(self: *const KvCacheContext, ctx: *mod.impl.llama_c.ggml_context, il: i32) *mod.impl.llama_c.ggml_tensor {
         return self.kv.?.getV(ctx, il, self.n_kv, self.sinfo());
     }
     /// Ports `llama_kv_cache_context`'s `get_k_scale` (llama-kv-cache.cpp:3076 @b1b770d90).
-    pub fn getKScale(self: *const KvCacheContext, il: i32) ?*mod.impl.c.ggml_tensor {
+    pub fn getKScale(self: *const KvCacheContext, il: i32) ?*mod.impl.llama_c.ggml_tensor {
         return self.kv.?.getKScale(il);
     }
     /// Ports `llama_kv_cache_context`'s `get_v_scale` (llama-kv-cache.cpp:3080 @b1b770d90).
-    pub fn getVScale(self: *const KvCacheContext, il: i32) ?*mod.impl.c.ggml_tensor {
+    pub fn getVScale(self: *const KvCacheContext, il: i32) ?*mod.impl.llama_c.ggml_tensor {
         return self.kv.?.getVScale(il);
     }
-    pub fn cpyK(self: *const KvCacheContext, ctx: *mod.impl.c.ggml_context, k_cur: *mod.impl.c.ggml_tensor, k_idxs: *mod.impl.c.ggml_tensor, il: i32) *mod.impl.c.ggml_tensor {
+    pub fn cpyK(self: *const KvCacheContext, ctx: *mod.impl.llama_c.ggml_context, k_cur: *mod.impl.llama_c.ggml_tensor, k_idxs: *mod.impl.llama_c.ggml_tensor, il: i32) *mod.impl.llama_c.ggml_tensor {
         return self.kv.?.cpyK(ctx, k_cur, k_idxs, il, self.sinfo());
     }
-    pub fn cpyV(self: *const KvCacheContext, ctx: *mod.impl.c.ggml_context, v_cur: *mod.impl.c.ggml_tensor, v_idxs: *mod.impl.c.ggml_tensor, il: i32) *mod.impl.c.ggml_tensor {
+    pub fn cpyV(self: *const KvCacheContext, ctx: *mod.impl.llama_c.ggml_context, v_cur: *mod.impl.llama_c.ggml_tensor, v_idxs: *mod.impl.llama_c.ggml_tensor, il: i32) *mod.impl.llama_c.ggml_tensor {
         return self.kv.?.cpyV(ctx, v_cur, v_idxs, il, self.sinfo());
     }
-    pub fn buildInputKIdxs(self: *const KvCacheContext, ctx: *mod.impl.c.ggml_context, ubatch: *const mod.batch.Ubatch) *mod.impl.c.ggml_tensor {
+    pub fn buildInputKIdxs(self: *const KvCacheContext, ctx: *mod.impl.llama_c.ggml_context, ubatch: *const mod.batch.Ubatch) *mod.impl.llama_c.ggml_tensor {
         return self.kv.?.buildInputKIdxs(ctx, ubatch);
     }
-    pub fn buildInputVIdxs(self: *const KvCacheContext, ctx: *mod.impl.c.ggml_context, ubatch: *const mod.batch.Ubatch) *mod.impl.c.ggml_tensor {
+    pub fn buildInputVIdxs(self: *const KvCacheContext, ctx: *mod.impl.llama_c.ggml_context, ubatch: *const mod.batch.Ubatch) *mod.impl.llama_c.ggml_tensor {
         return self.kv.?.buildInputVIdxs(ctx, ubatch);
     }
     /// Ports `llama_kv_cache_context`'s `get_k_rot` (llama-kv-cache.cpp:3100 @b1b770d90).
-    pub fn getKRot(self: *const KvCacheContext) []const ?*mod.impl.c.ggml_tensor {
+    pub fn getKRot(self: *const KvCacheContext) []const ?*mod.impl.llama_c.ggml_tensor {
         return self.kv.?.getKRot();
     }
     /// Ports `llama_kv_cache_context`'s `get_v_rot` (llama-kv-cache.cpp:3104 @b1b770d90).
-    pub fn getVRot(self: *const KvCacheContext) []const ?*mod.impl.c.ggml_tensor {
+    pub fn getVRot(self: *const KvCacheContext) []const ?*mod.impl.llama_c.ggml_tensor {
         return self.kv.?.getVRot();
     }
-    pub fn setInputKShift(self: *const KvCacheContext, dst: *mod.impl.c.ggml_tensor) void {
+    pub fn setInputKShift(self: *const KvCacheContext, dst: *mod.impl.llama_c.ggml_tensor) void {
         self.kv.?.setInputKShift(dst);
     }
-    pub fn setInputKIdxs(self: *const KvCacheContext, dst: *mod.impl.c.ggml_tensor, ubatch: *const mod.batch.Ubatch) void {
+    pub fn setInputKIdxs(self: *const KvCacheContext, dst: *mod.impl.llama_c.ggml_tensor, ubatch: *const mod.batch.Ubatch) void {
         self.kv.?.setInputKIdxs(dst, ubatch, self.sinfo());
     }
-    pub fn setInputVIdxs(self: *const KvCacheContext, dst: *mod.impl.c.ggml_tensor, ubatch: *const mod.batch.Ubatch) void {
+    pub fn setInputVIdxs(self: *const KvCacheContext, dst: *mod.impl.llama_c.ggml_tensor, ubatch: *const mod.batch.Ubatch) void {
         self.kv.?.setInputVIdxs(dst, ubatch, self.sinfo());
     }
     /// Ports `llama_kv_cache_context`'s `set_input_attn_mask` (llama-kv-cache.cpp:3120 @b1b770d90).
     pub fn setInputAttnMask(self: *const KvCacheContext, attn_mask: *const mod.graph.AttnMask, ubatch: *const mod.batch.Ubatch, causal_attn: bool) void {
         self.kv.?.setInputAttnMask(attn_mask, ubatch, causal_attn);
     }
-    pub fn setInputPosBucket(self: *const KvCacheContext, dst: *mod.impl.c.ggml_tensor, ubatch: *const mod.batch.Ubatch) void {
+    pub fn setInputPosBucket(self: *const KvCacheContext, dst: *mod.impl.llama_c.ggml_tensor, ubatch: *const mod.batch.Ubatch) void {
         self.kv.?.setInputPosBucket(dst, ubatch);
     }
 

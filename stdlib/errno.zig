@@ -9,6 +9,7 @@
 //! words differ between C libraries.
 
 const std = @import("std");
+const mod = @import("module.zig");
 
 /// `strerror(errnum)`: the C library's text for an `errno`.
 ///
@@ -17,7 +18,7 @@ const std = @import("std");
 ///
 /// Return: static, or valid until the next call.
 pub fn strerror(errnum: c_int) [*:0]const u8 {
-    return @import("libc.zig").strerror(errnum);
+    return mod.libc.strerror(errnum);
 }
 
 /// The `errno` a file error came from, for upstream's `strerror(errno)`.

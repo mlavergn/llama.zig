@@ -112,7 +112,7 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
     llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/smallthinker.cpp", 82, "n_embd_head == hparams.n_embd_head_k()");
     llama.impl.assert(n_embd_head == b.n_rot, "models/smallthinker.cpp", 83, "n_embd_head == n_rot");
 
-    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.llama_c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
 
     // The positions.
     const inp_pos = b.buildInpPos();
@@ -126,7 +126,7 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
         const layer = &model.layers[@intCast(il)];
         var inpSA = inpL;
 
-        var probs: *llama.impl.c.ggml_tensor = b.buildLoraMm(layer.ffn_gate_inp.?, inpL, null); // [n_expert, n_tokens]
+        var probs: *llama.impl.llama_c.ggml_tensor = b.buildLoraMm(layer.ffn_gate_inp.?, inpL, null); // [n_expert, n_tokens]
         b.cb(probs, "ffn_moe_logits", il);
 
         // Norm.
@@ -149,11 +149,11 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
             cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
         }
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
-            probs = llama.impl.c.ggml_get_rows(ctx, probs, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            probs = llama.impl.llama_c.ggml_get_rows(ctx, probs, inp_out_ids);
         }
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The mixture of experts.
@@ -177,7 +177,7 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
         b.cb(ffn_out, "ffn_out", il);
         cur = ffn_out;
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

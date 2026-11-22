@@ -60,8 +60,8 @@ pub const KvCacheDsaIswa = struct {
     pub fn create(
         model: *const mod.model.Model,
         no_alloc: bool,
-        type_k: mod.impl.c.enum_ggml_type,
-        type_v: mod.impl.c.enum_ggml_type,
+        type_k: mod.impl.llama_c.enum_ggml_type,
+        type_v: mod.impl.llama_c.enum_ggml_type,
         v_trans: bool,
         offload: bool,
         swa_full: bool,

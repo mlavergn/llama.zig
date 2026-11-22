@@ -96,7 +96,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 
     const f_logit_scale = hp.f_logit_scale;
 
-    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.llama_c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
 
     // The positions.
     const inp_pos = b.buildInpPos();
@@ -133,9 +133,9 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         }
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
-            ffn_inp = llama.impl.c.ggml_get_rows(ctx, ffn_inp, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpL = llama.impl.llama_c.ggml_get_rows(ctx, inpL, inp_out_ids);
+            ffn_inp = llama.impl.llama_c.ggml_get_rows(ctx, ffn_inp, inp_out_ids);
         }
 
         const attn_out = cur;
@@ -147,8 +147,8 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         }
 
         // Residual, feed-forward and self-attention added together.
-        cur = llama.impl.c.ggml_add(ctx, cur, inpL);
-        cur = llama.impl.c.ggml_add(ctx, cur, attn_out);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, inpL);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, attn_out);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
@@ -168,7 +168,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     cur = b.buildLoraMm(model.output.?, cur, model.output_s);
 
     if (f_logit_scale != 0.0) {
-        cur = llama.impl.c.ggml_scale(ctx, cur, f_logit_scale);
+        cur = llama.impl.llama_c.ggml_scale(ctx, cur, f_logit_scale);
     }
 
     b.cb(cur, "result_output", -1);

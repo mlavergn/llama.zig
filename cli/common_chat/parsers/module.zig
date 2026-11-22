@@ -26,10 +26,6 @@ const msg_mod = @import("../msg.zig");
 const util = @import("../util.zig");
 const log = @import("../log.zig");
 
-const Allocator = std.mem.Allocator;
-const Value = json.Value;
-const Error = exception.Error;
-
 pub const cohere2moe = @import("cohere2moe.zig");
 pub const deepseek = @import("deepseek.zig");
 pub const functionary_v3_2 = @import("functionary_v3_2.zig");
@@ -57,7 +53,7 @@ pub const translate_gemma = @import("translate_gemma.zig");
 /// `tools[i]` for `i < tools.size()` through `common_json`'s const
 /// `operator[]`, which is `at`: a scalar's size is 1 and an object's its
 /// member count, and either throws there (`cannot use at() with ...`).
-pub fn foreachFunction(tools: *const Value, ctx: anytype, comptime f: fn (@TypeOf(ctx), tool_index: usize, tool: *Value) Error!void) Error!void {
+pub fn foreachFunction(tools: *const json.Value, ctx: anytype, comptime f: fn (@TypeOf(ctx), tool_index: usize, tool: *json.Value) exception.Error!void) exception.Error!void {
     for (0..tools.size()) |i| {
         const tool = tools.atIndex(i) catch |e| return util.fromJson(e);
         const is_function = tool.contains("type") and blk: {
@@ -90,7 +86,7 @@ pub fn foreachFunction(tools: *const Value, ctx: anytype, comptime f: fn (@TypeO
 /// - `f`: called with the property's index, the property and its
 ///   document, which `f` may retain (`peg.Builder.schemaDoc` does);
 ///   released here after the last call.
-pub fn foreachParameter(a: Allocator, function: *const Value, ctx: anytype, comptime f: fn (@TypeOf(ctx), param_index: usize, prop: *const json.schema.Property, doc: *peg.SharedDoc) Error!void) Error!void {
+pub fn foreachParameter(a: std.mem.Allocator, function: *const json.Value, ctx: anytype, comptime f: fn (@TypeOf(ctx), param_index: usize, prop: *const json.schema.Property, doc: *peg.SharedDoc) exception.Error!void) exception.Error!void {
     const params = try msg_mod.toolParameters(a, function);
     const doc = peg.SharedDoc.fromJson(a, &params) catch |e| return util.fromPeg(e);
     defer doc.release();
@@ -104,21 +100,21 @@ pub fn foreachParameter(a: Allocator, function: *const Value, ctx: anytype, comp
 /// builds with `std::to_string` of an index.
 ///
 /// Return: owned by `a`.
-pub fn indexName(a: Allocator, prefix: []const u8, index: usize, suffix: []const u8) Allocator.Error![]u8 {
+pub fn indexName(a: std.mem.Allocator, prefix: []const u8, index: usize, suffix: []const u8) std.mem.Allocator.Error![]u8 {
     return std.fmt.allocPrint(a, "{s}{d}{s}", .{ prefix, index, suffix });
 }
 
 /// `"tool-<tool_index>-arg-<param_index><suffix>"`.
 ///
 /// Return: owned by `a`.
-pub fn argName(a: Allocator, tool_index: usize, param_index: usize, suffix: []const u8) Allocator.Error![]u8 {
+pub fn argName(a: std.mem.Allocator, tool_index: usize, param_index: usize, suffix: []const u8) std.mem.Allocator.Error![]u8 {
     return std.fmt.allocPrint(a, "tool-{d}-arg-{d}{s}", .{ tool_index, param_index, suffix });
 }
 
 /// `build_grammar([&](b) { parser.build_grammar(b, lazy); })`.
 ///
 /// Return: owned by `a`.
-pub fn grammar(a: Allocator, arena: *const peg.Arena, lazy: bool) Error![]u8 {
+pub fn grammar(a: std.mem.Allocator, arena: *const peg.Arena, lazy: bool) exception.Error![]u8 {
     return peg.gbnf.grammar(a, arena, lazy, .{}) catch |e| util.fromPeg(e);
 }
 
@@ -126,19 +122,19 @@ pub fn grammar(a: Allocator, arena: *const peg.Arena, lazy: bool) Error![]u8 {
 /// throws nlohmann's type error when the name is not a string.
 ///
 /// Return: borrowed from `tool`.
-pub fn functionName(tool: *const Value) Error![]const u8 {
+pub fn functionName(tool: *const json.Value) exception.Error![]const u8 {
     const f = tool.at("function") catch |e| return util.fromJson(e);
     const n = f.at("name") catch |e| return util.fromJson(e);
     return n.get([]const u8) catch |e| util.fromJson(e);
 }
 
 /// `inputs.tools.is_array() && !inputs.tools.empty()`.
-pub fn hasTools(tools: *const Value) bool {
+pub fn hasTools(tools: *const json.Value) bool {
     return tools.isArray() and !tools.empty();
 }
 
 /// `inputs.json_schema.is_object() && !inputs.json_schema.empty()`.
-pub fn hasResponseFormat(schema: *const Value) bool {
+pub fn hasResponseFormat(schema: *const json.Value) bool {
     return schema.isObject() and !schema.empty();
 }
 

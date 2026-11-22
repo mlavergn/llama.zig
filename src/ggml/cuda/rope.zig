@@ -166,10 +166,10 @@ fn int(v: anytype) c_int {
 }
 
 /// Ports `ggml_cuda_op_rope_impl` (rope.cu:548 @b1b770d90).
-fn opRopeImpl(comptime forward: bool, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor, set_rows: ?*const ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const src2: ?*const ggml.impl.c.ggml_tensor = dst.src[2];
+fn opRopeImpl(comptime forward: bool, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor, set_rows: ?*const ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const src2: ?*const ggml.impl.ggml_c.ggml_tensor = dst.src[2];
 
     var dst_d: ?*anyopaque = dst.data;
     var row_indices: ?*const anyopaque = null;
@@ -179,29 +179,29 @@ fn opRopeImpl(comptime forward: bool, ctx: *ggml.cuda.common.Context, dst: *ggml
     if (set_rows) |sr| {
         ggml.impl.assert(forward, "forward");
         dst_d = sr.data;
-        row_indices = ggml.impl.one(ggml.impl.c.ggml_tensor, sr.src[1]).data;
+        row_indices = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, sr.src[1]).data;
         dst_type = sr.type;
-        set_rows_stride = @truncate(@as(i64, @intCast(sr.nb[1] / ggml.impl.c.ggml_type_size(sr.type))));
+        set_rows_stride = @truncate(@as(i64, @intCast(sr.nb[1] / ggml.impl.ggml_c.ggml_type_size(sr.type))));
     }
     const stream = ctx.stream();
 
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32 or src0.type == ggml.impl.c.GGML_TYPE_F16, "src0->type == GGML_TYPE_F32 || src0->type == GGML_TYPE_F16");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32 or dst.type == ggml.impl.c.GGML_TYPE_F16, " dst->type == GGML_TYPE_F32 ||  dst->type == GGML_TYPE_F16");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32 or src0.type == ggml.impl.ggml_c.GGML_TYPE_F16, "src0->type == GGML_TYPE_F32 || src0->type == GGML_TYPE_F16");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32 or dst.type == ggml.impl.ggml_c.GGML_TYPE_F16, " dst->type == GGML_TYPE_F32 ||  dst->type == GGML_TYPE_F16");
     // When not fused, src0 and dst types must match
     // When fused (ROPE+VIEW+SET_ROWS), src0 may be F32 and dst may be F16
-    ggml.impl.assert(src0.type == dst.type or (src0.type == ggml.impl.c.GGML_TYPE_F32 and dst.type == ggml.impl.c.GGML_TYPE_F16), "src0->type == dst->type || (src0->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F16)");
+    ggml.impl.assert(src0.type == dst.type or (src0.type == ggml.impl.ggml_c.GGML_TYPE_F32 and dst.type == ggml.impl.ggml_c.GGML_TYPE_F16), "src0->type == dst->type || (src0->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F16)");
 
     const ne00 = src0.ne[0]; // head dims
     const ne01 = src0.ne[1]; // num heads
     const ne02 = src0.ne[2]; // num heads
-    const nr = ggml.impl.c.ggml_nrows(src0);
+    const nr = ggml.impl.ggml_c.ggml_nrows(src0);
 
-    const ts0 = ggml.impl.c.ggml_type_size(src0.type);
+    const ts0 = ggml.impl.ggml_c.ggml_type_size(src0.type);
     const s01 = src0.nb[1] / ts0;
     const s02 = src0.nb[2] / ts0;
     const s03 = src0.nb[3] / ts0;
 
-    const tsd = ggml.impl.c.ggml_type_size(dst.type);
+    const tsd = ggml.impl.ggml_c.ggml_type_size(dst.type);
     const s1 = dst.nb[1] / tsd;
     const s2 = dst.nb[2] / tsd;
     const s3 = dst.nb[3] / tsd;
@@ -226,10 +226,10 @@ fn opRopeImpl(comptime forward: bool, ctx: *ggml.cuda.common.Context, dst: *ggml
     const beta_slow = ggml.impl.getOpParamsF32(dst, 10);
     for (0..4) |i| sections.v[i] = ggml.impl.getOpParamsI32(dst, 11 + i);
 
-    const is_neox = (mode & ggml.impl.c.GGML_ROPE_TYPE_NEOX) != 0;
-    const is_mrope = (mode & ggml.impl.c.GGML_ROPE_TYPE_MROPE) != 0;
-    const is_imrope = mode == ggml.impl.c.GGML_ROPE_TYPE_IMROPE;
-    const is_vision = mode == ggml.impl.c.GGML_ROPE_TYPE_VISION;
+    const is_neox = (mode & ggml.impl.ggml_c.GGML_ROPE_TYPE_NEOX) != 0;
+    const is_mrope = (mode & ggml.impl.ggml_c.GGML_ROPE_TYPE_MROPE) != 0;
+    const is_imrope = mode == ggml.impl.ggml_c.GGML_ROPE_TYPE_IMROPE;
+    const is_vision = mode == ggml.impl.ggml_c.GGML_ROPE_TYPE_VISION;
 
     if (is_mrope) {
         ggml.impl.assert(sections.v[0] > 0 or sections.v[1] > 0 or sections.v[2] > 0, "sections.v[0] > 0 || sections.v[1] > 0 || sections.v[2] > 0");
@@ -248,7 +248,7 @@ fn opRopeImpl(comptime forward: bool, ctx: *ggml.cuda.common.Context, dst: *ggml
     }
 
     var corr_dims: CorrDims = undefined;
-    ggml.impl.c.ggml_rope_yarn_corr_dims(n_dims, n_ctx_orig, freq_base, beta_fast, beta_slow, ggml.impl.c.ggml_rope_get_truncate(dst), &corr_dims.v);
+    ggml.impl.ggml_c.ggml_rope_yarn_corr_dims(n_dims, n_ctx_orig, freq_base, beta_fast, beta_slow, ggml.impl.ggml_c.ggml_rope_get_truncate(dst), &corr_dims.v);
 
     const a: Args = .{
         .x = src0.data,
@@ -274,8 +274,8 @@ fn opRopeImpl(comptime forward: bool, ctx: *ggml.cuda.common.Context, dst: *ggml
         .freq_factors = freq_factors,
     };
 
-    const F32 = ggml.impl.c.GGML_TYPE_F32;
-    const F16 = ggml.impl.c.GGML_TYPE_F16;
+    const F32 = ggml.impl.ggml_c.GGML_TYPE_F32;
+    const F16 = ggml.impl.ggml_c.GGML_TYPE_F16;
 
     // compute
     if (is_neox) {
@@ -320,18 +320,18 @@ fn opRopeImpl(comptime forward: bool, ctx: *ggml.cuda.common.Context, dst: *ggml
 }
 
 /// Ports `ggml_cuda_op_rope` (rope.cu:714 @b1b770d90).
-pub fn opRope(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+pub fn opRope(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     opRopeImpl(true, ctx, dst, null);
 }
 
 /// Ports `ggml_cuda_op_rope_back` (rope.cu:718 @b1b770d90).
-pub fn opRopeBack(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+pub fn opRopeBack(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     opRopeImpl(false, ctx, dst, null);
 }
 
 /// Ports `ggml_cuda_op_rope_fused` (rope.cu:722 @b1b770d90): `ROPE` written
 /// straight into the rows a following `SET_ROWS` selects.
-pub fn opRopeFused(ctx: *ggml.cuda.common.Context, rope: *ggml.impl.c.ggml_tensor, set_rows: *ggml.impl.c.ggml_tensor) void {
+pub fn opRopeFused(ctx: *ggml.cuda.common.Context, rope: *ggml.impl.ggml_c.ggml_tensor, set_rows: *ggml.impl.ggml_c.ggml_tensor) void {
     opRopeImpl(true, ctx, rope, set_rows);
 }
 
@@ -417,16 +417,16 @@ fn rmsNormMulRopeCuda(
 
 /// Ports `ggml_cuda_op_rms_norm_mul_rope_fused` (rope.cu:881 @b1b770d90).
 /// `set_rows` is null when the chain ends at the `ROPE`.
-pub fn opRmsNormMulRopeFused(ctx: *ggml.cuda.common.Context, rms_norm: *ggml.impl.c.ggml_tensor, mul: *ggml.impl.c.ggml_tensor, rope: *ggml.impl.c.ggml_tensor, set_rows: ?*ggml.impl.c.ggml_tensor) void {
-    const x = ggml.impl.one(ggml.impl.c.ggml_tensor, rms_norm.src[0]);
-    const mul_src = ggml.impl.one(ggml.impl.c.ggml_tensor, if (mul.src[0] == rms_norm) mul.src[1] else mul.src[0]);
+pub fn opRmsNormMulRopeFused(ctx: *ggml.cuda.common.Context, rms_norm: *ggml.impl.ggml_c.ggml_tensor, mul: *ggml.impl.ggml_c.ggml_tensor, rope: *ggml.impl.ggml_c.ggml_tensor, set_rows: ?*ggml.impl.ggml_c.ggml_tensor) void {
+    const x = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, rms_norm.src[0]);
+    const mul_src = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, if (mul.src[0] == rms_norm) mul.src[1] else mul.src[0]);
 
     const eps = ggml.impl.getOpParamsF32(rms_norm, 0);
     ggml.impl.assert(eps >= 0.0, "eps >= 0.0f");
 
-    ggml.impl.assert(x.type == ggml.impl.c.GGML_TYPE_F32, "x->type == GGML_TYPE_F32");
-    ggml.impl.assert(mul_src.type == ggml.impl.c.GGML_TYPE_F32, "mul_src->type == GGML_TYPE_F32");
-    ggml.impl.assert(rope.type == ggml.impl.c.GGML_TYPE_F32, "rope->type == GGML_TYPE_F32");
+    ggml.impl.assert(x.type == ggml.impl.ggml_c.GGML_TYPE_F32, "x->type == GGML_TYPE_F32");
+    ggml.impl.assert(mul_src.type == ggml.impl.ggml_c.GGML_TYPE_F32, "mul_src->type == GGML_TYPE_F32");
+    ggml.impl.assert(rope.type == ggml.impl.ggml_c.GGML_TYPE_F32, "rope->type == GGML_TYPE_F32");
 
     var dst_d: ?*anyopaque = rope.data;
     var dst_type = rope.type;
@@ -436,8 +436,8 @@ pub fn opRmsNormMulRopeFused(ctx: *ggml.cuda.common.Context, rms_norm: *ggml.imp
     if (set_rows) |sr| {
         dst_d = sr.data;
         dst_type = sr.type;
-        row_indices = ggml.impl.one(ggml.impl.c.ggml_tensor, sr.src[1]).data;
-        set_rows_stride = @truncate(@as(i64, @intCast(sr.nb[1] / ggml.impl.c.ggml_type_size(sr.type))));
+        row_indices = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, sr.src[1]).data;
+        set_rows_stride = @truncate(@as(i64, @intCast(sr.nb[1] / ggml.impl.ggml_c.ggml_type_size(sr.type))));
     }
 
     const n_dims: c_int = ggml.impl.getOpParamsI32(rope, 1);
@@ -451,28 +451,28 @@ pub fn opRmsNormMulRopeFused(ctx: *ggml.cuda.common.Context, rms_norm: *ggml.imp
     const beta_fast = ggml.impl.getOpParamsF32(rope, 9);
     const beta_slow = ggml.impl.getOpParamsF32(rope, 10);
 
-    const is_neox = (mode & ggml.impl.c.GGML_ROPE_TYPE_NEOX) != 0;
+    const is_neox = (mode & ggml.impl.ggml_c.GGML_ROPE_TYPE_NEOX) != 0;
 
-    const pos: CPtr = ggml.impl.one(ggml.impl.c.ggml_tensor, rope.src[1]).data;
+    const pos: CPtr = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, rope.src[1]).data;
 
-    const freq_factors: CPtr = if (rope.src[2] != null) ggml.impl.one(ggml.impl.c.ggml_tensor, rope.src[2]).data else null;
+    const freq_factors: CPtr = if (rope.src[2] != null) ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, rope.src[2]).data else null;
 
     var corr_dims: CorrDims = undefined;
-    ggml.impl.c.ggml_rope_yarn_corr_dims(n_dims, n_ctx_orig, freq_base, beta_fast, beta_slow, ggml.impl.c.ggml_rope_get_truncate(rope), &corr_dims.v);
+    ggml.impl.ggml_c.ggml_rope_yarn_corr_dims(n_dims, n_ctx_orig, freq_base, beta_fast, beta_slow, ggml.impl.ggml_c.ggml_rope_get_truncate(rope), &corr_dims.v);
 
-    const ts0 = ggml.impl.c.ggml_type_size(x.type);
+    const ts0 = ggml.impl.ggml_c.ggml_type_size(x.type);
     ggml.impl.assert(x.nb[0] == ts0, "x->nb[0] == ts0");
     const s01: i64 = @intCast(x.nb[1] / ts0);
     const s02: i64 = @intCast(x.nb[2] / ts0);
     const s03: i64 = @intCast(x.nb[3] / ts0);
 
-    const ts_mul = ggml.impl.c.ggml_type_size(mul_src.type);
+    const ts_mul = ggml.impl.ggml_c.ggml_type_size(mul_src.type);
     ggml.impl.assert(mul_src.nb[0] == ts_mul, "mul_src->nb[0] == ts_mul");
     const mul_s01: i64 = @intCast(mul_src.nb[1] / ts_mul);
     const mul_s02: i64 = @intCast(mul_src.nb[2] / ts_mul);
     const mul_s03: i64 = @intCast(mul_src.nb[3] / ts_mul);
 
-    const ts_dst = ggml.impl.c.ggml_type_size(rope.type);
+    const ts_dst = ggml.impl.ggml_c.ggml_type_size(rope.type);
     const s1: i64 = @intCast(rope.nb[1] / ts_dst);
     const s2: i64 = @intCast(rope.nb[2] / ts_dst);
     const s3: i64 = @intCast(rope.nb[3] / ts_dst);
@@ -485,9 +485,9 @@ pub fn opRmsNormMulRopeFused(ctx: *ggml.cuda.common.Context, rms_norm: *ggml.imp
         }
     }.f;
 
-    if (dst_type == ggml.impl.c.GGML_TYPE_F32) {
+    if (dst_type == ggml.impl.ggml_c.GGML_TYPE_F32) {
         rmsNormMulRopeCuda(f32, x.data, dst_d, int(x.ne[0]), int(x.ne[1]), int(x.ne[2]), int(x.ne[3]), s01, s02, s03, s1, s2, s3, eps, mul_src.data, mul_s01, mul_s02, mul_s03, u(mul_src.ne[0]), u(mul_src.ne[1]), u(mul_src.ne[2]), u(mul_src.ne[3]), n_dims, pos, freq_scale, freq_base, ext_factor, attn_factor, corr_dims, freq_factors, row_indices, set_rows_stride, is_neox, stream);
-    } else if (dst_type == ggml.impl.c.GGML_TYPE_F16) {
+    } else if (dst_type == ggml.impl.ggml_c.GGML_TYPE_F16) {
         rmsNormMulRopeCuda(ggml.cuda.kernels.half, x.data, dst_d, int(x.ne[0]), int(x.ne[1]), int(x.ne[2]), int(x.ne[3]), s01, s02, s03, s1, s2, s3, eps, mul_src.data, mul_s01, mul_s02, mul_s03, u(mul_src.ne[0]), u(mul_src.ne[1]), u(mul_src.ne[2]), u(mul_src.ne[3]), n_dims, pos, freq_scale, freq_base, ext_factor, attn_factor, corr_dims, freq_factors, row_indices, set_rows_stride, is_neox, stream);
     } else {
         ggml.impl.abort("fatal error");

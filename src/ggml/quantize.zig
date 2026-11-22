@@ -44,36 +44,36 @@ const QuantizeFn = *const fn (
 /// `F16`, `BF16`, and `F32` are absent: they are not block formats and the C
 /// handles them with three special cases, reproduced in `ggml_quantize_chunk`.
 const quantizers = .{
-    .{ mod.impl.c.GGML_TYPE_Q1_0, "quantize_q1_0" },
-    .{ mod.impl.c.GGML_TYPE_Q2_0, "quantize_q2_0" },
-    .{ mod.impl.c.GGML_TYPE_Q4_0, "quantize_q4_0" },
-    .{ mod.impl.c.GGML_TYPE_Q4_1, "quantize_q4_1" },
-    .{ mod.impl.c.GGML_TYPE_Q5_0, "quantize_q5_0" },
-    .{ mod.impl.c.GGML_TYPE_Q5_1, "quantize_q5_1" },
-    .{ mod.impl.c.GGML_TYPE_Q8_0, "quantize_q8_0" },
-    .{ mod.impl.c.GGML_TYPE_MXFP4, "quantize_mxfp4" },
-    .{ mod.impl.c.GGML_TYPE_NVFP4, "quantize_nvfp4" },
-    .{ mod.impl.c.GGML_TYPE_F8_E4M3, "quantize_f8_e4m3" },
-    .{ mod.impl.c.GGML_TYPE_Q2_K, "quantize_q2_K" },
-    .{ mod.impl.c.GGML_TYPE_Q3_K, "quantize_q3_K" },
-    .{ mod.impl.c.GGML_TYPE_Q4_K, "quantize_q4_K" },
-    .{ mod.impl.c.GGML_TYPE_Q5_K, "quantize_q5_K" },
-    .{ mod.impl.c.GGML_TYPE_Q6_K, "quantize_q6_K" },
-    .{ mod.impl.c.GGML_TYPE_TQ1_0, "quantize_tq1_0" },
-    .{ mod.impl.c.GGML_TYPE_TQ2_0, "quantize_tq2_0" },
-    .{ mod.impl.c.GGML_TYPE_IQ2_XXS, "quantize_iq2_xxs" },
-    .{ mod.impl.c.GGML_TYPE_IQ2_XS, "quantize_iq2_xs" },
-    .{ mod.impl.c.GGML_TYPE_IQ3_XXS, "quantize_iq3_xxs" },
-    .{ mod.impl.c.GGML_TYPE_IQ3_S, "quantize_iq3_s" },
-    .{ mod.impl.c.GGML_TYPE_IQ2_S, "quantize_iq2_s" },
-    .{ mod.impl.c.GGML_TYPE_IQ1_S, "quantize_iq1_s" },
-    .{ mod.impl.c.GGML_TYPE_IQ1_M, "quantize_iq1_m" },
-    .{ mod.impl.c.GGML_TYPE_IQ4_NL, "quantize_iq4_nl" },
-    .{ mod.impl.c.GGML_TYPE_IQ4_XS, "quantize_iq4_xs" },
+    .{ mod.impl.ggml_c.GGML_TYPE_Q1_0, "quantize_q1_0" },
+    .{ mod.impl.ggml_c.GGML_TYPE_Q2_0, "quantize_q2_0" },
+    .{ mod.impl.ggml_c.GGML_TYPE_Q4_0, "quantize_q4_0" },
+    .{ mod.impl.ggml_c.GGML_TYPE_Q4_1, "quantize_q4_1" },
+    .{ mod.impl.ggml_c.GGML_TYPE_Q5_0, "quantize_q5_0" },
+    .{ mod.impl.ggml_c.GGML_TYPE_Q5_1, "quantize_q5_1" },
+    .{ mod.impl.ggml_c.GGML_TYPE_Q8_0, "quantize_q8_0" },
+    .{ mod.impl.ggml_c.GGML_TYPE_MXFP4, "quantize_mxfp4" },
+    .{ mod.impl.ggml_c.GGML_TYPE_NVFP4, "quantize_nvfp4" },
+    .{ mod.impl.ggml_c.GGML_TYPE_F8_E4M3, "quantize_f8_e4m3" },
+    .{ mod.impl.ggml_c.GGML_TYPE_Q2_K, "quantize_q2_K" },
+    .{ mod.impl.ggml_c.GGML_TYPE_Q3_K, "quantize_q3_K" },
+    .{ mod.impl.ggml_c.GGML_TYPE_Q4_K, "quantize_q4_K" },
+    .{ mod.impl.ggml_c.GGML_TYPE_Q5_K, "quantize_q5_K" },
+    .{ mod.impl.ggml_c.GGML_TYPE_Q6_K, "quantize_q6_K" },
+    .{ mod.impl.ggml_c.GGML_TYPE_TQ1_0, "quantize_tq1_0" },
+    .{ mod.impl.ggml_c.GGML_TYPE_TQ2_0, "quantize_tq2_0" },
+    .{ mod.impl.ggml_c.GGML_TYPE_IQ2_XXS, "quantize_iq2_xxs" },
+    .{ mod.impl.ggml_c.GGML_TYPE_IQ2_XS, "quantize_iq2_xs" },
+    .{ mod.impl.ggml_c.GGML_TYPE_IQ3_XXS, "quantize_iq3_xxs" },
+    .{ mod.impl.ggml_c.GGML_TYPE_IQ3_S, "quantize_iq3_s" },
+    .{ mod.impl.ggml_c.GGML_TYPE_IQ2_S, "quantize_iq2_s" },
+    .{ mod.impl.ggml_c.GGML_TYPE_IQ1_S, "quantize_iq1_s" },
+    .{ mod.impl.ggml_c.GGML_TYPE_IQ1_M, "quantize_iq1_m" },
+    .{ mod.impl.ggml_c.GGML_TYPE_IQ4_NL, "quantize_iq4_nl" },
+    .{ mod.impl.ggml_c.GGML_TYPE_IQ4_XS, "quantize_iq4_xs" },
 };
 
 /// Return: the routine for `t`, or null when `t` is not a block format.
-fn quantizerFor(t: mod.impl.c.enum_ggml_type) ?QuantizeFn {
+fn quantizerFor(t: mod.impl.ggml_c.enum_ggml_type) ?QuantizeFn {
     inline for (quantizers) |entry| {
         if (t == entry[0]) return @extern(QuantizeFn, .{ .name = entry[1] });
     }
@@ -84,50 +84,50 @@ fn quantizerFor(t: mod.impl.c.enum_ggml_type) ?QuantizeFn {
 ///
 /// Builds the shared codebook the i-quants index into. Idempotent, and a
 /// no-op for every other format.
-pub export fn ggml_quantize_init(t: mod.impl.c.enum_ggml_type) void {
-    mod.impl.c.ggml_critical_section_start();
+pub fn ggml_quantize_init(t: mod.impl.ggml_c.enum_ggml_type) callconv(.c) void {
+    mod.impl.ggml_c.ggml_critical_section_start();
 
     switch (t) {
-        mod.impl.c.GGML_TYPE_IQ2_XXS,
-        mod.impl.c.GGML_TYPE_IQ2_XS,
-        mod.impl.c.GGML_TYPE_IQ2_S,
-        mod.impl.c.GGML_TYPE_IQ1_S,
-        mod.impl.c.GGML_TYPE_IQ1_M,
+        mod.impl.ggml_c.GGML_TYPE_IQ2_XXS,
+        mod.impl.ggml_c.GGML_TYPE_IQ2_XS,
+        mod.impl.ggml_c.GGML_TYPE_IQ2_S,
+        mod.impl.ggml_c.GGML_TYPE_IQ1_S,
+        mod.impl.ggml_c.GGML_TYPE_IQ1_M,
         => mod.quants.codebook.iq2xs_init_impl(t),
-        mod.impl.c.GGML_TYPE_IQ3_XXS => mod.quants.codebook.iq3xs_init_impl(256),
-        mod.impl.c.GGML_TYPE_IQ3_S => mod.quants.codebook.iq3xs_init_impl(512),
+        mod.impl.ggml_c.GGML_TYPE_IQ3_XXS => mod.quants.codebook.iq3xs_init_impl(256),
+        mod.impl.ggml_c.GGML_TYPE_IQ3_S => mod.quants.codebook.iq3xs_init_impl(512),
         else => {}, // nothing
     }
 
-    mod.impl.c.ggml_critical_section_end();
+    mod.impl.ggml_c.ggml_critical_section_end();
 }
 
 /// Ports `ggml_quantize_free` (ggml.c:7982 @b1b770d90).
 ///
 /// Releases every codebook unconditionally rather than tracking which were
 /// built; the free routines tolerate a table that was never allocated.
-pub export fn ggml_quantize_free() void {
-    mod.impl.c.ggml_critical_section_start();
+pub fn ggml_quantize_free() callconv(.c) void {
+    mod.impl.ggml_c.ggml_critical_section_start();
 
-    mod.quants.codebook.iq2xs_free_impl(mod.impl.c.GGML_TYPE_IQ2_XXS);
-    mod.quants.codebook.iq2xs_free_impl(mod.impl.c.GGML_TYPE_IQ2_XS);
-    mod.quants.codebook.iq2xs_free_impl(mod.impl.c.GGML_TYPE_IQ2_S);
-    mod.quants.codebook.iq2xs_free_impl(mod.impl.c.GGML_TYPE_IQ1_S);
-    mod.quants.codebook.iq2xs_free_impl(mod.impl.c.GGML_TYPE_IQ1_M);
+    mod.quants.codebook.iq2xs_free_impl(mod.impl.ggml_c.GGML_TYPE_IQ2_XXS);
+    mod.quants.codebook.iq2xs_free_impl(mod.impl.ggml_c.GGML_TYPE_IQ2_XS);
+    mod.quants.codebook.iq2xs_free_impl(mod.impl.ggml_c.GGML_TYPE_IQ2_S);
+    mod.quants.codebook.iq2xs_free_impl(mod.impl.ggml_c.GGML_TYPE_IQ1_S);
+    mod.quants.codebook.iq2xs_free_impl(mod.impl.ggml_c.GGML_TYPE_IQ1_M);
     mod.quants.codebook.iq3xs_free_impl(256);
     mod.quants.codebook.iq3xs_free_impl(512);
 
-    mod.impl.c.ggml_critical_section_end();
+    mod.impl.ggml_c.ggml_critical_section_end();
 }
 
 /// Ports `ggml_quantize_requires_imatrix` (ggml.c:7996 @b1b770d90).
 ///
 /// Note `IQ1_M` is absent: the C lists it commented out, and leaving it out is
 /// deliberate rather than an oversight, so it is left out here too.
-pub export fn ggml_quantize_requires_imatrix(t: mod.impl.c.enum_ggml_type) bool {
-    return t == mod.impl.c.GGML_TYPE_IQ2_XXS or
-        t == mod.impl.c.GGML_TYPE_IQ2_XS or
-        t == mod.impl.c.GGML_TYPE_IQ1_S;
+pub fn ggml_quantize_requires_imatrix(t: mod.impl.ggml_c.enum_ggml_type) callconv(.c) bool {
+    return t == mod.impl.ggml_c.GGML_TYPE_IQ2_XXS or
+        t == mod.impl.ggml_c.GGML_TYPE_IQ2_XS or
+        t == mod.impl.ggml_c.GGML_TYPE_IQ1_S;
 }
 
 /// Ports `ggml_quantize_chunk` (ggml.c:8004 @b1b770d90).
@@ -145,15 +145,15 @@ pub export fn ggml_quantize_requires_imatrix(t: mod.impl.c.enum_ggml_type) bool 
 ///   `ggml_quantize_requires_imatrix` names and ignored by the rest.
 ///
 /// Return: bytes written, which the C asserts equals `nrows * row_size`.
-pub export fn ggml_quantize_chunk(
-    t: mod.impl.c.enum_ggml_type,
+pub fn ggml_quantize_chunk(
+    t: mod.impl.ggml_c.enum_ggml_type,
     src: [*c]const f32,
     dst: ?*anyopaque,
     start: i64,
     nrows: i64,
     n_per_row: i64,
     imatrix: [*c]const f32,
-) usize {
+) callconv(.c) usize {
     const n = nrows * n_per_row;
 
     if (ggml_quantize_requires_imatrix(t)) {
@@ -176,17 +176,17 @@ pub export fn ggml_quantize_chunk(
     } else switch (t) {
         // Not block formats: a straight elementwise narrowing, and note these
         // three index `dst` by element rather than by row.
-        mod.impl.c.GGML_TYPE_F16 => {
-            const elemsize = @sizeOf(mod.impl.c.ggml_fp16_t);
-            mod.impl.c.ggml_fp32_to_fp16_row(src + @as(usize, @intCast(start)), @as([*c]mod.impl.c.ggml_fp16_t, @ptrCast(@alignCast(dst))) + @as(usize, @intCast(start)), n);
+        mod.impl.ggml_c.GGML_TYPE_F16 => {
+            const elemsize = @sizeOf(mod.impl.ggml_c.ggml_fp16_t);
+            mod.impl.ggml_c.ggml_fp32_to_fp16_row(src + @as(usize, @intCast(start)), @as([*c]mod.impl.ggml_c.ggml_fp16_t, @ptrCast(@alignCast(dst))) + @as(usize, @intCast(start)), n);
             result = @as(usize, @intCast(n)) * elemsize;
         },
-        mod.impl.c.GGML_TYPE_BF16 => {
-            const elemsize = @sizeOf(mod.impl.c.ggml_bf16_t);
-            mod.impl.c.ggml_fp32_to_bf16_row_ref(src + @as(usize, @intCast(start)), @as([*c]mod.impl.c.ggml_bf16_t, @ptrCast(@alignCast(dst))) + @as(usize, @intCast(start)), n);
+        mod.impl.ggml_c.GGML_TYPE_BF16 => {
+            const elemsize = @sizeOf(mod.impl.ggml_c.ggml_bf16_t);
+            mod.impl.ggml_c.ggml_fp32_to_bf16_row_ref(src + @as(usize, @intCast(start)), @as([*c]mod.impl.ggml_c.ggml_bf16_t, @ptrCast(@alignCast(dst))) + @as(usize, @intCast(start)), n);
             result = @as(usize, @intCast(n)) * elemsize;
         },
-        mod.impl.c.GGML_TYPE_F32 => {
+        mod.impl.ggml_c.GGML_TYPE_F32 => {
             const elemsize = @sizeOf(f32);
             result = @as(usize, @intCast(n)) * elemsize;
             const out = @as([*]u8, @ptrCast(dst.?)) + @as(usize, @intCast(start)) * elemsize;
@@ -208,15 +208,15 @@ test {
 }
 
 test "only the three i-quant formats the C lists require an importance matrix" {
-    try std.testing.expect(ggml_quantize_requires_imatrix(mod.impl.c.GGML_TYPE_IQ2_XXS));
-    try std.testing.expect(ggml_quantize_requires_imatrix(mod.impl.c.GGML_TYPE_IQ2_XS));
-    try std.testing.expect(ggml_quantize_requires_imatrix(mod.impl.c.GGML_TYPE_IQ1_S));
+    try std.testing.expect(ggml_quantize_requires_imatrix(mod.impl.ggml_c.GGML_TYPE_IQ2_XXS));
+    try std.testing.expect(ggml_quantize_requires_imatrix(mod.impl.ggml_c.GGML_TYPE_IQ2_XS));
+    try std.testing.expect(ggml_quantize_requires_imatrix(mod.impl.ggml_c.GGML_TYPE_IQ1_S));
 
     // IQ1_M is commented out in the C. If a future pin uncomments it this
     // test fails, which is the point.
-    try std.testing.expect(!ggml_quantize_requires_imatrix(mod.impl.c.GGML_TYPE_IQ1_M));
-    try std.testing.expect(!ggml_quantize_requires_imatrix(mod.impl.c.GGML_TYPE_Q4_K));
-    try std.testing.expect(!ggml_quantize_requires_imatrix(mod.impl.c.GGML_TYPE_F32));
+    try std.testing.expect(!ggml_quantize_requires_imatrix(mod.impl.ggml_c.GGML_TYPE_IQ1_M));
+    try std.testing.expect(!ggml_quantize_requires_imatrix(mod.impl.ggml_c.GGML_TYPE_Q4_K));
+    try std.testing.expect(!ggml_quantize_requires_imatrix(mod.impl.ggml_c.GGML_TYPE_F32));
 }
 
 test "the dispatch table covers every quantized format the C switches on" {
@@ -225,15 +225,15 @@ test "the dispatch table covers every quantized format the C switches on" {
     // activation into, never as a destination a caller asks for. Reaching
     // `ggml_quantize_chunk` with either is a caller error, and the C answers
     // it with `default: assert(false)`.
-    const not_destinations = [_]mod.impl.c.enum_ggml_type{ mod.impl.c.GGML_TYPE_Q8_1, mod.impl.c.GGML_TYPE_Q8_K };
+    const not_destinations = [_]mod.impl.ggml_c.enum_ggml_type{ mod.impl.ggml_c.GGML_TYPE_Q8_1, mod.impl.ggml_c.GGML_TYPE_Q8_K };
 
-    for (0..mod.impl.c.GGML_TYPE_COUNT) |i| {
-        const t: mod.impl.c.enum_ggml_type = @intCast(i);
+    for (0..mod.impl.ggml_c.GGML_TYPE_COUNT) |i| {
+        const t: mod.impl.ggml_c.enum_ggml_type = @intCast(i);
         // Retired slots are zeroed in the traits table and report block size
         // zero; they are not formats and belong in neither branch.
         if (mod.types.ggml_blck_size(t) == 0) continue;
         if (!mod.types.ggml_is_quantized(t)) continue;
-        if (std.mem.findScalar(mod.impl.c.enum_ggml_type, &not_destinations, t) != null) {
+        if (std.mem.findScalar(mod.impl.ggml_c.enum_ggml_type, &not_destinations, t) != null) {
             try std.testing.expect(quantizerFor(t) == null);
             continue;
         }
@@ -241,8 +241,8 @@ test "the dispatch table covers every quantized format the C switches on" {
     }
 
     // The three non-block formats are handled by their own cases, not here.
-    try std.testing.expect(quantizerFor(mod.impl.c.GGML_TYPE_F32) == null);
-    try std.testing.expect(quantizerFor(mod.impl.c.GGML_TYPE_F16) == null);
-    try std.testing.expect(quantizerFor(mod.impl.c.GGML_TYPE_BF16) == null);
-    try std.testing.expect(quantizerFor(mod.impl.c.GGML_TYPE_I32) == null);
+    try std.testing.expect(quantizerFor(mod.impl.ggml_c.GGML_TYPE_F32) == null);
+    try std.testing.expect(quantizerFor(mod.impl.ggml_c.GGML_TYPE_F16) == null);
+    try std.testing.expect(quantizerFor(mod.impl.ggml_c.GGML_TYPE_BF16) == null);
+    try std.testing.expect(quantizerFor(mod.impl.ggml_c.GGML_TYPE_I32) == null);
 }

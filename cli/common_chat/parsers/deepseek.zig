@@ -14,8 +14,6 @@ const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
 
-const Allocator = std.mem.Allocator;
-
 const DSML = "｜DSML｜";
 const THINK_START = "<think>";
 const THINK_END = "</think>";
@@ -36,7 +34,7 @@ fn role(m: *const json.Value) common_chat.exception.Error![]const u8 {
 /// the preceding assistant message's tool calls, matched by id.
 ///
 /// Return: a copy owned by `a`.
-fn deepseekV4SortToolResults(a: Allocator, messages: *const json.Value) common_chat.exception.Error!json.Value {
+fn deepseekV4SortToolResults(a: std.mem.Allocator, messages: *const json.Value) common_chat.exception.Error!json.Value {
     var adjusted = try messages.clone(a);
     var call_order: std.ArrayList(CallOrder) = .empty;
 
@@ -122,7 +120,7 @@ fn deepseekV4SortToolResults(a: Allocator, messages: *const json.Value) common_c
 }
 
 const Build = struct {
-    a: Allocator,
+    a: std.mem.Allocator,
     inputs: *const common_chat.template.GenerationParams,
     tools: *const json.Value,
     is_v4: bool,
@@ -286,7 +284,7 @@ const Build = struct {
 /// Ports `common_chat_params_init_deepseek_v3_2` (parsers/deepseek.cpp:70 @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
-pub fn init(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
+pub fn init(a: std.mem.Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
     var data: common_chat.params.ChatParams = .{};
 
     // V4 uses the same DSML markup as V3.2, but names the tool call block "tool_calls"

@@ -30,8 +30,6 @@ const std = @import("std");
 const mod = @import("module.zig");
 const peg = @import("peg");
 
-const Allocator = std.mem.Allocator;
-
 /// Ports `common_sampling_add_preserved_tokens` (sampling.cpp:1055
 /// @b1b770d90): each string that is a single token in the vocabulary added
 /// to `preserved`, a `std::set` kept sorted and unique.
@@ -39,7 +37,7 @@ const Allocator = std.mem.Allocator;
 /// Parameters:
 /// - `vocab`: a `llama_vocab *`, only passed through.
 /// - `preserved`: grown with `a`.
-pub fn addPreservedTokens(a: Allocator, preserved: *std.ArrayList(i32), vocab: *const anyopaque, tokens: []const []const u8) mod.exception.Error!void {
+pub fn addPreservedTokens(a: std.mem.Allocator, preserved: *std.ArrayList(i32), vocab: *const anyopaque, tokens: []const []const u8) mod.exception.Error!void {
     for (tokens) |t| {
         const ids = try mod.input.commonTokenize(a, vocab, t, false, true);
         defer a.free(ids);
@@ -48,7 +46,7 @@ pub fn addPreservedTokens(a: Allocator, preserved: *std.ArrayList(i32), vocab: *
 }
 
 /// `std::set<llama_token>::insert`.
-fn setInsert(a: Allocator, set: *std.ArrayList(i32), id: i32) mod.exception.Error!void {
+fn setInsert(a: std.mem.Allocator, set: *std.ArrayList(i32), id: i32) mod.exception.Error!void {
     const at = std.sort.lowerBound(i32, set.items, id, struct {
         fn order(x: i32, y: i32) std.math.Order {
             return std.math.order(x, y);
@@ -69,7 +67,7 @@ fn setInsert(a: Allocator, set: *std.ArrayList(i32), id: i32) mod.exception.Erro
 ///
 /// Return: `error.RuntimeError` for a single-token word that is not
 /// preserved, or for a lazy grammar left without triggers.
-pub fn addGrammarTriggers(a: Allocator, out: *std.ArrayList(mod.params.GrammarTrigger), preserved: []const i32, grammar_lazy: bool, vocab: *const anyopaque, triggers: []const mod.params.GrammarTrigger) mod.exception.Error!void {
+pub fn addGrammarTriggers(a: std.mem.Allocator, out: *std.ArrayList(mod.params.GrammarTrigger), preserved: []const i32, grammar_lazy: bool, vocab: *const anyopaque, triggers: []const mod.params.GrammarTrigger) mod.exception.Error!void {
     for (triggers) |trigger| {
         if (trigger.type == .word) {
             const word = trigger.value;
@@ -101,7 +99,7 @@ pub const SessionParams = struct {
 
 /// Ports `common_chat_session` (chat.h:402 @b1b770d90).
 pub const Session = struct {
-    gpa: Allocator,
+    gpa: std.mem.Allocator,
     /// Everything the templates produced; never freed singly.
     arena: *std.heap.ArenaAllocator,
 
@@ -133,7 +131,7 @@ pub const Session = struct {
     /// constructor: no template; feeding it parses content only.
     ///
     /// Return: owned by `gpa`; release with `deinit`.
-    pub fn initEmpty(gpa: Allocator) mod.exception.Error!Session {
+    pub fn initEmpty(gpa: std.mem.Allocator) mod.exception.Error!Session {
         const arena = try gpa.create(std.heap.ArenaAllocator);
         arena.* = .init(gpa);
         var self: Session = .{
@@ -159,7 +157,7 @@ pub const Session = struct {
     ///   caller has, or null.
     ///
     /// Return: owned by `gpa`; release with `deinit`.
-    pub fn init(gpa: Allocator, tmpls: *const mod.templates.Templates, vocab: ?*const anyopaque, inputs: *const mod.templates.TemplatesInputs, params: SessionParams) mod.exception.Error!Session {
+    pub fn init(gpa: std.mem.Allocator, tmpls: *const mod.templates.Templates, vocab: ?*const anyopaque, inputs: *const mod.templates.TemplatesInputs, params: SessionParams) mod.exception.Error!Session {
         var self = try initEmpty(gpa);
         errdefer self.deinit();
         const a = self.arena.allocator();
@@ -192,7 +190,7 @@ pub const Session = struct {
             try addGrammarTriggers(a, &self.grammar_triggers, self.preserved_tokens.items, applied.grammar_lazy, v, applied.grammar_triggers.items);
 
             const Tok = struct {
-                fn run(vv: *const anyopaque, al: Allocator, text: []const u8) anyerror!std.ArrayList(i32) {
+                fn run(vv: *const anyopaque, al: std.mem.Allocator, text: []const u8) anyerror!std.ArrayList(i32) {
                     return .fromOwnedSlice(try mod.input.commonTokenize(al, vv, text, false, true));
                 }
             };
@@ -224,7 +222,7 @@ pub const Session = struct {
     /// The C++ copy.
     ///
     /// Return: owned by `gpa`; release with `deinit`.
-    pub fn clone(self: *const Session, gpa: Allocator) mod.exception.Error!Session {
+    pub fn clone(self: *const Session, gpa: std.mem.Allocator) mod.exception.Error!Session {
         var out = try initEmpty(gpa);
         errdefer out.deinit();
         const a = out.arena.allocator();
@@ -336,7 +334,7 @@ pub const Session = struct {
     /// - `sampling`: a pointer to a struct with `grammar_type`, `grammar`,
     ///   `grammar_lazy`, `generation_prompt`, `preserved_tokens` (sorted,
     ///   unique) and `grammar_triggers`, as `tools_common`'s `Sampling`.
-    pub fn applySampling(self: *const Session, a: Allocator, sampling: anytype) mod.exception.Error!void {
+    pub fn applySampling(self: *const Session, a: std.mem.Allocator, sampling: anytype) mod.exception.Error!void {
         if (!self.templated) return;
         const S = @typeInfo(@TypeOf(sampling)).pointer.child;
         if (self.grammar_text.len != 0) {

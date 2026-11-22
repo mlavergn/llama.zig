@@ -122,8 +122,8 @@ pub fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder
 
     llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/bert.cpp", 71, "n_embd_head == hparams.n_embd_head_k()");
 
-    var inp_pos: ?*llama.impl.c.ggml_tensor = null;
-    var embd_pos: ?*llama.impl.c.ggml_tensor = null;
+    var inp_pos: ?*llama.impl.llama_c.ggml_tensor = null;
+    var embd_pos: ?*llama.impl.llama_c.ggml_tensor = null;
 
     if (model.arch != .jina_bert_v2) {
         inp_pos = b.buildInpPos();
@@ -132,8 +132,8 @@ pub fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder
     // The position rows are ordered ahead of the input embeddings, without
     // marking them for compute.
     if (model.arch == .bert) {
-        embd_pos = llama.impl.c.ggml_get_rows(ctx, model.pos_embd, inp_pos);
-        llama.impl.c.ggml_build_forward_order(b.gf, embd_pos);
+        embd_pos = llama.impl.llama_c.ggml_get_rows(ctx, model.pos_embd, inp_pos);
+        llama.impl.llama_c.ggml_build_forward_order(b.gf, embd_pos);
     }
 
     // The input embeddings: token, type and position.
@@ -141,11 +141,11 @@ pub fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder
 
     // The token types are hardcoded to zero ("Sentence A").
     if (model.type_embd) |type_embd| {
-        const type_row0: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_1d(ctx, type_embd, b.n_embd, 0);
-        inpL = llama.impl.c.ggml_add(ctx, inpL, type_row0);
+        const type_row0: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_1d(ctx, type_embd, b.n_embd, 0);
+        inpL = llama.impl.llama_c.ggml_add(ctx, inpL, type_row0);
     }
     if (model.arch == .bert) {
-        inpL = llama.impl.c.ggml_add(ctx, embd_pos, inpL);
+        inpL = llama.impl.llama_c.ggml_add(ctx, embd_pos, inpL);
     }
     b.cb(inpL, "inp_embd", -1);
 
@@ -169,19 +169,19 @@ pub fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder
             const Vcur = qkv.v;
 
             if (layer.attn_q_norm != null) {
-                Qcur = llama.impl.c.ggml_reshape_2d(ctx, Qcur, n_embd_head * b.n_head, b.n_tokens);
+                Qcur = llama.impl.llama_c.ggml_reshape_2d(ctx, Qcur, n_embd_head * b.n_head, b.n_tokens);
 
                 Qcur = b.buildNorm(Qcur, layer.attn_q_norm, layer.attn_q_norm_b, .norm, il);
 
-                Qcur = llama.impl.c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
+                Qcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
             }
 
             if (layer.attn_k_norm != null) {
-                Kcur = llama.impl.c.ggml_reshape_2d(ctx, Kcur, n_embd_head * b.n_head_kv, b.n_tokens);
+                Kcur = llama.impl.llama_c.ggml_reshape_2d(ctx, Kcur, n_embd_head * b.n_head_kv, b.n_tokens);
 
                 Kcur = b.buildNorm(Kcur, layer.attn_k_norm, layer.attn_k_norm_b, .norm, il);
 
-                Kcur = llama.impl.c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, b.n_tokens);
+                Kcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, b.n_tokens);
             }
 
             // RoPE.
@@ -200,18 +200,18 @@ pub fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder
         }
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpL = llama.impl.llama_c.ggml_get_rows(ctx, inpL, inp_out_ids);
         }
 
         // Re-add the layer input.
-        cur = llama.impl.c.ggml_add(ctx, cur, inpL);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, inpL);
 
         // The attention's layer norm.
         cur = b.buildNorm(cur, layer.attn_out_norm, layer.attn_out_norm_b, .norm, il);
 
         if (layer.attn_norm_2 != null) {
-            cur = llama.impl.c.ggml_add(ctx, cur, inpL); // Re-add the layer input.
+            cur = llama.impl.llama_c.ggml_add(ctx, cur, inpL); // Re-add the layer input.
             cur = b.buildNorm(cur, layer.attn_norm_2, layer.attn_norm_2_b, .norm, il);
         }
 
@@ -248,7 +248,7 @@ pub fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder
         }
 
         // The attention output bypasses the feed-forward.
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
 
         // The output's layer norm.
         cur = b.buildNorm(cur, layer.layer_out_norm, layer.layer_out_norm_b, .norm, il);

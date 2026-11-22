@@ -23,13 +23,13 @@
 //! HTTP only, as the reference has no SSL.
 
 const std = @import("std");
+const mtmd = @import("mtmd");
+const llama = @import("llama");
 const mod = @import("module.zig");
-const tc = @import("tools_common");
+const tools_common = @import("tools_common");
 const stdlib = @import("stdlib");
 const json = @import("json");
-const chat = @import("common_chat");
-
-const Allocator = std.mem.Allocator;
+const common_chat = @import("common_chat");
 
 /// `DIRECTORY_SEPARATOR` (common/common.h:31 @b1b770d90).
 const directory_separator: u8 = if (@import("builtin").os.tag == .windows) '\\' else '/';
@@ -41,26 +41,26 @@ const directory_separator: u8 = if (@import("builtin").os.tag == .windows) '\\' 
 /// an OpenAI `/completions` body as llama.cpp's own parameters.
 ///
 /// Return: owned by `a`.
-pub fn oaicompatCompletionParamsParse(a: Allocator, body: *const json.Value) mod.common.Error!json.Value {
+pub fn oaicompatCompletionParamsParse(a: std.mem.Allocator, body: *const json.Value) common_chat.exception.Error!json.Value {
     var llama_params: json.Value = .null;
     errdefer llama_params.deinit(a);
 
     if (!body.contains("prompt")) {
-        return mod.common.throw(error.RuntimeError, "\"prompt\" is required", .{});
+        return common_chat.exception.throw(error.RuntimeError, "\"prompt\" is required", .{});
     }
 
     try handleStop(a, &llama_params, body);
 
     // Handle "echo" field
     if (mod.common.jsonValue(body, "echo", bool, false)) {
-        return mod.common.throw(error.RuntimeError, "Only no echo is supported", .{});
+        return common_chat.exception.throw(error.RuntimeError, "Only no echo is supported", .{});
     }
 
     // Params supported by OAI but unsupported by llama.cpp
     const unsupported_params = [_][]const u8{ "best_of", "suffix" };
     for (unsupported_params) |param| {
         if (body.contains(param)) {
-            return mod.common.throw(error.RuntimeError, "Unsupported param: {s}", .{param});
+            return common_chat.exception.throw(error.RuntimeError, "Unsupported param: {s}", .{param});
         }
     }
 
@@ -71,7 +71,7 @@ pub fn oaicompatCompletionParamsParse(a: Allocator, body: *const json.Value) mod
 
 /// The "stop" field both conversions share: a string becomes a one-element
 /// array.
-fn handleStop(a: Allocator, llama_params: *json.Value, body: *const json.Value) mod.common.Error!void {
+fn handleStop(a: std.mem.Allocator, llama_params: *json.Value, body: *const json.Value) common_chat.exception.Error!void {
     // Handle "stop" field
     if (body.contains("stop") and (try body.at("stop")).isString()) {
         var arr = json.Value.emptyArray();
@@ -85,7 +85,7 @@ fn handleStop(a: Allocator, llama_params: *json.Value, body: *const json.Value) 
 
 /// Copies the remaining properties: every member not already set, and
 /// `n_predict` whatever was set before ("max_tokens" may have).
-fn copyRemaining(a: Allocator, llama_params: *json.Value, body: *const json.Value) mod.common.Error!void {
+fn copyRemaining(a: std.mem.Allocator, llama_params: *json.Value, body: *const json.Value) common_chat.exception.Error!void {
     var it = @constCast(body).items();
     while (it.next()) |item| {
         // Exception: if "n_predict" is present, we overwrite the value specified earlier by "max_tokens"
@@ -224,15 +224,15 @@ pub fn serverAddrIsPublic(addr: []const u8) bool {
 /// `allow_private`).
 ///
 /// Return: the first address, owned by `a`.
-pub fn serverResolvePublicAddr(a: Allocator, host: []const u8, allow_private: bool) mod.common.Error![]const u8 {
+pub fn serverResolvePublicAddr(a: std.mem.Allocator, host: []const u8, allow_private: bool) common_chat.exception.Error![]const u8 {
     var addrs: std.ArrayList([]const u8) = .empty;
     try mod.httplib.hostedAt(a, host, &addrs);
     if (addrs.items.len == 0) {
-        return mod.common.throw(error.InvalidArgument, "cannot resolve host: {s}", .{host});
+        return common_chat.exception.throw(error.InvalidArgument, "cannot resolve host: {s}", .{host});
     }
     for (addrs.items) |addr| {
         if (!allow_private and !serverAddrIsPublic(addr)) {
-            return mod.common.throw(error.InvalidArgument, "host is not a public address: {s}", .{host});
+            return common_chat.exception.throw(error.InvalidArgument, "host is not a public address: {s}", .{host});
         }
     }
     return addrs.items[0];
@@ -240,7 +240,7 @@ pub fn serverResolvePublicAddr(a: Allocator, host: []const u8, allow_private: bo
 
 /// Ports `resolve_host` (server-common.cpp:1280 @b1b770d90), the lambda
 /// handle_media sets; `ctx` is the `allow_private_urls` it captured.
-fn resolveHostForMedia(ctx: ?*const anyopaque, a: Allocator, host: []const u8) mod.common.Error![]const u8 {
+fn resolveHostForMedia(ctx: ?*const anyopaque, a: std.mem.Allocator, host: []const u8) common_chat.exception.Error![]const u8 {
     const allow_private: *const bool = @ptrCast(ctx.?);
     return serverResolvePublicAddr(a, host, allow_private.*);
 }
@@ -252,10 +252,10 @@ fn resolveHostForMedia(ctx: ?*const anyopaque, a: Allocator, host: []const u8) m
 ///
 /// Parameters:
 /// - `out_files`: grows; each file owned by `a`.
-pub fn handleMedia(a: Allocator, out_files: *std.ArrayList([]u8), url: []const u8, media_path: []const u8, allow_private_urls: bool) mod.common.Error!void {
+pub fn handleMedia(a: std.mem.Allocator, out_files: *std.ArrayList([]u8), url: []const u8, media_path: []const u8, allow_private_urls: bool) common_chat.exception.Error!void {
     if (media_path.len != 0) {
         // should already be enforced by arg.cpp, but checking just in case
-        tc.ggml.ggmlAssert(media_path[media_path.len - 1] == directory_separator, "server-common.cpp", 1271, "media_path.back() == DIRECTORY_SEPARATOR");
+        tools_common.ggml.ggmlAssert(media_path[media_path.len - 1] == directory_separator, "server-common.cpp", 1271, "media_path.back() == DIRECTORY_SEPARATOR");
     }
 
     if (std.mem.startsWith(u8, url, "http")) {
@@ -274,16 +274,16 @@ pub fn handleMedia(a: Allocator, out_files: *std.ArrayList([]u8), url: []const u
             mod.common.srv(.inf, "handle_media", "downloaded %zu bytes\n", .{res.body.len});
             try out_files.append(a, res.body);
         } else {
-            return mod.common.throw(error.RuntimeError, "Failed to download image", .{});
+            return common_chat.exception.throw(error.RuntimeError, "Failed to download image", .{});
         }
     } else if (std.mem.startsWith(u8, url, "file://")) {
         if (media_path.len == 0) {
-            return mod.common.throw(error.InvalidArgument, "file:// URLs are not allowed unless --media-path is specified", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "file:// URLs are not allowed unless --media-path is specified", .{});
         }
         // load local image file
         const file_path = url[7..]; // remove "file://"
         if (!fsValidateFilename(file_path, true)) {
-            return mod.common.throw(error.InvalidArgument, "file path is not allowed: {s}", .{file_path});
+            return common_chat.exception.throw(error.InvalidArgument, "file path is not allowed: {s}", .{file_path});
         }
         const full = try std.mem.concat(a, u8, &.{ media_path, file_path });
         defer a.free(full);
@@ -292,7 +292,7 @@ pub fn handleMedia(a: Allocator, out_files: *std.ArrayList([]u8), url: []const u
         mod.common.srv(.inf, "handle_media", "loading image from local file '%s'\n", .{fz});
         // `std::ifstream(full, std::ios::binary)`, read whole
         const data = try stdlib.file.readStream(stdlib.file.defaultIo(), a, full) orelse
-            return mod.common.throw(error.InvalidArgument, "file does not exist or cannot be opened: {s}", .{file_path});
+            return common_chat.exception.throw(error.InvalidArgument, "file does not exist or cannot be opened: {s}", .{file_path});
         out_files.append(a, data) catch |e| {
             a.free(data);
             return e;
@@ -301,7 +301,7 @@ pub fn handleMedia(a: Allocator, out_files: *std.ArrayList([]u8), url: []const u
         // try to decode base64 image, video, or audio
         const n_parts = std.mem.count(u8, url, ",") + 1;
         if (n_parts != 2) {
-            return mod.common.throw(error.InvalidArgument, "Invalid uri-encoded base64 value", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "Invalid uri-encoded base64 value", .{});
         }
         const comma = std.mem.indexOfScalar(u8, url, ',').?;
         const part0 = url[0..comma];
@@ -310,9 +310,9 @@ pub fn handleMedia(a: Allocator, out_files: *std.ArrayList([]u8), url: []const u
             !std.mem.startsWith(u8, part0, "data:video/") and
             !std.mem.startsWith(u8, part0, "data:audio/"))
         {
-            return mod.common.throw(error.InvalidArgument, "Invalid uri format: {s}", .{part0});
+            return common_chat.exception.throw(error.InvalidArgument, "Invalid uri format: {s}", .{part0});
         } else if (!std.mem.endsWith(u8, part0, "base64")) {
-            return mod.common.throw(error.InvalidArgument, "uri must be base64 encoded", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "uri must be base64 encoded", .{});
         } else {
             const decoded_data = try mod.tokens.base64Decode(a, part1);
             out_files.append(a, decoded_data) catch |e| {
@@ -325,7 +325,7 @@ pub fn handleMedia(a: Allocator, out_files: *std.ArrayList([]u8), url: []const u
         const decoded_data = try mod.tokens.base64Decode(a, url);
         if (decoded_data.len == 0) {
             a.free(decoded_data);
-            return mod.common.throw(error.RuntimeError, "Invalid base64 value", .{});
+            return common_chat.exception.throw(error.RuntimeError, "Invalid base64 value", .{});
         }
         out_files.append(a, decoded_data) catch |e| {
             a.free(decoded_data);
@@ -337,11 +337,6 @@ pub fn handleMedia(a: Allocator, out_files: *std.ArrayList([]u8), url: []const u
 // -----------------------------------------------------------------------------
 // chat templates
 
-/// Ports `common_chat_templates` (chat.cpp:314 @b1b770d90), through
-/// `cli/common_chat/templates.zig`: the model's templates (or the
-/// override) parsed by the Jinja engine, which both arms render from.
-pub const Templates = chat.templates.Templates;
-
 /// `std::map<std::string, std::string>`: sorted by key, strings owned by
 /// the map's allocator.
 pub const KwMap = struct {
@@ -349,7 +344,7 @@ pub const KwMap = struct {
     entries: std.ArrayList(Entry) = .empty,
 
     /// `map[key] = value`.
-    pub fn put(self: *KwMap, a: Allocator, key: []const u8, value: []const u8) mod.common.Error!void {
+    pub fn put(self: *KwMap, a: std.mem.Allocator, key: []const u8, value: []const u8) common_chat.exception.Error!void {
         const v = try a.dupe(u8, value);
         errdefer a.free(v);
         var i: usize = 0;
@@ -377,7 +372,7 @@ pub const KwMap = struct {
     }
 
     /// `map.erase(key)`.
-    pub fn erase(self: *KwMap, a: Allocator, key: []const u8) void {
+    pub fn erase(self: *KwMap, a: std.mem.Allocator, key: []const u8) void {
         for (self.entries.items, 0..) |e, i| if (std.mem.eql(u8, e.key, key)) {
             a.free(e.key);
             a.free(e.value);
@@ -387,7 +382,7 @@ pub const KwMap = struct {
     }
 
     /// A copy owned by `a`.
-    pub fn clone(self: *const KwMap, a: Allocator) mod.common.Error!KwMap {
+    pub fn clone(self: *const KwMap, a: std.mem.Allocator) common_chat.exception.Error!KwMap {
         var out: KwMap = .{};
         errdefer out.deinit(a);
         for (self.entries.items) |e| try out.put(a, e.key, e.value);
@@ -397,13 +392,13 @@ pub const KwMap = struct {
     /// The entries as `templates.zig` takes them, borrowed from the map.
     ///
     /// Return: owned by `a`.
-    pub fn kwArgs(self: *const KwMap, a: Allocator) mod.common.Error![]const chat.templates.KwArg {
-        const out = try a.alloc(chat.templates.KwArg, self.entries.items.len);
+    pub fn kwArgs(self: *const KwMap, a: std.mem.Allocator) common_chat.exception.Error![]const common_chat.templates.KwArg {
+        const out = try a.alloc(common_chat.templates.KwArg, self.entries.items.len);
         for (self.entries.items, out) |e, *o| o.* = .{ .key = e.key, .value = e.value };
         return out;
     }
 
-    pub fn deinit(self: *KwMap, a: Allocator) void {
+    pub fn deinit(self: *KwMap, a: std.mem.Allocator) void {
         for (self.entries.items) |e| {
             a.free(e.key);
             a.free(e.value);
@@ -416,17 +411,17 @@ pub const KwMap = struct {
 /// conversion builds it: lists it grows and the kwargs map it merges into.
 /// The messages and tools are owned by the allocator the conversion used.
 pub const ChatTemplatesInputs = struct {
-    messages: std.ArrayList(chat.Msg) = .empty,
+    messages: std.ArrayList(common_chat.Msg) = .empty,
     grammar: []const u8 = "",
     json_schema: []const u8 = "",
     add_generation_prompt: bool = true,
-    continue_final_message: chat.Continuation = .none,
+    continue_final_message: common_chat.Continuation = .none,
     use_jinja: bool = true,
     // Parameters below only supported when use_jinja is true
-    tools: std.ArrayList(chat.Tool) = .empty,
-    tool_choice: chat.ToolChoice = .auto,
+    tools: std.ArrayList(common_chat.Tool) = .empty,
+    tool_choice: common_chat.ToolChoice = .auto,
     parallel_tool_calls: bool = false,
-    reasoning_format: chat.ReasoningFormat = .none, // TODO: refactor this to "bool enable_thinking"
+    reasoning_format: common_chat.ReasoningFormat = .none, // TODO: refactor this to "bool enable_thinking"
     enable_thinking: bool = true,
     chat_template_kwargs: KwMap = .{},
     add_bos: bool = false,
@@ -434,18 +429,13 @@ pub const ChatTemplatesInputs = struct {
     force_pure_content: bool = false,
 };
 
-/// Ports `common_chat_params` (chat.h:304 @b1b770d90): `templates.zig`'s.
-/// Every string and list is owned by the allocator `chatTemplatesApply`
-/// took.
-pub const ChatParams = chat.params.ChatParams;
-
 /// `json_schema_to_grammar(schema)`, its `std::invalid_argument` text moved
 /// into the data layer's `what()`.
 ///
 /// Return: owned by `a`.
-pub fn schemaToGrammar(a: Allocator, schema: *const json.Value) mod.common.Error![]u8 {
+pub fn schemaToGrammar(a: std.mem.Allocator, schema: *const json.Value) common_chat.exception.Error![]u8 {
     return json.schema_to_grammar.jsonSchemaToGrammar(a, schema, false) catch |e| switch (e) {
-        error.InvalidArgument, error.RuntimeError => mod.common.throw(e, "{s}", .{json.schema.what()}),
+        error.InvalidArgument, error.RuntimeError => common_chat.exception.throw(e, "{s}", .{json.schema.what()}),
         error.JsonError => error.JsonError,
         error.OutOfMemory => error.OutOfMemory,
     };
@@ -457,15 +447,15 @@ pub fn schemaToGrammar(a: Allocator, schema: *const json.Value) mod.common.Error
 /// template families (`--no-jinja`), both `templates.zig`'s.
 ///
 /// Return: owned by `a`, which must be an arena.
-pub fn chatTemplatesApply(a: Allocator, tmpls: *const Templates, inputs: *const ChatTemplatesInputs) mod.common.Error!ChatParams {
+pub fn chatTemplatesApply(a: std.mem.Allocator, tmpls: *const common_chat.templates.Templates, inputs: *const ChatTemplatesInputs) common_chat.exception.Error!common_chat.params.ChatParams {
     const in = try chatTemplatesInputs(a, inputs);
-    return chat.templates.apply(a, tmpls, &in);
+    return common_chat.templates.apply(a, tmpls, &in);
 }
 
 /// `common_chat_templates_inputs` as `templates.zig` takes it.
 ///
 /// Return: borrows `inputs`; the kwargs are `a`'s.
-fn chatTemplatesInputs(a: Allocator, inputs: *const ChatTemplatesInputs) mod.common.Error!chat.templates.TemplatesInputs {
+fn chatTemplatesInputs(a: std.mem.Allocator, inputs: *const ChatTemplatesInputs) common_chat.exception.Error!common_chat.templates.TemplatesInputs {
     return .{
         .messages = inputs.messages.items,
         .grammar = inputs.grammar,
@@ -487,8 +477,8 @@ fn chatTemplatesInputs(a: Allocator, inputs: *const ChatTemplatesInputs) mod.com
 
 /// `caps["supports_parallel_tool_calls"]` of `common_chat_templates_get_caps`
 /// (`templates.getCaps`): `caps[key]` of a missing key is false.
-pub fn chatTemplatesGetCaps(tmpls: *const Templates) bool {
-    return chat.templates.capsValue(chat.templates.getCaps(tmpls), "supports_parallel_tool_calls");
+pub fn chatTemplatesGetCaps(tmpls: *const common_chat.templates.Templates) bool {
+    return common_chat.templates.capsValue(common_chat.templates.getCaps(tmpls), "supports_parallel_tool_calls");
 }
 
 // -----------------------------------------------------------------------------
@@ -499,9 +489,9 @@ pub fn chatTemplatesGetCaps(tmpls: *const Templates) bool {
 pub const ServerChatParams = struct {
     use_jinja: bool,
     prefill_assistant: bool,
-    reasoning_format: chat.ReasoningFormat,
+    reasoning_format: common_chat.ReasoningFormat,
     chat_template_kwargs: KwMap = .{}, // mapping key --> json value
-    tmpls: *const Templates,
+    tmpls: *const common_chat.templates.Templates,
     allow_image: bool,
     allow_audio: bool,
     allow_video: bool,
@@ -528,7 +518,7 @@ pub const ServerChatParams = struct {
 /// Return: owned by `a`.
 /// - `out_session`: replaced by the request's session, owned by the
 ///   session's allocator; the caller deinits it.
-pub fn oaicompatChatParamsParse(a: Allocator, vocab: ?*const mod.common.c.llama_vocab, body: *json.Value, opt: *const ServerChatParams, out_files: *std.ArrayList([]u8), out_session: *chat.session.Session) mod.common.Error!json.Value {
+pub fn oaicompatChatParamsParse(a: std.mem.Allocator, vocab: ?*const llama.impl.llama_c.llama_vocab, body: *json.Value, opt: *const ServerChatParams, out_files: *std.ArrayList([]u8), out_session: *common_chat.session.Session) common_chat.exception.Error!json.Value {
     var arena_state = std.heap.ArenaAllocator.init(a);
     defer arena_state.deinit();
     const ar = arena_state.allocator();
@@ -543,10 +533,10 @@ pub fn oaicompatChatParamsParse(a: Allocator, vocab: ?*const mod.common.c.llama_
 
     if (!opt.use_jinja) {
         if (has_tools) {
-            return mod.common.throw(error.RuntimeError, "tools param requires --jinja flag", .{});
+            return common_chat.exception.throw(error.RuntimeError, "tools param requires --jinja flag", .{});
         }
         if (!std.mem.eql(u8, tool_choice, "auto")) {
-            return mod.common.throw(error.RuntimeError, "tool_choice param requires --jinja flag", .{});
+            return common_chat.exception.throw(error.RuntimeError, "tool_choice param requires --jinja flag", .{});
         }
     }
 
@@ -555,7 +545,7 @@ pub fn oaicompatChatParamsParse(a: Allocator, vocab: ?*const mod.common.c.llama_
     var json_schema = try mod.common.jsonValueJson(ar, body, "json_schema", .null);
     const grammar = mod.common.jsonValue(body, "grammar", []const u8, "");
     if (!json_schema.isNull() and grammar.len != 0) {
-        return mod.common.throw(error.RuntimeError, "Cannot use both json_schema and grammar", .{});
+        return common_chat.exception.throw(error.RuntimeError, "Cannot use both json_schema and grammar", .{});
     }
 
     // Handle "response_format" field
@@ -574,7 +564,7 @@ pub fn oaicompatChatParamsParse(a: Allocator, vocab: ?*const mod.common.c.llama_
                 json_schema = try mod.common.jsonValueJson(ar, &response_format, "schema", json.Value.emptyObject());
             }
         } else if (response_type.len != 0 and !std.mem.eql(u8, response_type, "text")) {
-            return mod.common.throw(error.InvalidArgument, "response_format type must be one of \"text\", \"json_object\" or \"json_schema\", but got: {s}", .{response_type});
+            return common_chat.exception.throw(error.InvalidArgument, "response_format type must be one of \"text\", \"json_object\" or \"json_schema\", but got: {s}", .{response_type});
         }
     }
 
@@ -585,20 +575,20 @@ pub fn oaicompatChatParamsParse(a: Allocator, vocab: ?*const mod.common.c.llama_
 
     // get input files
     if (!body.contains("messages")) {
-        return mod.common.throw(error.InvalidArgument, "'messages' is required", .{});
+        return common_chat.exception.throw(error.InvalidArgument, "'messages' is required", .{});
     }
     const messages = try body.at("messages");
     if (!messages.isArray()) {
-        return mod.common.throw(error.InvalidArgument, "Expected 'messages' to be an array", .{});
+        return common_chat.exception.throw(error.InvalidArgument, "Expected 'messages' to be an array", .{});
     }
     for (messages.array.items) |*msg| {
         const role = mod.common.jsonValue(msg, "role", []const u8, "");
         if (!std.mem.eql(u8, role, "assistant") and !msg.contains("content")) {
-            return mod.common.throw(error.InvalidArgument, "All non-assistant messages must contain 'content'", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "All non-assistant messages must contain 'content'", .{});
         }
         if (std.mem.eql(u8, role, "assistant")) {
             if (!msg.contains("content") and !msg.contains("tool_calls")) {
-                return mod.common.throw(error.InvalidArgument, "Assistant message must contain either 'content' or 'tool_calls'!", .{});
+                return common_chat.exception.throw(error.InvalidArgument, "Assistant message must contain either 'content' or 'tool_calls'!", .{});
             }
             if (!msg.contains("content")) {
                 continue; // avoid errors with no content
@@ -610,7 +600,7 @@ pub fn oaicompatChatParamsParse(a: Allocator, vocab: ?*const mod.common.c.llama_
         }
 
         if (!content.isArray()) {
-            return mod.common.throw(error.InvalidArgument, "Expected 'content' to be a string or an array", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "Expected 'content' to be a string or an array", .{});
         }
 
         try oaicompatContentLoadMedia(a, ar, content, opt, out_files);
@@ -619,16 +609,16 @@ pub fn oaicompatChatParamsParse(a: Allocator, vocab: ?*const mod.common.c.llama_
     const caps_parallel = chatTemplatesGetCaps(opt.tmpls);
 
     var inputs: ChatTemplatesInputs = .{};
-    inputs.messages = try chat.msg.msgsParseOaicompat(ar, messages);
-    inputs.tools = try chat.msg.toolsParseOaicompat(ar, &tools_v);
-    inputs.tool_choice = try chat.msg.toolChoiceParseOaicompat(tool_choice);
+    inputs.messages = try common_chat.msg.msgsParseOaicompat(ar, messages);
+    inputs.tools = try common_chat.msg.toolsParseOaicompat(ar, &tools_v);
+    inputs.tool_choice = try common_chat.msg.toolChoiceParseOaicompat(tool_choice);
     inputs.json_schema = if (json_schema.isNull()) "" else try json.dump(ar, &json_schema, -1);
     inputs.grammar = grammar;
     inputs.use_jinja = opt.use_jinja;
     inputs.parallel_tool_calls = mod.common.jsonValue(body, "parallel_tool_calls", bool, caps_parallel);
     inputs.add_generation_prompt = mod.common.jsonValue(body, "add_generation_prompt", bool, true);
     inputs.continue_final_message = if (body.contains("continue_final_message"))
-        try chat.msg.continuationParse(try body.at("continue_final_message"))
+        try common_chat.msg.continuationParse(try body.at("continue_final_message"))
     else
         .none;
     const msgs = inputs.messages.items;
@@ -636,29 +626,29 @@ pub fn oaicompatChatParamsParse(a: Allocator, vocab: ?*const mod.common.c.llama_
         msgs.len != 0 and std.mem.eql(u8, msgs[msgs.len - 1].role, "assistant"))
     {
         if (msgs.len >= 2 and std.mem.eql(u8, msgs[msgs.len - 2].role, "assistant")) {
-            return mod.common.throw(error.InvalidArgument, "Cannot have 2 or more assistant messages at the end of the list.", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "Cannot have 2 or more assistant messages at the end of the list.", .{});
         }
         inputs.continue_final_message = .auto;
         inputs.add_generation_prompt = false;
     }
     if (inputs.continue_final_message != .none and inputs.add_generation_prompt) {
-        return mod.common.throw(error.InvalidArgument, "Cannot set both add_generation_prompt and continue_final_message to true.", .{});
+        return common_chat.exception.throw(error.InvalidArgument, "Cannot set both add_generation_prompt and continue_final_message to true.", .{});
     }
     if (inputs.continue_final_message != .none and
         msgs.len != 0 and
         std.mem.eql(u8, msgs[msgs.len - 1].role, "assistant") and
         msgs[msgs.len - 1].tool_calls.items.len != 0)
     {
-        return mod.common.throw(error.InvalidArgument, "Cannot continue an assistant message that contains tool calls.", .{});
+        return common_chat.exception.throw(error.InvalidArgument, "Cannot continue an assistant message that contains tool calls.", .{});
     }
     inputs.reasoning_format = opt.reasoning_format;
     if (body.contains("reasoning_format")) {
-        inputs.reasoning_format = try chat.ReasoningFormat.fromName(try (try body.at("reasoning_format")).get([]const u8));
+        inputs.reasoning_format = try common_chat.ReasoningFormat.fromName(try (try body.at("reasoning_format")).get([]const u8));
     }
     inputs.enable_thinking = opt.enable_thinking;
     if (inputs.tools.items.len != 0 and inputs.tool_choice != .none) {
         if (body.contains("grammar")) {
-            return mod.common.throw(error.InvalidArgument, "Cannot use custom grammar constraints with tools.", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "Cannot use custom grammar constraints with tools.", .{});
         }
     }
 
@@ -677,7 +667,7 @@ pub fn oaicompatChatParamsParse(a: Allocator, vocab: ?*const mod.common.c.llama_
     } else if (std.mem.eql(u8, enable_thinking_kwarg, "false")) {
         inputs.enable_thinking = false;
     } else if (enable_thinking_kwarg.len != 0 and enable_thinking_kwarg[0] == '"') {
-        return mod.common.throw(error.InvalidArgument, "invalid type for \"enable_thinking\" (expected boolean, got string)", .{});
+        return common_chat.exception.throw(error.InvalidArgument, "invalid type for \"enable_thinking\" (expected boolean, got string)", .{});
     }
 
     // Parse the OAI "reasoning_effort" field; "none" disables reasoning.
@@ -697,7 +687,7 @@ pub fn oaicompatChatParamsParse(a: Allocator, vocab: ?*const mod.common.c.llama_
     // Apply chat template to the list of messages
     {
         const in = try chatTemplatesInputs(ar, &inputs);
-        const session = try chat.session.Session.init(out_session.gpa, opt.tmpls, vocab, &in, .{ .echo = mod.common.jsonValue(body, "echo", bool, false) });
+        const session = try common_chat.session.Session.init(out_session.gpa, opt.tmpls, vocab, &in, .{ .echo = mod.common.jsonValue(body, "echo", bool, false) });
         out_session.deinit();
         out_session.* = session;
     }
@@ -725,11 +715,11 @@ pub fn oaicompatChatParamsParse(a: Allocator, vocab: ?*const mod.common.c.llama_
     // TODO: The response format of this option is not yet OAI-compatible, but seems like no one really using it; We may need to fix it in the future
     if (mod.common.jsonValue(body, "logprobs", bool, false)) {
         if (has_tools and stream) {
-            return mod.common.throw(error.InvalidArgument, "logprobs is not supported with tools + stream", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "logprobs is not supported with tools + stream", .{});
         }
         try llama_params.set(a, "n_probs", try json.Value.from(a, mod.common.jsonValue(body, "top_logprobs", c_int, 20)));
     } else if (body.contains("top_logprobs") and !(try body.at("top_logprobs")).isNull()) {
-        return mod.common.throw(error.InvalidArgument, "top_logprobs requires logprobs to be set to true", .{});
+        return common_chat.exception.throw(error.InvalidArgument, "top_logprobs requires logprobs to be set to true", .{});
     }
 
     // Copy remaining properties to llama_params
@@ -757,12 +747,12 @@ pub fn oaicompatChatParamsParse(a: Allocator, vocab: ?*const mod.common.c.llama_
 /// - `content`: an array, owned by `a`; rewritten in place.
 /// - `ar`: scratch for the parts' sub-objects.
 /// - `out_files`: grows; each file owned by `a`.
-fn oaicompatContentLoadMedia(a: Allocator, ar: Allocator, content: *json.Value, opt: *const ServerChatParams, out_files: *std.ArrayList([]u8)) mod.common.Error!void {
+fn oaicompatContentLoadMedia(a: std.mem.Allocator, ar: std.mem.Allocator, content: *json.Value, opt: *const ServerChatParams, out_files: *std.ArrayList([]u8)) common_chat.exception.Error!void {
     for (content.array.items) |*p| {
         const ty = mod.common.jsonValue(p, "type", []const u8, "");
         if (std.mem.eql(u8, ty, "image_url")) {
             if (!opt.allow_image) {
-                return mod.common.throw(error.RuntimeError, "image input is not supported - hint: if this is unexpected, you may need to provide the mmproj", .{});
+                return common_chat.exception.throw(error.RuntimeError, "image input is not supported - hint: if this is unexpected, you may need to provide the mmproj", .{});
             }
 
             const image_url = try mod.common.jsonValueJson(ar, p, "image_url", json.Value.emptyObject());
@@ -772,7 +762,7 @@ fn oaicompatContentLoadMedia(a: Allocator, ar: Allocator, content: *json.Value, 
             try setMediaMarker(a, p, "image_url");
         } else if (std.mem.eql(u8, ty, "input_audio")) {
             if (!opt.allow_audio) {
-                return mod.common.throw(error.RuntimeError, "audio input is not supported - hint: if this is unexpected, you may need to provide the mmproj", .{});
+                return common_chat.exception.throw(error.RuntimeError, "audio input is not supported - hint: if this is unexpected, you may need to provide the mmproj", .{});
             }
 
             // note: don't need to validate "format", it's redundant
@@ -783,7 +773,7 @@ fn oaicompatContentLoadMedia(a: Allocator, ar: Allocator, content: *json.Value, 
             try setMediaMarker(a, p, "input_audio");
         } else if (std.mem.eql(u8, ty, "input_video") or std.mem.eql(u8, ty, "video_url")) {
             if (!opt.allow_video) {
-                return mod.common.throw(error.RuntimeError, "video input is not supported - hint: if this is unexpected, you may need to provide the mmproj", .{});
+                return common_chat.exception.throw(error.RuntimeError, "video input is not supported - hint: if this is unexpected, you may need to provide the mmproj", .{});
             }
 
             // accept the OpenAI-style "video_url" key as an alias of "input_video"
@@ -794,7 +784,7 @@ fn oaicompatContentLoadMedia(a: Allocator, ar: Allocator, content: *json.Value, 
             try setMediaMarker(a, p, "input_video");
             try p.erase(a, "video_url");
         } else if (!std.mem.eql(u8, ty, "text") and !std.mem.eql(u8, ty, "tool_reference")) {
-            return mod.common.throw(error.InvalidArgument, "unsupported content[].type", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "unsupported content[].type", .{});
         }
     }
 }
@@ -806,17 +796,17 @@ fn oaicompatContentLoadMedia(a: Allocator, ar: Allocator, content: *json.Value, 
 ///
 /// Return: owned by `gpa`.
 pub fn tokenizeOaiContentArray(
-    gpa: Allocator,
-    vocab: ?*const mod.common.c.llama_vocab,
-    mctx: ?*mod.common.c.mtmd_context,
+    gpa: std.mem.Allocator,
+    vocab: ?*const llama.impl.llama_c.llama_vocab,
+    mctx: ?*mtmd.mtmd.Context,
     opt: *const ServerChatParams,
     content_in: *const json.Value,
     add_special: bool,
     parse_special: bool,
-    init_opt: mod.common.c.mtmd_helper_init_opt,
-) mod.common.Error!mod.tokens.ServerTokens {
+    init_opt: mtmd.helper.InitOpt,
+) common_chat.exception.Error!mod.tokens.ServerTokens {
     if (!content_in.isArray()) {
-        return mod.common.throw(error.InvalidArgument, "\"content\" must be an array", .{});
+        return common_chat.exception.throw(error.InvalidArgument, "\"content\" must be an array", .{});
     }
 
     var arena_state = std.heap.ArenaAllocator.init(gpa);
@@ -841,7 +831,7 @@ pub fn tokenizeOaiContentArray(
 }
 
 /// `p["type"] = "media_marker"; p["text"] = get_media_marker(); p.erase(key);`
-fn setMediaMarker(a: Allocator, p: *json.Value, key: []const u8) mod.common.Error!void {
+fn setMediaMarker(a: std.mem.Allocator, p: *json.Value, key: []const u8) common_chat.exception.Error!void {
     try p.set(a, "type", try json.Value.initString(a, "media_marker"));
     try p.set(a, "text", try json.Value.initString(a, mod.common.getMediaMarker()));
     try p.erase(a, key);
@@ -854,7 +844,7 @@ fn setMediaMarker(a: Allocator, p: *json.Value, key: []const u8) mod.common.Erro
 /// standard alphabet, padded.
 ///
 /// Return: owned by `a`.
-pub fn base64Encode(a: Allocator, data: []const u8) mod.common.Error![]u8 {
+pub fn base64Encode(a: std.mem.Allocator, data: []const u8) common_chat.exception.Error![]u8 {
     const enc = std.base64.standard.Encoder;
     const out = try a.alloc(u8, enc.calcSize(data.len));
     _ = enc.encode(out, data);
@@ -864,7 +854,7 @@ pub fn base64Encode(a: Allocator, data: []const u8) mod.common.Error![]u8 {
 /// Ports `format_embeddings_response_oaicompat` (server-common.cpp:1636 @b1b770d90).
 ///
 /// Return: owned by `a`.
-pub fn formatEmbeddingsResponseOaicompat(a: Allocator, request: *const json.Value, model_name: []const u8, embeddings: *json.Value, use_base64: bool) mod.common.Error!json.Value {
+pub fn formatEmbeddingsResponseOaicompat(a: std.mem.Allocator, request: *const json.Value, model_name: []const u8, embeddings: *json.Value, use_base64: bool) common_chat.exception.Error!json.Value {
     var data = json.Value.emptyArray();
     errdefer data.deinit(a);
     var n_tokens: i32 = 0;
@@ -929,14 +919,14 @@ fn scoreGreater(ctx: ScoreCtx, x: json.Value, y: json.Value) bool {
 ///
 /// Return: owned by `a`.
 pub fn formatResponseRerank(
-    a: Allocator,
+    a: std.mem.Allocator,
     request: *const json.Value,
     model_name: []const u8,
     ranks: *json.Value,
     is_tei_format: bool,
     texts: [][]const u8,
     top_n: c_int,
-) mod.common.Error!json.Value {
+) common_chat.exception.Error!json.Value {
     var n_tokens: i32 = 0;
     const return_text = is_tei_format and mod.common.jsonValue(request, "return_text", bool, false);
     var elements: std.ArrayList(json.Value) = .empty; // Temporary vector to hold unsorted elements

@@ -16,70 +16,66 @@
 //! `common_imatrix::entries`, a `std::map`, in name order.
 
 const std = @import("std");
+const llama = @import("llama");
 const stdlib = @import("stdlib");
 const builtin = @import("builtin");
-const common = @import("tools_common");
-
-comptime {
-    // libllama, compiled in (see `build/tools.zig`).
-    _ = @import("llama").lib;
-}
+const tools_common = @import("tools_common");
 
 /// Mirrors `tensor_type_option` (quantize/quantize.cpp:23 @b1b770d90).
 const TensorTypeOption = struct {
     name: [:0]u8,
-    type: common.c.ggml_type = common.c.GGML_TYPE_COUNT,
+    type: llama.impl.llama_c.ggml_type = llama.impl.llama_c.GGML_TYPE_COUNT,
 };
 
 /// Mirrors `quant_option` (quantize/quantize.cpp:28 @b1b770d90).
 const QuantOption = struct {
     name: []const u8,
-    ftype: common.c.llama_ftype,
+    ftype: llama.impl.llama_c.llama_ftype,
     desc: [*:0]const u8,
 };
 
 /// Ports `QUANT_OPTIONS` (quantize/quantize.cpp:34 @b1b770d90).
 const quant_options = [_]QuantOption{
-    .{ .name = "Q1_0", .ftype = common.c.LLAMA_FTYPE_MOSTLY_Q1_0, .desc = " 1.125 bpw quantization" },
-    .{ .name = "Q2_0", .ftype = common.c.LLAMA_FTYPE_MOSTLY_Q2_0, .desc = " 2.25 bpw quantization (group 64)" },
-    .{ .name = "Q4_0", .ftype = common.c.LLAMA_FTYPE_MOSTLY_Q4_0, .desc = " 4.34G, +0.4685 ppl @ Llama-3-8B" },
-    .{ .name = "Q4_1", .ftype = common.c.LLAMA_FTYPE_MOSTLY_Q4_1, .desc = " 4.78G, +0.4511 ppl @ Llama-3-8B" },
-    .{ .name = "MXFP4_MOE", .ftype = common.c.LLAMA_FTYPE_MOSTLY_MXFP4_MOE, .desc = " MXFP4 MoE" },
-    .{ .name = "Q5_0", .ftype = common.c.LLAMA_FTYPE_MOSTLY_Q5_0, .desc = " 5.21G, +0.1316 ppl @ Llama-3-8B" },
-    .{ .name = "Q5_1", .ftype = common.c.LLAMA_FTYPE_MOSTLY_Q5_1, .desc = " 5.65G, +0.1062 ppl @ Llama-3-8B" },
-    .{ .name = "IQ2_XXS", .ftype = common.c.LLAMA_FTYPE_MOSTLY_IQ2_XXS, .desc = " 2.06 bpw quantization" },
-    .{ .name = "IQ2_XS", .ftype = common.c.LLAMA_FTYPE_MOSTLY_IQ2_XS, .desc = " 2.31 bpw quantization" },
-    .{ .name = "IQ2_S", .ftype = common.c.LLAMA_FTYPE_MOSTLY_IQ2_S, .desc = " 2.5  bpw quantization" },
-    .{ .name = "IQ2_M", .ftype = common.c.LLAMA_FTYPE_MOSTLY_IQ2_M, .desc = " 2.7  bpw quantization" },
-    .{ .name = "IQ1_S", .ftype = common.c.LLAMA_FTYPE_MOSTLY_IQ1_S, .desc = " 1.56 bpw quantization" },
-    .{ .name = "IQ1_M", .ftype = common.c.LLAMA_FTYPE_MOSTLY_IQ1_M, .desc = " 1.75 bpw quantization" },
-    .{ .name = "TQ1_0", .ftype = common.c.LLAMA_FTYPE_MOSTLY_TQ1_0, .desc = " 1.69 bpw ternarization" },
-    .{ .name = "TQ2_0", .ftype = common.c.LLAMA_FTYPE_MOSTLY_TQ2_0, .desc = " 2.06 bpw ternarization" },
-    .{ .name = "Q2_K", .ftype = common.c.LLAMA_FTYPE_MOSTLY_Q2_K, .desc = " 2.96G, +3.5199 ppl @ Llama-3-8B" },
-    .{ .name = "Q2_K_S", .ftype = common.c.LLAMA_FTYPE_MOSTLY_Q2_K_S, .desc = " 2.96G, +3.1836 ppl @ Llama-3-8B" },
-    .{ .name = "IQ3_XXS", .ftype = common.c.LLAMA_FTYPE_MOSTLY_IQ3_XXS, .desc = " 3.06 bpw quantization" },
-    .{ .name = "IQ3_S", .ftype = common.c.LLAMA_FTYPE_MOSTLY_IQ3_S, .desc = " 3.44 bpw quantization" },
-    .{ .name = "IQ3_M", .ftype = common.c.LLAMA_FTYPE_MOSTLY_IQ3_M, .desc = " 3.66 bpw quantization mix" },
-    .{ .name = "Q3_K", .ftype = common.c.LLAMA_FTYPE_MOSTLY_Q3_K_M, .desc = "alias for Q3_K_M" },
-    .{ .name = "IQ3_XS", .ftype = common.c.LLAMA_FTYPE_MOSTLY_IQ3_XS, .desc = " 3.3 bpw quantization" },
-    .{ .name = "Q3_K_S", .ftype = common.c.LLAMA_FTYPE_MOSTLY_Q3_K_S, .desc = " 3.41G, +1.6321 ppl @ Llama-3-8B" },
-    .{ .name = "Q3_K_M", .ftype = common.c.LLAMA_FTYPE_MOSTLY_Q3_K_M, .desc = " 3.74G, +0.6569 ppl @ Llama-3-8B" },
-    .{ .name = "Q3_K_L", .ftype = common.c.LLAMA_FTYPE_MOSTLY_Q3_K_L, .desc = " 4.03G, +0.5562 ppl @ Llama-3-8B" },
-    .{ .name = "IQ4_NL", .ftype = common.c.LLAMA_FTYPE_MOSTLY_IQ4_NL, .desc = " 4.50 bpw non-linear quantization" },
-    .{ .name = "IQ4_XS", .ftype = common.c.LLAMA_FTYPE_MOSTLY_IQ4_XS, .desc = " 4.25 bpw non-linear quantization" },
-    .{ .name = "Q4_K", .ftype = common.c.LLAMA_FTYPE_MOSTLY_Q4_K_M, .desc = "alias for Q4_K_M" },
-    .{ .name = "Q4_K_S", .ftype = common.c.LLAMA_FTYPE_MOSTLY_Q4_K_S, .desc = " 4.37G, +0.2689 ppl @ Llama-3-8B" },
-    .{ .name = "Q4_K_M", .ftype = common.c.LLAMA_FTYPE_MOSTLY_Q4_K_M, .desc = " 4.58G, +0.1754 ppl @ Llama-3-8B" },
-    .{ .name = "Q5_K", .ftype = common.c.LLAMA_FTYPE_MOSTLY_Q5_K_M, .desc = "alias for Q5_K_M" },
-    .{ .name = "Q5_K_S", .ftype = common.c.LLAMA_FTYPE_MOSTLY_Q5_K_S, .desc = " 5.21G, +0.1049 ppl @ Llama-3-8B" },
-    .{ .name = "Q5_K_M", .ftype = common.c.LLAMA_FTYPE_MOSTLY_Q5_K_M, .desc = " 5.33G, +0.0569 ppl @ Llama-3-8B" },
-    .{ .name = "Q6_K", .ftype = common.c.LLAMA_FTYPE_MOSTLY_Q6_K, .desc = " 6.14G, +0.0217 ppl @ Llama-3-8B" },
-    .{ .name = "Q8_0", .ftype = common.c.LLAMA_FTYPE_MOSTLY_Q8_0, .desc = " 7.96G, +0.0026 ppl @ Llama-3-8B" },
-    .{ .name = "F16", .ftype = common.c.LLAMA_FTYPE_MOSTLY_F16, .desc = "14.00G, +0.0020 ppl @ Mistral-7B" },
-    .{ .name = "BF16", .ftype = common.c.LLAMA_FTYPE_MOSTLY_BF16, .desc = "14.00G, -0.0050 ppl @ Mistral-7B" },
-    .{ .name = "F32", .ftype = common.c.LLAMA_FTYPE_ALL_F32, .desc = "26.00G              @ 7B" },
+    .{ .name = "Q1_0", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_Q1_0, .desc = " 1.125 bpw quantization" },
+    .{ .name = "Q2_0", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_Q2_0, .desc = " 2.25 bpw quantization (group 64)" },
+    .{ .name = "Q4_0", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_Q4_0, .desc = " 4.34G, +0.4685 ppl @ Llama-3-8B" },
+    .{ .name = "Q4_1", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_Q4_1, .desc = " 4.78G, +0.4511 ppl @ Llama-3-8B" },
+    .{ .name = "MXFP4_MOE", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_MXFP4_MOE, .desc = " MXFP4 MoE" },
+    .{ .name = "Q5_0", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_Q5_0, .desc = " 5.21G, +0.1316 ppl @ Llama-3-8B" },
+    .{ .name = "Q5_1", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_Q5_1, .desc = " 5.65G, +0.1062 ppl @ Llama-3-8B" },
+    .{ .name = "IQ2_XXS", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_IQ2_XXS, .desc = " 2.06 bpw quantization" },
+    .{ .name = "IQ2_XS", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_IQ2_XS, .desc = " 2.31 bpw quantization" },
+    .{ .name = "IQ2_S", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_IQ2_S, .desc = " 2.5  bpw quantization" },
+    .{ .name = "IQ2_M", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_IQ2_M, .desc = " 2.7  bpw quantization" },
+    .{ .name = "IQ1_S", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_IQ1_S, .desc = " 1.56 bpw quantization" },
+    .{ .name = "IQ1_M", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_IQ1_M, .desc = " 1.75 bpw quantization" },
+    .{ .name = "TQ1_0", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_TQ1_0, .desc = " 1.69 bpw ternarization" },
+    .{ .name = "TQ2_0", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_TQ2_0, .desc = " 2.06 bpw ternarization" },
+    .{ .name = "Q2_K", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_Q2_K, .desc = " 2.96G, +3.5199 ppl @ Llama-3-8B" },
+    .{ .name = "Q2_K_S", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_Q2_K_S, .desc = " 2.96G, +3.1836 ppl @ Llama-3-8B" },
+    .{ .name = "IQ3_XXS", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_IQ3_XXS, .desc = " 3.06 bpw quantization" },
+    .{ .name = "IQ3_S", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_IQ3_S, .desc = " 3.44 bpw quantization" },
+    .{ .name = "IQ3_M", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_IQ3_M, .desc = " 3.66 bpw quantization mix" },
+    .{ .name = "Q3_K", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_Q3_K_M, .desc = "alias for Q3_K_M" },
+    .{ .name = "IQ3_XS", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_IQ3_XS, .desc = " 3.3 bpw quantization" },
+    .{ .name = "Q3_K_S", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_Q3_K_S, .desc = " 3.41G, +1.6321 ppl @ Llama-3-8B" },
+    .{ .name = "Q3_K_M", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_Q3_K_M, .desc = " 3.74G, +0.6569 ppl @ Llama-3-8B" },
+    .{ .name = "Q3_K_L", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_Q3_K_L, .desc = " 4.03G, +0.5562 ppl @ Llama-3-8B" },
+    .{ .name = "IQ4_NL", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_IQ4_NL, .desc = " 4.50 bpw non-linear quantization" },
+    .{ .name = "IQ4_XS", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_IQ4_XS, .desc = " 4.25 bpw non-linear quantization" },
+    .{ .name = "Q4_K", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_Q4_K_M, .desc = "alias for Q4_K_M" },
+    .{ .name = "Q4_K_S", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_Q4_K_S, .desc = " 4.37G, +0.2689 ppl @ Llama-3-8B" },
+    .{ .name = "Q4_K_M", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_Q4_K_M, .desc = " 4.58G, +0.1754 ppl @ Llama-3-8B" },
+    .{ .name = "Q5_K", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_Q5_K_M, .desc = "alias for Q5_K_M" },
+    .{ .name = "Q5_K_S", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_Q5_K_S, .desc = " 5.21G, +0.1049 ppl @ Llama-3-8B" },
+    .{ .name = "Q5_K_M", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_Q5_K_M, .desc = " 5.33G, +0.0569 ppl @ Llama-3-8B" },
+    .{ .name = "Q6_K", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_Q6_K, .desc = " 6.14G, +0.0217 ppl @ Llama-3-8B" },
+    .{ .name = "Q8_0", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_Q8_0, .desc = " 7.96G, +0.0026 ppl @ Llama-3-8B" },
+    .{ .name = "F16", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_F16, .desc = "14.00G, +0.0020 ppl @ Mistral-7B" },
+    .{ .name = "BF16", .ftype = llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_BF16, .desc = "14.00G, -0.0050 ppl @ Mistral-7B" },
+    .{ .name = "F32", .ftype = llama.impl.llama_c.LLAMA_FTYPE_ALL_F32, .desc = "26.00G              @ 7B" },
     // Note: Ensure COPY comes after F32 to avoid ftype 0 from matching.
-    .{ .name = "COPY", .ftype = common.c.LLAMA_FTYPE_ALL_F32, .desc = "only copy tensors, no quantizing" },
+    .{ .name = "COPY", .ftype = llama.impl.llama_c.LLAMA_FTYPE_ALL_F32, .desc = "only copy tensors, no quantizing" },
 };
 
 /// One line of the type list `usage` prints, named so its `:` is not read
@@ -101,7 +97,7 @@ fn striequals(a: []const u8, b: []const u8) bool {
 
 /// Ports `try_parse_ftype` (quantize/quantize.cpp:92 @b1b770d90): a name, case
 /// folded, or the ftype's number, the first option with it.
-fn tryParseFtype(arena: std.mem.Allocator, ftype_str_in: [:0]const u8, ftype: *common.c.llama_ftype, ftype_str_out: *[]const u8) !bool {
+fn tryParseFtype(arena: std.mem.Allocator, ftype_str_in: [:0]const u8, ftype: *llama.impl.llama_c.llama_ftype, ftype_str_out: *[]const u8) !bool {
     const ftype_str = try arena.dupeSentinel(u8, ftype_str_in, 0);
     for (ftype_str) |*ch| ch.* = std.ascii.toUpper(ch.*);
     for (quant_options) |it| {
@@ -127,62 +123,62 @@ fn tryParseFtype(arena: std.mem.Allocator, ftype_str_in: [:0]const u8, ftype: *c
 
 /// Ports `usage` (quantize/quantize.cpp:122 @b1b770d90).
 fn usage(executable: [*:0]const u8) noreturn {
-    common.io.printf("usage: %s [--help] [--allow-requantize] [--leave-output-tensor] [--pure] [--imatrix] [--include-weights]\n", .{executable});
-    common.io.printf("       [--exclude-weights] [--output-tensor-type] [--token-embedding-type] [--tensor-type] [--tensor-type-file]\n", .{});
-    common.io.printf("       [--prune-layers] [--keep-split] [--override-kv] [--dry-run] [--max-buffer-size]\n", .{});
-    common.io.printf("       model-f32.gguf [model-quant.gguf] type [nthreads]\n\n", .{});
-    common.io.printf("  --allow-requantize\n", .{});
-    common.io.printf("                                      allow requantizing tensors that have already been quantized\n", .{});
-    common.io.printf("                                      WARNING: this can severely reduce quality compared to quantizing\n", .{});
-    common.io.printf("                                               from 16bit or 32bit!\n", .{});
-    common.io.printf("  --leave-output-tensor\n", .{});
-    common.io.printf("                                      leave output.weight un(re)quantized\n", .{});
-    common.io.printf("                                      increases model size but may also increase quality, especially when requantizing\n", .{});
-    common.io.printf("  --pure\n", .{});
-    common.io.printf("                                      disable k-quant mixtures and quantize all tensors to the same type\n", .{});
-    common.io.printf("  --imatrix file_name\n", .{});
-    common.io.printf("                                      use data in file_name as importance matrix for quant optimizations\n", .{});
-    common.io.printf("  --include-weights tensor_name\n", .{});
-    common.io.printf("                                      use importance matrix for this/these tensor(s)\n", .{});
-    common.io.printf("  --exclude-weights tensor_name\n", .{});
-    common.io.printf("                                      do not use importance matrix for this/these tensor(s)\n", .{});
-    common.io.printf("  --output-tensor-type ggml_type\n", .{});
-    common.io.printf("                                      use this ggml_type for the output.weight tensor\n", .{});
-    common.io.printf("  --token-embedding-type ggml_type\n", .{});
-    common.io.printf("                                      use this ggml_type for the token embeddings tensor\n", .{});
-    common.io.printf("  --tensor-type tensor_name=ggml_type\n", .{});
-    common.io.printf("                                      quantize this tensor to this ggml_type\n", .{});
-    common.io.printf("                                      this is an advanced option to selectively quantize tensors. may be specified multiple times.\n", .{});
-    common.io.printf("                                      example: --tensor-type attn_q=q8_0\n", .{});
-    common.io.printf("  --tensor-type-file tensor_types.txt\n", .{});
-    common.io.printf("                                      list of tensors to quantize to a specific ggml_type\n", .{});
-    common.io.printf("                                      this is an advanced option to selectively quantize a long list of tensors.\n", .{});
-    common.io.printf("                                      the file should use the same format as above, separated by spaces or newlines.\n", .{});
-    common.io.printf("  --prune-layers L0,L1,L2...\n", .{});
-    common.io.printf("                                      comma-separated list of layer numbers to prune from the model\n", .{});
-    common.io.printf("                                      WARNING: this is an advanced option, use with care.\n", .{});
-    common.io.printf("  --keep-split\n", .{});
-    common.io.printf("                                      generate quantized model in the same shards as input\n", .{});
-    common.io.printf("  --override-kv KEY=TYPE:VALUE\n", .{});
-    common.io.printf("                                      override model metadata by key in the quantized model. may be specified multiple times.\n", .{});
-    common.io.printf("                                      WARNING: this is an advanced option, use with care.\n", .{});
-    common.io.printf("  --dry-run\n", .{});
-    common.io.printf("                                      calculate and show the final quantization size without performing quantization\n", .{});
-    common.io.printf("                                      example: llama-quantize --dry-run model-f32.gguf Q4_K\n", .{});
-    common.io.printf("  --max-buffer-size MiB\n", .{});
-    common.io.printf("                                      max amount of tensor rows kept in memory while quantizing one tensor (default: 8192)\n", .{});
-    common.io.printf("                                      lower it to quantize models with very large tensors on a machine with little RAM\n\n", .{});
-    common.io.printf("note: --include-weights and --exclude-weights cannot be used together\n\n", .{});
-    common.io.printf("-----------------------------------------------------------------------------\n", .{});
-    common.io.printf(" allowed quantization types\n", .{});
-    common.io.printf("-----------------------------------------------------------------------------\n\n", .{});
+    tools_common.io.printf("usage: %s [--help] [--allow-requantize] [--leave-output-tensor] [--pure] [--imatrix] [--include-weights]\n", .{executable});
+    tools_common.io.printf("       [--exclude-weights] [--output-tensor-type] [--token-embedding-type] [--tensor-type] [--tensor-type-file]\n", .{});
+    tools_common.io.printf("       [--prune-layers] [--keep-split] [--override-kv] [--dry-run] [--max-buffer-size]\n", .{});
+    tools_common.io.printf("       model-f32.gguf [model-quant.gguf] type [nthreads]\n\n", .{});
+    tools_common.io.printf("  --allow-requantize\n", .{});
+    tools_common.io.printf("                                      allow requantizing tensors that have already been quantized\n", .{});
+    tools_common.io.printf("                                      WARNING: this can severely reduce quality compared to quantizing\n", .{});
+    tools_common.io.printf("                                               from 16bit or 32bit!\n", .{});
+    tools_common.io.printf("  --leave-output-tensor\n", .{});
+    tools_common.io.printf("                                      leave output.weight un(re)quantized\n", .{});
+    tools_common.io.printf("                                      increases model size but may also increase quality, especially when requantizing\n", .{});
+    tools_common.io.printf("  --pure\n", .{});
+    tools_common.io.printf("                                      disable k-quant mixtures and quantize all tensors to the same type\n", .{});
+    tools_common.io.printf("  --imatrix file_name\n", .{});
+    tools_common.io.printf("                                      use data in file_name as importance matrix for quant optimizations\n", .{});
+    tools_common.io.printf("  --include-weights tensor_name\n", .{});
+    tools_common.io.printf("                                      use importance matrix for this/these tensor(s)\n", .{});
+    tools_common.io.printf("  --exclude-weights tensor_name\n", .{});
+    tools_common.io.printf("                                      do not use importance matrix for this/these tensor(s)\n", .{});
+    tools_common.io.printf("  --output-tensor-type ggml_type\n", .{});
+    tools_common.io.printf("                                      use this ggml_type for the output.weight tensor\n", .{});
+    tools_common.io.printf("  --token-embedding-type ggml_type\n", .{});
+    tools_common.io.printf("                                      use this ggml_type for the token embeddings tensor\n", .{});
+    tools_common.io.printf("  --tensor-type tensor_name=ggml_type\n", .{});
+    tools_common.io.printf("                                      quantize this tensor to this ggml_type\n", .{});
+    tools_common.io.printf("                                      this is an advanced option to selectively quantize tensors. may be specified multiple times.\n", .{});
+    tools_common.io.printf("                                      example: --tensor-type attn_q=q8_0\n", .{});
+    tools_common.io.printf("  --tensor-type-file tensor_types.txt\n", .{});
+    tools_common.io.printf("                                      list of tensors to quantize to a specific ggml_type\n", .{});
+    tools_common.io.printf("                                      this is an advanced option to selectively quantize a long list of tensors.\n", .{});
+    tools_common.io.printf("                                      the file should use the same format as above, separated by spaces or newlines.\n", .{});
+    tools_common.io.printf("  --prune-layers L0,L1,L2...\n", .{});
+    tools_common.io.printf("                                      comma-separated list of layer numbers to prune from the model\n", .{});
+    tools_common.io.printf("                                      WARNING: this is an advanced option, use with care.\n", .{});
+    tools_common.io.printf("  --keep-split\n", .{});
+    tools_common.io.printf("                                      generate quantized model in the same shards as input\n", .{});
+    tools_common.io.printf("  --override-kv KEY=TYPE:VALUE\n", .{});
+    tools_common.io.printf("                                      override model metadata by key in the quantized model. may be specified multiple times.\n", .{});
+    tools_common.io.printf("                                      WARNING: this is an advanced option, use with care.\n", .{});
+    tools_common.io.printf("  --dry-run\n", .{});
+    tools_common.io.printf("                                      calculate and show the final quantization size without performing quantization\n", .{});
+    tools_common.io.printf("                                      example: llama-quantize --dry-run model-f32.gguf Q4_K\n", .{});
+    tools_common.io.printf("  --max-buffer-size MiB\n", .{});
+    tools_common.io.printf("                                      max amount of tensor rows kept in memory while quantizing one tensor (default: 8192)\n", .{});
+    tools_common.io.printf("                                      lower it to quantize models with very large tensors on a machine with little RAM\n\n", .{});
+    tools_common.io.printf("note: --include-weights and --exclude-weights cannot be used together\n\n", .{});
+    tools_common.io.printf("-----------------------------------------------------------------------------\n", .{});
+    tools_common.io.printf(" allowed quantization types\n", .{});
+    tools_common.io.printf("-----------------------------------------------------------------------------\n\n", .{});
     for (quant_options) |it| {
         if (!std.mem.eql(u8, it.name, "COPY")) {
-            common.io.printf("  %2d  or  ", .{@as(c_int, @intCast(it.ftype))});
+            tools_common.io.printf("  %2d  or  ", .{@as(c_int, @intCast(it.ftype))});
         } else {
-            common.io.printf("          ", .{});
+            tools_common.io.printf("          ", .{});
         }
-        common.io.printf(type_line, .{ @as(c_int, @intCast(it.name.len)), it.name.ptr, it.desc });
+        tools_common.io.printf(type_line, .{ @as(c_int, @intCast(it.name.len)), it.name.ptr, it.desc });
     }
     stdlib.stdio.exit(1);
 }
@@ -193,14 +189,14 @@ const ImatrixData = std.StringArrayHashMapUnmanaged([]f32);
 /// Ports `load_imatrix` (quantize/quantize.cpp:183 @b1b770d90).
 fn loadImatrix(a: std.mem.Allocator, imatrix_file: [:0]const u8, imatrix_datasets: *std.ArrayList([]const u8), imatrix_data: *ImatrixData) !c_int {
     const func = "load_imatrix";
-    var loaded = try common.imatrix_loader.Imatrix.init(a);
-    if (!try common.imatrix_loader.load(imatrix_file, &loaded)) {
-        common.io.eprintf("%s: failed to load imatrix from '%s'\n", .{ func, imatrix_file.ptr });
+    var loaded = try tools_common.imatrix_loader.Imatrix.init(a);
+    if (!try tools_common.imatrix_loader.load(imatrix_file, &loaded)) {
+        tools_common.io.eprintf("%s: failed to load imatrix from '%s'\n", .{ func, imatrix_file.ptr });
         stdlib.stdio.exit(1);
     }
 
     if (!loaded.is_legacy and !loaded.has_metadata) {
-        common.io.eprintf("%s: missing imatrix metadata in file %s\n", .{ func, imatrix_file.ptr });
+        tools_common.io.eprintf("%s: missing imatrix metadata in file %s\n", .{ func, imatrix_file.ptr });
         stdlib.stdio.exit(1);
     }
 
@@ -234,7 +230,7 @@ fn loadImatrix(a: std.mem.Allocator, imatrix_file: [:0]const u8, imatrix_dataset
                     const count: f32 = @floatFromInt(cnt);
                     if (count > max_count) max_count = count;
                 }
-                common.io.printf("%s: loaded data (size = %6d, n_tokens = %6d, n_chunks = %6d) for '%.*s'\n", .{
+                tools_common.io.printf("%s: loaded data (size = %6d, n_tokens = %6d, n_chunks = %6d) for '%.*s'\n", .{
                     func,
                     @as(c_int, @intCast(e.len)),
                     @as(c_int, @intFromFloat(max_count)),
@@ -249,7 +245,7 @@ fn loadImatrix(a: std.mem.Allocator, imatrix_file: [:0]const u8, imatrix_dataset
             for (e, entry.sums.items) |*dst, s| dst.* = if (ncall > 0) s / @as(f32, @floatFromInt(ncall)) else s;
 
             if (trace) {
-                common.io.printf("%s: loaded data (size = %6d, ncall = %6d) for '%.*s'\n", .{
+                tools_common.io.printf("%s: loaded data (size = %6d, ncall = %6d) for '%.*s'\n", .{
                     func, @as(c_int, @intCast(e.len)), @as(c_int, @truncate(ncall)), @as(c_int, @intCast(name.len)), name.ptr,
                 });
             }
@@ -261,12 +257,12 @@ fn loadImatrix(a: std.mem.Allocator, imatrix_file: [:0]const u8, imatrix_dataset
 
     if (imatrix_datasets.items.len != 0) {
         const d0 = imatrix_datasets.items[0];
-        common.io.printf("%s: imatrix datasets=['%.*s'", .{ func, @as(c_int, @intCast(d0.len)), d0.ptr });
-        for (imatrix_datasets.items[1..]) |d| common.io.printf(", '%.*s'", .{ @as(c_int, @intCast(d.len)), d.ptr });
-        common.io.printf("]\n", .{});
+        tools_common.io.printf("%s: imatrix datasets=['%.*s'", .{ func, @as(c_int, @intCast(d0.len)), d0.ptr });
+        for (imatrix_datasets.items[1..]) |d| tools_common.io.printf(", '%.*s'", .{ @as(c_int, @intCast(d.len)), d.ptr });
+        tools_common.io.printf("]\n", .{});
     }
 
-    common.io.printf("%s: loaded %d importance matrix entries from %s computed on %d chunks\n", .{
+    tools_common.io.printf("%s: loaded %d importance matrix entries from %s computed on %d chunks\n", .{
         func, @as(c_int, @intCast(imatrix_data.count())), imatrix_file.ptr, loaded.chunk_count,
     });
 
@@ -302,38 +298,38 @@ fn prepareImatrix(a: std.mem.Allocator, imatrix_file: [:0]const u8, imatrix_data
         imatrix_data.* = tmp;
     }
     if (imatrix_data.count() != 0) {
-        common.io.printf("%s: have %d importance matrix entries\n", .{ "prepare_imatrix", @as(c_int, @intCast(imatrix_data.count())) });
+        tools_common.io.printf("%s: have %d importance matrix entries\n", .{ "prepare_imatrix", @as(c_int, @intCast(imatrix_data.count())) });
     }
     return m_last_call;
 }
 
 /// Ports `parse_ggml_type` (quantize/quantize.cpp:305 @b1b770d90).
-fn parseGgmlType(arg: [*:0]const u8) common.c.ggml_type {
+fn parseGgmlType(arg: [*:0]const u8) llama.impl.llama_c.ggml_type {
     var i: c_int = 0;
-    while (i < common.c.GGML_TYPE_COUNT) : (i += 1) {
-        const t: common.c.ggml_type = @intCast(i);
-        const name = common.c.ggml_type_name(t);
+    while (i < llama.impl.llama_c.GGML_TYPE_COUNT) : (i += 1) {
+        const t: llama.impl.llama_c.ggml_type = @intCast(i);
+        const name = llama.impl.llama_c.ggml_type_name(t);
         if (name != null and striequals(std.mem.span(name), std.mem.span(arg))) return t;
     }
-    common.io.eprintf("\n%s: invalid ggml_type '%s'\n\n", .{ "parse_ggml_type", arg });
-    return common.c.GGML_TYPE_COUNT;
+    tools_common.io.eprintf("\n%s: invalid ggml_type '%s'\n\n", .{ "parse_ggml_type", arg });
+    return llama.impl.llama_c.GGML_TYPE_COUNT;
 }
 
 /// Ports `parse_tensor_type` (quantize/quantize.cpp:317 @b1b770d90).
 fn parseTensorType(a: std.mem.Allocator, data: [:0]const u8, tensor_type: *std.ArrayList(TensorTypeOption)) !bool {
     const func = "parse_tensor_type";
     const sep_idx = std.mem.indexOfScalar(u8, data, '=') orelse {
-        common.io.printf("\n%s: malformed tensor type '%s'\n\n", .{ func, data.ptr });
+        tools_common.io.printf("\n%s: malformed tensor type '%s'\n\n", .{ func, data.ptr });
         return false;
     };
 
     const tn_len = sep_idx;
     if (tn_len == 0) {
-        common.io.printf("\n%s: missing tensor name\n\n", .{func});
+        tools_common.io.printf("\n%s: missing tensor name\n\n", .{func});
         return false;
     }
     if (data.len - sep_idx == 1) {
-        common.io.printf("\n%s: missing quantization type\n\n", .{func});
+        tools_common.io.printf("\n%s: missing quantization type\n\n", .{func});
         return false;
     }
 
@@ -342,8 +338,8 @@ fn parseTensorType(a: std.mem.Allocator, data: [:0]const u8, tensor_type: *std.A
     const qt = data[sep_idx + 1 ..];
     const opt: TensorTypeOption = .{ .name = tn, .type = parseGgmlType(qt.ptr) };
     try tensor_type.append(a, opt);
-    if (opt.type == common.c.GGML_TYPE_COUNT) {
-        common.io.printf("\n%s: invalid quantization type '%s'\n\n", .{ func, qt.ptr });
+    if (opt.type == llama.impl.llama_c.GGML_TYPE_COUNT) {
+        tools_common.io.printf("\n%s: invalid quantization type '%s'\n\n", .{ func, qt.ptr });
         return false;
     }
 
@@ -354,7 +350,7 @@ fn parseTensorType(a: std.mem.Allocator, data: [:0]const u8, tensor_type: *std.A
 /// white-space-separated word of the file, as `file >> arg` reads them.
 fn parseTensorTypeFile(a: std.mem.Allocator, std_io: std.Io, filename: [:0]const u8, tensor_type: *std.ArrayList(TensorTypeOption)) !bool {
     const text = stdlib.file.readText(std_io, a, filename) catch |e| {
-        common.io.printf("\n%s: failed to open file '%s': %s\n\n", .{ "parse_tensor_type_file", filename.ptr, stdlib.errno.text(e) });
+        tools_common.io.printf("\n%s: failed to open file '%s': %s\n\n", .{ "parse_tensor_type_file", filename.ptr, stdlib.errno.text(e) });
         return false;
     };
     defer a.free(text);
@@ -380,7 +376,7 @@ fn parseLayerPrune(a: std.mem.Allocator, data: [:0]const u8, prune_layers: *std.
             else => -1,
         };
         if (id < 0) {
-            common.io.printf("\n%s: invalid layer id '%s'\n\n", .{ func, z.ptr });
+            tools_common.io.printf("\n%s: invalid layer id '%s'\n\n", .{ func, z.ptr });
             return false;
         }
         try prune_layers.append(a, id);
@@ -428,13 +424,13 @@ fn quantize(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u
     const exe = argv[0].ptr;
     if (argv.len < 3) usage(exe);
 
-    var params = common.c.llama_model_quantize_default_params();
+    var params = llama.api.quant.llama_model_quantize_default_params();
 
     var arg_idx: usize = 1;
     var imatrix_file: [:0]const u8 = "";
     var included_weights: std.ArrayList([:0]const u8) = .empty;
     var excluded_weights: std.ArrayList([:0]const u8) = .empty;
-    var kv_overrides: std.ArrayList(common.c.llama_model_kv_override) = .empty;
+    var kv_overrides: std.ArrayList(llama.impl.llama_c.llama_model_kv_override) = .empty;
     var tensor_type_opts: std.ArrayList(TensorTypeOption) = .empty;
     var prune_layers: std.ArrayList(i32) = .empty;
 
@@ -447,12 +443,12 @@ fn quantize(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u
             if (last) usage(exe);
             arg_idx += 1;
             params.output_tensor_type = parseGgmlType(argv[arg_idx].ptr);
-            if (params.output_tensor_type == common.c.GGML_TYPE_COUNT) usage(exe);
+            if (params.output_tensor_type == llama.impl.llama_c.GGML_TYPE_COUNT) usage(exe);
         } else if (std.mem.eql(u8, arg, "--token-embedding-type")) {
             if (last) usage(exe);
             arg_idx += 1;
             params.token_embedding_type = parseGgmlType(argv[arg_idx].ptr);
-            if (params.token_embedding_type == common.c.GGML_TYPE_COUNT) usage(exe);
+            if (params.token_embedding_type == llama.impl.llama_c.GGML_TYPE_COUNT) usage(exe);
         } else if (std.mem.eql(u8, arg, "--tensor-type")) {
             if (last) usage(exe);
             arg_idx += 1;
@@ -468,7 +464,7 @@ fn quantize(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u
         } else if (std.mem.eql(u8, arg, "--override-kv")) {
             if (last) usage(exe);
             arg_idx += 1;
-            if (!try common.arg.parseKvOverride(argv[arg_idx], &kv_overrides, a)) usage(exe);
+            if (!try tools_common.arg.parseKvOverride(argv[arg_idx], &kv_overrides, a)) usage(exe);
         } else if (std.mem.eql(u8, arg, "--dry-run")) {
             params.dry_run = true;
         } else if (std.mem.eql(u8, arg, "--allow-requantize")) {
@@ -494,7 +490,7 @@ fn quantize(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u
             arg_idx += 1;
             const mib = stdlib.num.atoi(argv[arg_idx]);
             if (mib <= 0) {
-                common.io.eprintf("%s: invalid --max-buffer-size '%s'\n", .{ func, argv[arg_idx].ptr });
+                tools_common.io.eprintf("%s: invalid --max-buffer-size '%s'\n", .{ func, argv[arg_idx].ptr });
                 return 1;
             }
             params.max_buf_size = @as(usize, @intCast(mib)) * 1024 * 1024;
@@ -504,7 +500,7 @@ fn quantize(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u
     }
 
     if (argv.len - arg_idx < 2) {
-        common.io.printf("%s: bad arguments\n", .{exe});
+        tools_common.io.printf("%s: bad arguments\n", .{exe});
         usage(exe);
     }
     if (included_weights.items.len != 0 and excluded_weights.items.len != 0) usage(exe);
@@ -513,8 +509,8 @@ fn quantize(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u
     var imatrix_data: ImatrixData = .empty;
     const m_last_call = try prepareImatrix(a, imatrix_file, &imatrix_datasets, included_weights.items, excluded_weights.items, &imatrix_data);
 
-    var i_data: std.ArrayList(common.c.llama_model_imatrix_data) = .empty;
-    var t_override: std.ArrayList(common.c.llama_model_tensor_override) = .empty;
+    var i_data: std.ArrayList(llama.impl.llama_c.llama_model_imatrix_data) = .empty;
+    var t_override: std.ArrayList(llama.impl.llama_c.llama_model_tensor_override) = .empty;
     if (imatrix_data.count() != 0) {
         for (imatrix_data.keys(), imatrix_data.values()) |k, v| {
             try i_data.append(a, .{ .name = (try a.dupeSentinel(u8, k, 0)).ptr, .data = v.ptr, .size = v.len });
@@ -522,44 +518,44 @@ fn quantize(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u
         try i_data.append(a, .{ .name = null, .data = null, .size = 0 }); // array terminator
         params.imatrix = i_data.items.ptr;
         {
-            var kvo = std.mem.zeroes(common.c.llama_model_kv_override);
+            var kvo = std.mem.zeroes(llama.impl.llama_c.llama_model_kv_override);
             @memcpy(kvo.key[0..kv_imatrix_file.len], kv_imatrix_file);
-            kvo.tag = common.c.LLAMA_KV_OVERRIDE_TYPE_STR;
+            kvo.tag = llama.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_STR;
             const fname_imatrix = pathFilename(imatrix_file);
             copyStr128(&kvo.unnamed_0.val_str, fname_imatrix);
             try kv_overrides.append(a, kvo);
         }
         if (imatrix_datasets.items.len != 0) {
-            var kvo = std.mem.zeroes(common.c.llama_model_kv_override);
+            var kvo = std.mem.zeroes(llama.impl.llama_c.llama_model_kv_override);
             // TODO: list multiple datasets when there are more than one
             @memcpy(kvo.key[0..kv_imatrix_dataset.len], kv_imatrix_dataset);
-            kvo.tag = common.c.LLAMA_KV_OVERRIDE_TYPE_STR;
+            kvo.tag = llama.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_STR;
             const fname_dataset = pathFilename(imatrix_datasets.items[0]);
             copyStr128(&kvo.unnamed_0.val_str, fname_dataset[0 .. std.mem.indexOfScalar(u8, fname_dataset, 0) orelse fname_dataset.len]);
             try kv_overrides.append(a, kvo);
         }
         {
-            var kvo = std.mem.zeroes(common.c.llama_model_kv_override);
+            var kvo = std.mem.zeroes(llama.impl.llama_c.llama_model_kv_override);
             @memcpy(kvo.key[0..kv_imatrix_n_entries.len], kv_imatrix_n_entries);
-            kvo.tag = common.c.LLAMA_KV_OVERRIDE_TYPE_INT;
+            kvo.tag = llama.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_INT;
             kvo.unnamed_0.val_i64 = @intCast(imatrix_data.count());
             try kv_overrides.append(a, kvo);
         }
         if (m_last_call > 0) {
-            var kvo = std.mem.zeroes(common.c.llama_model_kv_override);
+            var kvo = std.mem.zeroes(llama.impl.llama_c.llama_model_kv_override);
             @memcpy(kvo.key[0..kv_imatrix_n_chunks.len], kv_imatrix_n_chunks);
-            kvo.tag = common.c.LLAMA_KV_OVERRIDE_TYPE_INT;
+            kvo.tag = llama.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_INT;
             kvo.unnamed_0.val_i64 = m_last_call;
             try kv_overrides.append(a, kvo);
         }
     }
     if (kv_overrides.items.len != 0) {
-        try kv_overrides.append(a, std.mem.zeroes(common.c.llama_model_kv_override));
+        try kv_overrides.append(a, std.mem.zeroes(llama.impl.llama_c.llama_model_kv_override));
         params.kv_overrides = kv_overrides.items.ptr;
     }
     if (tensor_type_opts.items.len != 0) {
         for (tensor_type_opts.items) |tt| try t_override.append(a, .{ .pattern = tt.name.ptr, .type = tt.type });
-        try t_override.append(a, .{ .pattern = null, .type = common.c.GGML_TYPE_COUNT }); // array terminator
+        try t_override.append(a, .{ .pattern = null, .type = llama.impl.llama_c.GGML_TYPE_COUNT }); // array terminator
         params.tt_overrides = t_override.items.ptr;
     }
     if (prune_layers.items.len != 0) {
@@ -567,7 +563,7 @@ fn quantize(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u
         params.prune_layers = prune_layers.items.ptr;
     }
 
-    common.c.llama_backend_init();
+    llama.api.llama.llama_backend_init();
 
     // parse command line arguments
     const fname_inp = argv[arg_idx];
@@ -596,11 +592,11 @@ fn quantize(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u
         arg_idx += 1;
 
         if (argv.len <= arg_idx) {
-            common.io.eprintf("%s: missing ftype\n", .{func});
+            tools_common.io.eprintf("%s: missing ftype\n", .{func});
             return 1;
         }
         if (!try tryParseFtype(a, argv[arg_idx], &params.ftype, &ftype_str)) {
-            common.io.eprintf("%s: invalid ftype '%s'\n", .{ func, argv[arg_idx].ptr });
+            tools_common.io.eprintf("%s: invalid ftype '%s'\n", .{ func, argv[arg_idx].ptr });
             return 1;
         }
         if (std.mem.eql(u8, ftype_str, "COPY")) params.only_copy = true;
@@ -612,7 +608,7 @@ fn quantize(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u
         switch (stdlib.num.stoi(argv[arg_idx])) {
             .ok => |n| params.nthread = n,
             else => |e| {
-                common.io.eprintf("%s: invalid nthread '%s' (%s)\n", .{ func, argv[arg_idx].ptr, e.what() });
+                tools_common.io.eprintf("%s: invalid nthread '%s' (%s)\n", .{ func, argv[arg_idx].ptr, e.what() });
                 return 1;
             },
         }
@@ -622,48 +618,48 @@ fn quantize(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u
     const ftype_z = try a.dupeSentinel(u8, ftype_str, 0);
     if (!params.dry_run) {
         if (stdlib.fs.equivalent(fname_inp, out_z)) {
-            common.io.eprintf("%s: error: input and output files are the same: '%s'\n", .{ func, fname_inp.ptr });
+            tools_common.io.eprintf("%s: error: input and output files are the same: '%s'\n", .{ func, fname_inp.ptr });
             return 1;
         }
     }
 
-    common.build_info.print(common.c.llama_version(), stdlib.stdio.stderr());
+    tools_common.build_info.print(llama.api.llama.llama_version(), stdlib.stdio.stderr());
 
     if (params.dry_run) {
-        common.io.eprintf("%s: calculating quantization size for '%s' as %s", .{ func, fname_inp.ptr, ftype_z.ptr });
+        tools_common.io.eprintf("%s: calculating quantization size for '%s' as %s", .{ func, fname_inp.ptr, ftype_z.ptr });
     } else {
-        common.io.eprintf("%s: quantizing '%s' to '%s' as %s", .{ func, fname_inp.ptr, out_z.ptr, ftype_z.ptr });
+        tools_common.io.eprintf("%s: quantizing '%s' to '%s' as %s", .{ func, fname_inp.ptr, out_z.ptr, ftype_z.ptr });
     }
 
-    if (params.nthread > 0) common.io.eprintf(" using %d threads", .{params.nthread});
-    common.io.eprintf("\n", .{});
+    if (params.nthread > 0) tools_common.io.eprintf(" using %d threads", .{params.nthread});
+    tools_common.io.eprintf("\n", .{});
 
-    const t_main_start_us = common.c.llama_time_us();
+    const t_main_start_us = llama.api.llama.llama_time_us();
 
     var t_quantize_us: i64 = 0;
 
     // load the model
     {
-        const t_start_us = common.c.llama_time_us();
+        const t_start_us = llama.api.llama.llama_time_us();
 
-        if (common.c.llama_model_quantize(fname_inp.ptr, out_z.ptr, &params) != 0) {
-            common.io.eprintf("%s: failed to quantize model from '%s'\n", .{ func, fname_inp.ptr });
+        if (llama.api.quant.llama_model_quantize(fname_inp.ptr, out_z.ptr, &params) != 0) {
+            tools_common.io.eprintf("%s: failed to quantize model from '%s'\n", .{ func, fname_inp.ptr });
             return 1;
         }
 
-        t_quantize_us = common.c.llama_time_us() - t_start_us;
+        t_quantize_us = llama.api.llama.llama_time_us() - t_start_us;
     }
 
     // report timing
     {
-        const t_main_end_us = common.c.llama_time_us();
+        const t_main_end_us = llama.api.llama.llama_time_us();
 
-        common.io.printf("\n", .{});
-        common.io.printf("%s: quantize time = %8.2f ms\n", .{ func, @as(f64, @floatFromInt(t_quantize_us)) / 1000.0 });
-        common.io.printf("%s:    total time = %8.2f ms\n", .{ func, @as(f64, @floatFromInt(t_main_end_us - t_main_start_us)) / 1000.0 });
+        tools_common.io.printf("\n", .{});
+        tools_common.io.printf("%s: quantize time = %8.2f ms\n", .{ func, @as(f64, @floatFromInt(t_quantize_us)) / 1000.0 });
+        tools_common.io.printf("%s:    total time = %8.2f ms\n", .{ func, @as(f64, @floatFromInt(t_main_end_us - t_main_start_us)) / 1000.0 });
     }
 
-    common.c.llama_backend_free();
+    llama.api.llama.llama_backend_free();
 
     return 0;
 }

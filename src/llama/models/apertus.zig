@@ -49,7 +49,7 @@ pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *
         layer.attn_norm = try self.createTensor(.{ .tensor = .attn_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, 0, exc);
 
         const rope_dup: u32 = if (i != 0) llama.loader.tensor_duplicated else 0;
-        if (hp.rope_scaling_type_train == llama.impl.c.LLAMA_ROPE_SCALING_TYPE_LONGROPE) {
+        if (hp.rope_scaling_type_train == llama.impl.llama_c.LLAMA_ROPE_SCALING_TYPE_LONGROPE) {
             layer.rope_long = try self.createTensor(.{ .tensor = .rope_factors_long, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, nr | rope_dup, exc);
             layer.rope_short = try self.createTensor(.{ .tensor = .rope_factors_short, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, nr | rope_dup, exc);
         } else {
@@ -90,7 +90,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/apertus.cpp", 63, "n_embd_head == hparams.n_embd_head_k()");
     llama.impl.assert(n_embd_head == b.n_rot, "models/apertus.cpp", 64, "n_embd_head == n_rot");
 
-    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.llama_c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
 
     const inp_pos = b.buildInpPos();
     const inp_attn = b.buildAttnInpKv();
@@ -133,11 +133,11 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         }
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The feed-forward network, with xIELU activation.
@@ -155,7 +155,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             const eps_val = hp.xielu_eps[@intCast(il)];
 
             // xIELU.
-            const activated: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_xielu(ctx, up, alpha_n_val, alpha_p_val, beta_val, eps_val);
+            const activated: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_xielu(ctx, up, alpha_n_val, alpha_p_val, beta_val, eps_val);
             b.cb(activated, "ffn_xielu", il);
 
             // The down projection.
@@ -163,7 +163,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             b.cb(cur, "ffn_down", il);
         }
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
         b.cb(cur, "ffn_out", il);
 
         cur = b.buildCvec(cur, il);

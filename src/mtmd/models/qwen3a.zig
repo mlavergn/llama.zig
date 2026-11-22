@@ -8,21 +8,22 @@
 //! Each declaration names what it ports and the line it began at.
 
 const std = @import("std");
+const llama = @import("llama");
 const mtmd = @import("../module.zig");
 
 /// The `conv_block` lambda (qwen3a.cpp:30 @b1b770d90) of `build`: conv
 /// output `[OW, OH, C_out, n_chunks]`.
-fn convBlock(ctx0: ?*mtmd.impl.c.ggml_context, x_in: mtmd.graph.T, w: mtmd.graph.T, b: mtmd.graph.T) mtmd.graph.T {
-    var x = mtmd.impl.c.ggml_conv_2d(ctx0, w, x_in, 2, 2, 1, 1, 1, 1);
+fn convBlock(ctx0: ?*llama.impl.llama_c.ggml_context, x_in: mtmd.graph.T, w: mtmd.graph.T, b: mtmd.graph.T) mtmd.graph.T {
+    var x = llama.impl.llama_c.ggml_conv_2d(ctx0, w, x_in, 2, 2, 1, 1, 1, 1);
     if (b != null) {
-        x = mtmd.impl.c.ggml_add(ctx0, x, mtmd.impl.c.ggml_reshape_4d(ctx0, b, 1, 1, mtmd.graph.ne(x, 2), 1));
+        x = llama.impl.llama_c.ggml_add(ctx0, x, llama.impl.llama_c.ggml_reshape_4d(ctx0, b, 1, 1, mtmd.graph.ne(x, 2), 1));
     }
-    return mtmd.impl.c.ggml_gelu_erf(ctx0, x);
+    return llama.impl.llama_c.ggml_gelu_erf(ctx0, x);
 }
 
 /// Ports `build` (qwen3a.cpp:3 @b1b770d90), a member of
 /// `mtmd_graph_qwen3a`.
-pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*llama.impl.llama_c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
     const model = g.model;
@@ -38,10 +39,10 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     const n_chunks = @divTrunc(n_frames, chunk_size);
 
     mtmd.impl.ggmlAssert(@rem(n_frames, chunk_size) == 0, "qwen3a.cpp", 14, "n_frames % chunk_size == 0"); // preprocessor should already pad the input
-    mtmd.impl.ggmlAssert(inp.?.type == mtmd.impl.c.GGML_TYPE_F32, "qwen3a.cpp", 15, "inp->type == GGML_TYPE_F32");
+    mtmd.impl.ggmlAssert(inp.?.type == llama.impl.llama_c.GGML_TYPE_F32, "qwen3a.cpp", 15, "inp->type == GGML_TYPE_F32");
 
     // View mel spectrogram as batched 100-frame chunks: [chunk_size, n_mel, 1, n_chunks]
-    inp = mtmd.impl.c.ggml_view_4d(
+    inp = llama.impl.llama_c.ggml_view_4d(
         ctx0,
         inp,
         chunk_size,
@@ -53,7 +54,7 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
         @intCast(chunk_size * @sizeOf(f32)), // nb[3]: stride over chunks
         0,
     );
-    inp = mtmd.impl.c.ggml_cont(ctx0, inp);
+    inp = llama.impl.llama_c.ggml_cont(ctx0, inp);
     g.cb(inp, "inp_chunks", -1);
 
     // 3 x conv2d + gelu
@@ -68,13 +69,13 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     // permute [OW=25, OH=16, OC=480, n_chunks] -> [OH=16, OC=480, OW=25, n_chunks]
     // reshape to [OH*OC=7680, OW*n_chunks]
     // feature index h+16*c = c*16+f (matches python code)
-    inp = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, inp, 2, 0, 1, 3));
-    inp = mtmd.impl.c.ggml_reshape_2d(ctx0, inp, mtmd.graph.ne(inp, 0) * mtmd.graph.ne(inp, 1), mtmd.graph.ne(inp, 2) * mtmd.graph.ne(inp, 3));
+    inp = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_permute(ctx0, inp, 2, 0, 1, 3));
+    inp = llama.impl.llama_c.ggml_reshape_2d(ctx0, inp, mtmd.graph.ne(inp, 0) * mtmd.graph.ne(inp, 1), mtmd.graph.ne(inp, 2) * mtmd.graph.ne(inp, 3));
 
     // Project to d_model: [d_model, 25*n_chunks]
-    inp = mtmd.impl.c.ggml_mul_mat(ctx0, model.conv_out_w, inp);
+    inp = llama.impl.llama_c.ggml_mul_mat(ctx0, model.conv_out_w, inp);
     if (model.conv_out_b != null) {
-        inp = mtmd.impl.c.ggml_add(ctx0, inp, model.conv_out_b);
+        inp = llama.impl.llama_c.ggml_add(ctx0, inp, model.conv_out_b);
     }
     g.cb(inp, "after_conv_out", -1);
 
@@ -84,9 +85,9 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     // (position indices reset 0..12 per chunk, not sequential across chunks)
     {
         const tokens_per_chunk = @divTrunc(n_pos, n_chunks); // 13
-        const pos_tmp = mtmd.impl.c.ggml_view_2d(ctx0, model.position_embeddings, mtmd.graph.ne(model.position_embeddings, 0), tokens_per_chunk, mtmd.graph.nb(model.position_embeddings, 1), 0);
-        const tgt = mtmd.impl.c.ggml_new_tensor_2d(ctx0, mtmd.impl.c.GGML_TYPE_F32, mtmd.graph.ne(model.position_embeddings, 0), n_pos);
-        inp = mtmd.impl.c.ggml_add(ctx0, inp, mtmd.impl.c.ggml_repeat(ctx0, pos_tmp, tgt));
+        const pos_tmp = llama.impl.llama_c.ggml_view_2d(ctx0, model.position_embeddings, mtmd.graph.ne(model.position_embeddings, 0), tokens_per_chunk, mtmd.graph.nb(model.position_embeddings, 1), 0);
+        const tgt = llama.impl.llama_c.ggml_new_tensor_2d(ctx0, llama.impl.llama_c.GGML_TYPE_F32, mtmd.graph.ne(model.position_embeddings, 0), n_pos);
+        inp = llama.impl.llama_c.ggml_add(ctx0, inp, llama.impl.llama_c.ggml_repeat(ctx0, pos_tmp, tgt));
     }
 
     var cur = g.buildVit(inp, n_pos, .normal, hparams.ffn_op, null, null, .{}); // pos embd already added above
@@ -96,7 +97,7 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     cur = g.buildFfn(cur, model.mm_1_w, model.mm_1_b, null, null, model.mm_2_w, model.mm_2_b, .gelu_erf, -1);
     g.cb(cur, "projected", -1);
 
-    mtmd.impl.c.ggml_build_forward_expand(g.gf, cur);
+    llama.impl.llama_c.ggml_build_forward_expand(g.gf, cur);
     return g.gf;
 }
 

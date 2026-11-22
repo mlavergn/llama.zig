@@ -72,7 +72,7 @@ inline fn mullSum(a: ggml.cpu.quants.arch.neon.i16x8, b: ggml.cpu.quants.arch.ne
 /// Two-bit weights with a four-bit scale and four-bit minimum per group of
 /// sixteen, both packed into the same byte -- `scales & 0xF` and
 /// `scales >> 4`.
-pub export fn ggml_vec_dot_q2_K_q8_K(
+pub fn ggml_vec_dot_q2_K_q8_K(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -81,14 +81,14 @@ pub export fn ggml_vec_dot_q2_K_q8_K(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
+) callconv(.c) void {
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
     const x = as(ggml.quants.blocks.Q2_K, vx);
     const y = as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb = @divTrunc(n, ggml.impl.c.QK_K);
+    const nb = @divTrunc(n, ggml.impl.ggml_c.QK_K);
 
     const m3: ggml.cpu.quants.arch.neon.u8x16 = @splat(0x3);
     const m4: ggml.cpu.quants.arch.neon.u8x16 = @splat(0xF);
@@ -121,7 +121,7 @@ pub export fn ggml_vec_dot_q2_K_q8_K(
         var q2: usize = 0;
         var q8: usize = 0;
 
-        for (0..ggml.impl.c.QK_K / 128) |_| {
+        for (0..ggml.impl.ggml_c.QK_K / 128) |_| {
             const q2bits0 = ggml.cpu.quants.arch.neon.loadFrom(ggml.cpu.quants.arch.neon.u8x16, x[i].qs[q2..].ptr);
             const q2bits1 = ggml.cpu.quants.arch.neon.loadFrom(ggml.cpu.quants.arch.neon.u8x16, x[i].qs[q2 + 16 ..].ptr);
             q2 += 32;
@@ -157,7 +157,7 @@ pub export fn ggml_vec_dot_q2_K_q8_K(
 /// `hmask`. The inversion is why the kernel uses `vbicq_u8(mask, qhbits)` --
 /// `mask AND NOT qhbits` -- and then *subtracts*: a clear mask bit contributes
 /// 4, and a set one contributes nothing.
-pub export fn ggml_vec_dot_q3_K_q8_K(
+pub fn ggml_vec_dot_q3_K_q8_K(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -166,8 +166,8 @@ pub export fn ggml_vec_dot_q3_K_q8_K(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
+) callconv(.c) void {
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
@@ -177,7 +177,7 @@ pub export fn ggml_vec_dot_q3_K_q8_K(
     const x = as(ggml.quants.blocks.Q3_K, vx);
     const y = as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb = @divTrunc(n, ggml.impl.c.QK_K);
+    const nb = @divTrunc(n, ggml.impl.ggml_c.QK_K);
 
     const m3b: ggml.cpu.quants.arch.neon.u8x16 = @splat(0x3);
     const m0: ggml.cpu.quants.arch.neon.u8x16 = @splat(1);
@@ -213,7 +213,7 @@ pub export fn ggml_vec_dot_q3_K_q8_K(
         var q8: usize = 0;
         var sc: usize = 0;
 
-        for (0..ggml.impl.c.QK_K / 128) |j| {
+        for (0..ggml.impl.ggml_c.QK_K / 128) |j| {
             const q3bits0 = ggml.cpu.quants.arch.neon.loadFrom(ggml.cpu.quants.arch.neon.u8x16, x[i].qs[q3..].ptr);
             const q3bits1 = ggml.cpu.quants.arch.neon.loadFrom(ggml.cpu.quants.arch.neon.u8x16, x[i].qs[q3 + 16 ..].ptr);
             q3 += 32;
@@ -308,7 +308,7 @@ inline fn unpackQ5K(packed_scales: *const [12]u8) [4]u32 {
 ///
 /// Note `sumf -= dmin * mins` **before** the weight loop and `sumf += d * ...`
 /// after: two separate float statements per super-block, in that order.
-pub export fn ggml_vec_dot_q4_K_q8_K(
+pub fn ggml_vec_dot_q4_K_q8_K(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -317,8 +317,8 @@ pub export fn ggml_vec_dot_q4_K_q8_K(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
+) callconv(.c) void {
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_K) == 0);
     // With i8mm, `mul_mat` asks for two rows per call; see `mmla.zig`.
     if (comptime ggml.cpu.quants.arch.neon.has_i8mm) {
         if (nrc == 2) return ggml.cpu.quants.arch.mmla.q4_K(n, s, bs, vx, bx, vy, by);
@@ -333,7 +333,7 @@ pub export fn ggml_vec_dot_q4_K_q8_K(
     const x = as(ggml.quants.blocks.Q4_K, vx);
     const y = as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb = @divTrunc(n, ggml.impl.c.QK_K);
+    const nb = @divTrunc(n, ggml.impl.ggml_c.QK_K);
     const m4b: ggml.cpu.quants.arch.neon.u8x16 = @splat(0xf);
 
     var sumf: f32 = 0;
@@ -375,7 +375,7 @@ pub export fn ggml_vec_dot_q4_K_q8_K(
         var q4: usize = 0;
         var q8: usize = 0;
 
-        for (0..ggml.impl.c.QK_K / 64) |j| {
+        for (0..ggml.impl.ggml_c.QK_K / 64) |j| {
             const q4bits0 = ggml.cpu.quants.arch.neon.loadFrom(ggml.cpu.quants.arch.neon.u8x16, x[i].qs[q4..].ptr);
             const q4bits1 = ggml.cpu.quants.arch.neon.loadFrom(ggml.cpu.quants.arch.neon.u8x16, x[i].qs[q4 + 16 ..].ptr);
             q4 += 32;
@@ -419,7 +419,7 @@ pub export fn ggml_vec_dot_q4_K_q8_K(
 /// The epilogue is one statement -- `sumf += d * sumi - dmin * sumi_mins` --
 /// where `q4_K` uses two, and it contracts differently from the two-statement
 /// form: see the note at the site.
-pub export fn ggml_vec_dot_q5_K_q8_K(
+pub fn ggml_vec_dot_q5_K_q8_K(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -428,15 +428,15 @@ pub export fn ggml_vec_dot_q5_K_q8_K(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
+) callconv(.c) void {
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
     const x = as(ggml.quants.blocks.Q5_K, vx);
     const y = as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb = @divTrunc(n, ggml.impl.c.QK_K);
+    const nb = @divTrunc(n, ggml.impl.ggml_c.QK_K);
 
     const m4b: ggml.cpu.quants.arch.neon.u8x16 = @splat(0xf);
     const mone: ggml.cpu.quants.arch.neon.u8x16 = @splat(1);
@@ -471,7 +471,7 @@ pub export fn ggml_vec_dot_q5_K_q8_K(
         var q8: usize = 0;
         var sc: usize = 0;
 
-        for (0..ggml.impl.c.QK_K / 64) |_| {
+        for (0..ggml.impl.ggml_c.QK_K / 64) |_| {
             const q5bits0 = ggml.cpu.quants.arch.neon.loadFrom(ggml.cpu.quants.arch.neon.u8x16, x[i].qs[q5..].ptr);
             const q5bits1 = ggml.cpu.quants.arch.neon.loadFrom(ggml.cpu.quants.arch.neon.u8x16, x[i].qs[q5 + 16 ..].ptr);
             q5 += 32;
@@ -517,7 +517,7 @@ pub export fn ggml_vec_dot_q5_K_q8_K(
 /// Six-bit weights, four in `ql` and two in `qh`, with signed scales that need
 /// no unpacking. The bias of 32 is applied once per super-block as
 /// `isum - 32 * isum_mins` rather than per weight.
-pub export fn ggml_vec_dot_q6_K_q8_K(
+pub fn ggml_vec_dot_q6_K_q8_K(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -526,8 +526,8 @@ pub export fn ggml_vec_dot_q6_K_q8_K(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
+) callconv(.c) void {
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_K) == 0);
     // With i8mm, `mul_mat` asks for two rows per call; see `mmla.zig`.
     if (comptime ggml.cpu.quants.arch.neon.has_i8mm) {
         if (nrc == 2) return ggml.cpu.quants.arch.mmla.q6_K(n, s, bs, vx, bx, vy, by);
@@ -538,7 +538,7 @@ pub export fn ggml_vec_dot_q6_K_q8_K(
     const x = as(ggml.quants.blocks.Q6_K, vx);
     const y = as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb = @divTrunc(n, ggml.impl.c.QK_K);
+    const nb = @divTrunc(n, ggml.impl.ggml_c.QK_K);
 
     const m4b: ggml.cpu.quants.arch.neon.u8x16 = @splat(0xF);
     // Named `mone` in the C and holding 3, which is the two-bit mask.
@@ -568,7 +568,7 @@ pub export fn ggml_vec_dot_q6_K_q8_K(
         var q8: usize = 0;
         var sc: usize = 0;
 
-        for (0..ggml.impl.c.QK_K / 128) |_| {
+        for (0..ggml.impl.ggml_c.QK_K / 128) |_| {
             const qhbits0 = ggml.cpu.quants.arch.neon.loadFrom(ggml.cpu.quants.arch.neon.u8x16, x[i].qh[qh..].ptr);
             const qhbits1 = ggml.cpu.quants.arch.neon.loadFrom(ggml.cpu.quants.arch.neon.u8x16, x[i].qh[qh + 16 ..].ptr);
             qh += 32;
@@ -636,23 +636,23 @@ test {
 const golden = if (ggml.cpu.features.golden_generic) ggml.cpu.quants.arch.golden_generic else ggml.cpu.quants.arch.golden;
 
 test "q2_K dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q2_K_q8_K, ggml.impl.c.GGML_TYPE_Q2_K, ggml.impl.c.GGML_TYPE_Q8_K, golden.q2_K);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q2_K_q8_K, ggml.impl.ggml_c.GGML_TYPE_Q2_K, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.q2_K);
 }
 
 test "q3_K dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q3_K_q8_K, ggml.impl.c.GGML_TYPE_Q3_K, ggml.impl.c.GGML_TYPE_Q8_K, golden.q3_K);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q3_K_q8_K, ggml.impl.ggml_c.GGML_TYPE_Q3_K, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.q3_K);
 }
 
 test "q4_K dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q4_K_q8_K, ggml.impl.c.GGML_TYPE_Q4_K, ggml.impl.c.GGML_TYPE_Q8_K, golden.q4_K);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q4_K_q8_K, ggml.impl.ggml_c.GGML_TYPE_Q4_K, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.q4_K);
 }
 
 test "q5_K dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q5_K_q8_K, ggml.impl.c.GGML_TYPE_Q5_K, ggml.impl.c.GGML_TYPE_Q8_K, golden.q5_K);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q5_K_q8_K, ggml.impl.ggml_c.GGML_TYPE_Q5_K, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.q5_K);
 }
 
 test "q6_K dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q6_K_q8_K, ggml.impl.c.GGML_TYPE_Q6_K, ggml.impl.c.GGML_TYPE_Q8_K, golden.q6_K);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q6_K_q8_K, ggml.impl.ggml_c.GGML_TYPE_Q6_K, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.q6_K);
 }
 
 test "the widening product does not truncate" {

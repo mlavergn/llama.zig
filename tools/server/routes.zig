@@ -27,16 +27,16 @@
 //! during sleep wakes the server first.
 
 const std = @import("std");
+const mtmd = @import("mtmd");
+const llama = @import("llama");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 const json = @import("json");
-const chat = @import("common_chat");
-const tc = @import("tools_common");
-
-const Allocator = std.mem.Allocator;
+const common_chat = @import("common_chat");
+const tools_common = @import("tools_common");
 
 fn ggmlAssert(ok: bool, comptime line: c_int, comptime cond: [*:0]const u8) void {
-    tc.ggml.ggmlAssert(ok, "server-context.cpp", line, cond);
+    tools_common.ggml.ggmlAssert(ok, "server-context.cpp", line, cond);
 }
 
 // -----------------------------------------------------------------------------
@@ -65,11 +65,11 @@ pub const ResGenerator = struct {
     /// @b1b770d90): may bypass sleep if the task does not use the context;
     /// otherwise the server stays awake until the response is destroyed.
     fn create(queue_tasks: *mod.context.TaskQueue, queue_results: *mod.context.ResultQueue, sleep_idle_seconds: c_int, bypass_sleep_in: bool) !*ResGenerator {
-        const self = try mod.context.gpa.create(ResGenerator);
-        errdefer mod.context.gpa.destroy(self);
+        const self = try std.heap.c_allocator.create(ResGenerator);
+        errdefer std.heap.c_allocator.destroy(self);
         self.* = .{
-            .base = .{ .arena = std.heap.ArenaAllocator.init(mod.context.gpa), .vtable = &vtable },
-            .rd = try mod.context.Reader.init(mod.context.gpa, queue_tasks, queue_results, mod.context.http_polling_seconds),
+            .base = .{ .arena = std.heap.ArenaAllocator.init(std.heap.c_allocator), .vtable = &vtable },
+            .rd = try mod.context.Reader.init(std.heap.c_allocator, queue_tasks, queue_results, mod.context.http_polling_seconds),
         };
         // fast path in case sleeping is disabled
         const bypass_sleep = bypass_sleep_in or sleep_idle_seconds < 0;
@@ -95,14 +95,14 @@ pub const ResGenerator = struct {
         self.rd.deinit();
         self.spipe.deinit();
         self.base.arena.deinit();
-        mod.context.gpa.destroy(self);
+        std.heap.c_allocator.destroy(self);
     }
 
     pub fn destroy(self: *ResGenerator) void {
         destroyGen(&self.base);
     }
 
-    fn alloc(self: *ResGenerator) Allocator {
+    fn alloc(self: *ResGenerator) std.mem.Allocator {
         return self.base.allocator();
     }
 
@@ -184,7 +184,7 @@ pub const Routes = struct {
     meta: ?mod.context.Meta = null,
     meta_arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.c_allocator),
 
-    params: *const tc.params.Params,
+    params: *const tools_common.params.Params,
     ctx_server: *mod.context.Impl,
 
     queue_tasks: *mod.context.TaskQueue,
@@ -202,7 +202,7 @@ pub const Routes = struct {
     /// Ports the constructor of `server_routes` (server-context.cpp:5622
     /// @b1b770d90). `self` must not move afterwards: the handlers and the
     /// sleeping callback point at it.
-    pub fn init(self: *Routes, params: *const tc.params.Params, ctx_server: *mod.context.ServerContext) !void {
+    pub fn init(self: *Routes, params: *const tools_common.params.Params, ctx_server: *mod.context.ServerContext) !void {
         self.* = .{
             .params = params,
             .ctx_server = ctx_server.impl,
@@ -311,8 +311,8 @@ pub const Routes = struct {
         defer self.mutex_cache.unlock();
         const a = res.alloc();
         try res.base.setHeader("Process-Start-Time-Unix", try std.fmt.allocPrint(a, "{d}", .{self.cached_metrics.t_start}));
-        const tmp = try mod.result.Result.create(mod.context.gpa, .metrics);
-        defer tmp.destroy(mod.context.gpa);
+        const tmp = try mod.result.Result.create(std.heap.c_allocator, .metrics);
+        defer tmp.destroy(std.heap.c_allocator);
         tmp.kind.metrics.metrics = try self.cached_metrics.clone(tmp.alloc());
         res.base.content_type = "text/plain; version=0.0.4";
         res.base.status = 200;
@@ -357,7 +357,7 @@ pub const Routes = struct {
                 }
                 return &res.base;
             };
-            defer result.destroy(mod.context.gpa);
+            defer result.destroy(std.heap.c_allocator);
 
             if (result.isError()) {
                 var j = try result.toJson(res.alloc());
@@ -399,7 +399,7 @@ pub const Routes = struct {
             ggmlAssert(req.should_stop.call(), 5871, "req.should_stop()");
             return &res.base;
         };
-        defer result.destroy(mod.context.gpa);
+        defer result.destroy(std.heap.c_allocator);
 
         if (result.isError()) {
             var j = try result.toJson(res.alloc());
@@ -434,7 +434,7 @@ pub const Routes = struct {
 
         const id_slot_str = try res.alloc().dupeSentinel(u8, req.getParam("id_slot", ""), 0);
 
-        const id_slot = tc.arg.stoi(id_slot_str) catch {
+        const id_slot = tools_common.arg.stoi(id_slot_str) catch {
             try res.errMsg("Invalid slot ID", .invalid_request);
             return &res.base;
         };
@@ -505,13 +505,13 @@ pub const Routes = struct {
         const vocab = self.ctx_server.vocab;
         // check model compatibility
         var err: std.ArrayList(u8) = .empty;
-        if (tc.c.llama_vocab_fim_pre(vocab) == mod.common.token_null) {
+        if (llama.api.vocab.llama_vocab_fim_pre(vocab) == mod.common.token_null) {
             try err.appendSlice(a, "prefix token is missing. ");
         }
-        if (tc.c.llama_vocab_fim_suf(vocab) == mod.common.token_null) {
+        if (llama.api.vocab.llama_vocab_fim_suf(vocab) == mod.common.token_null) {
             try err.appendSlice(a, "suffix token is missing. ");
         }
-        if (tc.c.llama_vocab_fim_mid(vocab) == mod.common.token_null) {
+        if (llama.api.vocab.llama_vocab_fim_mid(vocab) == mod.common.token_null) {
             try err.appendSlice(a, "middle token is missing. ");
         }
         if (err.items.len != 0) {
@@ -521,8 +521,8 @@ pub const Routes = struct {
         }
 
         // validate input
-        var data = try json.parse(mod.context.gpa, req.body);
-        defer data.deinit(mod.context.gpa);
+        var data = try json.parse(std.heap.c_allocator, req.body);
+        defer data.deinit(std.heap.c_allocator);
         if (data.contains("prompt") and !(try data.at("prompt")).isString()) {
             // prompt is optional
             try res.errMsg("\"prompt\" must be a string", .invalid_request);
@@ -543,31 +543,31 @@ pub const Routes = struct {
             return &res.base;
         }
 
-        var input_extra = try mod.common.jsonValueJson(mod.context.gpa, &data, "input_extra", json.Value.emptyArray());
+        var input_extra = try mod.common.jsonValueJson(std.heap.c_allocator, &data, "input_extra", json.Value.emptyArray());
         for (input_extra.array.items) |*chunk| {
             // { "text": string, "filename": string }
             if (!chunk.contains("text") or !(try chunk.at("text")).isString()) {
-                input_extra.deinit(mod.context.gpa);
+                input_extra.deinit(std.heap.c_allocator);
                 try res.errMsg("extra_context chunk must contain a \"text\" field with a string value", .invalid_request);
                 keep = true;
                 return &res.base;
             }
             // filename is optional
             if (chunk.contains("filename") and !(try chunk.at("filename")).isString()) {
-                input_extra.deinit(mod.context.gpa);
+                input_extra.deinit(std.heap.c_allocator);
                 try res.errMsg("extra_context chunk's \"filename\" field must be a string", .invalid_request);
                 keep = true;
                 return &res.base;
             }
         }
-        try data.set(mod.context.gpa, "input_extra", input_extra); // default to empty array if it's not exist
+        try data.set(std.heap.c_allocator, "input_extra", input_extra); // default to empty array if it's not exist
 
         const prompt = mod.common.jsonValue(&data, "prompt", []const u8, "");
         var pv = try json.Value.initString(a, prompt);
-        var tokenized_prompts = try mod.tokens.tokenizeInputPrompts(mod.context.gpa, vocab, self.ctx_server.mctx, &pv, false, true, self.ctx_server.init_opt);
+        var tokenized_prompts = try mod.tokens.tokenizeInputPrompts(std.heap.c_allocator, vocab, self.ctx_server.mctx, &pv, false, true, self.ctx_server.init_opt);
         defer {
             for (tokenized_prompts.items) |*t| t.deinit();
-            tokenized_prompts.deinit(mod.context.gpa);
+            tokenized_prompts.deinit(std.heap.c_allocator);
         }
         mod.common.srv(.dbg, "operator()", "creating infill tasks, n_prompts = %d\n", .{@as(c_int, @intCast(tokenized_prompts.items.len))});
         const infill = try mod.tokens.formatPromptInfill(
@@ -582,7 +582,7 @@ pub const Routes = struct {
             self.params.spm_infill,
             tokenized_prompts.items[0].getTokens(), // TODO: this could maybe be multimodal.
         );
-        try data.set(mod.context.gpa, "prompt", try mod.common.from(mod.context.gpa, infill));
+        try data.set(std.heap.c_allocator, "prompt", try mod.common.from(std.heap.c_allocator, infill));
 
         return self.handleCompletionsImpl(req, .infill, &data, &.{}, .none, null); // infill is not OAI compatible
     }
@@ -591,8 +591,8 @@ pub const Routes = struct {
     fn postCompletions(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(false);
         defer res.destroy();
-        var body = try json.parse(mod.context.gpa, req.body);
-        defer body.deinit(mod.context.gpa);
+        var body = try json.parse(std.heap.c_allocator, req.body);
+        defer body.deinit(std.heap.c_allocator);
         return self.handleCompletionsImpl(req, .completion, &body, &.{}, .none, null);
     }
 
@@ -600,8 +600,8 @@ pub const Routes = struct {
     fn postCompletionsOai(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(false);
         defer res.destroy();
-        var body = try json.parse(mod.context.gpa, req.body);
-        defer body.deinit(mod.context.gpa);
+        var body = try json.parse(std.heap.c_allocator, req.body);
+        defer body.deinit(std.heap.c_allocator);
         return self.handleCompletionsImpl(req, .completion, &body, &.{}, .oai_cmpl, null);
     }
 
@@ -611,7 +611,7 @@ pub const Routes = struct {
         arena: std.heap.ArenaAllocator,
         body: json.Value,
         files: std.ArrayList([]u8),
-        session: chat.session.Session,
+        session: common_chat.session.Session,
     };
 
     fn chatParse(self: *Routes, body_text: []const u8) !*Parsed {
@@ -625,9 +625,9 @@ pub const Routes = struct {
     /// two `SRV_DBG` lines each route logs after it (the second dumps the
     /// body, which throws on invalid UTF-8 -- only when it prints).
     fn chatParseConverted(self: *Routes, body_text: []const u8, conv: Conversion, req: ?*const mod.http.Req) !*Parsed {
-        const p = try mod.context.gpa.create(Parsed);
-        errdefer mod.context.gpa.destroy(p);
-        p.* = .{ .arena = std.heap.ArenaAllocator.init(mod.context.gpa), .body = .null, .files = .empty, .session = try chat.session.Session.initEmpty(mod.context.gpa) };
+        const p = try std.heap.c_allocator.create(Parsed);
+        errdefer std.heap.c_allocator.destroy(p);
+        p.* = .{ .arena = std.heap.ArenaAllocator.init(std.heap.c_allocator), .body = .null, .files = .empty, .session = try common_chat.session.Session.initEmpty(std.heap.c_allocator) };
         errdefer p.arena.deinit();
         errdefer p.session.deinit();
         const a = p.arena.allocator();
@@ -653,9 +653,9 @@ pub const Routes = struct {
     }
 
     /// `SRV_DBG("%s\n", what); SRV_DBG("converted request: %s\n", body.dump().c_str());`
-    fn logConverted(a: Allocator, comptime what: []const u8, body: *const json.Value) !void {
+    fn logConverted(a: std.mem.Allocator, comptime what: []const u8, body: *const json.Value) !void {
         mod.common.srv(.dbg, "operator()", "%s\n", .{@as([*:0]const u8, what ++ "")});
-        if (tc.log.level_debug <= tc.log.verbosity_thold) {
+        if (tools_common.log.level_debug <= tools_common.log.verbosity_thold) {
             const d = try json.dump(a, body, -1);
             const z = mod.common.dupZ(d);
             defer mod.common.freeZ(z);
@@ -666,7 +666,7 @@ pub const Routes = struct {
     fn freeParsed(p: *Parsed) void {
         p.session.deinit();
         p.arena.deinit();
-        mod.context.gpa.destroy(p);
+        std.heap.c_allocator.destroy(p);
     }
 
     /// The `post_chat_completions` lambda (server-context.cpp:6054 @b1b770d90).
@@ -704,7 +704,7 @@ pub const Routes = struct {
         {
             var task = mod.task.Task.initType(.control);
             task.id = res.rd.getNewId();
-            const ta = try task.arenaAlloc(mod.context.gpa);
+            const ta = try task.arenaAlloc(std.heap.c_allocator);
             task.params.control_cmpl_id = try ta.dupe(u8, cmpl_id);
             task.params.control_action = .reasoning_end;
             try res.rd.postTask(task, false);
@@ -714,7 +714,7 @@ pub const Routes = struct {
             ggmlAssert(req.should_stop.call(), 6104, "req.should_stop()");
             return &res.base;
         };
-        defer result.destroy(mod.context.gpa);
+        defer result.destroy(std.heap.c_allocator);
         var j = try result.toJson(a);
         if (result.isError()) {
             try res.err(&j);
@@ -820,7 +820,7 @@ pub const Routes = struct {
 
             if (with_pieces) {
                 for (toks) |token| {
-                    const piece = try tc.common.tokenToPiece(a, self.ctx_server.vocab, token, true);
+                    const piece = try tools_common.common.tokenToPiece(a, self.ctx_server.vocab, token, true);
                     var piece_json: json.Value = undefined;
 
                     // Check if the piece is valid UTF-8
@@ -860,7 +860,7 @@ pub const Routes = struct {
 
         var content: []const u8 = "";
         if (body.count("tokens") != 0) {
-            const toks = try (try body.at("tokens")).getSlice(a, mod.common.Token);
+            const toks = try (try body.at("tokens")).getSlice(a, llama.impl.llama_c.llama_token);
             content = try mod.common.tokensToStr(a, self.ctx_server.vocab, toks);
         }
 
@@ -910,41 +910,41 @@ pub const Routes = struct {
         {
             var tasks: std.ArrayList(mod.task.Task) = .empty;
             defer {
-                for (tasks.items) |*t| t.deinit(mod.context.gpa);
-                tasks.deinit(mod.context.gpa);
+                for (tasks.items) |*t| t.deinit(std.heap.c_allocator);
+                tasks.deinit(std.heap.c_allocator);
             }
             if (decision.isJoint()) {
                 var task = mod.task.Task.initType(.decision);
-                errdefer task.deinit(mod.context.gpa);
-                task.params = try mod.task.TaskParams.init(try task.arenaAlloc(mod.context.gpa));
+                errdefer task.deinit(std.heap.c_allocator);
+                task.params = try mod.task.TaskParams.init(try task.arenaAlloc(std.heap.c_allocator));
                 task.id = res.rd.getNewId();
-                try decision.fillTaskJoint(a, mod.context.gpa, &state, questions, fs, self.ctx_server.mctx, self.ctx_server.init_opt, &task);
-                try tasks.append(mod.context.gpa, task);
+                try decision.fillTaskJoint(a, std.heap.c_allocator, &state, questions, fs, self.ctx_server.mctx, self.ctx_server.init_opt, &task);
+                try tasks.append(std.heap.c_allocator, task);
             } else {
                 for (questions) |*question| {
                     for (0..decision.nVariants(question)) |variant| {
                         var task = mod.task.Task.initType(.decision);
-                        errdefer task.deinit(mod.context.gpa);
-                        task.params = try mod.task.TaskParams.init(try task.arenaAlloc(mod.context.gpa));
+                        errdefer task.deinit(std.heap.c_allocator);
+                        task.params = try mod.task.TaskParams.init(try task.arenaAlloc(std.heap.c_allocator));
                         task.id = res.rd.getNewId();
-                        try decision.fillTask(a, mod.context.gpa, &state, questions, question, variant, fs, self.ctx_server.mctx, self.ctx_server.init_opt, &task);
-                        try tasks.append(mod.context.gpa, task);
+                        try decision.fillTask(a, std.heap.c_allocator, &state, questions, question, variant, fs, self.ctx_server.mctx, self.ctx_server.init_opt, &task);
+                        try tasks.append(std.heap.c_allocator, task);
                     }
                 }
             }
             if (decision.canSharePrompt()) {
-                var groups = try mod.decision.groupTasks(mod.context.gpa, tasks.items, @intCast(self.params.n_parallel));
-                defer groups.deinit(mod.context.gpa);
-                for (tasks.items) |*t| t.deinit(mod.context.gpa);
+                var groups = try mod.decision.groupTasks(std.heap.c_allocator, tasks.items, @intCast(self.params.n_parallel));
+                defer groups.deinit(std.heap.c_allocator);
+                for (tasks.items) |*t| t.deinit(std.heap.c_allocator);
                 tasks.clearRetainingCapacity();
-                try tasks.appendSlice(mod.context.gpa, groups.items);
+                try tasks.appendSlice(std.heap.c_allocator, groups.items);
             }
             try res.rd.postTasks(tasks.items, null, false);
             tasks.clearRetainingCapacity();
         }
 
         var all_results = try res.rd.waitForAll(ReqStop{ .req = req });
-        defer all_results.deinit(mod.context.gpa);
+        defer all_results.deinit(std.heap.c_allocator);
 
         if (all_results.is_terminated) {
             return &res.base; // connection is closed
@@ -999,17 +999,17 @@ pub const Routes = struct {
 
     /// `parse_item` of `handle_rerank_impl`: one rerank input item, a plain
     /// string or `{"text": str|[str], "image": url|data-uri|raw-base64|[urls]}`.
-    fn parseRerankItem(self: *Routes, a: Allocator, item: *const json.Value, out_text: *std.ArrayList(u8), out_files: *std.ArrayList([]u8)) !void {
+    fn parseRerankItem(self: *Routes, a: std.mem.Allocator, item: *const json.Value, out_text: *std.ArrayList(u8), out_files: *std.ArrayList([]u8)) !void {
         if (item.isString()) {
             out_text.clearRetainingCapacity();
             try out_text.appendSlice(a, item.string);
             return;
         }
         if (!item.isObject()) {
-            return mod.common.throw(error.InvalidArgument, "rerank input must be a string or an object of the form {{\"text\": ..., \"image\": ...}}", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "rerank input must be a string or an object of the form {{\"text\": ..., \"image\": ...}}", .{});
         }
         if (item.contains("video") or item.contains("fps") or item.contains("max_frames")) {
-            return mod.common.throw(error.InvalidArgument, "video/fps/max_frames are not supported for rerank input", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "video/fps/max_frames are not supported for rerank input", .{});
         }
         const text: json.Value = if (item.contains("text")) (try item.at("text")).* else .null;
         if (text.isString()) {
@@ -1017,12 +1017,12 @@ pub const Routes = struct {
         } else if (text.isArray()) {
             for (text.array.items) |*t| {
                 if (!t.isString()) {
-                    return mod.common.throw(error.InvalidArgument, "\"text\" array elements must be strings", .{});
+                    return common_chat.exception.throw(error.InvalidArgument, "\"text\" array elements must be strings", .{});
                 }
                 try out_text.appendSlice(a, t.string);
             }
         } else if (!text.isNull()) {
-            return mod.common.throw(error.InvalidArgument, "\"text\" must be a string or an array of strings", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "\"text\" must be a string or an array of strings", .{});
         }
         const image: json.Value = if (item.contains("image")) (try item.at("image")).* else .null;
         if (image.isString()) {
@@ -1031,12 +1031,12 @@ pub const Routes = struct {
         } else if (image.isArray()) {
             for (image.array.items) |*u| {
                 if (!u.isString()) {
-                    return mod.common.throw(error.InvalidArgument, "\"image\" array elements must be strings", .{});
+                    return common_chat.exception.throw(error.InvalidArgument, "\"image\" array elements must be strings", .{});
                 }
                 try mod.oaicompat.handleMedia(a, out_files, u.string, self.params.media_path, self.params.media_allow_private_urls);
             }
         } else if (!image.isNull()) {
-            return mod.common.throw(error.InvalidArgument, "\"image\" must be a string or an array of strings", .{});
+            return common_chat.exception.throw(error.InvalidArgument, "\"image\" must be a string or an array of strings", .{});
         }
     }
 
@@ -1045,7 +1045,7 @@ pub const Routes = struct {
         const res = try self.createResponse(false);
         errdefer res.destroy();
         const a = res.alloc();
-        if (!self.params.embedding or self.params.pooling_type != tc.c.LLAMA_POOLING_TYPE_RANK) {
+        if (!self.params.embedding or self.params.pooling_type != llama.impl.llama_c.LLAMA_POOLING_TYPE_RANK) {
             try res.errMsg("This server does not support reranking. Start it with `--reranking`", .not_supported);
             return &res.base;
         }
@@ -1109,14 +1109,14 @@ pub const Routes = struct {
         var responses = json.Value.emptyArray();
         {
             var tasks: std.ArrayList(mod.task.Task) = .empty;
-            defer tasks.deinit(mod.context.gpa);
-            errdefer for (tasks.items) |*t| t.deinit(mod.context.gpa);
-            try tasks.ensureTotalCapacity(mod.context.gpa, documents.len);
+            defer tasks.deinit(std.heap.c_allocator);
+            errdefer for (tasks.items) |*t| t.deinit(std.heap.c_allocator);
+            try tasks.ensureTotalCapacity(std.heap.c_allocator, documents.len);
             for (documents, document_files) |doc, doc_files| {
-                var tmp = try mod.tokens.formatPromptRerank(mod.context.gpa, self.ctx_server.model_tgt, self.ctx_server.vocab, self.ctx_server.mctx, query_str.items, doc, query_files.items, doc_files, self.ctx_server.init_opt);
+                var tmp = try mod.tokens.formatPromptRerank(std.heap.c_allocator, self.ctx_server.model_tgt, self.ctx_server.vocab, self.ctx_server.mctx, query_str.items, doc, query_files.items, doc_files, self.ctx_server.init_opt);
                 errdefer tmp.deinit();
                 var task = mod.task.Task.initType(.rerank);
-                task.params = try mod.task.TaskParams.init(try task.arenaAlloc(mod.context.gpa));
+                task.params = try mod.task.TaskParams.init(try task.arenaAlloc(std.heap.c_allocator));
                 task.id = res.rd.getNewId();
                 task.tokens = tmp;
                 tasks.appendAssumeCapacity(task);
@@ -1127,7 +1127,7 @@ pub const Routes = struct {
 
         // wait for the results
         var all_results = try res.rd.waitForAll(ReqStop{ .req = req });
-        defer all_results.deinit(mod.context.gpa);
+        defer all_results.deinit(std.heap.c_allocator);
 
         // collect results
         if (all_results.is_terminated) {
@@ -1155,7 +1155,7 @@ pub const Routes = struct {
     /// strings, the numeric and boolean params get their types back.
     ///
     /// Return: owned by `a`.
-    fn parseTtsBody(a: Allocator, req: *const mod.http.Req) !json.Value {
+    fn parseTtsBody(a: std.mem.Allocator, req: *const mod.http.Req) !json.Value {
         var body = try json.parse(a, req.body);
         for ([_][]const u8{ "top_k", "n_predict", "max_tokens", "seed" }) |k| {
             if (body.contains(k) and (try body.at(k)).isString()) {
@@ -1175,7 +1175,7 @@ pub const Routes = struct {
 
     /// The `post_tts` lambda (server-context.cpp:6533 @b1b770d90).
     fn postTts(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
-        var arena = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer arena.deinit();
         const body = try parseTtsBody(arena.allocator(), req);
         return self.handleTtsImpl(req, &body);
@@ -1184,7 +1184,7 @@ pub const Routes = struct {
     /// The `post_speech_oai` lambda (server-context.cpp:6537 @b1b770d90): an
     /// OpenAI speech request, converted to `/tts`'s.
     fn postSpeechOai(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
-        var arena = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer arena.deinit();
         const aa = arena.allocator();
         const parsed = try parseTtsBody(aa, req);
@@ -1208,7 +1208,7 @@ pub const Routes = struct {
             return &res.base;
         }
 
-        const info = tc.c.mtmd_gen_audio_get_info(self.ctx_server.mctx);
+        const info = mtmd.mtmd.mtmd_gen_audio_get_info(self.ctx_server.mctx.?);
 
         const prompt = mod.common.jsonValue(body, "input", []const u8, mod.common.jsonValue(body, "prompt", []const u8, ""));
         if (prompt.len == 0) {
@@ -1222,8 +1222,8 @@ pub const Routes = struct {
 
         var task = mod.task.Task.initType(.tts);
         var task_moved = false;
-        defer if (!task_moved) task.deinit(mod.context.gpa);
-        const ta = try task.arenaAlloc(mod.context.gpa);
+        defer if (!task_moved) task.deinit(std.heap.c_allocator);
+        const ta = try task.arenaAlloc(std.heap.c_allocator);
         task.params = try mod.task.TaskParams.init(ta);
         task.tts_inp = mod.task.TtsInp.init();
         try mod.schema.evalTtsSchema(ta, self.params, &task, body);
@@ -1233,12 +1233,12 @@ pub const Routes = struct {
         // speaker_ref in the request overrides the default voice
         const has_speaker_ref = req.files.get("speaker_ref") != null or mod.common.jsonValue(body, "speaker_ref_b64", []const u8, "").len != 0;
         const voice = mod.common.jsonValue(body, "voice", []const u8, if (has_speaker_ref) "" else self.params.tts_voice);
-        const tts_prompt = try chat.templates.getTtsPrompt(a, self.metaRef().chat_params.tmpls, prompt, lang, voice);
+        const tts_prompt = try common_chat.templates.getTtsPrompt(a, self.metaRef().chat_params.tmpls, prompt, lang, voice);
         // a model with predefined voices only speaks with one of them
-        var voice_ref: ?*tc.c.mtmd_bitmap = null;
-        defer if (voice_ref) |bmp| tc.c.mtmd_bitmap_free(bmp);
+        var voice_ref: ?*mtmd.mtmd.Bitmap = null;
+        defer if (voice_ref) |bmp| mtmd.mtmd.mtmd_bitmap_free(bmp);
         if (voice.len != 0 and info.n_voices > 0) {
-            voice_ref = tc.c.mtmd_gen_audio_get_voice(self.ctx_server.mctx, (try a.dupeSentinel(u8, voice, 0)).ptr);
+            voice_ref = mtmd.mtmd.mtmd_gen_audio_get_voice(self.ctx_server.mctx.?, (try a.dupeSentinel(u8, voice, 0)).ptr);
             if (voice_ref == null) {
                 try res.errMsg(try std.mem.concat(a, u8, &.{ "unknown voice \"", voice, "\", see \"voices\" in GET /props" }), .invalid_request);
                 return &res.base;
@@ -1247,7 +1247,7 @@ pub const Routes = struct {
         task.tts_inp.prompt_str = try ta.dupeSentinel(u8, if (tts_prompt.len == 0) prompt else tts_prompt, 0);
         task.tts_inp.lang_str = try ta.dupeSentinel(u8, lang, 0);
         task.tts_inp.data.stream = do_stream;
-        task.tts_inp.data.out_type = if (is_pcm or pcm16) tc.c.MTMD_HELPER_GEN_AUDIO_OUTTYPE_PCM else tc.c.MTMD_HELPER_GEN_AUDIO_OUTTYPE_WAV;
+        task.tts_inp.data.out_type = if (is_pcm or pcm16) mtmd.helper_gen.OutType.pcm else mtmd.helper_gen.OutType.wav;
         // note: -1 is clamped to 0 by the sampler, it will disable the penalty
         task.params.sampling.penalty_last_n = if (task.params.n_predict > 0) task.params.n_predict else 512;
         task.params.sampling.seed = task.tts_inp.data.seed; // same seed for the codec/vocoder RNG
@@ -1283,11 +1283,11 @@ pub const Routes = struct {
                 try res.errMsg("\"voice\" and \"speaker_ref\" cannot be used together", .invalid_request);
                 return &res.base;
             }
-            if (!tc.c.mtmd_support_audio(self.ctx_server.mctx)) {
+            if (!mtmd.mtmd.mtmd_support_audio(self.ctx_server.mctx.?)) {
                 try res.errMsg("this model has no voice encoder, \"speaker_ref\" cannot be used", .invalid_request);
                 return &res.base;
             }
-            const wrapper = tc.c.mtmd_helper_bitmap_init_from_buf(self.ctx_server.mctx, speaker_ref.ptr, speaker_ref.len, false, self.ctx_server.init_opt);
+            const wrapper = mtmd.helper.mtmd_helper_bitmap_init_from_buf(self.ctx_server.mctx.?, speaker_ref.ptr, speaker_ref.len, false, self.ctx_server.init_opt);
             if (wrapper.bitmap == null) {
                 try res.errMsg("failed to decode \"speaker_ref\"", .invalid_request);
                 return &res.base;
@@ -1298,9 +1298,9 @@ pub const Routes = struct {
             voice_ref = null;
         } else if (info.n_voices > 0) {
             // without a voice prompt the model produces near silence: the first voice is the default
-            const first = tc.c.mtmd_gen_audio_voice_name(self.ctx_server.mctx, 0);
+            const first = mtmd.mtmd.mtmd_gen_audio_voice_name(self.ctx_server.mctx.?, 0);
             mod.common.srv(.wrn, "handle_tts_impl", "no voice given, speaking with \"%s\"\n", .{first});
-            task.tts_inp.setSpeakerRef(tc.c.mtmd_gen_audio_get_voice(self.ctx_server.mctx, first));
+            task.tts_inp.setSpeakerRef(mtmd.mtmd.mtmd_gen_audio_get_voice(self.ctx_server.mctx.?, first));
         } else {
             mod.common.srv(.wrn, "handle_tts_impl", "%s", .{@as([*:0]const u8, "no speaker reference provided, the model may behave randomly\n")});
         }
@@ -1324,7 +1324,7 @@ pub const Routes = struct {
                 ggmlAssert(req.should_stop.call(), 7185, "req.should_stop()");
                 return &res.base; // connection is closed
             };
-            defer result.destroy(mod.context.gpa);
+            defer result.destroy(std.heap.c_allocator);
             if (result.isError()) {
                 var j = try result.toJson(a);
                 try res.err(&j);
@@ -1341,7 +1341,7 @@ pub const Routes = struct {
             ggmlAssert(req.should_stop.call(), 7201, "req.should_stop()");
             return &res.base; // connection is closed
         };
-        defer first_result.destroy(mod.context.gpa);
+        defer first_result.destroy(std.heap.c_allocator);
         if (first_result.isError()) {
             var j = try first_result.toJson(a);
             try res.err(&j);
@@ -1363,7 +1363,7 @@ pub const Routes = struct {
     /// 16-bit for `pcm16`.
     ///
     /// Return: `audio` itself, or the converted bytes owned by `a`.
-    fn takeAudio(a: Allocator, pcm16: bool, audio: []const u8) ![]const u8 {
+    fn takeAudio(a: std.mem.Allocator, pcm16: bool, audio: []const u8) ![]const u8 {
         if (!pcm16) return audio;
         const n = audio.len / @sizeOf(f32);
         const samples = try a.alloc(f32, n);
@@ -1373,7 +1373,7 @@ pub const Routes = struct {
     }
 
     /// The `set_next` lambda (server-context.cpp:7216 @b1b770d90) of `handle_tts_impl`.
-    fn ttsNext(ctx: ?*anyopaque, output: *std.ArrayList(u8), oa: Allocator) anyerror!bool {
+    fn ttsNext(ctx: ?*anyopaque, output: *std.ArrayList(u8), oa: std.mem.Allocator) anyerror!bool {
         const res_this: *ResGenerator = @ptrCast(@alignCast(ctx.?));
         // flush buffered audio before is_done - the first result can already be final
         if (res_this.base.data.items.len != 0) {
@@ -1399,13 +1399,13 @@ pub const Routes = struct {
             }
         };
         const result = (try rd.next(Stop{ .res_this = res_this })) orelse return false;
-        defer result.destroy(mod.context.gpa);
+        defer result.destroy(std.heap.c_allocator);
         if (result.isError()) {
             return false;
         }
         ggmlAssert(result.kind == .tts, 7239, "tts_res != nullptr");
-        const audio = try takeAudio(mod.context.gpa, res_this.tts_pcm16, result.kind.tts.audio);
-        defer if (res_this.tts_pcm16) mod.context.gpa.free(audio);
+        const audio = try takeAudio(std.heap.c_allocator, res_this.tts_pcm16, result.kind.tts.audio);
+        defer if (res_this.tts_pcm16) std.heap.c_allocator.free(audio);
         try output.appendSlice(oa, audio);
         res_this.tts_is_done = result.kind.tts.final;
         return true;
@@ -1448,7 +1448,7 @@ pub const Routes = struct {
             return;
         }
 
-        var session: LiveAsr = .{ .routes = self, .conn = conn, .arena = std.heap.ArenaAllocator.init(mod.context.gpa) };
+        var session: LiveAsr = .{ .routes = self, .conn = conn, .arena = std.heap.ArenaAllocator.init(std.heap.c_allocator) };
         defer session.arena.deinit();
         try session.run();
     }
@@ -1482,7 +1482,7 @@ pub const Routes = struct {
         {
             var task = mod.task.Task.initType(.set_lora);
             task.id = res.rd.getNewId();
-            task.set_lora = try mod.common.parseLoraRequest(try task.arenaAlloc(mod.context.gpa), &body);
+            task.set_lora = try mod.common.parseLoraRequest(try task.arenaAlloc(std.heap.c_allocator), &body);
             try res.rd.postTask(task, false);
         }
 
@@ -1499,7 +1499,7 @@ pub const Routes = struct {
             ggmlAssert(req.should_stop.call(), line - 9, "req.should_stop()");
             return &res.base;
         };
-        defer result.destroy(mod.context.gpa);
+        defer result.destroy(std.heap.c_allocator);
 
         if (result.isError()) {
             var j = try result.toJson(res.alloc());
@@ -1541,7 +1541,7 @@ pub const Routes = struct {
         {
             var task = mod.task.Task.initType(ty);
             task.id = res.rd.getNewId();
-            const ta = try task.arenaAlloc(mod.context.gpa);
+            const ta = try task.arenaAlloc(std.heap.c_allocator);
             task.slot_action.id_slot = id_slot;
             task.slot_action.filename = try ta.dupe(u8, filename);
             task.slot_action.filepath = try ta.dupe(u8, filepath);
@@ -1561,7 +1561,7 @@ pub const Routes = struct {
         {
             var task = mod.task.Task.initType(.slot_save);
             task.id = res.rd.getNewId();
-            const ta = try task.arenaAlloc(mod.context.gpa);
+            const ta = try task.arenaAlloc(std.heap.c_allocator);
             task.slot_action.id_slot = id_slot;
             task.slot_action.filename = try ta.dupe(u8, f[0]);
             task.slot_action.filepath = try ta.dupe(u8, f[1]);
@@ -1573,7 +1573,7 @@ pub const Routes = struct {
             ggmlAssert(req.should_stop.call(), 6716, "req.should_stop()");
             return &res.base;
         };
-        defer result.destroy(mod.context.gpa);
+        defer result.destroy(std.heap.c_allocator);
 
         var j = try result.toJson(res.alloc());
         if (result.isError()) {
@@ -1606,7 +1606,7 @@ pub const Routes = struct {
             return &res.base;
         }
 
-        if (res_type != .none and self.metaRef().pooling_type == tc.c.LLAMA_POOLING_TYPE_NONE) {
+        if (res_type != .none and self.metaRef().pooling_type == llama.impl.llama_c.LLAMA_POOLING_TYPE_NONE) {
             try res.errMsg("Pooling type 'none' is not OAI compatible. Please use a different pooling type", .invalid_request);
             return &res.base;
         }
@@ -1640,28 +1640,28 @@ pub const Routes = struct {
         const TokenizeEntry = struct {
             fn run(r: *Routes, p: *const json.Value) !mod.tokens.ServerTokens {
                 if (p.isObject() and p.contains("content")) {
-                    return mod.oaicompat.tokenizeOaiContentArray(mod.context.gpa, r.ctx_server.vocab, r.ctx_server.mctx, r.metaRef().chat_params, try p.at("content"), true, true, r.ctx_server.init_opt);
+                    return mod.oaicompat.tokenizeOaiContentArray(std.heap.c_allocator, r.ctx_server.vocab, r.ctx_server.mctx, r.metaRef().chat_params, try p.at("content"), true, true, r.ctx_server.init_opt);
                 }
-                return mod.tokens.tokenizeInputSubprompt(mod.context.gpa, r.ctx_server.vocab, r.ctx_server.mctx, p, true, true, r.ctx_server.init_opt);
+                return mod.tokens.tokenizeInputSubprompt(std.heap.c_allocator, r.ctx_server.vocab, r.ctx_server.mctx, p, true, true, r.ctx_server.init_opt);
             }
         };
 
         var tokenized_prompts: std.ArrayList(mod.tokens.ServerTokens) = .empty;
         defer {
             for (tokenized_prompts.items) |*t| t.deinit();
-            tokenized_prompts.deinit(mod.context.gpa);
+            tokenized_prompts.deinit(std.heap.c_allocator);
         }
         if (prompt.isArray() and !mod.common.jsonIsArrayAndContainsNumbers(prompt)) {
             for (prompt.array.items) |*p| {
                 var t = try TokenizeEntry.run(self, p);
-                tokenized_prompts.append(mod.context.gpa, t) catch |e| {
+                tokenized_prompts.append(std.heap.c_allocator, t) catch |e| {
                     t.deinit();
                     return e;
                 };
             }
         } else {
             var t = try TokenizeEntry.run(self, prompt);
-            tokenized_prompts.append(mod.context.gpa, t) catch |e| {
+            tokenized_prompts.append(std.heap.c_allocator, t) catch |e| {
                 t.deinit();
                 return e;
             };
@@ -1682,7 +1682,7 @@ pub const Routes = struct {
         var embd_normalize = self.params.embd_normalize;
         if (body.count("embd_normalize") != 0) {
             embd_normalize = try (try body.at("embd_normalize")).get(c_int);
-            if (self.metaRef().pooling_type == tc.c.LLAMA_POOLING_TYPE_NONE) {
+            if (self.metaRef().pooling_type == llama.impl.llama_c.LLAMA_POOLING_TYPE_NONE) {
                 mod.common.srv(.dbg, "handle_embeddings_impl", "embd_normalize is not supported by pooling type %d, ignoring it\n", .{@as(c_int, self.metaRef().pooling_type)});
             }
         }
@@ -1691,21 +1691,21 @@ pub const Routes = struct {
         var responses = json.Value.emptyArray();
         {
             var tasks: std.ArrayList(mod.task.Task) = .empty;
-            defer tasks.deinit(mod.context.gpa);
-            errdefer for (tasks.items) |*t| t.deinit(mod.context.gpa);
+            defer tasks.deinit(std.heap.c_allocator);
+            errdefer for (tasks.items) |*t| t.deinit(std.heap.c_allocator);
             for (tokenized_prompts.items) |*t| {
                 var task = mod.task.Task.initType(.embedding);
-                task.params = try mod.task.TaskParams.init(try task.arenaAlloc(mod.context.gpa));
+                task.params = try mod.task.TaskParams.init(try task.arenaAlloc(std.heap.c_allocator));
 
                 task.id = res.rd.getNewId();
                 task.tokens = t.*;
-                t.* = mod.tokens.ServerTokens.init(mod.context.gpa); // std::move
+                t.* = mod.tokens.ServerTokens.init(std.heap.c_allocator); // std::move
 
                 // OAI-compat
                 task.params.res_type = res_type;
                 task.params.embd_normalize = embd_normalize;
 
-                try tasks.append(mod.context.gpa, task);
+                try tasks.append(std.heap.c_allocator, task);
             }
             try res.rd.postTasks(tasks.items, null, false);
             tasks.clearRetainingCapacity();
@@ -1713,7 +1713,7 @@ pub const Routes = struct {
 
         // wait for the results
         var all_results = try res.rd.waitForAll(ReqStop{ .req = req });
-        defer all_results.deinit(mod.context.gpa);
+        defer all_results.deinit(std.heap.c_allocator);
 
         // collect results
         if (all_results.is_terminated) {
@@ -1766,7 +1766,7 @@ pub const Routes = struct {
         }
 
         var files: std.ArrayList([]u8) = .empty;
-        var session = try chat.session.Session.initEmpty(mod.context.gpa); // dummy, unused
+        var session = try common_chat.session.Session.initEmpty(std.heap.c_allocator); // dummy, unused
         defer session.deinit();
         var body_parsed = try mod.oaicompat.oaicompatChatParamsParse(a, self.ctx_server.vocab, &body, self.metaRef().chat_params, &files, &session);
         const prompt = try body_parsed.at("prompt");
@@ -1775,9 +1775,9 @@ pub const Routes = struct {
         var n_tokens: usize = undefined;
         if (self.ctx_server.mctx != null) {
             if (!prompt.isString()) {
-                return mod.common.throw(error.RuntimeError, "for mtmd, input prompt must be a string.", .{});
+                return common_chat.exception.throw(error.RuntimeError, "for mtmd, input prompt must be a string.", .{});
             }
-            var t = try mod.tokens.processMtmdPrompt(mod.context.gpa, self.ctx_server.mctx, prompt.string, files.items, self.ctx_server.init_opt, true);
+            var t = try mod.tokens.processMtmdPrompt(std.heap.c_allocator, self.ctx_server.mctx, prompt.string, files.items, self.ctx_server.init_opt, true);
             defer t.deinit();
             n_tokens = t.size();
         } else {
@@ -1796,7 +1796,7 @@ pub const Routes = struct {
 
     /// Ports `server_routes`'s `handle_completions_impl` (server-context.cpp:5339 @b1b770d90).
     /// `chat_session`: the request's, or null for the default one.
-    fn handleCompletionsImpl(self: *Routes, req: *const mod.http.Req, ty: mod.task.TaskType, data: *json.Value, files: []const []u8, res_type: mod.task.ResponseType, chat_session: ?*const chat.session.Session) !*mod.http.Res {
+    fn handleCompletionsImpl(self: *Routes, req: *const mod.http.Req, ty: mod.task.TaskType, data: *json.Value, files: []const []u8, res_type: mod.task.ResponseType, chat_session: ?*const common_chat.session.Session) !*mod.http.Res {
         ggmlAssert(ty == .completion or ty == .infill, 5346, "type == SERVER_TASK_TYPE_COMPLETION || type == SERVER_TASK_TYPE_INFILL");
 
         const res = try self.createResponse(false);
@@ -1825,7 +1825,7 @@ pub const Routes = struct {
         if (!do_stream) {
             // non-stream, wait for the results
             var all_results = try res.rd.waitForAll(ReqStop{ .req = req });
-            defer all_results.deinit(mod.context.gpa);
+            defer all_results.deinit(std.heap.c_allocator);
             if (all_results.is_terminated) {
                 return &res.base; // connection is closed
             } else if (all_results.err) |e| {
@@ -1874,7 +1874,7 @@ pub const Routes = struct {
                 ggmlAssert(req.should_stop.call(), 5479, "req.should_stop()");
                 return &res.base; // connection is closed
             };
-            defer first_result.destroy(mod.context.gpa);
+            defer first_result.destroy(std.heap.c_allocator);
 
             if (first_result.isError()) {
                 var j = try first_result.toJson(a);
@@ -1909,12 +1909,12 @@ pub const Routes = struct {
     /// The `try` block of `handle_completions_impl` (server-context.cpp:5339
     /// @b1b770d90): tokenize, build one task per prompt (and its children),
     /// post them.
-    fn postCompletionTasks(self: *Routes, res: *ResGenerator, ty: mod.task.TaskType, data: *json.Value, files: []const []u8, res_type: mod.task.ResponseType, completion_id: []const u8, sse_ping_interval: *i32, chat_session: ?*const chat.session.Session) !void {
+    fn postCompletionTasks(self: *Routes, res: *ResGenerator, ty: mod.task.TaskType, data: *json.Value, files: []const []u8, res_type: mod.task.ResponseType, completion_id: []const u8, sse_ping_interval: *i32, chat_session: ?*const common_chat.session.Session) !void {
         const params = self.params;
         const ctx_server = self.ctx_server;
         var tasks: std.ArrayList(mod.task.Task) = .empty;
-        defer tasks.deinit(mod.context.gpa);
-        errdefer for (tasks.items) |*t| t.deinit(mod.context.gpa);
+        defer tasks.deinit(std.heap.c_allocator);
+        errdefer for (tasks.items) |*t| t.deinit(std.heap.c_allocator);
 
         const prompt = try data.at("prompt");
         // TODO: this log can become very long, put it behind a flag or think about a more compact format
@@ -1927,29 +1927,29 @@ pub const Routes = struct {
         var inputs: std.ArrayList(mod.tokens.ServerTokens) = .empty;
         defer {
             for (inputs.items) |*t| t.deinit();
-            inputs.deinit(mod.context.gpa);
+            inputs.deinit(std.heap.c_allocator);
         }
 
         if (res_type != .none and ctx_server.mctx != null) {
             // This is the case used by OAI compatible chat path with MTMD. TODO It can be moved to the path below.
-            try inputs.append(mod.context.gpa, try mod.tokens.processMtmdPrompt(mod.context.gpa, ctx_server.mctx, try prompt.get([]const u8), files, ctx_server.init_opt, false));
+            try inputs.append(std.heap.c_allocator, try mod.tokens.processMtmdPrompt(std.heap.c_allocator, ctx_server.mctx, try prompt.get([]const u8), files, ctx_server.init_opt, false));
         } else {
             // Everything else, including multimodal completions.
-            inputs = try mod.tokens.tokenizeInputPrompts(mod.context.gpa, ctx_server.vocab, ctx_server.mctx, prompt, true, true, ctx_server.init_opt);
+            inputs = try mod.tokens.tokenizeInputPrompts(std.heap.c_allocator, ctx_server.vocab, ctx_server.mctx, prompt, true, true, ctx_server.init_opt);
         }
 
         for (inputs.items) |*input| {
             var task = mod.task.Task.initType(ty);
-            errdefer task.deinit(mod.context.gpa);
+            errdefer task.deinit(std.heap.c_allocator);
 
             task.id = res.rd.getNewId();
 
             task.tokens = input.*;
-            input.* = mod.tokens.ServerTokens.init(mod.context.gpa); // std::move
-            const ta = try task.arenaAlloc(mod.context.gpa);
+            input.* = mod.tokens.ServerTokens.init(std.heap.c_allocator); // std::move
+            const ta = try task.arenaAlloc(std.heap.c_allocator);
             task.params = try mod.schema.evalLlamaCmplSchema(ta, ctx_server.vocab, params, self.metaRef().logit_bias_eog, data);
 
-            if (chat_session) |cs| try task.applyChatSession(mod.context.gpa, cs);
+            if (chat_session) |cs| try task.applyChatSession(std.heap.c_allocator, cs);
 
             task.id_slot = mod.common.jsonValue(data, "id_slot", c_int, -1);
             sse_ping_interval.* = task.params.sse_ping_interval;
@@ -1964,11 +1964,11 @@ pub const Routes = struct {
                 const n_children = task.params.n_cmpl - 1;
                 var j: i32 = 0;
                 while (j < n_children) : (j += 1) {
-                    try task.addChild(mod.context.gpa, task.id, res.rd.getNewId());
+                    try task.addChild(std.heap.c_allocator, task.id, res.rd.getNewId());
                 }
             }
 
-            try tasks.append(mod.context.gpa, task);
+            try tasks.append(std.heap.c_allocator, task);
         }
 
         try res.rd.postTasks(tasks.items, chat_session, false);
@@ -1978,8 +1978,8 @@ pub const Routes = struct {
     /// The `path_prompts_log_dir` block of `handle_completions_impl`
     /// (server-context.cpp:5339 @b1b770d90): the prompt, written to a file
     /// named for the time.
-    fn logPrompt(a: Allocator, dir: []const u8, prompt: *const json.Value) !void {
-        const name = try std.fmt.allocPrint(a, "{d:0>12}.txt", .{tc.c.ggml_time_ms()});
+    fn logPrompt(a: std.mem.Allocator, dir: []const u8, prompt: *const json.Value) !void {
+        const name = try std.fmt.allocPrint(a, "{d:0>12}.txt", .{llama.impl.llama_c.ggml_time_ms()});
         const file_path = try std.fs.path.joinZ(a, &.{ dir, name });
         const text = if (prompt.isString()) prompt.string else try json.dump(a, prompt, 2);
         const io = stdlib.file.defaultIo();
@@ -1999,14 +1999,14 @@ pub const Routes = struct {
     /// (server-context.cpp:5339 @b1b770d90): one result per call as SSE, a
     /// ping when the stream stays silent, `[DONE]` at the end where the
     /// format has one.
-    fn streamNext(ctx: ?*anyopaque, output: *std.ArrayList(u8), oa: Allocator) anyerror!bool {
+    fn streamNext(ctx: ?*anyopaque, output: *std.ArrayList(u8), oa: std.mem.Allocator) anyerror!bool {
         const res_this: *ResGenerator = @ptrCast(@alignCast(ctx.?));
         const res_type = res_this.res_type;
         const sse_ping_interval = res_this.sse_ping_interval;
 
         return streamNextImpl(res_this, output, oa, res_type, sse_ping_interval) catch |e| {
             if (e == error.OutOfMemory) return e;
-            var tmp = std.heap.ArenaAllocator.init(mod.context.gpa);
+            var tmp = std.heap.ArenaAllocator.init(std.heap.c_allocator);
             defer tmp.deinit();
             var error_json = try mod.common.formatErrorResponse(tmp.allocator(), mod.context.whatOf(e), .server);
             try output.appendSlice(oa, try formatError(tmp.allocator(), res_type, &error_json));
@@ -2017,7 +2017,7 @@ pub const Routes = struct {
     }
 
     /// The `format_error` lambda of the streaming lambda (server-context.cpp:5508 @b1b770d90).
-    fn formatError(a: Allocator, res_type: mod.task.ResponseType, res_json: *const json.Value) ![]u8 {
+    fn formatError(a: std.mem.Allocator, res_type: mod.task.ResponseType, res_json: *const json.Value) ![]u8 {
         if (res_type == .anthropic) {
             var o = mod.common.Obj.init(a);
             try o.put("event", "error");
@@ -2032,7 +2032,7 @@ pub const Routes = struct {
         }
     }
 
-    fn streamNextImpl(res_this: *ResGenerator, output: *std.ArrayList(u8), oa: Allocator, res_type: mod.task.ResponseType, sse_ping_interval: i32) !bool {
+    fn streamNextImpl(res_this: *ResGenerator, output: *std.ArrayList(u8), oa: std.mem.Allocator, res_type: mod.task.ResponseType, sse_ping_interval: i32) !bool {
         const func = "operator()";
         if (res_this.shouldStop()) {
             mod.common.srv(.dbg, func, "%s", .{@as([*:0]const u8, "stopping streaming due to should_stop condition\n")});
@@ -2067,7 +2067,7 @@ pub const Routes = struct {
             pub fn shouldStop(s: @This()) bool {
                 if (s.res_this.shouldStop()) {
                     return true; // should_stop condition met
-                } else if (s.sse_ping_interval > 0 and tc.c.ggml_time_ms() - s.start_time > @as(i64, s.sse_ping_interval) * 1000) {
+                } else if (s.sse_ping_interval > 0 and llama.impl.llama_c.ggml_time_ms() - s.start_time > @as(i64, s.sse_ping_interval) * 1000) {
                     s.timeout.* = true;
                     return true; // timeout
                 }
@@ -2075,10 +2075,10 @@ pub const Routes = struct {
             }
         };
         var timeout = false;
-        const result_opt = try rd.next(Stop{ .res_this = res_this, .timeout = &timeout, .start_time = tc.c.ggml_time_ms(), .sse_ping_interval = sse_ping_interval });
+        const result_opt = try rd.next(Stop{ .res_this = res_this, .timeout = &timeout, .start_time = llama.impl.llama_c.ggml_time_ms(), .sse_ping_interval = sse_ping_interval });
 
         if (timeout) {
-            if (result_opt) |r| r.destroy(mod.context.gpa);
+            if (result_opt) |r| r.destroy(std.heap.c_allocator);
             // some clients may time out (e.g. undici) will time out if no data is received for a while, so we need to send a ping to keep the connection alive
             mod.common.srv(.dbg, func, "%s", .{@as([*:0]const u8, "sending SSE ping\n")});
             try output.appendSlice(oa, ":\n\n");
@@ -2090,9 +2090,9 @@ pub const Routes = struct {
             ggmlAssert(res_this.shouldStop(), 5577, "effective_should_stop()");
             return false; // should_stop condition met
         };
-        defer result.destroy(mod.context.gpa);
+        defer result.destroy(std.heap.c_allocator);
 
-        var tmp = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var tmp = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer tmp.deinit();
         const a = tmp.allocator();
 
@@ -2120,7 +2120,7 @@ pub const Routes = struct {
 
     /// Ports `server_routes`'s `get_model_info` (server-context.cpp:5751
     /// @b1b770d90): for router mode.
-    pub fn getModelInfo(self: *const Routes, a: Allocator) !json.Value {
+    pub fn getModelInfo(self: *const Routes, a: std.mem.Allocator) !json.Value {
         return getResModelInfo(a, self.metaRef());
     }
 
@@ -2155,14 +2155,14 @@ pub const Routes = struct {
 /// warning -- when it does not convert.
 ///
 /// Return: owned by `a`.
-fn jsonValueStringsOr(a: Allocator, body: *const json.Value, key: []const u8, default_value: []const []const u8) ![][]const u8 {
+fn jsonValueStringsOr(a: std.mem.Allocator, body: *const json.Value, key: []const u8, default_value: []const []const u8) ![][]const u8 {
     if (body.contains(key) and !(try body.at(key)).isNull()) {
         const v = try body.at(key);
         return v.getSlice(a, []const u8) catch |e| switch (e) {
             error.JsonError => {
                 const k = try a.dupeSentinel(u8, key, 0);
                 const w = try a.dupeSentinel(u8, json.what(), 0);
-                tc.log.wrn("Wrong type supplied for parameter '%s', using default value: %s\n", .{ k.ptr, w.ptr });
+                tools_common.log.wrn("Wrong type supplied for parameter '%s', using default value: %s\n", .{ k.ptr, w.ptr });
                 return a.dupe([]const u8, default_value);
             },
             else => |x| x,
@@ -2173,7 +2173,7 @@ fn jsonValueStringsOr(a: Allocator, body: *const json.Value, key: []const u8, de
 
 /// Ports `get_res_model_info` (server-context.cpp:5636 @b1b770d90): do NOT
 /// use the context here, so it works during sleep.
-fn getResModelInfo(a: Allocator, meta: *const mod.context.Meta) !json.Value {
+fn getResModelInfo(a: std.mem.Allocator, meta: *const mod.context.Meta) !json.Value {
     var o = mod.common.Obj.init(a);
     try o.put("id", meta.model_name);
     try o.put("aliases", meta.model_aliases);
@@ -2204,7 +2204,7 @@ fn getResModelInfo(a: Allocator, meta: *const mod.context.Meta) !json.Value {
 }
 
 /// Ports `get_res_models` (server-context.cpp:5664 @b1b770d90).
-fn getResModels(a: Allocator, meta: *const mod.context.Meta) !json.Value {
+fn getResModels(a: std.mem.Allocator, meta: *const mod.context.Meta) !json.Value {
     var model = mod.common.Obj.init(a);
     try model.put("name", meta.model_name);
     try model.put("model", meta.model_name);
@@ -2243,7 +2243,7 @@ fn getResModels(a: Allocator, meta: *const mod.context.Meta) !json.Value {
 
 /// Ports `get_res_props` (server-context.cpp:5697 @b1b770d90): do NOT use
 /// the context here, so it works during sleep.
-fn getResProps(a: Allocator, meta: *const mod.context.Meta, params: *const tc.params.Params, is_sleeping: bool) !json.Value {
+fn getResProps(a: std.mem.Allocator, meta: *const mod.context.Meta, params: *const tools_common.params.Params, is_sleeping: bool) !json.Value {
     var tparams = try mod.task.TaskParams.init(a);
     tparams.sampling = params.sampling;
     var dgs = mod.common.Obj.init(a);
@@ -2308,7 +2308,7 @@ const ConnStop = struct {
 /// on its stack for a live transcription session.
 /// `j.value(key, json::object())` on an object: a copy of the member, of
 /// whatever type, or an empty object.
-fn valueOr(a: Allocator, j: *const json.Value, key: []const u8) !json.Value {
+fn valueOr(a: std.mem.Allocator, j: *const json.Value, key: []const u8) !json.Value {
     if (j.contains(key)) return (try j.at(key)).clone(a);
     return json.Value.emptyObject();
 }
@@ -2344,7 +2344,7 @@ const LiveAsr = struct {
     }
 
     /// The `send_event` lambda: `ev` is `ea`'s.
-    fn sendEvent(self: *LiveAsr, ea: Allocator, ev: json.Value) !void {
+    fn sendEvent(self: *LiveAsr, ea: std.mem.Allocator, ev: json.Value) !void {
         var e = ev;
         const id = try std.mem.concat(ea, u8, &.{ "event_", try mod.common.randomString(ea) });
         try e.set(ea, "event_id", try json.Value.initString(ea, id));
@@ -2352,7 +2352,7 @@ const LiveAsr = struct {
     }
 
     /// The `send_error_event` lambda.
-    fn sendErrorEvent(self: *LiveAsr, ea: Allocator, message: []const u8, ty: []const u8) !void {
+    fn sendErrorEvent(self: *LiveAsr, ea: std.mem.Allocator, message: []const u8, ty: []const u8) !void {
         var err = mod.common.Obj.init(ea);
         try err.put("type", ty);
         try err.put("code", @as(json.Value, .null));
@@ -2364,13 +2364,13 @@ const LiveAsr = struct {
         try self.sendEvent(ea, o.done());
     }
 
-    fn typed(self: *LiveAsr, ea: Allocator, ty: []const u8) !void {
+    fn typed(self: *LiveAsr, ea: std.mem.Allocator, ty: []const u8) !void {
         var o = mod.common.Obj.init(ea);
         try o.put("type", ty);
         try self.sendEvent(ea, o.done());
     }
 
-    fn sessionEvent(self: *LiveAsr, ea: Allocator, ty: []const u8) !void {
+    fn sessionEvent(self: *LiveAsr, ea: std.mem.Allocator, ty: []const u8) !void {
         var o = mod.common.Obj.init(ea);
         try o.put("type", ty);
         try o.put("session", try self.session_config.clone(ea));
@@ -2378,7 +2378,7 @@ const LiveAsr = struct {
     }
 
     /// The `send_completed` lambda, called with `mutex_item` held.
-    fn sendCompleted(self: *LiveAsr, ea: Allocator) !void {
+    fn sendCompleted(self: *LiveAsr, ea: std.mem.Allocator) !void {
         var o = mod.common.Obj.init(ea);
         try o.put("type", "conversation.item.input_audio_transcription.completed");
         try o.put("item_id", self.item_id);
@@ -2390,17 +2390,17 @@ const LiveAsr = struct {
 
     /// The `post_control` lambda.
     fn postControl(self: *LiveAsr, action: mod.task.ControlAction, audio: []const f32) !bool {
-        var ctl = try mod.context.Reader.init(mod.context.gpa, self.routes.queue_tasks, self.routes.queue_results, mod.context.http_polling_seconds);
+        var ctl = try mod.context.Reader.init(std.heap.c_allocator, self.routes.queue_tasks, self.routes.queue_results, mod.context.http_polling_seconds);
         defer ctl.deinit();
         var task = mod.task.Task.initType(.control);
         task.id = ctl.getNewId();
-        const ta = try task.arenaAlloc(mod.context.gpa);
+        const ta = try task.arenaAlloc(std.heap.c_allocator);
         task.params.control_action = action;
         task.params.control_cmpl_id = try ta.dupe(u8, self.session_id);
         task.params.control_audio = try ta.dupe(f32, audio);
         try ctl.postTask(task, false);
         const result = (try ctl.next(ConnStop{ .conn = self.conn })) orelse return false;
-        defer result.destroy(mod.context.gpa);
+        defer result.destroy(std.heap.c_allocator);
         return switch (result.kind) {
             .control => |r| r.success,
             else => false,
@@ -2420,13 +2420,13 @@ const LiveAsr = struct {
 
     fn readEvents(self: *LiveAsr) !void {
         var input_rate: c_int = self.model_rate;
-        var resampler: ?*tc.c.mtmd_helper_resampler = null; // input_rate -> model_rate
-        defer if (resampler) |r| tc.c.mtmd_helper_resampler_free(r);
+        var resampler: ?*mtmd.vendor.miniaudio.HelperResampler = null; // input_rate -> model_rate
+        defer if (resampler) |r| mtmd.helper.mtmd_helper_resampler_free(r);
         var msg: std.ArrayList(u8) = .empty;
-        defer msg.deinit(mod.context.gpa);
-        var ev_arena = std.heap.ArenaAllocator.init(mod.context.gpa);
+        defer msg.deinit(std.heap.c_allocator);
+        var ev_arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer ev_arena.deinit();
-        while (try self.conn.read(mod.context.gpa, &msg) != 0) {
+        while (try self.conn.read(std.heap.c_allocator, &msg) != 0) {
             _ = ev_arena.reset(.retain_capacity);
             const ea = ev_arena.allocator();
             var ev = json.parse(ea, msg.items) catch |e| switch (e) {
@@ -2449,7 +2449,7 @@ const LiveAsr = struct {
                     }
                     if (rate != input_rate) {
                         input_rate = rate;
-                        if (resampler) |r| tc.c.mtmd_helper_resampler_free(r);
+                        if (resampler) |r| mtmd.helper.mtmd_helper_resampler_free(r);
                         resampler = null;
                         self.lock();
                         defer self.unlock();
@@ -2468,14 +2468,14 @@ const LiveAsr = struct {
                 };
                 var samples = try mod.realtime.pcm16ToF32(ea, pcm);
                 if (resampler == null) {
-                    resampler = tc.c.mtmd_helper_resampler_init(input_rate, self.model_rate);
+                    resampler = mtmd.helper.mtmd_helper_resampler_init(input_rate, self.model_rate);
                     if (resampler == null) {
                         try self.sendErrorEvent(ea, "failed to initialize the audio resampler", "server_error");
                         break;
                     }
                 }
-                var out: [*c]const f32 = null;
-                const n = tc.c.mtmd_helper_resampler_process(resampler, samples.ptr, samples.len, &out);
+                var out: ?[*]const f32 = null;
+                const n = mtmd.helper.mtmd_helper_resampler_process(resampler.?, samples.ptr, samples.len, &out);
                 if (n < 0) {
                     try self.sendErrorEvent(ea, "failed to resample the audio", "server_error");
                     break;
@@ -2484,7 +2484,7 @@ const LiveAsr = struct {
                     continue;
                 }
                 if (out != samples.ptr) {
-                    samples = try ea.dupe(f32, out[0..@intCast(n)]);
+                    samples = try ea.dupe(f32, out.?[0..@intCast(n)]);
                 }
                 if (!try self.postControl(.audio_append, samples)) {
                     break;
@@ -2524,7 +2524,7 @@ const LiveAsr = struct {
         const meta = routes.metaRef();
         const a = self.arena.allocator();
 
-        var ev_arena = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var ev_arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer ev_arena.deinit();
         const ea = ev_arena.allocator();
 
@@ -2535,7 +2535,7 @@ const LiveAsr = struct {
         }
 
         self.session_id = try std.mem.concat(a, u8, &.{ "sess_", try mod.common.randomString(a) });
-        self.model_rate = tc.c.mtmd_get_audio_sample_rate(server.mctx);
+        self.model_rate = mtmd.mtmd.mtmd_get_audio_sample_rate(server.mctx.?);
         {
             var format = mod.common.Obj.init(a);
             try format.put("type", "audio/pcm");
@@ -2563,7 +2563,7 @@ const LiveAsr = struct {
         {
             var task = mod.task.Task.initType(.transcribe_rt);
             task.id = rd.getNewId();
-            const ta = try task.arenaAlloc(mod.context.gpa);
+            const ta = try task.arenaAlloc(std.heap.c_allocator);
             task.params = try mod.task.TaskParams.init(ta);
             task.params.sampling = try mod.task.deepClone(ta, routes.params.sampling);
             task.params.stream = true;
@@ -2578,7 +2578,7 @@ const LiveAsr = struct {
                 self.conn.close();
                 return;
             };
-            defer result.destroy(mod.context.gpa);
+            defer result.destroy(std.heap.c_allocator);
             if (result.isError()) {
                 var j = try result.toJson(ea);
                 try self.sendErrorEvent(ea, mod.common.jsonValue(&j, "message", []const u8, "server error"), "server_error");
@@ -2596,7 +2596,7 @@ const LiveAsr = struct {
         while (true) {
             _ = ev_arena.reset(.retain_capacity);
             const result = (try rd.next(ConnStop{ .conn = self.conn })) orelse break; // connection closed
-            defer result.destroy(mod.context.gpa);
+            defer result.destroy(std.heap.c_allocator);
             if (result.isError()) {
                 var j = try result.toJson(ea);
                 try self.sendErrorEvent(ea, mod.common.jsonValue(&j, "message", []const u8, "server error"), "server_error");

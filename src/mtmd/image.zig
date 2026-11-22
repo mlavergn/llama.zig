@@ -34,6 +34,7 @@
 //! reference on bits.
 
 const std = @import("std");
+const llama = @import("llama");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 
@@ -512,7 +513,7 @@ pub const ImgTool = struct {
             .bicubic => 2.0,
             .lanczos => 3.0,
             else => {
-                _ = mod.impl.c.ggml_abort("mtmd-image.cpp", 234, "unsupported resize algo: %d", @as(c_int, @backingInt(algo)));
+                _ = llama.impl.llama_c.ggml_abort("mtmd-image.cpp", 234, "unsupported resize algo: %d", @as(c_int, @backingInt(algo)));
                 unreachable;
             },
         };
@@ -2032,7 +2033,7 @@ pub const Preprocessor = struct {
         for (out.entries.items) |*e| {
             // `get_ro_buf` throws on a placeholder
             if (e.isPlaceholder()) return mod.clip.throwErr("this mtmd_image_f32 is a placeholder", .{});
-            for (e.buf.items) |*v| v.* = mod.impl.c.ggml_bf16_to_fp32(mod.impl.c.ggml_fp32_to_bf16(v.*));
+            for (e.buf.items) |*v| v.* = llama.impl.llama_c.ggml_bf16_to_fp32(llama.impl.llama_c.ggml_fp32_to_bf16(v.*));
         }
         return out;
     }

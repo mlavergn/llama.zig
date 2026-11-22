@@ -17,6 +17,7 @@
 //! are in the C++'s order, arm by arm, optional ones included.
 
 const std = @import("std");
+const llama = @import("llama");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 
@@ -120,7 +121,7 @@ fn cbxLoadCamBlock(tl: *mod.clip.TensorLoader, bp: []const u8, tp: []const u8, b
     var li: c_int = 1;
     while (true) : (li += 1) {
         const probe = std.fmt.bufPrintSentinel(&nbuf, "{s}.tdnnd{d}.linear1.weight", .{ bp, li }, 0) catch unreachable;
-        if (mod.impl.c.gguf_find_tensor(tl.loader.ctx_gguf, probe.ptr) < 0) break;
+        if (llama.impl.llama_c.gguf_find_tensor(tl.loader.ctx_gguf, probe.ptr) < 0) break;
         const p = std.fmt.bufPrint(&pbuf, "{s}.tdnnd{d}", .{ bp, li }) catch unreachable;
         var l: mod.model.Chatterbox.SpkCamLayer = .{};
         try cbxLoadBn(tl, std.fmt.bufPrint(&nbuf, "{s}.nonlinear1.batchnorm", .{p}) catch unreachable, &l.nl1_bn);
@@ -142,7 +143,7 @@ fn cbxLoadCamBlock(tl: *mod.clip.TensorLoader, bp: []const u8, tp: []const u8, b
 fn cbxHas(tl: *mod.clip.TensorLoader, comptime fmt: []const u8, args: anytype) bool {
     var buf: [256]u8 = undefined;
     const name = std.fmt.bufPrintSentinel(&buf, fmt, args, 0) catch return false;
-    return mod.impl.c.gguf_find_tensor(tl.loader.ctx_gguf, name.ptr) >= 0;
+    return llama.impl.llama_c.gguf_find_tensor(tl.loader.ctx_gguf, name.ptr) >= 0;
 }
 
 /// The `load_enc_layer` lambda of the CHATTERBOX arm (mtmd-model.cpp:2580
@@ -370,8 +371,8 @@ fn loadChatterbox(tl: *mod.clip.TensorLoader) mod.clip.Error!void {
     cb.s3tok_down_b = try tl.getTensor("a.s3tok.quantizer._codebook.project_down.bias", true);
 
     // read on the host: embedding tables, source module
-    var t: ?*mod.impl.c.ggml_tensor = mod.impl.c.ggml_get_first_tensor(tl.loader.ctx_meta);
-    while (t != null) : (t = mod.impl.c.ggml_get_next_tensor(tl.loader.ctx_meta, t)) {
+    var t: ?*llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_get_first_tensor(tl.loader.ctx_meta);
+    while (t != null) : (t = llama.impl.llama_c.ggml_get_next_tensor(tl.loader.ctx_meta, t)) {
         const name = std.mem.sliceTo(&t.?.name, 0);
         if (std.mem.startsWith(u8, name, "a.gen.code.") or std.mem.startsWith(u8, name, "a.gen.t3.") or
             std.mem.startsWith(u8, name, "a.gen.hift.m_source."))
@@ -390,38 +391,38 @@ fn loadChatterbox(tl: *mod.clip.TensorLoader) mod.clip.Error!void {
     var ids: std.ArrayList(f32) = .empty; // the converter stores 1D tensors as F32, ids are exact
     defer ids.deinit(std.heap.c_allocator);
     var it: i64 = 0;
-    while (it < mod.impl.c.gguf_get_n_tensors(ctx_gguf)) : (it += 1) {
-        const name_z = mod.impl.c.gguf_get_tensor_name(ctx_gguf, it);
+    while (it < llama.impl.llama_c.gguf_get_n_tensors(ctx_gguf)) : (it += 1) {
+        const name_z = llama.impl.llama_c.gguf_get_tensor_name(ctx_gguf, it);
         const name = std.mem.span(name_z);
         if (!std.mem.startsWith(u8, name, "voice.")) continue;
-        const vt: *mod.impl.c.ggml_tensor = mod.impl.c.ggml_get_tensor(tl.loader.ctx_meta, name_z);
+        const vt: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_get_tensor(tl.loader.ctx_meta, name_z);
         var voice: []const u8 = name[6..];
         ids.clearRetainingCapacity();
         var dst: []f32 = &.{};
         var ok = false;
-        const n_el: usize = @intCast(mod.impl.c.ggml_nelements(vt));
+        const n_el: usize = @intCast(llama.impl.llama_c.ggml_nelements(vt));
         if (cbxTake(&voice, ".ref_tokens")) {
             try ids.resize(std.heap.c_allocator, n_el);
             dst = ids.items;
-            ok = vt.type == mod.impl.c.GGML_TYPE_F32;
+            ok = vt.type == llama.impl.llama_c.GGML_TYPE_F32;
         } else if (cbxTake(&voice, ".ref_feat")) {
             const v = &(try model.gen_voices.getOrPut(voice)).ref.feat;
             try v.resize(std.heap.c_allocator, n_el);
             dst = v.items;
-            ok = vt.type == mod.impl.c.GGML_TYPE_F32 and vt.ne[0] == 80;
+            ok = vt.type == llama.impl.llama_c.GGML_TYPE_F32 and vt.ne[0] == 80;
         } else if (cbxTake(&voice, ".ref_spk")) {
             const v = &(try model.gen_voices.getOrPut(voice)).ref.spk;
             try v.resize(std.heap.c_allocator, n_el);
             dst = v.items;
-            ok = vt.type == mod.impl.c.GGML_TYPE_F32 and vt.ne[0] == 192;
+            ok = vt.type == llama.impl.llama_c.GGML_TYPE_F32 and vt.ne[0] == 192;
         } else {
             const v = &(try model.gen_voices.getOrPut(voice)).rows;
             try v.resize(std.heap.c_allocator, n_el);
             dst = v.items;
-            ok = vt.type == mod.impl.c.GGML_TYPE_F32 and mod.impl.c.ggml_n_dims(vt) <= 2 and vt.ne[0] == n_embd_talker;
+            ok = vt.type == llama.impl.llama_c.GGML_TYPE_F32 and llama.impl.llama_c.ggml_n_dims(vt) <= 2 and vt.ne[0] == n_embd_talker;
         }
         if (!ok) return mod.clip.throwErr("%s: invalid voice tensor %s\n", .{ func, name_z });
-        if (!tl.readTensorBytes(name, std.mem.sliceAsBytes(dst)[0..mod.impl.c.ggml_nbytes(vt)])) {
+        if (!tl.readTensorBytes(name, std.mem.sliceAsBytes(dst)[0..llama.impl.llama_c.ggml_nbytes(vt)])) {
             return mod.clip.throwErr("%s: failed to read %s\n", .{ func, name_z });
         }
         if (ids.items.len != 0) {
@@ -679,7 +680,7 @@ pub fn load(tl: *mod.clip.TensorLoader) mod.clip.Error!void {
             model.rope_freqs = try tl.getTensor(mod.names.TN_ROPE_FREQS, true);
             const d_head: c_int = if (hparams.n_head > 0) @divTrunc(hparams.n_embd, hparams.n_head) else 0;
             if (d_head <= 0 or d_head * hparams.n_head != hparams.n_embd or @rem(d_head, 32) != 0 or
-                model.rope_freqs.?.type != mod.impl.c.GGML_TYPE_F32 or mod.impl.c.ggml_nelements(model.rope_freqs) != d_head)
+                model.rope_freqs.?.type != llama.impl.llama_c.GGML_TYPE_F32 or llama.impl.llama_c.ggml_nelements(model.rope_freqs) != d_head)
             {
                 return mod.clip.throwErr("%s: hparams do not match the tensor shapes\n", .{func});
             }
@@ -1221,8 +1222,8 @@ pub fn load(tl: *mod.clip.TensorLoader) mod.clip.Error!void {
             try cbxLoadBn(tl, "a.spk.xvector.dense.nonlinear.batchnorm", &cb.spk_dense_bn);
 
             // read on the host: voice encoder lstm, conditioning encoder
-            var t: ?*mod.impl.c.ggml_tensor = mod.impl.c.ggml_get_first_tensor(tl.loader.ctx_meta);
-            while (t != null) : (t = mod.impl.c.ggml_get_next_tensor(tl.loader.ctx_meta, t)) {
+            var t: ?*llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_get_first_tensor(tl.loader.ctx_meta);
+            while (t != null) : (t = llama.impl.llama_c.ggml_get_next_tensor(tl.loader.ctx_meta, t)) {
                 const name = std.mem.sliceTo(&t.?.name, 0);
                 if (std.mem.startsWith(u8, name, "a.ve.") or std.mem.startsWith(u8, name, "a.cenc.")) {
                     const loaded = try tl.getTensor(@ptrCast(&t.?.name), true);
@@ -1303,18 +1304,18 @@ pub fn load(tl: *mod.clip.TensorLoader) mod.clip.Error!void {
 
             const ctx_gguf = tl.loader.ctx_gguf;
             var i: i64 = 0;
-            while (i < mod.impl.c.gguf_get_n_tensors(ctx_gguf)) : (i += 1) {
-                const name = mod.impl.c.gguf_get_tensor_name(ctx_gguf, i);
+            while (i < llama.impl.llama_c.gguf_get_n_tensors(ctx_gguf)) : (i += 1) {
+                const name = llama.impl.llama_c.gguf_get_tensor_name(ctx_gguf, i);
                 if (!std.mem.startsWith(u8, std.mem.span(name), "voice.")) continue;
-                const t: *const mod.impl.c.ggml_tensor = mod.impl.c.ggml_get_tensor(tl.loader.ctx_meta, name);
-                if (t.type != mod.impl.c.GGML_TYPE_F32 or mod.impl.c.ggml_n_dims(t) > 2 or t.ne[0] != model.gen_input_lin_w.?.ne[1]) {
+                const t: *const llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_get_tensor(tl.loader.ctx_meta, name);
+                if (t.type != llama.impl.llama_c.GGML_TYPE_F32 or llama.impl.llama_c.ggml_n_dims(t) > 2 or t.ne[0] != model.gen_input_lin_w.?.ne[1]) {
                     return mod.clip.throwErr("%s: invalid voice tensor %s\n", .{ "load_tensors", name });
                 }
                 const embd = &(try model.gen_voices.getOrPut(std.mem.span(name + 6))).rows;
                 const old_len = embd.items.len;
-                try embd.resize(std.heap.c_allocator, @intCast(mod.impl.c.ggml_nelements(t)));
+                try embd.resize(std.heap.c_allocator, @intCast(llama.impl.llama_c.ggml_nelements(t)));
                 if (embd.items.len > old_len) @memset(embd.items[old_len..], 0);
-                if (!tl.readTensorBytes(std.mem.span(name), std.mem.sliceAsBytes(embd.items)[0..mod.impl.c.ggml_nbytes(t)])) {
+                if (!tl.readTensorBytes(std.mem.span(name), std.mem.sliceAsBytes(embd.items)[0..llama.impl.llama_c.ggml_nbytes(t)])) {
                     return mod.clip.throwErr("%s: failed to read %s\n", .{ "load_tensors", name });
                 }
             }
@@ -1513,7 +1514,7 @@ pub fn load(tl: *mod.clip.TensorLoader) mod.clip.Error!void {
             model.image_newline = try tl.getTensor(mod.names.TN_IMAGE_NEWLINE, true);
             model.view_seperator = try tl.getTensor(mod.names.TN_IMAGE_SEPERATOR, false);
             // the position embedding is resampled on the host as F32
-            if (model.position_embeddings == null or model.position_embeddings.?.type != mod.impl.c.GGML_TYPE_F32) {
+            if (model.position_embeddings == null or model.position_embeddings.?.type != llama.impl.llama_c.GGML_TYPE_F32) {
                 var pb: [256]u8 = undefined;
                 return mod.clip.throwErr("%s: HunyuanVL requires an F32 %s\n", .{ func, mod.clip.fmtKey(&pb, mod.names.TN_POS_EMBD, prefix) });
             }

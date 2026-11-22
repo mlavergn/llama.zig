@@ -35,10 +35,7 @@
 const std = @import("std");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const c = @import("tools_h");
 const llama = @import("llama");
-
-const gpa = std.heap.c_allocator;
 
 fn assertC(ok: bool, comptime line: c_int, comptime expr: [*:0]const u8) void {
     mod.ggml.ggmlAssert(ok, "speculative.cpp", line, expr);
@@ -53,40 +50,40 @@ fn oom() noreturn {
 pub const ext = struct {
     const api = llama.api;
 
-    pub fn setEmbeddingsNextn(ctx: ?*c.llama_context, value: bool, masked: bool) void {
+    pub fn setEmbeddingsNextn(ctx: ?*llama.impl.llama_c.llama_context, value: bool, masked: bool) void {
         api.context.llama_set_embeddings_nextn(@ptrCast(ctx), value, masked);
     }
-    pub fn setNextnLayerOffset(ctx: ?*c.llama_context, offset: i32) void {
+    pub fn setNextnLayerOffset(ctx: ?*llama.impl.llama_c.llama_context, offset: i32) void {
         api.context.llama_set_nextn_layer_offset(@ptrCast(ctx), offset);
     }
-    pub fn getEmbeddingsNextn(ctx: ?*c.llama_context) ?[*]f32 {
+    pub fn getEmbeddingsNextn(ctx: ?*llama.impl.llama_c.llama_context) ?[*]f32 {
         return api.context.llama_get_embeddings_nextn(@ptrCast(ctx));
     }
-    pub fn getEmbeddingsNextnIth(ctx: ?*c.llama_context, i: i32) ?[*]f32 {
+    pub fn getEmbeddingsNextnIth(ctx: ?*llama.impl.llama_c.llama_context, i: i32) ?[*]f32 {
         return api.context.llama_get_embeddings_nextn_ith(@ptrCast(ctx), i);
     }
-    pub fn setEmbeddingsLayerInp(ctx: ?*c.llama_context, lid: u32, value: bool) void {
+    pub fn setEmbeddingsLayerInp(ctx: ?*llama.impl.llama_c.llama_context, lid: u32, value: bool) void {
         api.context.llama_set_embeddings_layer_inp(@ptrCast(ctx), lid, value);
     }
-    pub fn getEmbeddingsLayerInp(ctx: ?*c.llama_context, lid: u32) ?[*]f32 {
+    pub fn getEmbeddingsLayerInp(ctx: ?*llama.impl.llama_c.llama_context, lid: u32) ?[*]f32 {
         return api.context.llama_get_embeddings_layer_inp(@ptrCast(ctx), lid);
     }
-    pub fn modelTargetLayerIds(model: ?*const c.llama_model) [*c]const i32 {
+    pub fn modelTargetLayerIds(model: ?*const llama.impl.llama_c.llama_model) [*c]const i32 {
         return api.model.llama_model_target_layer_ids(@ptrCast(model));
     }
-    pub fn modelTargetLayerIdsN(model: ?*const c.llama_model) u32 {
+    pub fn modelTargetLayerIdsN(model: ?*const llama.impl.llama_c.llama_model) u32 {
         return api.model.llama_model_target_layer_ids_n(@ptrCast(model));
     }
-    pub fn modelDflashSelectorTopK(model: ?*const c.llama_model) i32 {
+    pub fn modelDflashSelectorTopK(model: ?*const llama.impl.llama_c.llama_model) i32 {
         return api.model.llama_model_dflash_selector_top_k(@ptrCast(model));
     }
-    pub fn getCtxOther(ctx: ?*c.llama_context) ?*c.llama_context {
+    pub fn getCtxOther(ctx: ?*llama.impl.llama_c.llama_context) ?*llama.impl.llama_c.llama_context {
         return @ptrCast(api.context.llama_get_ctx_other(@ptrCast(ctx)));
     }
-    pub fn setEmbeddingsLayerInpDev(ctx: ?*c.llama_context, value: bool) void {
+    pub fn setEmbeddingsLayerInpDev(ctx: ?*llama.impl.llama_c.llama_context, value: bool) void {
         api.context.llama_set_embeddings_layer_inp_dev(@ptrCast(ctx), value);
     }
-    pub fn supportsEmbdRow(ctx: ?*c.llama_context) bool {
+    pub fn supportsEmbdRow(ctx: ?*llama.impl.llama_c.llama_context) bool {
         return api.context.llama_supports_embd_row(@ptrCast(ctx));
     }
 };
@@ -161,32 +158,32 @@ fn findType(name: []const u8) ?mod.params.SpeculativeType {
 /// @b1b770d90): the named devices, or `default`.
 ///
 /// Return: the text, NUL-terminated, `c_allocator`'s.
-pub fn devicesStr(devices: []const c.ggml_backend_dev_t) [:0]u8 {
+pub fn devicesStr(devices: []const llama.impl.llama_c.ggml_backend_dev_t) [:0]u8 {
     var result: std.ArrayList(u8) = .empty;
     for (devices) |d| {
         if (d == null) continue;
-        if (result.items.len != 0) result.appendSlice(gpa, ", ") catch oom();
-        result.appendSlice(gpa, std.mem.span(c.ggml_backend_dev_name(d))) catch oom();
+        if (result.items.len != 0) result.appendSlice(std.heap.c_allocator, ", ") catch oom();
+        result.appendSlice(std.heap.c_allocator, std.mem.span(llama.impl.llama_c.ggml_backend_dev_name(d))) catch oom();
     }
-    if (result.items.len == 0) result.appendSlice(gpa, "default") catch oom();
-    return result.toOwnedSliceSentinel(gpa, 0) catch oom();
+    if (result.items.len == 0) result.appendSlice(std.heap.c_allocator, "default") catch oom();
+    return result.toOwnedSliceSentinel(std.heap.c_allocator, 0) catch oom();
 }
 
 /// Ports `common_speculative_are_compatible` (speculative.cpp:106
 /// @b1b770d90), exported from `speculative.h` since v0.6.0: the draft's vocabulary must be the target's, give or take
 /// `SPEC_VOCAB_MAX_SIZE_DIFFERENCE` tokens at the end.
-pub fn areCompatible(model_tgt: ?*const c.llama_model, model_dft: ?*const c.llama_model) bool {
+pub fn areCompatible(model_tgt: ?*const llama.impl.llama_c.llama_model, model_dft: ?*const llama.impl.llama_c.llama_model) bool {
     const func = "common_speculative_are_compatible";
     const max_size_difference = 128; // SPEC_VOCAB_MAX_SIZE_DIFFERENCE
     const check_start_token_id = 5; // SPEC_VOCAB_CHECK_START_TOKEN_ID
 
-    const vocab_tgt = c.llama_model_get_vocab(model_tgt);
-    const vocab_dft = c.llama_model_get_vocab(model_dft);
+    const vocab_tgt = llama.api.model.llama_model_get_vocab(model_tgt);
+    const vocab_dft = llama.api.model.llama_model_get_vocab(model_dft);
 
-    const vocab_type_tgt = c.llama_vocab_type(vocab_tgt);
+    const vocab_type_tgt = llama.api.vocab.llama_vocab_type(vocab_tgt);
     spcDbg(func, "vocab_type tgt: %d\n", .{@as(c_int, @intCast(vocab_type_tgt))});
 
-    const vocab_type_dft = c.llama_vocab_type(vocab_dft);
+    const vocab_type_dft = llama.api.vocab.llama_vocab_type(vocab_dft);
     spcDbg(func, "vocab_type dft: %d\n", .{@as(c_int, @intCast(vocab_type_dft))});
 
     if (vocab_type_tgt != vocab_type_dft) {
@@ -195,48 +192,48 @@ pub fn areCompatible(model_tgt: ?*const c.llama_model, model_dft: ?*const c.llam
         return false;
     }
 
-    if (c.llama_vocab_get_add_bos(vocab_tgt) != c.llama_vocab_get_add_bos(vocab_dft) or
-        (c.llama_vocab_get_add_bos(vocab_tgt) and c.llama_vocab_bos(vocab_tgt) != c.llama_vocab_bos(vocab_dft)))
+    if (llama.api.vocab.llama_vocab_get_add_bos(vocab_tgt) != llama.api.vocab.llama_vocab_get_add_bos(vocab_dft) or
+        (llama.api.vocab.llama_vocab_get_add_bos(vocab_tgt) and llama.api.vocab.llama_vocab_bos(vocab_tgt) != llama.api.vocab.llama_vocab_bos(vocab_dft)))
     {
         spcWrn(func, "draft model bos tokens must match target model to use speculation. add: %d - %d, id: %d - %d)\n", .{
-            @as(c_int, @intFromBool(c.llama_vocab_get_add_bos(vocab_tgt))), @as(c_int, @intFromBool(c.llama_vocab_get_add_bos(vocab_dft))),
-            c.llama_vocab_bos(vocab_tgt),                                   c.llama_vocab_bos(vocab_dft),
+            @as(c_int, @intFromBool(llama.api.vocab.llama_vocab_get_add_bos(vocab_tgt))), @as(c_int, @intFromBool(llama.api.vocab.llama_vocab_get_add_bos(vocab_dft))),
+            llama.api.vocab.llama_vocab_bos(vocab_tgt),                                   llama.api.vocab.llama_vocab_bos(vocab_dft),
         });
         return false;
     }
 
-    if (c.llama_vocab_get_add_eos(vocab_tgt) != c.llama_vocab_get_add_eos(vocab_dft) or
-        (c.llama_vocab_get_add_eos(vocab_tgt) and c.llama_vocab_eos(vocab_tgt) != c.llama_vocab_eos(vocab_dft)))
+    if (llama.api.vocab.llama_vocab_get_add_eos(vocab_tgt) != llama.api.vocab.llama_vocab_get_add_eos(vocab_dft) or
+        (llama.api.vocab.llama_vocab_get_add_eos(vocab_tgt) and llama.api.vocab.llama_vocab_eos(vocab_tgt) != llama.api.vocab.llama_vocab_eos(vocab_dft)))
     {
         spcWrn(func, "draft model eos tokens must match target model to use speculation. add: %d - %d, id: %d - %d)\n", .{
-            @as(c_int, @intFromBool(c.llama_vocab_get_add_eos(vocab_tgt))), @as(c_int, @intFromBool(c.llama_vocab_get_add_eos(vocab_dft))),
-            c.llama_vocab_eos(vocab_tgt),                                   c.llama_vocab_eos(vocab_dft),
+            @as(c_int, @intFromBool(llama.api.vocab.llama_vocab_get_add_eos(vocab_tgt))), @as(c_int, @intFromBool(llama.api.vocab.llama_vocab_get_add_eos(vocab_dft))),
+            llama.api.vocab.llama_vocab_eos(vocab_tgt),                                   llama.api.vocab.llama_vocab_eos(vocab_dft),
         });
         return false;
     }
 
     {
-        const n_vocab_tgt = c.llama_vocab_n_tokens(vocab_tgt);
-        const n_vocab_dft = c.llama_vocab_n_tokens(vocab_dft);
+        const n_vocab_tgt = llama.api.vocab.llama_vocab_n_tokens(vocab_tgt);
+        const n_vocab_dft = llama.api.vocab.llama_vocab_n_tokens(vocab_dft);
         const vocab_diff = if (n_vocab_tgt > n_vocab_dft) n_vocab_tgt - n_vocab_dft else n_vocab_dft - n_vocab_tgt;
 
         if (vocab_diff > max_size_difference) {
             spcDbg(func, "draft model vocab must closely match target model to use speculation but " ++
-                "target vocab size %d does not match draft vocab size %d - difference %d, max allowed %d\n", .{ n_vocab_tgt, c.llama_vocab_n_tokens(vocab_dft), vocab_diff, @as(c_int, max_size_difference) });
+                "target vocab size %d does not match draft vocab size %d - difference %d, max allowed %d\n", .{ n_vocab_tgt, llama.api.vocab.llama_vocab_n_tokens(vocab_dft), vocab_diff, @as(c_int, max_size_difference) });
             return false;
         }
 
         var i: i32 = check_start_token_id;
         while (i < @min(n_vocab_tgt, n_vocab_dft)) : (i += 1) {
-            const token_text_tgt = c.llama_vocab_get_text(vocab_tgt, i);
-            const token_text_dft = c.llama_vocab_get_text(vocab_dft, i);
+            const token_text_tgt = llama.api.vocab.llama_vocab_get_text(vocab_tgt, i);
+            const token_text_dft = llama.api.vocab.llama_vocab_get_text(vocab_dft, i);
 
             if (std.mem.orderZ(u8, token_text_tgt, token_text_dft) != .eq) {
                 if (mod.log.verbosity_thold >= mod.log.level_debug) {
-                    const pt = mod.common.tokenToPiece(gpa, vocab_tgt, i, true) catch oom();
-                    defer gpa.free(pt[0 .. pt.len + 1]);
-                    const pd = mod.common.tokenToPiece(gpa, vocab_dft, i, true) catch oom();
-                    defer gpa.free(pd[0 .. pd.len + 1]);
+                    const pt = mod.common.tokenToPiece(std.heap.c_allocator, vocab_tgt, i, true) catch oom();
+                    defer std.heap.c_allocator.free(pt[0 .. pt.len + 1]);
+                    const pd = mod.common.tokenToPiece(std.heap.c_allocator, vocab_dft, i, true) catch oom();
+                    defer std.heap.c_allocator.free(pd[0 .. pd.len + 1]);
                     spcDbg(func, "draft model vocab must match target model to use speculation but " ++
                         "token %d content differs - target '%s', draft '%s'\n", .{ i, pt.ptr, pd.ptr });
                 }
@@ -250,13 +247,13 @@ pub fn areCompatible(model_tgt: ?*const c.llama_model, model_dft: ?*const c.llam
 
 /// Candidate distributions, one per drafted token: the C++'s
 /// `std::vector<std::vector<llama_token_data>>`, over `std.heap.c_allocator`.
-pub const Candidates = std.ArrayList(std.ArrayList(c.llama_token_data));
+pub const Candidates = std.ArrayList(std.ArrayList(llama.impl.llama_c.llama_token_data));
 
 /// Frees the inner lists of `q` past `n`, then shrinks it to `n` -- the
 /// C++'s `resize` down, or `clear` at 0.
 pub fn truncateCandidates(q: *Candidates, n: usize) void {
     if (n >= q.items.len) return;
-    for (q.items[n..]) |*e| e.deinit(gpa);
+    for (q.items[n..]) |*e| e.deinit(std.heap.c_allocator);
     q.shrinkRetainingCapacity(n);
 }
 
@@ -264,13 +261,13 @@ pub fn truncateCandidates(q: *Candidates, n: usize) void {
 /// empty lists.
 fn resizeCandidates(q: *Candidates, n: usize) void {
     if (n <= q.items.len) return truncateCandidates(q, n);
-    q.appendNTimes(gpa, .empty, n - q.items.len) catch oom();
+    q.appendNTimes(std.heap.c_allocator, .empty, n - q.items.len) catch oom();
 }
 
 /// Frees `q` and everything in it.
 pub fn freeCandidates(q: *Candidates) void {
     truncateCandidates(q, 0);
-    q.deinit(gpa);
+    q.deinit(std.heap.c_allocator);
 }
 
 /// Ports `common_speculative_draft_params` (speculative.h:56 @b1b770d90):
@@ -286,21 +283,21 @@ pub const DraftParams = struct {
     // can be used to constraint the max draft based on the remaining context size
     n_max: i32 = -1,
 
-    pos0: c.llama_pos = 0,
-    id_last: c.llama_token = 0,
+    pos0: llama.impl.llama_c.llama_pos = 0,
+    id_last: llama.impl.llama_c.llama_token = 0,
 
     // TODO: remove in the future by keeping track of the prompt from the _begin() call and the consecutive accept calls
-    prompt: []const c.llama_token = &.{},
+    prompt: []const llama.impl.llama_c.llama_token = &.{},
 
     // the generated draft from the last _draft() call
-    result: ?*std.ArrayList(c.llama_token) = null,
+    result: ?*std.ArrayList(llama.impl.llama_c.llama_token) = null,
 
     // candidate distribution per drafted token; set it to make draft-simple, draft-mtp and draft-dflash (DFlash2 only) sample
     result_q: ?*Candidates = null,
 
     // the target's temp and seed, read only when the drafter samples probabilistically
     temp: f32 = 1.0,
-    seed: u32 = c.LLAMA_DEFAULT_SEED,
+    seed: u32 = llama.impl.llama_c.LLAMA_DEFAULT_SEED,
 };
 
 /// Ports `common_speculative_impl` (speculative.cpp:177 @b1b770d90): what
@@ -332,12 +329,12 @@ pub const Base = struct {
 /// `common_time_meas` (common/common.cpp:70 @b1b770d90): the start, or -1
 /// when disabled.
 fn timeStart(disable: bool) i64 {
-    return if (disable) -1 else c.ggml_time_us();
+    return if (disable) -1 else llama.impl.llama_c.ggml_time_us();
 }
 
 /// The `common_time_meas` destructor (common/common.cpp:72 @b1b770d90).
 fn timeEnd(t_start_us: i64, t_acc: *i64) void {
-    if (t_start_us >= 0) t_acc.* += c.ggml_time_us() - t_start_us;
+    if (t_start_us >= 0) t_acc.* += llama.impl.llama_c.ggml_time_us() - t_start_us;
 }
 
 // -----------------------------------------------------------------------------
@@ -365,7 +362,7 @@ pub const NgramSimple = struct {
     fn deinit(_: *NgramSimple) void {}
 
     /// Ports `begin` (speculative.cpp:2077 @b1b770d90): nothing to do.
-    fn begin(_: *NgramSimple, _: *Base, _: c.llama_seq_id, _: []const c.llama_token) void {}
+    fn begin(_: *NgramSimple, _: *Base, _: llama.impl.llama_c.llama_seq_id, _: []const llama.impl.llama_c.llama_token) void {}
 
     /// Ports `process` (speculative.cpp:2081 @b1b770d90): nothing to do.
     fn process(_: *NgramSimple, _: *Base, _: *const mod.common.Batch) bool {
@@ -377,15 +374,15 @@ pub const NgramSimple = struct {
         std.debug.assert(dparams.len == base.n_seq);
         for (dparams) |*dp| {
             if (!dp.drafting) continue;
-            var r = mod.ngram_map.simpleDraft(gpa, self.config, dp.prompt, dp.id_last) catch oom();
-            defer r.deinit(gpa);
+            var r = mod.ngram_map.simpleDraft(std.heap.c_allocator, self.config, dp.prompt, dp.id_last) catch oom();
+            defer r.deinit(std.heap.c_allocator);
             dp.result.?.clearRetainingCapacity();
-            dp.result.?.appendSlice(gpa, r.items) catch oom();
+            dp.result.?.appendSlice(std.heap.c_allocator, r.items) catch oom();
         }
     }
 
     /// Ports `accept` (speculative.cpp:2099 @b1b770d90): nothing to do.
-    fn accept(_: *NgramSimple, _: *Base, _: c.llama_seq_id, _: u16, _: bool) void {}
+    fn accept(_: *NgramSimple, _: *Base, _: llama.impl.llama_c.llama_seq_id, _: u16, _: bool) void {}
 };
 
 /// Ports `common_speculative_impl_ngram_map_k` (speculative.cpp:2104
@@ -398,8 +395,8 @@ pub const NgramMapK = struct {
     /// @b1b770d90), the constructor: `n_seq` copies of `config`.
     fn init(base: *const Base, config: *const mod.ngram_map.Map) NgramMapK {
         const func = "common_speculative_impl_ngram_map_k";
-        const maps = gpa.alloc(mod.ngram_map.Map, base.n_seq) catch oom();
-        for (maps) |*m| m.* = config.clone(gpa) catch oom();
+        const maps = std.heap.c_allocator.alloc(mod.ngram_map.Map, base.n_seq) catch oom();
+        for (maps) |*m| m.* = config.clone(std.heap.c_allocator) catch oom();
 
         spcTrc(func, "adding speculative implementation '%s'\n", .{typeToStr(base.type).ptr});
         spcTrc(func, "- size_key=%d, size_value=%d, key_only=%d, min_hits=%d\n", .{ @as(c_int, config.size_key), @as(c_int, config.size_value), @as(c_int, @intFromBool(config.key_only)), @as(c_int, config.min_hits) });
@@ -408,12 +405,12 @@ pub const NgramMapK = struct {
 
     fn deinit(self: *NgramMapK) void {
         for (self.config) |*m| m.deinit();
-        gpa.free(self.config);
+        std.heap.c_allocator.free(self.config);
     }
 
     /// Ports `begin` (speculative.cpp:2123 @b1b770d90).
-    fn begin(self: *NgramMapK, base: *Base, seq_id: c.llama_seq_id, prompt: []const c.llama_token) void {
-        assertC(seq_id < @as(c.llama_seq_id, @intCast(base.n_seq)), 2073, "seq_id < (llama_seq_id) n_seq");
+    fn begin(self: *NgramMapK, base: *Base, seq_id: llama.impl.llama_c.llama_seq_id, prompt: []const llama.impl.llama_c.llama_token) void {
+        assertC(seq_id < @as(llama.impl.llama_c.llama_seq_id, @intCast(base.n_seq)), 2073, "seq_id < (llama_seq_id) n_seq");
 
         mod.ngram_map.begin(&self.config[@intCast(seq_id)], prompt);
     }
@@ -433,8 +430,8 @@ pub const NgramMapK = struct {
     }
 
     /// Ports `accept` (speculative.cpp:2147 @b1b770d90).
-    fn accept(self: *NgramMapK, _: *Base, seq_id: c.llama_seq_id, n_accepted: u16, is_other: bool) void {
-        assertC(seq_id < @as(c.llama_seq_id, @intCast(self.config.len)), 2097, "(seq_id < (llama_seq_id) config.size())");
+    fn accept(self: *NgramMapK, _: *Base, seq_id: llama.impl.llama_c.llama_seq_id, n_accepted: u16, is_other: bool) void {
+        assertC(seq_id < @as(llama.impl.llama_c.llama_seq_id, @intCast(self.config.len)), 2097, "(seq_id < (llama_seq_id) config.size())");
 
         if (is_other) return;
 
@@ -473,7 +470,7 @@ pub const NgramMod = struct {
     fn init(base: *const Base, params: *const mod.params.Speculative) NgramMod {
         const func = "common_speculative_impl_ngram_mod";
         const p = params.ngram_mod;
-        const ngram = mod.ngram_mod.Mod.init(gpa, @truncate(@as(u32, @bitCast(p.n_match))), 4 * 1024 * 1024) catch oom();
+        const ngram = mod.ngram_mod.Mod.init(std.heap.c_allocator, @truncate(@as(u32, @bitCast(p.n_match))), 4 * 1024 * 1024) catch oom();
 
         spcTrc(func, "%s", .{@as([*:0]const u8, "adding speculative implementation 'ngram-mod'\n")});
         spcTrc(func, "- n_match=%d, n_max=%d, n_min=%d\n", .{ p.n_match, p.n_max, p.n_min });
@@ -485,19 +482,19 @@ pub const NgramMod = struct {
                 "see: https://github.com/ggml-org/llama.cpp/pull/19164\n", .{p.n_match});
         }
 
-        const sinfos = gpa.alloc(SeqInfo, base.n_seq) catch oom();
+        const sinfos = std.heap.c_allocator.alloc(SeqInfo, base.n_seq) catch oom();
         @memset(sinfos, .{});
         return .{ .params = p, .mod = ngram, .verbose = stdlib.env.get("LLAMA_TRACE") != null, .sinfos = sinfos };
     }
 
     fn deinit(self: *NgramMod) void {
         self.mod.deinit();
-        gpa.free(self.sinfos);
+        std.heap.c_allocator.free(self.sinfos);
     }
 
     /// Ports `begin` (speculative.cpp:2203 @b1b770d90): the prompt's
     /// n-grams into the table, which resets past a quarter full.
-    fn begin(self: *NgramMod, _: *Base, seq_id: c.llama_seq_id, prompt: []const c.llama_token) void {
+    fn begin(self: *NgramMod, _: *Base, seq_id: llama.impl.llama_c.llama_seq_id, prompt: []const llama.impl.llama_c.llama_token) void {
         const sinfo = &self.sinfos[@intCast(seq_id)];
 
         sinfo.i_last = 0;
@@ -547,7 +544,7 @@ pub const NgramMod = struct {
 
         const n_max: usize = @intCast(self.params.n_max);
         const old = result.items.len;
-        result.resize(gpa, n + n_max) catch oom();
+        result.resize(std.heap.c_allocator, n + n_max) catch oom();
         if (result.items.len > old) @memset(result.items[old..], 0);
         for (0..n - 1) |i| result.items[i] = prompt[cur_len - n + 1 + i];
         result.items[n - 1] = dparams.id_last;
@@ -592,7 +589,7 @@ pub const NgramMod = struct {
 
     /// Ports `accept` (speculative.cpp:2305 @b1b770d90): five rounds in a
     /// row under a quarter accepted reset the table.
-    fn accept(self: *NgramMod, _: *Base, seq_id: c.llama_seq_id, n_accepted: u16, is_other: bool) void {
+    fn accept(self: *NgramMod, _: *Base, seq_id: llama.impl.llama_c.llama_seq_id, n_accepted: u16, is_other: bool) void {
         if (is_other) return;
 
         const sinfo = &self.sinfos[@intCast(seq_id)];
@@ -646,26 +643,26 @@ pub const NgramCache = struct {
         const path_static = params.ngram_cache.lookup_cache_static;
         const path_dynamic = params.ngram_cache.lookup_cache_dynamic;
         spcTrc(func, "%s", .{@as([*:0]const u8, "adding speculative implementation 'ngram-cache'\n")});
-        const ps = gpa.dupeSentinel(u8, if (path_static.len == 0) "none" else path_static, 0) catch oom();
-        defer gpa.free(ps);
-        const pd = gpa.dupeSentinel(u8, if (path_dynamic.len == 0) "none" else path_dynamic, 0) catch oom();
-        defer gpa.free(pd);
+        const ps = std.heap.c_allocator.dupeSentinel(u8, if (path_static.len == 0) "none" else path_static, 0) catch oom();
+        defer std.heap.c_allocator.free(ps);
+        const pd = std.heap.c_allocator.dupeSentinel(u8, if (path_dynamic.len == 0) "none" else path_dynamic, 0) catch oom();
+        defer std.heap.c_allocator.free(pd);
         spcTrc(func, "- n_draft=%d, cache_static=%s, cache_dynamic=%s\n", .{ @as(c_int, n_draft), ps.ptr, pd.ptr });
 
-        const sinfos = gpa.alloc(SeqInfo, base.n_seq) catch oom();
+        const sinfos = std.heap.c_allocator.alloc(SeqInfo, base.n_seq) catch oom();
         for (sinfos) |*si| si.* = .{
-            .ngram_cache_context = mod.ngram_cache.Cache.init(gpa) catch oom(),
-            .ngram_cache_dynamic = mod.ngram_cache.Cache.init(gpa) catch oom(),
-            .ngram_cache_static = mod.ngram_cache.Cache.init(gpa) catch oom(),
+            .ngram_cache_context = mod.ngram_cache.Cache.init(std.heap.c_allocator) catch oom(),
+            .ngram_cache_dynamic = mod.ngram_cache.Cache.init(std.heap.c_allocator) catch oom(),
+            .ngram_cache_static = mod.ngram_cache.Cache.init(std.heap.c_allocator) catch oom(),
         };
 
         if (path_static.len != 0) {
-            const path = gpa.dupeSentinel(u8, path_static, 0) catch oom();
-            defer gpa.free(path);
-            var loaded = mod.ngram_cache.load(gpa, path) catch |e| switch (e) {
+            const path = std.heap.c_allocator.dupeSentinel(u8, path_static, 0) catch oom();
+            defer std.heap.c_allocator.free(path);
+            var loaded = mod.ngram_cache.load(std.heap.c_allocator, path) catch |e| switch (e) {
                 error.OpenFailed => {
                     spcErr(func, "failed to open static lookup cache: %s\n", .{path.ptr});
-                    _ = c.ggml_abort("speculative.cpp", 2375, "Couldn't read static lookup cache");
+                    _ = llama.impl.llama_c.ggml_abort("speculative.cpp", 2375, "Couldn't read static lookup cache");
                     unreachable;
                 },
                 error.OutOfMemory => oom(),
@@ -673,19 +670,19 @@ pub const NgramCache = struct {
             defer mod.ngram_cache.deinitCache(&loaded);
             for (sinfos) |*si| {
                 mod.ngram_cache.deinitCache(&si.ngram_cache_static);
-                si.ngram_cache_static = mod.ngram_cache.cloneCache(gpa, &loaded) catch oom();
+                si.ngram_cache_static = mod.ngram_cache.cloneCache(std.heap.c_allocator, &loaded) catch oom();
             }
         }
 
         if (path_dynamic.len != 0) {
-            const path = gpa.dupeSentinel(u8, path_dynamic, 0) catch oom();
-            defer gpa.free(path);
-            if (mod.ngram_cache.load(gpa, path)) |loaded_cache| {
+            const path = std.heap.c_allocator.dupeSentinel(u8, path_dynamic, 0) catch oom();
+            defer std.heap.c_allocator.free(path);
+            if (mod.ngram_cache.load(std.heap.c_allocator, path)) |loaded_cache| {
                 var loaded = loaded_cache;
                 defer mod.ngram_cache.deinitCache(&loaded);
                 for (sinfos) |*si| {
                     mod.ngram_cache.deinitCache(&si.ngram_cache_dynamic);
-                    si.ngram_cache_dynamic = mod.ngram_cache.cloneCache(gpa, &loaded) catch oom();
+                    si.ngram_cache_dynamic = mod.ngram_cache.cloneCache(std.heap.c_allocator, &loaded) catch oom();
                 }
             } else |e| switch (e) {
                 error.OpenFailed => {
@@ -699,7 +696,7 @@ pub const NgramCache = struct {
                         spcWrn(func, "dynamic lookup cache file does not exist: %s, starting with empty cache\n", .{path.ptr});
                     } else {
                         spcErr(func, "failed to open dynamic lookup cache: %s\n", .{path.ptr});
-                        _ = c.ggml_abort("speculative.cpp", 2395, "Couldn't read dynamic lookup cache");
+                        _ = llama.impl.llama_c.ggml_abort("speculative.cpp", 2395, "Couldn't read dynamic lookup cache");
                         unreachable;
                     }
                 },
@@ -720,8 +717,8 @@ pub const NgramCache = struct {
                 mod.ngram_cache.merge(dynamic_cache, &si.ngram_cache_context) catch oom();
             }
 
-            const path = gpa.dupeSentinel(u8, self.params.lookup_cache_dynamic, 0) catch oom();
-            defer gpa.free(path);
+            const path = std.heap.c_allocator.dupeSentinel(u8, self.params.lookup_cache_dynamic, 0) catch oom();
+            defer std.heap.c_allocator.free(path);
             spcInf("~common_speculative_impl_ngram_cache", "saving dynamic lookup cache at %s\n", .{path.ptr});
             mod.ngram_cache.save(dynamic_cache, path);
         }
@@ -731,11 +728,11 @@ pub const NgramCache = struct {
             mod.ngram_cache.deinitCache(&si.ngram_cache_dynamic);
             mod.ngram_cache.deinitCache(&si.ngram_cache_static);
         }
-        gpa.free(self.sinfos);
+        std.heap.c_allocator.free(self.sinfos);
     }
 
     /// Ports `begin` (speculative.cpp:2415 @b1b770d90).
-    fn begin(self: *NgramCache, _: *Base, seq_id: c.llama_seq_id, _: []const c.llama_token) void {
+    fn begin(self: *NgramCache, _: *Base, seq_id: llama.impl.llama_c.llama_seq_id, _: []const llama.impl.llama_c.llama_token) void {
         self.sinfos[@intCast(seq_id)].cache_size = 0;
     }
 
@@ -747,9 +744,9 @@ pub const NgramCache = struct {
 
         const prompt = dparams.prompt;
 
-        var inp: std.ArrayList(c.llama_token) = .empty;
-        defer inp.deinit(gpa);
-        inp.ensureTotalCapacity(gpa, prompt.len + 1) catch oom();
+        var inp: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
+        defer inp.deinit(std.heap.c_allocator);
+        inp.ensureTotalCapacity(std.heap.c_allocator, prompt.len + 1) catch oom();
         inp.appendSliceAssumeCapacity(prompt);
         inp.appendAssumeCapacity(dparams.id_last);
 
@@ -760,9 +757,9 @@ pub const NgramCache = struct {
             sinfo.cache_size = inp.items.len;
         }
 
-        result.append(gpa, dparams.id_last) catch oom();
+        result.append(std.heap.c_allocator, dparams.id_last) catch oom();
 
-        mod.ngram_cache.draft(inp.items, result, gpa, self.n_draft, mod.ngram_cache.ngram_min, mod.ngram_cache.ngram_max, &sinfo.ngram_cache_context, &sinfo.ngram_cache_dynamic, &sinfo.ngram_cache_static) catch oom();
+        mod.ngram_cache.draft(inp.items, result, std.heap.c_allocator, self.n_draft, mod.ngram_cache.ngram_min, mod.ngram_cache.ngram_max, &sinfo.ngram_cache_context, &sinfo.ngram_cache_dynamic, &sinfo.ngram_cache_static) catch oom();
 
         if (result.items.len > 0) {
             // delete first token in result (which is the id_last token)
@@ -785,7 +782,7 @@ pub const NgramCache = struct {
     }
 
     /// Ports `accept` (speculative.cpp:2476 @b1b770d90): nothing to do.
-    fn accept(_: *NgramCache, _: *Base, _: c.llama_seq_id, _: u16, _: bool) void {}
+    fn accept(_: *NgramCache, _: *Base, _: llama.impl.llama_c.llama_seq_id, _: u16, _: bool) void {}
 };
 
 // -----------------------------------------------------------------------------
@@ -812,11 +809,11 @@ pub const Impl = struct {
         switch (self.kind) {
             inline else => |*k| k.deinit(),
         }
-        self.base.n_acc_tokens_per_pos.deinit(gpa);
-        gpa.destroy(self);
+        self.base.n_acc_tokens_per_pos.deinit(std.heap.c_allocator);
+        std.heap.c_allocator.destroy(self);
     }
 
-    fn begin(self: *Impl, seq_id: c.llama_seq_id, prompt: []const c.llama_token) void {
+    fn begin(self: *Impl, seq_id: llama.impl.llama_c.llama_seq_id, prompt: []const llama.impl.llama_c.llama_token) void {
         switch (self.kind) {
             inline else => |*k| k.begin(&self.base, seq_id, prompt),
         }
@@ -834,7 +831,7 @@ pub const Impl = struct {
         }
     }
 
-    fn accept(self: *Impl, seq_id: c.llama_seq_id, n_accepted: u16, is_other: bool) void {
+    fn accept(self: *Impl, seq_id: llama.impl.llama_c.llama_seq_id, n_accepted: u16, is_other: bool) void {
         switch (self.kind) {
             inline else => |*k| k.accept(&self.base, seq_id, n_accepted, is_other),
         }
@@ -842,7 +839,7 @@ pub const Impl = struct {
 
     /// `get_state` (speculative.cpp:214 @b1b770d90): only EAGLE3 and MTP
     /// have one.
-    fn getState(self: *Impl, seq_id: c.llama_seq_id, data: *std.ArrayList(u8)) bool {
+    fn getState(self: *Impl, seq_id: llama.impl.llama_c.llama_seq_id, data: *std.ArrayList(u8)) bool {
         return switch (self.kind) {
             .eagle3 => |*k| k.getState(&self.base, seq_id, data),
             .mtp => |*k| k.getState(&self.base, seq_id, data),
@@ -851,7 +848,7 @@ pub const Impl = struct {
     }
 
     /// `set_state` (speculative.cpp:215 @b1b770d90).
-    fn setState(self: *Impl, seq_id: c.llama_seq_id, data: []const u8) void {
+    fn setState(self: *Impl, seq_id: llama.impl.llama_c.llama_seq_id, data: []const u8) void {
         switch (self.kind) {
             .eagle3 => |*k| k.setState(&self.base, seq_id, data),
             .mtp => |*k| k.setState(&self.base, seq_id, data),
@@ -880,7 +877,7 @@ fn getCommonNgramMap(t: mod.params.SpeculativeType, config: mod.params.Speculati
     const key_only = t == .ngram_map_k;
     const min_hits = config.min_hits;
 
-    return mod.ngram_map.Map.init(gpa, size_key, size_value, key_only, min_hits) catch oom();
+    return mod.ngram_map.Map.init(std.heap.c_allocator, size_key, size_value, key_only, min_hits) catch oom();
 }
 
 /// Ports `create_state_ngram_cache` (speculative.cpp:2504 @b1b770d90).
@@ -976,27 +973,27 @@ pub fn typeFromName(name: []const u8) mod.params.SpeculativeType {
 ///
 /// Return: the types, the allocator's; empty when unknown.
 pub fn typesFromGguf(a: std.mem.Allocator, path: [:0]const u8) ![]mod.params.SpeculativeType {
-    const gguf_ctx = c.gguf_init_from_file(path.ptr, .{ .no_alloc = true, .ctx = null }) orelse return a.alloc(mod.params.SpeculativeType, 0);
-    defer c.gguf_free(gguf_ctx);
+    const gguf_ctx = llama.impl.llama_c.gguf_init_from_file(path.ptr, .{ .no_alloc = true, .ctx = null }) orelse return a.alloc(mod.params.SpeculativeType, 0);
+    defer llama.impl.llama_c.gguf_free(gguf_ctx);
 
-    const arch_id = c.gguf_find_key(gguf_ctx, "general.architecture");
-    if (arch_id < 0 or c.gguf_get_kv_type(gguf_ctx, arch_id) != c.GGUF_TYPE_STRING) return a.alloc(mod.params.SpeculativeType, 0);
+    const arch_id = llama.impl.llama_c.gguf_find_key(gguf_ctx, "general.architecture");
+    if (arch_id < 0 or llama.impl.llama_c.gguf_get_kv_type(gguf_ctx, arch_id) != llama.impl.llama_c.GGUF_TYPE_STRING) return a.alloc(mod.params.SpeculativeType, 0);
 
-    const arch = std.mem.span(c.gguf_get_val_str(gguf_ctx, arch_id));
+    const arch = std.mem.span(llama.impl.llama_c.gguf_get_val_str(gguf_ctx, arch_id));
     if (!std.mem.eql(u8, arch, "dflash")) {
         const key = try std.fmt.allocPrintSentinel(a, "{s}.block_count", .{arch}, 0);
         defer a.free(key);
-        const block_count = c.gguf_get_val_u32(gguf_ctx, c.gguf_find_key(gguf_ctx, key.ptr));
+        const block_count = llama.impl.llama_c.gguf_get_val_u32(gguf_ctx, llama.impl.llama_c.gguf_find_key(gguf_ctx, key.ptr));
 
         const name = try std.fmt.allocPrintSentinel(a, "blk.{d}.nextn.eh_proj.weight", .{block_count -% 1}, 0);
         defer a.free(name);
-        if (c.gguf_find_tensor(gguf_ctx, name.ptr) >= 0) return a.dupe(mod.params.SpeculativeType, &.{.draft_mtp});
+        if (llama.impl.llama_c.gguf_find_tensor(gguf_ctx, name.ptr) >= 0) return a.dupe(mod.params.SpeculativeType, &.{.draft_mtp});
 
         return a.alloc(mod.params.SpeculativeType, 0);
     }
 
     // the Markov head distinguishes draft-dspark from draft-dflash
-    const t: mod.params.SpeculativeType = if (c.gguf_find_tensor(gguf_ctx, "markov_w1.weight") >= 0) .draft_dspark else .draft_dflash;
+    const t: mod.params.SpeculativeType = if (llama.impl.llama_c.gguf_find_tensor(gguf_ctx, "markov_w1.weight") >= 0) .draft_dspark else .draft_dflash;
 
     spcInf("common_speculative_types_from_gguf", "auto-detected speculative type '%s' from the draft model metadata\n", .{typeToStr(t).ptr});
 
@@ -1137,7 +1134,7 @@ pub fn baseParamsToSpeculative(params: *const mod.params.Params) mod.params.Para
     var result = params.*;
 
     result.embedding = false;
-    result.pooling_type = c.LLAMA_POOLING_TYPE_UNSPECIFIED;
+    result.pooling_type = llama.impl.llama_c.LLAMA_POOLING_TYPE_UNSPECIFIED;
 
     if (has_draft) {
         // default to global devices value
@@ -1152,7 +1149,7 @@ pub fn baseParamsToSpeculative(params: *const mod.params.Params) mod.params.Para
         for (params_spec.devices.items) |d| {
             if (d != null) n_devs += 1;
         }
-        if (n_devs == 1) result.split_mode = c.LLAMA_SPLIT_MODE_LAYER;
+        if (n_devs == 1) result.split_mode = llama.impl.llama_c.LLAMA_SPLIT_MODE_LAYER;
 
         if (params_spec.cpuparams.n_threads > 0) {
             result.cpuparams.n_threads = params_spec.cpuparams.n_threads;
@@ -1191,13 +1188,13 @@ pub fn baseParamsToSpeculative(params: *const mod.params.Params) mod.params.Para
 /// the draft model and context, owned. The context frees first, as the
 /// C++'s member order decides.
 pub const InitResult = struct {
-    model_: ?*c.llama_model = null,
-    context_: ?*c.llama_context = null,
+    model_: ?*llama.impl.llama_c.llama_model = null,
+    context_: ?*llama.impl.llama_c.llama_context = null,
 
     /// Ports `common_speculative_init_result` (speculative.cpp:2829
     /// @b1b770d90), the constructor: a draft model and its context, or an
     /// MTP context over the target model.
-    pub fn init(params: *mod.params.Params, model_tgt: ?*c.llama_model, ctx_tgt: ?*c.llama_context) !InitResult {
+    pub fn init(params: *mod.params.Params, model_tgt: ?*llama.impl.llama_c.llama_model, ctx_tgt: ?*llama.impl.llama_c.llama_context) !InitResult {
         const func: [*:0]const u8 = "common_speculative_init_result";
         var self: InitResult = .{};
         const has_draft = params.speculative.hasDft();
@@ -1209,10 +1206,10 @@ pub const InitResult = struct {
         const mparams = mod.common.modelParamsToLlama(params);
         var cparams = mod.common.contextParamsToLlama(params);
 
-        if (spec_mtp) cparams.ctx_type = c.LLAMA_CONTEXT_TYPE_MTP;
+        if (spec_mtp) cparams.ctx_type = llama.impl.llama_c.LLAMA_CONTEXT_TYPE_MTP;
 
         // the draft context holds as many tokens per sequence as the target context
-        cparams.n_ctx = c.llama_n_ctx(ctx_tgt);
+        cparams.n_ctx = llama.api.context.llama_n_ctx(ctx_tgt);
 
         // note: for small models maybe we can set this to the maximum possible draft from all speculative types
         //       the extra memory for small models is likely negligible?
@@ -1220,11 +1217,11 @@ pub const InitResult = struct {
         cparams.ctx_other = ctx_tgt;
 
         if (has_draft) {
-            const model_path = try gpa.dupeSentinel(u8, params.speculative.draft.mparams.path, 0);
-            defer gpa.free(model_path);
+            const model_path = try std.heap.c_allocator.dupeSentinel(u8, params.speculative.draft.mparams.path, 0);
+            defer std.heap.c_allocator.free(model_path);
             mod.log.inf("%s: loading draft model '%s'\n", .{ func, model_path.ptr });
 
-            var paths_arena = std.heap.ArenaAllocator.init(gpa);
+            var paths_arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
             defer paths_arena.deinit();
             const paths = try mod.common.modelPaths(paths_arena.allocator(), &params.speculative.draft.mparams);
             const model_dft = mod.common.modelLoad(paths, mparams) orelse {
@@ -1234,19 +1231,19 @@ pub const InitResult = struct {
 
             self.model_ = model_dft;
 
-            const ctx_dft = c.llama_init_from_model(model_dft, cparams) orelse {
+            const ctx_dft = llama.api.context.llama_init_from_model(model_dft, cparams) orelse {
                 mod.log.err("%s: failed to create MTP context\n", .{func});
                 return self;
             };
 
             self.context_ = ctx_dft;
         } else if (spec_mtp) {
-            const model_path = try gpa.dupeSentinel(u8, params.model.path, 0);
-            defer gpa.free(model_path);
+            const model_path = try std.heap.c_allocator.dupeSentinel(u8, params.model.path, 0);
+            defer std.heap.c_allocator.free(model_path);
 
             mod.log.inf("%s: creating MTP draft context against the target model '%s'\n", .{ func, model_path.ptr });
 
-            const ctx_dft = c.llama_init_from_model(model_tgt, cparams) orelse {
+            const ctx_dft = llama.api.context.llama_init_from_model(model_tgt, cparams) orelse {
                 mod.log.err("%s: failed to create MTP context\n", .{func});
                 return self;
             };
@@ -1259,27 +1256,27 @@ pub const InitResult = struct {
     /// Ports the destructor of `common_speculative_init_result`
     /// (speculative.cpp:2889 @b1b770d90): context, then model.
     pub fn deinit(self: *InitResult) void {
-        if (self.context_) |ctx| c.llama_free(ctx);
-        if (self.model_) |m| c.llama_model_free(m);
+        if (self.context_) |ctx| llama.api.context.llama_free(ctx);
+        if (self.model_) |m| llama.api.model.llama_model_free(m);
         self.* = .{};
     }
 
     /// Ports `model` (speculative.cpp:2891 @b1b770d90), a member of
     /// `common_speculative_init_result`.
-    pub fn model(self: *const InitResult) ?*c.llama_model {
+    pub fn model(self: *const InitResult) ?*llama.impl.llama_c.llama_model {
         return self.model_;
     }
 
     /// Ports `context` (speculative.cpp:2895 @b1b770d90), a member of
     /// `common_speculative_init_result`.
-    pub fn context(self: *const InitResult) ?*c.llama_context {
+    pub fn context(self: *const InitResult) ?*llama.impl.llama_c.llama_context {
         return self.context_;
     }
 };
 
 /// Ports `common_speculative_init_from_params` (speculative.cpp:2899
 /// @b1b770d90).
-pub fn initFromParams(params: *mod.params.Params, model_tgt: ?*c.llama_model, ctx_tgt: ?*c.llama_context) !InitResult {
+pub fn initFromParams(params: *mod.params.Params, model_tgt: ?*llama.impl.llama_c.llama_model, ctx_tgt: ?*llama.impl.llama_c.llama_context) !InitResult {
     return InitResult.init(params, model_tgt, ctx_tgt);
 }
 
@@ -1311,7 +1308,7 @@ pub fn init(params: *mod.params.Speculative, n_seq: u32) InitError!?*Speculative
     const func = "common_speculative_init";
     // Compute the implementations to use based on the config and their order of preference
     var configs: std.ArrayList(mod.params.SpeculativeType) = .empty; // list of speculative configs to try
-    defer configs.deinit(gpa);
+    defer configs.deinit(std.heap.c_allocator);
     {
         const enabled_configs = getEnabledConfigs(params.types.items);
 
@@ -1331,25 +1328,25 @@ pub fn init(params: *mod.params.Speculative, n_seq: u32) InitError!?*Speculative
             .{ .draft_dspark, has_ctx_dft },
         };
         for (order) |o| {
-            if (o[1] and (enabled_configs & (@as(u32, 1) << @intCast(@backingInt(o[0])))) != 0) try configs.append(gpa, o[0]);
+            if (o[1] and (enabled_configs & (@as(u32, 1) << @intCast(@backingInt(o[0])))) != 0) try configs.append(std.heap.c_allocator, o[0]);
         }
     }
 
     var impls: std.ArrayList(*Impl) = .empty;
     errdefer {
         for (impls.items) |impl| impl.destroy();
-        impls.deinit(gpa);
+        impls.deinit(std.heap.c_allocator);
     }
 
     for (configs.items) |t| {
-        const impl = try gpa.create(Impl);
+        const impl = try std.heap.c_allocator.create(Impl);
         impl.base = .{ .type = t, .n_seq = n_seq, .n_max = 0 };
         var ok = true;
-        defer if (!ok) gpa.destroy(impl);
+        defer if (!ok) std.heap.c_allocator.destroy(impl);
         errdefer ok = false;
         switch (t) {
             .none, .count => {
-                gpa.destroy(impl);
+                std.heap.c_allocator.destroy(impl);
                 continue;
             },
             .draft_simple => {
@@ -1398,20 +1395,20 @@ pub fn init(params: *mod.params.Speculative, n_seq: u32) InitError!?*Speculative
                 impl.kind = .{ .ngram_cache = createStateNgramCache(&impl.base, params) };
             },
         }
-        try impls.append(gpa, impl);
+        try impls.append(std.heap.c_allocator, impl);
     }
 
     if (impls.items.len == 0) {
         spcTrc(func, "%s", .{@as([*:0]const u8, "no implementations specified for speculative decoding\n")});
-        impls.deinit(gpa);
+        impls.deinit(std.heap.c_allocator);
         return null;
     }
 
-    const result = try gpa.create(Speculative);
+    const result = try std.heap.c_allocator.create(Speculative);
     result.* = .{
-        .dparams = try gpa.alloc(DraftParams, n_seq),
-        .impls = try impls.toOwnedSlice(gpa),
-        .impl_last = try gpa.alloc(?*Impl, n_seq),
+        .dparams = try std.heap.c_allocator.alloc(DraftParams, n_seq),
+        .impls = try impls.toOwnedSlice(std.heap.c_allocator),
+        .impl_last = try std.heap.c_allocator.alloc(?*Impl, n_seq),
     };
     @memset(result.dparams, .{});
     @memset(result.impl_last, null);
@@ -1419,20 +1416,20 @@ pub fn init(params: *mod.params.Speculative, n_seq: u32) InitError!?*Speculative
 
     const n_max_configured = nMaxParams(params);
     const n_max_effective = nMax(result);
-    const rates = try synthRatesResolve(gpa, params, n_max_effective);
-    defer gpa.free(rates);
+    const rates = try synthRatesResolve(std.heap.c_allocator, params, n_max_effective);
+    defer std.heap.c_allocator.free(rates);
 
     var rates_str: std.ArrayList(u8) = .empty;
-    defer rates_str.deinit(gpa);
-    try result.synth_probs.ensureTotalCapacity(gpa, rates.len);
+    defer rates_str.deinit(std.heap.c_allocator);
+    try result.synth_probs.ensureTotalCapacity(std.heap.c_allocator, rates.len);
     var rate_prev: f64 = 1.0;
     var acceptance_length: f64 = 1.0;
     for (rates, 0..) |rate, i| {
         result.synth_probs.appendAssumeCapacity(if (rate_prev > 0.0) rate / rate_prev else 0.0);
         var buf: [64]u8 = undefined;
         const n = stdlib.libc.snprintf(&buf, buf.len, "%.6g", rate);
-        if (i > 0) try rates_str.appendSlice(gpa, ", ");
-        try rates_str.appendSlice(gpa, buf[0..@intCast(n)]);
+        if (i > 0) try rates_str.appendSlice(std.heap.c_allocator, ", ");
+        try rates_str.appendSlice(std.heap.c_allocator, buf[0..@intCast(n)]);
         rate_prev = rate;
         acceptance_length += rate;
     }
@@ -1441,7 +1438,7 @@ pub fn init(params: *mod.params.Speculative, n_seq: u32) InitError!?*Speculative
         if (n_max_effective != n_max_configured) {
             spcWrn(func, "synthetic acceptance draft limit was reduced from %d to %d by the initialized speculative implementations\n", .{ n_max_configured, n_max_effective });
         }
-        try rates_str.append(gpa, 0);
+        try rates_str.append(std.heap.c_allocator, 0);
         spcInf(func, "synthetic acceptance: n_max = %zu, mean length = %.6f, rates = [%s]\n", .{ rates.len, acceptance_length, @as([*:0]const u8, @ptrCast(rates_str.items.ptr)) });
     }
 
@@ -1453,25 +1450,25 @@ pub fn free(spec: ?*Speculative) void {
     const s = spec orelse return;
 
     for (s.impls) |impl| impl.destroy();
-    gpa.free(s.impls);
-    gpa.free(s.dparams);
-    gpa.free(s.impl_last);
-    s.synth_probs.deinit(gpa);
-    gpa.destroy(s);
+    std.heap.c_allocator.free(s.impls);
+    std.heap.c_allocator.free(s.dparams);
+    std.heap.c_allocator.free(s.impl_last);
+    s.synth_probs.deinit(std.heap.c_allocator);
+    std.heap.c_allocator.destroy(s);
 }
 
 /// Ports `common_speculative_get_draft_params` (speculative.cpp:3065
 /// @b1b770d90): the slot a caller fills before `draft`.
-pub fn getDraftParams(spec: ?*Speculative, seq_id: c.llama_seq_id) *DraftParams {
+pub fn getDraftParams(spec: ?*Speculative, seq_id: llama.impl.llama_c.llama_seq_id) *DraftParams {
     assertC(spec != null, 3068, "spec");
-    assertC(seq_id < @as(c.llama_seq_id, @intCast(spec.?.dparams.len)), 3018, "seq_id < (llama_seq_id) spec->dparams.size()");
+    assertC(seq_id < @as(llama.impl.llama_c.llama_seq_id, @intCast(spec.?.dparams.len)), 3018, "seq_id < (llama_seq_id) spec->dparams.size()");
 
     return &spec.?.dparams[@intCast(seq_id)];
 }
 
 /// Ports `common_speculative_begin` (speculative.cpp:3074 @b1b770d90):
 /// optionally called once at the start of a generation.
-pub fn begin(spec: ?*Speculative, seq_id: c.llama_seq_id, prompt: []const c.llama_token) void {
+pub fn begin(spec: ?*Speculative, seq_id: llama.impl.llama_c.llama_seq_id, prompt: []const llama.impl.llama_c.llama_token) void {
     const s = spec orelse return;
 
     for (s.impls) |impl| {
@@ -1572,7 +1569,7 @@ pub fn draft(spec: ?*Speculative) void {
 
 /// Ports `common_speculative_accept` (speculative.cpp:3190 @b1b770d90):
 /// `n_accepted` tokens of the last draft were accepted by the target.
-pub fn accept(spec: *Speculative, seq_id: c.llama_seq_id, n_accepted: u16) void {
+pub fn accept(spec: *Speculative, seq_id: llama.impl.llama_c.llama_seq_id, n_accepted: u16) void {
     const impl = spec.impl_last[@intCast(seq_id)] orelse {
         assertC(n_accepted == 0, 3194, "n_accepted == 0");
         return;
@@ -1583,7 +1580,7 @@ pub fn accept(spec: *Speculative, seq_id: c.llama_seq_id, n_accepted: u16) void 
 
         if (impl.base.n_acc_tokens_per_pos.items.len < n_accepted) {
             const old = impl.base.n_acc_tokens_per_pos.items.len;
-            impl.base.n_acc_tokens_per_pos.resize(gpa, n_accepted) catch oom();
+            impl.base.n_acc_tokens_per_pos.resize(std.heap.c_allocator, n_accepted) catch oom();
             @memset(impl.base.n_acc_tokens_per_pos.items[old..], 0);
         }
 
@@ -1609,7 +1606,7 @@ pub fn accept(spec: *Speculative, seq_id: c.llama_seq_id, n_accepted: u16) void 
 /// the first drafter's per-sequence state, if any has one.
 ///
 /// Return: whether `data` was filled; grown with `c_allocator`.
-pub fn getState(spec: ?*Speculative, seq_id: c.llama_seq_id, data: *std.ArrayList(u8)) bool {
+pub fn getState(spec: ?*Speculative, seq_id: llama.impl.llama_c.llama_seq_id, data: *std.ArrayList(u8)) bool {
     const s = spec orelse return false;
 
     for (s.impls) |impl| {
@@ -1620,7 +1617,7 @@ pub fn getState(spec: ?*Speculative, seq_id: c.llama_seq_id, data: *std.ArrayLis
 }
 
 /// Ports `common_speculative_set_state` (speculative.cpp:3241 @b1b770d90).
-pub fn setState(spec: ?*Speculative, seq_id: c.llama_seq_id, data: []const u8) void {
+pub fn setState(spec: ?*Speculative, seq_id: llama.impl.llama_c.llama_seq_id, data: []const u8) void {
     const s = spec orelse return;
 
     for (s.impls) |impl| impl.setState(seq_id, data);
@@ -1635,7 +1632,7 @@ pub fn printStats(spec: ?*const Speculative) void {
     for (s.impls) |impl| {
         const b = &impl.base;
         var str_perf: std.ArrayList(u8) = .empty;
-        defer str_perf.deinit(gpa);
+        defer str_perf.deinit(std.heap.c_allocator);
         if (b.gen_perf) {
             appendFmt(&str_perf, ", dur(b,g,a) = %.3f, ", .{@as(f64, @floatFromInt(b.t_begin_us)) / 1000.0});
             appendFmt(&str_perf, "%.3f, ", .{@as(f64, @floatFromInt(b.t_draft_us)) / 1000.0});
@@ -1643,18 +1640,18 @@ pub fn printStats(spec: ?*const Speculative) void {
         }
 
         var str_stats: std.ArrayList(u8) = .empty;
-        defer str_stats.deinit(gpa);
+        defer str_stats.deinit(std.heap.c_allocator);
         if (b.n_call_accept > 0) {
             const mean = 1.0 + @as(f64, @floatFromInt(b.n_acc_tokens)) / @as(f64, @floatFromInt(b.n_call_accept));
             appendFmt(&str_stats, ", #mean acc len = %.2f, #acc rate/pos = (", .{mean});
             for (b.n_acc_tokens_per_pos.items, 0..) |n, i| {
-                if (i > 0) str_stats.appendSlice(gpa, ", ") catch oom();
+                if (i > 0) str_stats.appendSlice(std.heap.c_allocator, ", ") catch oom();
                 appendFmt(&str_stats, "%.3f", .{@as(f64, @floatFromInt(n)) / @as(f64, @floatFromInt(b.n_call_accept))});
             }
-            str_stats.append(gpa, ')') catch oom();
+            str_stats.append(std.heap.c_allocator, ')') catch oom();
         }
-        str_stats.append(gpa, 0) catch oom();
-        str_perf.append(gpa, 0) catch oom();
+        str_stats.append(std.heap.c_allocator, 0) catch oom();
+        str_perf.append(std.heap.c_allocator, 0) catch oom();
 
         spcTrc("common_speculative_print_stats", "statistics %16s: #calls(b,g,a) = %4zu %6zu %6zu, #gen drafts = %6zu, #acc drafts = %5zu, #gen tokens = %6zu, #acc tokens = %5zu%s%s\n", .{
             typeToStr(b.type).ptr,
@@ -1676,7 +1673,7 @@ pub fn printStats(spec: ?*const Speculative) void {
 fn appendFmt(out: *std.ArrayList(u8), comptime fmt: [*:0]const u8, args: anytype) void {
     var buf: [128]u8 = undefined;
     const n = @call(.auto, stdlib.libc.snprintf, .{ &buf, buf.len, fmt } ++ args);
-    out.appendSlice(gpa, buf[0..@min(@as(usize, @intCast(n)), buf.len - 1)]) catch oom();
+    out.appendSlice(std.heap.c_allocator, buf[0..@min(@as(usize, @intCast(n)), buf.len - 1)]) catch oom();
 }
 
 // -----------------------------------------------------------------------------

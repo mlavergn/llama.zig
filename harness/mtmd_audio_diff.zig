@@ -19,11 +19,9 @@
 //! **Not a port.** Usage: `zig-out/bin/mtmd-audio-diff [--quick] [filter]`.
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
-const audio = @import("mtmd_audio");
-const mtmd = audio.deps;
-const Hparams = mtmd.model.Hparams;
-const c = mtmd.impl.c;
+const stdlib = @import("stdlib");
+const llama = @import("llama");
+const mtmd_audio = @import("mtmd_audio");
 
 extern fn ref_audio_hparams_new() ?*anyopaque;
 extern fn ref_audio_hparams_free(hp: ?*anyopaque) void;
@@ -44,8 +42,6 @@ extern fn ref_istft_reset(s: ?*anyopaque) void;
 extern fn ref_istft_frame(s: ?*anyopaque, spec: [*]const f32, out: [*]f32) usize;
 extern fn ref_istft_flush(s: ?*anyopaque, out: [*]f32) usize;
 
-const gpa = std.heap.c_allocator;
-
 // -----------------------------------------------------------------------------
 // logs
 
@@ -53,11 +49,11 @@ var log_ref: std.ArrayList(u8) = .empty;
 var log_port: std.ArrayList(u8) = .empty;
 
 fn logRef(level: c_int, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
-    log_ref.print(gpa, "[{d}] {s}", .{ level, std.mem.span(text) }) catch {};
+    log_ref.print(std.heap.c_allocator, "[{d}] {s}", .{ level, std.mem.span(text) }) catch {};
 }
 
-fn logPort(level: mtmd.impl.c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
-    log_port.print(gpa, "[{d}] {s}", .{ @as(c_int, @intCast(level)), std.mem.span(text) }) catch {};
+fn logPort(level: llama.impl.llama_c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
+    log_port.print(std.heap.c_allocator, "[{d}] {s}", .{ @as(c_int, @intCast(level)), std.mem.span(text) }) catch {};
 }
 
 // -----------------------------------------------------------------------------
@@ -66,7 +62,7 @@ fn logPort(level: mtmd.impl.c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyo
 /// One preprocessor configuration: the hparams both sides get.
 const Config = struct {
     name: []const u8,
-    kind: audio.Kind,
+    kind: mtmd_audio.Kind,
     n_mel: c_int,
     n_fft: c_int,
     window: c_int,
@@ -122,7 +118,7 @@ const configs = [_]Config{
 const Signal = enum { silence, sweep, noise, impulses, square_clip, loud };
 
 fn makeSignal(sig: Signal, n: usize, sr: c_int, seed: u64) ![]f32 {
-    const s = try gpa.alloc(f32, n);
+    const s = try std.heap.c_allocator.alloc(f32, n);
     var rng = std.Random.DefaultPrng.init(seed);
     const r = rng.random();
     const fsr: f64 = @floatFromInt(@max(sr, 1));
@@ -144,32 +140,32 @@ fn makeSignal(sig: Signal, n: usize, sr: c_int, seed: u64) ![]f32 {
 // the port's result, in the shim's blob format
 
 fn put64(blob: *std.ArrayList(u8), v: i64) !void {
-    try blob.appendSlice(gpa, std.mem.asBytes(&v));
+    try blob.appendSlice(std.heap.c_allocator, std.mem.asBytes(&v));
 }
 
 /// `put_out` of `harness/mtmd_audio_ref.cpp`.
-fn putOut(blob: *std.ArrayList(u8), o: *const audio.PreprocOut) !void {
+fn putOut(blob: *std.ArrayList(u8), o: *const mtmd_audio.PreprocOut) !void {
     try put64(blob, @intCast(o.entries.items.len));
     for (o.entries.items) |*e| {
         try put64(blob, e.nx());
         try put64(blob, e.ny());
         try put64(blob, @intFromBool(e.isPlaceholder()));
         try put64(blob, @intCast(e.roBuf().len));
-        try blob.appendSlice(gpa, std.mem.sliceAsBytes(e.roBuf()));
+        try blob.appendSlice(std.heap.c_allocator, std.mem.sliceAsBytes(e.roBuf()));
     }
     try put64(blob, @intCast(o.samples.items.len));
-    try blob.appendSlice(gpa, std.mem.sliceAsBytes(o.samples.items));
+    try blob.appendSlice(std.heap.c_allocator, std.mem.sliceAsBytes(o.samples.items));
     try put64(blob, @intFromBool(o.needsCompute()));
 }
 
 // The port's CPU scheduler, built as the shim builds its own.
-var port_sched: c.ggml_backend_sched_t = null;
+var port_sched: llama.impl.llama_c.ggml_backend_sched_t = null;
 
-fn portSched() c.ggml_backend_sched_t {
+fn portSched() llama.impl.llama_c.ggml_backend_sched_t {
     if (port_sched == null) {
-        var cpu = c.ggml_backend_init_by_type(c.GGML_BACKEND_DEVICE_TYPE_CPU, null);
-        var buft = c.ggml_backend_get_default_buffer_type(cpu);
-        port_sched = c.ggml_backend_sched_new(&cpu, &buft, 1, 8192, false, true);
+        var cpu = llama.impl.llama_c.ggml_backend_init_by_type(llama.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_CPU, null);
+        var buft = llama.impl.llama_c.ggml_backend_get_default_buffer_type(cpu);
+        port_sched = llama.impl.llama_c.ggml_backend_sched_new(&cpu, &buft, 1, 8192, false, true);
     }
     return port_sched;
 }
@@ -198,10 +194,10 @@ fn compareBlobs(name: []const u8, len: usize, sig: Signal, ref: []const u8, port
     }
 }
 
-fn runCase(cfg: *const Config, hp_port: *const Hparams, hp_ref: ?*anyopaque, len: usize, sig: Signal) !void {
+fn runCase(cfg: *const Config, hp_port: *const mtmd_audio.deps.model.Hparams, hp_ref: ?*anyopaque, len: usize, sig: Signal) !void {
     n_cases += 1;
     const samples = try makeSignal(sig, len, cfg.sr, @as(u64, len) *% 2654435761 +% @backingInt(sig));
-    defer gpa.free(samples);
+    defer std.heap.c_allocator.free(samples);
 
     log_ref.clearRetainingCapacity();
     log_port.clearRetainingCapacity();
@@ -217,11 +213,11 @@ fn runCase(cfg: *const Config, hp_port: *const Hparams, hp_ref: ?*anyopaque, len
     var blob: ?*anyopaque = null;
     var blob_len: usize = 0;
     const ok_ref = ref_audio_proc_run(r, samples.ptr, samples.len, &blob, &blob_len) != 0;
-    defer libc.free(blob);
+    defer std.c.free(blob);
     const ref_bytes = @as([*]const u8, @ptrCast(blob.?))[0..blob_len];
 
     // port
-    var p = audio.Preprocessor.init(cfg.kind, hp_port);
+    var p = mtmd_audio.Preprocessor.init(cfg.kind, hp_port);
     p.is_mtl = cfg.is_mtl;
     p.mel_config.n_threads = n_threads;
     p.mel_config.sched = portSched();
@@ -230,7 +226,7 @@ fn runCase(cfg: *const Config, hp_port: *const Hparams, hp_ref: ?*anyopaque, len
     var o = try p.preprocess(samples);
     defer o.deinit();
     var port_blob: std.ArrayList(u8) = .empty;
-    defer port_blob.deinit(gpa);
+    defer port_blob.deinit(std.heap.c_allocator);
     try putOut(&port_blob, &o);
     const ok_port = try p.compute(&o);
     try putOut(&port_blob, &o);
@@ -248,31 +244,31 @@ fn runCase(cfg: *const Config, hp_port: *const Hparams, hp_ref: ?*anyopaque, len
 
 fn lengths(cfg: *const Config, quick: bool, out: *std.ArrayList(usize)) !void {
     const base = [_]usize{ 0, 1, 2, 5, 37, 159, 160, 161, 199, 200, 201, 255, 256, 257, 383, 384, 385, 400, 401, 511, 512, 513, 1000, 4801, 16000, 23999, 24001 };
-    for (base) |l| try out.append(gpa, l);
+    for (base) |l| try out.append(std.heap.c_allocator, l);
     if (cfg.n_fft > 0) {
         const nf: usize = @intCast(cfg.n_fft);
-        for ([_]usize{ nf / 2 - 1, nf / 2, nf / 2 + 1, nf - 1, nf, nf + 1, 2 * nf + 3 }) |l| try out.append(gpa, l);
+        for ([_]usize{ nf / 2 - 1, nf / 2, nf / 2 + 1, nf - 1, nf, nf + 1, 2 * nf + 3 }) |l| try out.append(std.heap.c_allocator, l);
     }
     const sr: usize = @intCast(cfg.sr);
-    try out.append(gpa, 3 * sr + 7);
+    try out.append(std.heap.c_allocator, 3 * sr + 7);
     if (!quick) {
-        try out.append(gpa, 17 * sr + 123);
+        try out.append(std.heap.c_allocator, 17 * sr + 123);
         if (cfg.chunk_samples > 0) {
             const cs = cfg.chunk_samples;
-            for ([_]usize{ cs - 1, cs, cs + 1, 2 * cs - 1, 2 * cs, 2 * cs + 1 }) |l| try out.append(gpa, l);
+            for ([_]usize{ cs - 1, cs, cs + 1, 2 * cs - 1, 2 * cs, 2 * cs + 1 }) |l| try out.append(std.heap.c_allocator, l);
         }
         // past 30 s (pockettts truncates there) and past 60 s
-        try out.append(gpa, 31 * sr + 11);
-        if (cfg.kind != .whisper and cfg.kind != .dots3note) try out.append(gpa, 61 * sr + 5);
+        try out.append(std.heap.c_allocator, 31 * sr + 11);
+        if (cfg.kind != .whisper and cfg.kind != .dots3note) try out.append(std.heap.c_allocator, 61 * sr + 5);
     }
 }
 
 fn parakeetTables(n_mel: c_int, n_fft: c_int, window: c_int) !struct { []f32, []f32 } {
     const bins: usize = @intCast(@divTrunc(n_fft, 2) + 1);
-    const filt = try gpa.alloc(f32, @as(usize, @intCast(n_mel)) * bins);
+    const filt = try std.heap.c_allocator.alloc(f32, @as(usize, @intCast(n_mel)) * bins);
     var rng = std.Random.DefaultPrng.init(0x5eed);
     for (filt) |*v| v.* = if (rng.random().float(f32) < 0.7) 0.0 else rng.random().float(f32) * 0.01;
-    const win = try gpa.alloc(f32, @intCast(window));
+    const win = try std.heap.c_allocator.alloc(f32, @intCast(window));
     for (win, 0..) |*v, i| {
         const x = @as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(window));
         v.* = @floatCast(0.5 - 0.5 * @cos(2.0 * std.math.pi * x) + 0.001 * @as(f64, @floatFromInt(i % 3)));
@@ -281,7 +277,7 @@ fn parakeetTables(n_mel: c_int, n_fft: c_int, window: c_int) !struct { []f32, []
 }
 
 fn runConfig(cfg: *const Config, quick: bool) !void {
-    var hp: Hparams = .{
+    var hp: mtmd_audio.deps.model.Hparams = .{
         .n_mel_bins = cfg.n_mel,
         .audio_n_fft = cfg.n_fft,
         .audio_window_len = cfg.window,
@@ -293,29 +289,29 @@ fn runConfig(cfg: *const Config, quick: bool) !void {
     const hp_ref = ref_audio_hparams_new();
     defer ref_audio_hparams_free(hp_ref);
     ref_audio_hparams_set(hp_ref, cfg.n_mel, cfg.n_fft, cfg.window, cfg.hop, cfg.sr, cfg.chunk_len, cfg.mimi_downsample);
-    defer hp.audio_patch_sizes.deinit(gpa);
+    defer hp.audio_patch_sizes.deinit(std.heap.c_allocator);
     if (cfg.patches.len != 0) {
-        try hp.audio_patch_sizes.appendSlice(gpa, cfg.patches);
+        try hp.audio_patch_sizes.appendSlice(std.heap.c_allocator, cfg.patches);
         ref_audio_hparams_set_patches(hp_ref, cfg.patches.ptr, cfg.patches.len);
     }
     var tables: ?struct { []f32, []f32 } = null;
     defer if (tables) |t| {
-        gpa.free(t[0]);
-        gpa.free(t[1]);
+        std.heap.c_allocator.free(t[0]);
+        std.heap.c_allocator.free(t[1]);
     };
     if (cfg.kind == .parakeet or cfg.kind == .nemotron_transcribe) {
         tables = try parakeetTables(cfg.n_mel, cfg.n_fft, cfg.window);
-        try hp.mel_filters.appendSlice(gpa, tables.?[0]);
-        try hp.window.appendSlice(gpa, tables.?[1]);
+        try hp.mel_filters.appendSlice(std.heap.c_allocator, tables.?[0]);
+        try hp.window.appendSlice(std.heap.c_allocator, tables.?[1]);
         ref_audio_hparams_set_parakeet(hp_ref, tables.?[0].ptr, tables.?[0].len, tables.?[1].ptr, tables.?[1].len);
     }
     defer {
-        hp.mel_filters.deinit(gpa);
-        hp.window.deinit(gpa);
+        hp.mel_filters.deinit(std.heap.c_allocator);
+        hp.window.deinit(std.heap.c_allocator);
     }
 
     var lens: std.ArrayList(usize) = .empty;
-    defer lens.deinit(gpa);
+    defer lens.deinit(std.heap.c_allocator);
     try lengths(cfg, quick, &lens);
     const before = n_fail;
     for (lens.items) |len| {
@@ -335,17 +331,17 @@ fn runConfig(cfg: *const Config, quick: bool) !void {
 fn runMelFrame(n_fft: c_int, n_mel: c_int, sr: c_int) !void {
     const c_ref = ref_mel_frame_new(n_fft, n_fft, n_mel, sr);
     defer ref_mel_frame_free(c_ref);
-    var cache: audio.Cache = .{};
+    var cache: mtmd_audio.Cache = .{};
     defer cache.deinit();
     try cache.fillSinCosTable(@bitCast(n_fft));
     try cache.fillHannWindow(@bitCast(n_fft), true);
     try cache.fillMelFilterbankMatrix(n_mel, n_fft, sr, 0.0, -1.0, true, 1.0, false);
 
     const nm: usize = @intCast(n_mel);
-    const a = try gpa.alloc(f32, nm);
-    defer gpa.free(a);
-    const b = try gpa.alloc(f32, nm);
-    defer gpa.free(b);
+    const a = try std.heap.c_allocator.alloc(f32, nm);
+    defer std.heap.c_allocator.free(a);
+    const b = try std.heap.c_allocator.alloc(f32, nm);
+    defer std.heap.c_allocator.free(b);
     const before = n_fail;
     var seed: u64 = 1;
     for ([_]Signal{ .silence, .sweep, .noise, .impulses, .square_clip, .loud }) |sig| {
@@ -353,9 +349,9 @@ fn runMelFrame(n_fft: c_int, n_mel: c_int, sr: c_int) !void {
             seed += 1;
             n_cases += 1;
             const s = try makeSignal(sig, @intCast(n_fft), sr, seed);
-            defer gpa.free(s);
+            defer std.heap.c_allocator.free(s);
             ref_mel_frame_run(c_ref, s.ptr, n_fft, n_mel, a.ptr);
-            try audio.logMelFrame(&cache, s.ptr, n_fft, n_mel, b.ptr);
+            try mtmd_audio.logMelFrame(&cache, s.ptr, n_fft, n_mel, b.ptr);
             n_checks += nm;
             if (!std.mem.eql(u8, std.mem.sliceAsBytes(a), std.mem.sliceAsBytes(b))) {
                 fail("mel frame n_fft={d} n_mel={d} {s}: differs", .{ n_fft, n_mel, @tagName(sig) });
@@ -369,14 +365,14 @@ fn runIstft(n_fft: c_int, hop: c_int, n_frames: usize) !void {
     n_cases += 1;
     const s_ref = ref_istft_new(n_fft, hop);
     defer ref_istft_free(s_ref);
-    var s_port = try audio.StreamingIstft.init(n_fft, hop);
+    var s_port = try mtmd_audio.StreamingIstft.init(n_fft, hop);
     defer s_port.deinit();
 
     const bins: usize = @intCast(@divTrunc(n_fft, 2) + 1);
-    const spec = try gpa.alloc(f32, bins * 2);
-    defer gpa.free(spec);
-    const out_ref = try gpa.alloc(f32, @intCast(n_fft * 4));
-    defer gpa.free(out_ref);
+    const spec = try std.heap.c_allocator.alloc(f32, bins * 2);
+    defer std.heap.c_allocator.free(spec);
+    const out_ref = try std.heap.c_allocator.alloc(f32, @intCast(n_fft * 4));
+    defer std.heap.c_allocator.free(out_ref);
     var rng = std.Random.DefaultPrng.init(@intCast(n_fft * 31 + hop));
     const before = n_fail;
 
@@ -385,7 +381,7 @@ fn runIstft(n_fft: c_int, hop: c_int, n_frames: usize) !void {
             for (spec) |*v| v.* = (rng.random().float(f32) * 2 - 1) * @as(f32, @floatFromInt(f % 5 + 1));
             const n_ref = ref_istft_frame(s_ref, spec.ptr, out_ref.ptr);
             var o = try s_port.processFrame(spec.ptr);
-            defer o.deinit(gpa);
+            defer o.deinit(std.heap.c_allocator);
             n_checks += n_ref + 1;
             if (n_ref != o.items.len or !std.mem.eql(u8, std.mem.sliceAsBytes(out_ref[0..n_ref]), std.mem.sliceAsBytes(o.items))) {
                 fail("istft n_fft={d} hop={d} round {d} frame {d}: differs (ref {d} samples, port {d})", .{ n_fft, hop, round, f, n_ref, o.items.len });
@@ -393,7 +389,7 @@ fn runIstft(n_fft: c_int, hop: c_int, n_frames: usize) !void {
         }
         const n_ref = ref_istft_flush(s_ref, out_ref.ptr);
         var o = try s_port.flush();
-        defer o.deinit(gpa);
+        defer o.deinit(std.heap.c_allocator);
         n_checks += n_ref + 1;
         if (n_ref != o.items.len or !std.mem.eql(u8, std.mem.sliceAsBytes(out_ref[0..n_ref]), std.mem.sliceAsBytes(o.items))) {
             fail("istft n_fft={d} hop={d} round {d}: flush differs", .{ n_fft, hop, round });
@@ -414,7 +410,7 @@ pub fn main(init: std.process.Init) !u8 {
     }
 
     ref_audio_set_log(logRef, null);
-    mtmd.impl.g_logger_state.log_callback = logPort;
+    mtmd_audio.deps.impl.g_logger_state.log_callback = logPort;
 
     for (&configs) |*cfg| {
         if (filter) |f| if (std.mem.indexOf(u8, cfg.name, f) == null) continue;

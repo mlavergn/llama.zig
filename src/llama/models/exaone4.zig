@@ -130,7 +130,7 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
     llama.impl.assert(n_embd_head == hp.nEmbdHeadV(0), "models/exaone4.cpp", 97, "n_embd_head == hparams.n_embd_head_v()");
     llama.impl.assert(n_embd_head == b.n_rot, "models/exaone4.cpp", 98, "n_embd_head == n_rot");
 
-    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.llama_c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
 
     // The positions.
     const inp_pos = b.buildInpPos();
@@ -170,13 +170,13 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
             b.cb(cur, "attn_out", il);
         }
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
         cur = b.buildNorm(cur, layer.attn_post_norm, null, .rms, il);
         b.cb(cur, "attn_post_norm", il);
 
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The feed-forward network.
@@ -186,7 +186,7 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
         cur = b.buildNorm(cur, layer.ffn_post_norm, null, .rms, -1);
         b.cb(cur, "ffn_post_norm", -1);
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

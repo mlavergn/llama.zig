@@ -117,7 +117,7 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
     llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/olmo2.cpp", 81, "n_embd_head == hparams.n_embd_head_k()");
     llama.impl.assert(n_embd_head == b.n_rot, "models/olmo2.cpp", 82, "n_embd_head == n_rot");
 
-    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.llama_c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
 
     // The positions.
     const inp_pos = b.buildInpPos();
@@ -150,9 +150,9 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
             Kcur = b.buildNorm(Kcur, layer.attn_k_norm, null, .rms, il);
             b.cb(Kcur, "Kcur_normed", il);
 
-            Qcur = llama.impl.c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
-            Kcur = llama.impl.c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, b.n_tokens);
-            Vcur = llama.impl.c.ggml_reshape_3d(ctx, Vcur, n_embd_head, b.n_head_kv, b.n_tokens);
+            Qcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
+            Kcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, b.n_tokens);
+            Vcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Vcur, n_embd_head, b.n_head_kv, b.n_tokens);
 
             Qcur = b.buildRope(Qcur, inp_pos, il);
             Kcur = b.buildRope(Kcur, inp_pos, il);
@@ -163,13 +163,13 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
             cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
         }
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
         cur = b.buildNorm(cur, layer.attn_post_norm, null, .rms, il);
         b.cb(cur, "attn_post_norm", il);
 
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The feed-forward network.
@@ -179,7 +179,7 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
         cur = b.buildNorm(cur, layer.ffn_post_norm, null, .rms, -1);
         b.cb(cur, "ffn_post_norm", -1);
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
         b.cb(cur, "ffn_out", il);
 
         cur = b.buildCvec(cur, il);

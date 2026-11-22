@@ -28,11 +28,9 @@
 //! and `no_perf` are ever read back, so only those are kept.
 
 const std = @import("std");
+const llama = @import("llama");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const c = @import("tools_h");
-
-const gpa = std.heap.c_allocator;
 
 fn assertC(ok: bool, comptime line: c_int, comptime expr: [*:0]const u8) void {
     mod.ggml.ggmlAssert(ok, "sampling.cpp", line, expr);
@@ -44,7 +42,7 @@ fn oom() noreturn {
 
 /// A C++ `throw std::runtime_error(msg)` nothing catches.
 fn throwUncaught(comptime line: c_int, msg: [*:0]const u8) noreturn {
-    _ = c.ggml_abort("sampling.cpp", line, "terminating due to uncaught exception of type std::runtime_error: %s", msg);
+    _ = llama.impl.llama_c.ggml_abort("sampling.cpp", line, "terminating due to uncaught exception of type std::runtime_error: %s", msg);
     unreachable;
 }
 
@@ -174,7 +172,7 @@ pub fn grammarNeedsPrefill(t: mod.params.GrammarType) bool {
 
 /// Ports `prob_of` (sampling.cpp:724 @b1b770d90): `id`'s probability
 /// among `data`, 0 when absent.
-fn probOf(data: []const c.llama_token_data, id: c.llama_token) f32 {
+fn probOf(data: []const llama.impl.llama_c.llama_token_data, id: llama.impl.llama_c.llama_token) f32 {
     for (data) |d| {
         if (d.id == id) return d.p;
     }
@@ -189,12 +187,12 @@ pub const Sampler = struct {
     allocator: std.mem.Allocator,
     grammar_lazy: bool = false,
     no_perf: bool = false,
-    grmr: ?*c.llama_sampler = null,
-    rbudget: ?*c.llama_sampler = null,
-    chain: *c.llama_sampler,
-    prev: RingBuffer(c.llama_token),
-    cur: std.ArrayList(c.llama_token_data) = .empty,
-    cur_p: c.llama_token_data_array = .{ .data = null, .size = 0, .selected = -1, .sorted = false },
+    grmr: ?*llama.impl.llama_c.llama_sampler = null,
+    rbudget: ?*llama.impl.llama_c.llama_sampler = null,
+    chain: *llama.impl.llama_c.llama_sampler,
+    prev: RingBuffer(llama.impl.llama_c.llama_token),
+    cur: std.ArrayList(llama.impl.llama_c.llama_token_data) = .empty,
+    cur_p: llama.impl.llama_c.llama_token_data_array = .{ .data = null, .size = 0, .selected = -1, .sorted = false },
 
     // for rejection sampling; independent of the draft, or the target distribution is not preserved
     rng: stdlib.libcxx.Mt19937,
@@ -205,26 +203,26 @@ pub const Sampler = struct {
     /// `common_sampler`: a `common_time_meas` over `t_total_us`. End it
     /// with `tmEnd`.
     fn tm(self: *const Sampler) i64 {
-        return if (self.no_perf) -1 else c.ggml_time_us();
+        return if (self.no_perf) -1 else llama.impl.llama_c.ggml_time_us();
     }
 
     /// The `common_time_meas` destructor (common/common.cpp:72 @b1b770d90).
     fn tmEnd(self: *Sampler, t_start_us: i64) void {
-        if (t_start_us >= 0) self.t_total_us += c.ggml_time_us() - t_start_us;
+        if (t_start_us >= 0) self.t_total_us += llama.impl.llama_c.ggml_time_us() - t_start_us;
     }
 
     /// Ports `common_sampler_free` (sampling.cpp:449 @b1b770d90).
     pub fn destroy(self: *Sampler) void {
-        c.llama_sampler_free(self.grmr);
-        c.llama_sampler_free(self.rbudget);
-        c.llama_sampler_free(self.chain);
+        llama.sampler.core.llama_sampler_free(self.grmr);
+        llama.sampler.core.llama_sampler_free(self.rbudget);
+        llama.sampler.core.llama_sampler_free(self.chain);
         self.prev.deinit(self.allocator);
         self.cur.deinit(self.allocator);
         self.allocator.destroy(self);
     }
 
     /// Ports `common_sampler_get` (sampling.cpp:598 @b1b770d90): the chain.
-    pub fn get(self: *const Sampler) *c.llama_sampler {
+    pub fn get(self: *const Sampler) *llama.impl.llama_c.llama_sampler {
         return self.chain;
     }
 
@@ -233,39 +231,39 @@ pub const Sampler = struct {
     /// @b1b770d90) calls.
     pub fn reset(self: *Sampler) void {
         self.prev.clear();
-        c.llama_sampler_reset(self.chain);
+        llama.sampler.core.llama_sampler_reset(self.chain);
     }
 
     /// Ports `set_logits` (sampling.cpp:134 @b1b770d90), a member of
     /// `common_sampler`: the candidates, from a backend sampler's output or
     /// the raw logits.
-    fn setLogits(self: *Sampler, ctx: ?*c.llama_context, idx: i32) void {
-        const sampled_probs = c.llama_get_sampled_probs_ith(ctx, idx);
-        const sampled_logits = c.llama_get_sampled_logits_ith(ctx, idx);
-        const sampled_ids = c.llama_get_sampled_candidates_ith(ctx, idx);
+    fn setLogits(self: *Sampler, ctx: ?*llama.impl.llama_c.llama_context, idx: i32) void {
+        const sampled_probs = llama.api.context.llama_get_sampled_probs_ith(ctx, idx);
+        const sampled_logits = llama.api.context.llama_get_sampled_logits_ith(ctx, idx);
+        const sampled_ids = llama.api.context.llama_get_sampled_candidates_ith(ctx, idx);
 
-        const model = c.llama_get_model(ctx);
-        const vocab = c.llama_model_get_vocab(model);
+        const model = llama.api.context.llama_get_model(ctx);
+        const vocab = llama.api.model.llama_model_get_vocab(model);
 
-        const n_vocab = c.llama_vocab_n_tokens(vocab);
+        const n_vocab = llama.api.vocab.llama_vocab_n_tokens(vocab);
 
         const a = self.allocator;
         if (sampled_probs != null) {
-            const n = c.llama_get_sampled_probs_count_ith(ctx, idx);
+            const n = llama.api.context.llama_get_sampled_probs_count_ith(ctx, idx);
             self.cur.resize(a, n) catch oom();
-            for (0..n) |i| self.cur.items[i] = .{ .id = sampled_ids[i], .logit = sampled_logits[i], .p = sampled_probs[i] };
+            for (0..n) |i| self.cur.items[i] = .{ .id = sampled_ids[i], .logit = sampled_logits.?[i], .p = sampled_probs.?[i] };
         } else if (sampled_logits != null) {
-            const n = c.llama_get_sampled_logits_count_ith(ctx, idx);
+            const n = llama.api.context.llama_get_sampled_logits_count_ith(ctx, idx);
             self.cur.resize(a, n) catch oom();
-            for (0..n) |i| self.cur.items[i] = .{ .id = sampled_ids[i], .logit = sampled_logits[i], .p = 0.0 };
+            for (0..n) |i| self.cur.items[i] = .{ .id = sampled_ids[i], .logit = sampled_logits.?[i], .p = 0.0 };
         } else {
-            const logits = c.llama_get_logits_ith(ctx, idx);
+            const logits = llama.api.context.llama_get_logits_ith(ctx, idx);
             assertC(logits != null, 158, "logits != nullptr");
             self.cur.resize(a, @intCast(n_vocab)) catch oom();
-            var token_id: c.llama_token = 0;
+            var token_id: llama.impl.llama_c.llama_token = 0;
             while (token_id < n_vocab) : (token_id += 1) {
                 const k: usize = @intCast(token_id);
-                self.cur.items[k] = .{ .id = token_id, .logit = logits[k], .p = 0.0 };
+                self.cur.items[k] = .{ .id = token_id, .logit = logits.?[k], .p = 0.0 };
             }
         }
 
@@ -287,7 +285,7 @@ pub const Sampler = struct {
     /// Ports `common_sampler_accept` (sampling.cpp:476 @b1b770d90): with
     /// `is_generated`, the token goes to the chain, the reasoning budget and
     /// the grammar; otherwise to the chain alone.
-    pub fn accept(self: *Sampler, token: c.llama_token, is_generated: bool) void {
+    pub fn accept(self: *Sampler, token: llama.impl.llama_c.llama_token, is_generated: bool) void {
         const t0 = self.tm();
         defer self.tmEnd(t0);
 
@@ -295,20 +293,20 @@ pub const Sampler = struct {
         const accept_grammar = is_generated and self.grammarShouldApply();
 
         if (self.rbudget != null and is_generated) {
-            c.llama_sampler_accept(self.rbudget, token);
+            llama.sampler.core.llama_sampler_accept(self.rbudget, token);
 
             // if done, replay end sequence which may contain a grammar trigger
             const is_done = mod.reasoning_budget.getState(self.rbudget) == .done;
             if (self.grmr != null and !accept_grammar and is_done) {
                 if (mod.reasoning_budget.getEndMatch(self.rbudget)) |end_seq| {
-                    for (end_seq) |end_token| c.llama_sampler_accept(self.grmr, end_token);
+                    for (end_seq) |end_token| llama.sampler.core.llama_sampler_accept(self.grmr, end_token);
                 }
             }
         }
 
-        if (self.grmr != null and accept_grammar) c.llama_sampler_accept(self.grmr, token);
+        if (self.grmr != null and accept_grammar) llama.sampler.core.llama_sampler_accept(self.grmr, token);
 
-        c.llama_sampler_accept(self.chain, token);
+        llama.sampler.core.llama_sampler_accept(self.chain, token);
 
         self.prev.pushBack(token);
     }
@@ -323,9 +321,9 @@ pub const Sampler = struct {
             .allocator = a,
             .grammar_lazy = self.grammar_lazy,
             .no_perf = self.no_perf,
-            .grmr = c.llama_sampler_clone(self.grmr),
-            .rbudget = c.llama_sampler_clone(self.rbudget),
-            .chain = c.llama_sampler_clone(self.chain).?,
+            .grmr = llama.sampler.core.llama_sampler_clone(self.grmr),
+            .rbudget = llama.sampler.core.llama_sampler_clone(self.rbudget),
+            .chain = llama.sampler.core.llama_sampler_clone(self.chain).?,
             .prev = self.prev.clone(a) catch oom(),
             .cur = .empty,
             .cur_p = self.cur_p,
@@ -347,9 +345,9 @@ pub const Sampler = struct {
         assertC((s.grmr == null) == (d.grmr == null), 533, "(src->grmr == nullptr) == (dst->grmr == nullptr)");
         assertC((s.rbudget == null) == (d.rbudget == null), 534, "(src->rbudget == nullptr) == (dst->rbudget == nullptr)");
 
-        c.llama_sampler_copy(s.grmr, d.grmr);
-        c.llama_sampler_copy(s.rbudget, d.rbudget);
-        c.llama_sampler_copy(s.chain, d.chain);
+        llama.sampler.chain.llama_sampler_copy(s.grmr, d.grmr);
+        llama.sampler.chain.llama_sampler_copy(s.rbudget, d.rbudget);
+        llama.sampler.chain.llama_sampler_copy(s.chain, d.chain);
 
         d.grammar_lazy = s.grammar_lazy;
         d.no_perf = s.no_perf;
@@ -368,8 +366,8 @@ pub const Sampler = struct {
     /// budget.
     ///
     /// Return: the token, which `cur_p` records as selected.
-    pub fn sample(self: *Sampler, ctx: ?*c.llama_context, idx: i32, grammar_first: bool) !c.llama_token {
-        c.llama_synchronize(ctx);
+    pub fn sample(self: *Sampler, ctx: ?*llama.impl.llama_c.llama_context, idx: i32, grammar_first: bool) !llama.impl.llama_c.llama_token {
+        llama.api.context.llama_synchronize(ctx);
 
         // start measuring sampling time after the llama_context synchronization in order to not measure any ongoing async operations
         const t0 = self.tm();
@@ -380,8 +378,8 @@ pub const Sampler = struct {
         // Check if a backend sampler has already sampled a token in which case we
         // return that token id directly.
         {
-            const id = c.llama_get_sampled_token_ith(ctx, idx);
-            if (id != c.LLAMA_TOKEN_NULL) {
+            const id = llama.api.context.llama_get_sampled_token_ith(ctx, idx);
+            if (id != llama.impl.llama_c.LLAMA_TOKEN_NULL) {
                 mod.log.dbg("%s: Backend sampler selected token: '%d'. Will not run any CPU samplers\n", .{ @as([*:0]const u8, "common_sampler_sample"), id });
 
                 assertC(self.grmr == null, 625, "!gsmpl->grmr    && \"using grammar in combination with backend sampling is not supported\"");
@@ -398,11 +396,11 @@ pub const Sampler = struct {
         }
 
         // apply reasoning budget first
-        c.llama_sampler_apply(self.rbudget, &self.cur_p);
+        llama.sampler.core.llama_sampler_apply(self.rbudget, &self.cur_p);
 
-        if (grammar_first and self.grammarShouldApply()) c.llama_sampler_apply(self.grmr, &self.cur_p);
+        if (grammar_first and self.grammarShouldApply()) llama.sampler.core.llama_sampler_apply(self.grmr, &self.cur_p);
 
-        c.llama_sampler_apply(self.chain, &self.cur_p);
+        llama.sampler.core.llama_sampler_apply(self.chain, &self.cur_p);
 
         var id = self.cur_p.data[@intCast(self.cur_p.selected)].id;
 
@@ -410,10 +408,10 @@ pub const Sampler = struct {
 
         // check if it the sampled token fits the grammar (grammar-based rejection sampling)
         {
-            var single_token_data: c.llama_token_data = .{ .id = id, .logit = 1.0, .p = 0.0 };
-            var single_token_data_array: c.llama_token_data_array = .{ .data = &single_token_data, .size = 1, .selected = -1, .sorted = false };
+            var single_token_data: llama.impl.llama_c.llama_token_data = .{ .id = id, .logit = 1.0, .p = 0.0 };
+            var single_token_data_array: llama.impl.llama_c.llama_token_data_array = .{ .data = &single_token_data, .size = 1, .selected = -1, .sorted = false };
 
-            c.llama_sampler_apply(self.grmr, &single_token_data_array);
+            llama.sampler.core.llama_sampler_apply(self.grmr, &single_token_data_array);
 
             const is_valid = single_token_data_array.data[0].logit != -std.math.inf(f32);
             if (is_valid) return id;
@@ -423,11 +421,11 @@ pub const Sampler = struct {
         // if the token is not valid, sample again, but first apply the grammar sampler and then the sampling chain
         self.setLogits(ctx, idx);
 
-        c.llama_sampler_apply(self.rbudget, &self.cur_p);
+        llama.sampler.core.llama_sampler_apply(self.rbudget, &self.cur_p);
 
-        if (self.grammarShouldApply()) c.llama_sampler_apply(self.grmr, &self.cur_p);
+        if (self.grammarShouldApply()) llama.sampler.core.llama_sampler_apply(self.grmr, &self.cur_p);
 
-        c.llama_sampler_apply(self.chain, &self.cur_p);
+        llama.sampler.core.llama_sampler_apply(self.chain, &self.cur_p);
 
         assertC(self.cur_p.selected != -1, 679, "cur_p.selected != -1 && \"no selected token during sampling - check your sampling configuration\"");
 
@@ -446,13 +444,13 @@ pub const Sampler = struct {
     /// - `draft`: the drafted tokens.
     ///
     /// Return: at least one token, at most `idxs.len`; the allocator's.
-    pub fn sampleAndAcceptNIdxs(self: *Sampler, a: std.mem.Allocator, ctx: ?*c.llama_context, idxs: []const i32, draft: []const c.llama_token, grammar_first: bool) ![]c.llama_token {
+    pub fn sampleAndAcceptNIdxs(self: *Sampler, a: std.mem.Allocator, ctx: ?*llama.impl.llama_c.llama_context, idxs: []const i32, draft: []const llama.impl.llama_c.llama_token, grammar_first: bool) ![]llama.impl.llama_c.llama_token {
         assertC(idxs.len == draft.len + 1, 687, "idxs.size() == draft.size() + 1 && \"idxs.size() must be draft.size() + 1\"");
 
-        var result: std.ArrayList(c.llama_token) = .empty;
+        var result: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
         try result.ensureTotalCapacityPrecise(a, idxs.len);
 
-        const vocab = c.llama_model_get_vocab(c.llama_get_model(ctx));
+        const vocab = llama.api.model.llama_model_get_vocab(llama.api.context.llama_get_model(ctx));
 
         var i: usize = 0;
         while (i < draft.len) : (i += 1) {
@@ -464,7 +462,7 @@ pub const Sampler = struct {
 
             // do not accept draft tokens after an EOG - they are not output but would stay in the context
             // on replay the last token is from the target and can be EOG, so a trailing EOG is still accepted
-            if (draft[i] != id or (c.llama_vocab_is_eog(vocab, id) and i + 1 < draft.len)) break;
+            if (draft[i] != id or (llama.api.vocab.llama_vocab_is_eog(vocab, id) and i + 1 < draft.len)) break;
         }
 
         if (i == draft.len) {
@@ -490,19 +488,19 @@ pub const Sampler = struct {
     /// - `draft_q`: the draft's candidates, one array per drafted token.
     ///
     /// Return: at least one token, at most `idxs.len`; the allocator's.
-    pub fn sampleAndAcceptNRejection(self: *Sampler, a: std.mem.Allocator, ctx: ?*c.llama_context, idxs: []const i32, draft: []const c.llama_token, draft_q: []const []const c.llama_token_data, grammar_first: bool) ![]c.llama_token {
+    pub fn sampleAndAcceptNRejection(self: *Sampler, a: std.mem.Allocator, ctx: ?*llama.impl.llama_c.llama_context, idxs: []const i32, draft: []const llama.impl.llama_c.llama_token, draft_q: []const []const llama.impl.llama_c.llama_token_data, grammar_first: bool) ![]llama.impl.llama_c.llama_token {
         assertC(idxs.len == draft.len + 1, 733, "idxs.size()    == draft.size() + 1 && \"idxs.size() must be draft.size() + 1\"");
         assertC(draft_q.len == draft.len, 734, "draft_q.size() == draft.size() && \"draft_q must have one entry per draft token\"");
 
-        var result: std.ArrayList(c.llama_token) = .empty;
+        var result: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
         try result.ensureTotalCapacityPrecise(a, idxs.len);
 
         // draws come from the sampler's own stream, so they stay independent of what was drafted
 
-        var residual: std.ArrayList(c.llama_token_data) = .empty;
+        var residual: std.ArrayList(llama.impl.llama_c.llama_token_data) = .empty;
         defer residual.deinit(a);
 
-        var cand: std.ArrayList(c.llama_token_data) = .empty; // candidate array masked by the grammar, if there is one
+        var cand: std.ArrayList(llama.impl.llama_c.llama_token_data) = .empty; // candidate array masked by the grammar, if there is one
         defer cand.deinit(a);
 
         var i: usize = 0;
@@ -517,14 +515,14 @@ pub const Sampler = struct {
             if (masked) {
                 cand.clearRetainingCapacity();
                 try cand.appendSlice(a, cur_p.data[0..cur_p.size]);
-                var arr: c.llama_token_data_array = .{ .data = cand.items.ptr, .size = cand.items.len, .selected = -1, .sorted = false };
-                c.llama_sampler_apply(self.grmr, &arr);
+                var arr: llama.impl.llama_c.llama_token_data_array = .{ .data = cand.items.ptr, .size = cand.items.len, .selected = -1, .sorted = false };
+                llama.sampler.core.llama_sampler_apply(self.grmr, &arr);
             }
 
             const P = struct {
                 masked: bool,
-                cand: []const c.llama_token_data,
-                cur_p: *const c.llama_token_data_array,
+                cand: []const llama.impl.llama_c.llama_token_data,
+                cur_p: *const llama.impl.llama_c.llama_token_data_array,
                 p_norm: f32 = 1.0,
 
                 // a candidate the grammar rejects carries no probability, whatever the target thinks
@@ -608,7 +606,7 @@ pub const Sampler = struct {
     /// draft.size()]`.
     ///
     /// Return: the accepted tokens, the allocator's.
-    pub fn sampleAndAcceptN(self: *Sampler, a: std.mem.Allocator, ctx: ?*c.llama_context, draft: []const c.llama_token, grammar_first: bool) ![]c.llama_token {
+    pub fn sampleAndAcceptN(self: *Sampler, a: std.mem.Allocator, ctx: ?*llama.impl.llama_c.llama_context, draft: []const llama.impl.llama_c.llama_token, grammar_first: bool) ![]llama.impl.llama_c.llama_token {
         const idxs = try a.alloc(i32, draft.len + 1);
         defer a.free(idxs);
         for (idxs, 0..) |*x, i| x.* = @intCast(i);
@@ -618,7 +616,7 @@ pub const Sampler = struct {
 
     /// Ports `common_sampler_get_seed` (sampling.cpp:851 @b1b770d90).
     pub fn getSeed(self: *const Sampler) u32 {
-        return c.llama_sampler_get_seed(self.chain);
+        return llama.sampler.chain.llama_sampler_get_seed(self.chain);
     }
 
     /// Ports `common_sampler_reasoning_budget_force` (sampling.cpp:855
@@ -635,7 +633,7 @@ pub const Sampler = struct {
     /// libc++'s `std::sort` when `do_sort` and not already sorted.
     ///
     /// Return: the sampler's own array, valid until the next sample.
-    pub fn getCandidates(self: *Sampler, do_sort: bool) *c.llama_token_data_array {
+    pub fn getCandidates(self: *Sampler, do_sort: bool) *llama.impl.llama_c.llama_token_data_array {
         const t0 = self.tm();
         defer self.tmEnd(t0);
 
@@ -645,8 +643,8 @@ pub const Sampler = struct {
             // remember the selected token before sorting
             const id = res.data[@intCast(res.selected)].id;
 
-            stdlib.libcxx.sort(c.llama_token_data, res.data[0..res.size], {}, struct {
-                fn gt(_: void, x: c.llama_token_data, y: c.llama_token_data) bool {
+            stdlib.libcxx.sort(llama.impl.llama_c.llama_token_data, res.data[0..res.size], {}, struct {
+                fn gt(_: void, x: llama.impl.llama_c.llama_token_data, y: llama.impl.llama_c.llama_token_data) bool {
                     return x.p > y.p;
                 }
             }.gt);
@@ -667,7 +665,7 @@ pub const Sampler = struct {
 
     /// Ports `common_sampler_last` (sampling.cpp:892 @b1b770d90): the last
     /// accepted token.
-    pub fn last(self: *const Sampler) c.llama_token {
+    pub fn last(self: *const Sampler) llama.impl.llama_c.llama_token {
         return self.prev.rat(0);
     }
 
@@ -680,10 +678,10 @@ pub const Sampler = struct {
         try result.appendSlice(a, "logits ");
 
         var i: c_int = 0;
-        while (i < c.llama_sampler_chain_n(self.chain)) : (i += 1) {
-            const smpl = c.llama_sampler_chain_get(self.chain, i);
+        while (i < llama.sampler.chain.llama_sampler_chain_n(self.chain)) : (i += 1) {
+            const smpl = llama.sampler.chain.llama_sampler_chain_get(self.chain, i);
             try result.appendSlice(a, "-> ");
-            try result.appendSlice(a, std.mem.span(c.llama_sampler_name(smpl)));
+            try result.appendSlice(a, std.mem.span(llama.sampler.core.llama_sampler_name(smpl)));
             try result.append(a, ' ');
         }
 
@@ -694,7 +692,7 @@ pub const Sampler = struct {
     /// last `n` accepted tokens' text.
     ///
     /// Return: the text, the allocator's.
-    pub fn prevStr(self: *const Sampler, a: std.mem.Allocator, ctx_main: ?*c.llama_context, n_in: i32) ![]u8 {
+    pub fn prevStr(self: *const Sampler, a: std.mem.Allocator, ctx_main: ?*llama.impl.llama_c.llama_context, n_in: i32) ![]u8 {
         const n = @min(n_in, @as(i32, @intCast(self.prev.size())));
 
         if (n <= 0) return a.alloc(u8, 0);
@@ -702,12 +700,12 @@ pub const Sampler = struct {
         var result: std.ArrayList(u8) = .empty;
         try result.ensureTotalCapacity(a, @intCast(8 * n)); // 8 is the average length of a token [citation needed], TODO: compute this from the vocab
 
-        const vocab = c.llama_model_get_vocab(c.llama_get_model(ctx_main));
+        const vocab = llama.api.model.llama_model_get_vocab(llama.api.context.llama_get_model(ctx_main));
         var i: i32 = n - 1;
         while (i >= 0) : (i -= 1) {
             const id = self.prev.rat(@intCast(i));
 
-            assertC(id != c.LLAMA_TOKEN_NULL, 917, "id != LLAMA_TOKEN_NULL && \"null token in the sampling history - should not happen\"");
+            assertC(id != llama.impl.llama_c.LLAMA_TOKEN_NULL, 917, "id != LLAMA_TOKEN_NULL && \"null token in the sampling history - should not happen\"");
 
             const piece = try mod.common.tokenToPiece(a, vocab, id, true);
             defer a.free(piece[0 .. piece.len + 1]);
@@ -727,7 +725,7 @@ pub const Sampler = struct {
 ///   grammar or a reasoning budget rules it out, as the C++ does.
 ///
 /// Return: the sampler, which the caller owns (`Sampler.destroy`).
-pub fn init(model: ?*const c.llama_model, params: *mod.params.Sampling) InitError!*Sampler {
+pub fn init(model: ?*const llama.impl.llama_c.llama_model, params: *mod.params.Sampling) InitError!*Sampler {
     if (!std.math.isFinite(params.penalty_repeat) or params.penalty_repeat <= 0.0 or !std.math.isFinite(1.0 / params.penalty_repeat)) {
         switch (mod.arg.throwStr("penalty_repeat must be finite and greater than 0")) {
             error.Throw => {},
@@ -747,31 +745,31 @@ pub fn init(model: ?*const c.llama_model, params: *mod.params.Sampling) InitErro
         return error.InvalidArgument;
     }
 
-    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    var arena_state = std.heap.ArenaAllocator.init(std.heap.c_allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    const vocab = c.llama_model_get_vocab(model);
-    var lparams = c.llama_sampler_chain_default_params();
+    const vocab = llama.api.model.llama_model_get_vocab(model);
+    var lparams = llama.api.llama.llama_sampler_chain_default_params();
 
     lparams.no_perf = params.no_perf;
 
-    var grmr: ?*c.llama_sampler = null;
-    var rbudget: ?*c.llama_sampler = null;
-    const chain = c.llama_sampler_chain_init(lparams);
+    var grmr: ?*llama.impl.llama_c.llama_sampler = null;
+    var rbudget: ?*llama.impl.llama_c.llama_sampler = null;
+    const chain = llama.sampler.chain.chainInit(lparams);
 
-    var samplers: std.ArrayList(*c.llama_sampler) = .empty;
+    var samplers: std.ArrayList(*llama.impl.llama_c.llama_sampler) = .empty;
 
     const grammar_str = params.grammar;
     if (std.mem.startsWith(u8, grammar_str, "%llguidance")) {
-        c.llama_sampler_free(chain);
+        llama.sampler.core.llama_sampler_free(chain);
         switch (mod.arg.throwStr("failed to parse grammar: llguidance is not enabled")) {
             error.Throw => {},
         }
         return error.Runtime;
     } else {
         var trigger_patterns: std.ArrayList([:0]const u8) = .empty;
-        var trigger_tokens: std.ArrayList(c.llama_token) = .empty;
+        var trigger_tokens: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
         for (params.grammar_triggers.items) |trigger| {
             switch (trigger.type) {
                 .word => {
@@ -795,7 +793,7 @@ pub fn init(model: ?*const c.llama_model, params: *mod.params.Sampling) InitErro
                     const token = trigger.token;
                     try trigger_tokens.append(arena, token);
                 },
-                _ => _ = c.ggml_abort("sampling.cpp", 258, "GGML_ASSERT(%s) failed", "false && \"unknown trigger type\""),
+                _ => _ = llama.impl.llama_c.ggml_abort("sampling.cpp", 258, "GGML_ASSERT(%s) failed", "false && \"unknown trigger type\""),
             }
         }
 
@@ -806,14 +804,14 @@ pub fn init(model: ?*const c.llama_model, params: *mod.params.Sampling) InitErro
         if (grammar_str.len != 0) {
             const g = try arena.dupeSentinel(u8, grammar_str, 0);
             if (params.grammar_lazy) {
-                grmr = c.llama_sampler_init_grammar_lazy_patterns(vocab, g.ptr, "root", trigger_patterns_c.items.ptr, trigger_patterns_c.items.len, trigger_tokens.items.ptr, trigger_tokens.items.len);
+                grmr = llama.sampler.grammar.llama_sampler_init_grammar_lazy_patterns(vocab, g.ptr, "root", trigger_patterns_c.items.ptr, trigger_patterns_c.items.len, trigger_tokens.items.ptr, trigger_tokens.items.len);
             } else {
-                grmr = c.llama_sampler_init_grammar(vocab, g.ptr, "root");
+                grmr = llama.sampler.grammar.llama_sampler_init_grammar(vocab, g.ptr, "root");
             }
         }
     }
     if (grmr == null and grammar_str.len != 0) {
-        c.llama_sampler_free(chain);
+        llama.sampler.core.llama_sampler_free(chain);
         switch (mod.arg.throwStr("failed to parse grammar")) {
             error.Throw => {},
         }
@@ -821,7 +819,7 @@ pub fn init(model: ?*const c.llama_model, params: *mod.params.Sampling) InitErro
     }
 
     // Compute prefill tokens from the generation prompt
-    var prefill_tokens: std.ArrayList(c.llama_token) = .empty;
+    var prefill_tokens: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
     if (params.generation_prompt.len != 0) {
         assertC(vocab != null, 285, "vocab != nullptr");
         const tokens = try mod.common.tokenize(arena, vocab, params.generation_prompt, false, true);
@@ -841,35 +839,35 @@ pub fn init(model: ?*const c.llama_model, params: *mod.params.Sampling) InitErro
     // Only applies to output-format and tool-call grammars; user-supplied grammars must not be prefilled.
     if (grmr != null and !params.grammar_lazy and grammarNeedsPrefill(params.grammar_type)) {
         for (prefill_tokens.items) |token| {
-            c.llama_sampler_accept(grmr, token);
+            llama.sampler.core.llama_sampler_accept(grmr, token);
             mod.log.dbg("%s: grammar accepted prefill token (%d)\n", .{ @as([*:0]const u8, "common_sampler_init"), token });
         }
     }
 
     // reasoning budget sampler (skip when budget is unlimited unless a lazy grammar is active, which needs rbudget for thinking-block suppression)
     if (params.reasoning_budget_start.items.len != 0 and params.reasoning_budget_end.items.len != 0 and (params.grammar_lazy or params.reasoning_budget_tokens >= 0 or params.reasoning_control)) {
-        const ends = try arena.alloc([]const c.llama_token, params.reasoning_budget_end.items.len);
+        const ends = try arena.alloc([]const llama.impl.llama_c.llama_token, params.reasoning_budget_end.items.len);
         for (params.reasoning_budget_end.items, ends) |e, *d| d.* = e.items;
         rbudget = try mod.reasoning_budget.init(vocab, &.{params.reasoning_budget_start.items}, ends, params.reasoning_budget_forced.items, if (params.reasoning_budget_tokens < 0) std.math.maxInt(i32) else params.reasoning_budget_tokens, .idle);
 
         for (prefill_tokens.items) |token| {
-            c.llama_sampler_accept(rbudget, token);
+            llama.sampler.core.llama_sampler_accept(rbudget, token);
             mod.log.dbg("%s: reasoning-budget accepted prefill token (%d)\n", .{ @as([*:0]const u8, "common_sampler_init"), token });
         }
     }
 
     // logit bias: user biases + model suppress tokens (-INFINITY)
     {
-        var merged: std.ArrayList(c.llama_logit_bias) = .empty;
+        var merged: std.ArrayList(llama.impl.llama_c.llama_logit_bias) = .empty;
         try merged.appendSlice(arena, params.logit_bias.items);
 
         var n_suppress: i32 = 0;
-        const suppress = c.llama_vocab_get_suppress_tokens(vocab, &n_suppress);
+        const suppress = llama.api.vocab.llama_vocab_get_suppress_tokens(vocab, &n_suppress);
         var i: i32 = 0;
         while (i < n_suppress) : (i += 1) try merged.append(arena, .{ .token = suppress[@intCast(i)], .bias = -std.math.inf(f32) });
 
         if (merged.items.len != 0) {
-            try samplers.append(arena, c.llama_sampler_init_logit_bias(c.llama_vocab_n_tokens(vocab), @intCast(merged.items.len), merged.items.ptr).?);
+            try samplers.append(arena, llama.sampler.logit_bias.llama_sampler_init_logit_bias(llama.api.vocab.llama_vocab_n_tokens(vocab), @intCast(merged.items.len), merged.items.ptr).?);
         }
     }
 
@@ -877,22 +875,22 @@ pub fn init(model: ?*const c.llama_model, params: *mod.params.Sampling) InitErro
         var use_adaptive_p = false; // see below
 
         for (params.samplers.items) |cnstr| {
-            const s: ?*c.llama_sampler = switch (cnstr) {
+            const s: ?*llama.impl.llama_c.llama_sampler = switch (cnstr) {
                 .dry => blk: {
                     var c_breakers: std.ArrayList([*c]const u8) = .empty;
                     try c_breakers.ensureTotalCapacity(arena, params.dry_sequence_breakers.items.len);
                     for (params.dry_sequence_breakers.items) |str| c_breakers.appendAssumeCapacity((try arena.dupeSentinel(u8, str, 0)).ptr);
-                    break :blk c.llama_sampler_init_dry(vocab, params.dry_multiplier, params.dry_base, params.dry_allowed_length, params.dry_penalty_last_n, c_breakers.items.ptr, c_breakers.items.len);
+                    break :blk llama.sampler.penalties.llama_sampler_init_dry(vocab, params.dry_multiplier, params.dry_base, params.dry_allowed_length, params.dry_penalty_last_n, c_breakers.items.ptr, c_breakers.items.len);
                 },
-                .top_k => c.llama_sampler_init_top_k(params.top_k),
-                .top_p => c.llama_sampler_init_top_p(params.top_p, @intCast(params.min_keep)),
-                .top_n_sigma => c.llama_sampler_init_top_n_sigma(params.top_n_sigma),
-                .min_p => c.llama_sampler_init_min_p(params.min_p, @intCast(params.min_keep)),
-                .xtc => c.llama_sampler_init_xtc(params.xtc_probability, params.xtc_threshold, @intCast(params.min_keep), params.seed),
-                .typical_p => c.llama_sampler_init_typical(params.typ_p, @intCast(params.min_keep)),
-                .temperature => c.llama_sampler_init_temp_ext(params.temp, params.dynatemp_range, params.dynatemp_exponent),
-                .infill => c.llama_sampler_init_infill(vocab),
-                .penalties => c.llama_sampler_init_penalties(c.llama_vocab_n_tokens(vocab), params.penalty_last_n, params.penalty_repeat, params.penalty_freq, params.penalty_present),
+                .top_k => llama.sampler.basic.llama_sampler_init_top_k(params.top_k),
+                .top_p => llama.sampler.basic.llama_sampler_init_top_p(params.top_p, @intCast(params.min_keep)),
+                .top_n_sigma => llama.sampler.basic.llama_sampler_init_top_n_sigma(params.top_n_sigma),
+                .min_p => llama.sampler.basic.llama_sampler_init_min_p(params.min_p, @intCast(params.min_keep)),
+                .xtc => llama.sampler.basic.llama_sampler_init_xtc(params.xtc_probability, params.xtc_threshold, @intCast(params.min_keep), params.seed),
+                .typical_p => llama.sampler.basic.llama_sampler_init_typical(params.typ_p, @intCast(params.min_keep)),
+                .temperature => llama.sampler.basic.llama_sampler_init_temp_ext(params.temp, params.dynatemp_range, params.dynatemp_exponent),
+                .infill => llama.sampler.infill.llama_sampler_init_infill(vocab),
+                .penalties => llama.sampler.penalties.llama_sampler_init_penalties(llama.api.vocab.llama_vocab_n_tokens(vocab), params.penalty_last_n, params.penalty_repeat, params.penalty_freq, params.penalty_present),
                 .adaptive_p => blk: {
                     // the `adaptive-p` sampler is like `dist` and `mirostat` in that it selects
                     // a single token, so we will add `dist` at the end of the chain by default,
@@ -910,26 +908,26 @@ pub fn init(model: ?*const c.llama_model, params: *mod.params.Sampling) InitErro
         }
         if (use_adaptive_p) {
             // only if user explicitly included adaptive-p sampler
-            try samplers.append(arena, c.llama_sampler_init_adaptive_p(params.adaptive_target, params.adaptive_decay, params.seed).?);
+            try samplers.append(arena, llama.sampler.mirostat.llama_sampler_init_adaptive_p(params.adaptive_target, params.adaptive_decay, params.seed).?);
         } else {
             // Keep distribution sampling when callers request probabilities.
             const last_type: ?mod.params.SamplerType = if (params.samplers.items.len == 0) null else params.samplers.items[params.samplers.items.len - 1];
             const greedy = params.n_probs == 0 and last_type != null and
                 ((last_type.? == .temperature and params.temp == 0.0 and params.dynatemp_range == 0.0) or
                     (last_type.? == .top_k and params.top_k == 1));
-            try samplers.append(arena, (if (greedy) c.llama_sampler_init_greedy() else c.llama_sampler_init_dist(params.seed)).?);
+            try samplers.append(arena, (if (greedy) llama.sampler.basic.llama_sampler_init_greedy() else llama.sampler.basic.llama_sampler_init_dist(params.seed)).?);
         }
     } else if (params.mirostat == 1) {
-        try samplers.append(arena, c.llama_sampler_init_temp(params.temp).?);
-        try samplers.append(arena, c.llama_sampler_init_mirostat(c.llama_vocab_n_tokens(vocab), params.seed, params.mirostat_tau, params.mirostat_eta, 100).?);
+        try samplers.append(arena, llama.sampler.basic.llama_sampler_init_temp(params.temp).?);
+        try samplers.append(arena, llama.sampler.mirostat.llama_sampler_init_mirostat(llama.api.vocab.llama_vocab_n_tokens(vocab), params.seed, params.mirostat_tau, params.mirostat_eta, 100).?);
     } else if (params.mirostat == 2) {
-        try samplers.append(arena, c.llama_sampler_init_temp(params.temp).?);
-        try samplers.append(arena, c.llama_sampler_init_mirostat_v2(params.seed, params.mirostat_tau, params.mirostat_eta).?);
+        try samplers.append(arena, llama.sampler.basic.llama_sampler_init_temp(params.temp).?);
+        try samplers.append(arena, llama.sampler.mirostat.llama_sampler_init_mirostat_v2(params.seed, params.mirostat_tau, params.mirostat_eta).?);
     } else {
         assertC(false, 415, "false && \"unknown mirostat version\"");
     }
 
-    for (samplers.items) |smpl| c.llama_sampler_chain_add(chain, smpl);
+    for (samplers.items) |smpl| llama.sampler.chain.llama_sampler_chain_add(chain, smpl);
 
     if (grmr != null and params.backend_sampling) {
         mod.log.wrn("%s: backend sampling is not compatible with grammar, disabling\n", .{@as([*:0]const u8, "common_sampler_init")});
@@ -943,17 +941,17 @@ pub fn init(model: ?*const c.llama_model, params: *mod.params.Sampling) InitErro
         params.backend_sampling = false;
     }
 
-    const result = try gpa.create(Sampler);
+    const result = try std.heap.c_allocator.create(Sampler);
     result.* = .{
-        .allocator = gpa,
+        .allocator = std.heap.c_allocator,
         .grammar_lazy = params.grammar_lazy,
         .no_perf = params.no_perf,
         .grmr = grmr,
         .rbudget = rbudget,
         .chain = chain.?,
-        .prev = try RingBuffer(c.llama_token).init(gpa, @intCast(@max(32, params.n_prev))),
+        .prev = try RingBuffer(llama.impl.llama_c.llama_token).init(std.heap.c_allocator, @intCast(@max(32, params.n_prev))),
         // mix it, the chain and the draft are seeded from this one too
-        .rng = stdlib.libcxx.Mt19937.init(c.llama_sampler_get_seed(chain) ^ 0x9e3779b9),
+        .rng = stdlib.libcxx.Mt19937.init(llama.sampler.chain.llama_sampler_get_seed(chain) ^ 0x9e3779b9),
     };
     return result;
 }
@@ -967,9 +965,9 @@ pub fn init(model: ?*const c.llama_model, params: *mod.params.Sampling) InitErro
 /// - `sampling`: the parameters changed.
 /// - `vocab`: must not be null.
 /// - `tokens`: the strings tried.
-pub fn addPreservedTokens(a: std.mem.Allocator, sampling: *mod.params.Sampling, vocab: ?*const c.llama_vocab, tokens: []const []const u8) !void {
+pub fn addPreservedTokens(a: std.mem.Allocator, sampling: *mod.params.Sampling, vocab: ?*const llama.impl.llama_c.llama_vocab, tokens: []const []const u8) !void {
     assertC(vocab != null, 1056, "vocab != nullptr");
-    var tmp = std.heap.ArenaAllocator.init(gpa);
+    var tmp = std.heap.ArenaAllocator.init(std.heap.c_allocator);
     defer tmp.deinit();
     for (tokens) |t| {
         const ids = try mod.common.tokenize(tmp.allocator(), vocab, t, false, true);
@@ -978,7 +976,7 @@ pub fn addPreservedTokens(a: std.mem.Allocator, sampling: *mod.params.Sampling, 
 }
 
 /// `std::set<llama_token>::insert` on the sorted list `preserved_tokens` is.
-fn setInsert(a: std.mem.Allocator, set: *std.ArrayList(c.llama_token), tok: c.llama_token) !void {
+fn setInsert(a: std.mem.Allocator, set: *std.ArrayList(llama.impl.llama_c.llama_token), tok: llama.impl.llama_c.llama_token) !void {
     var i: usize = 0;
     while (i < set.items.len) : (i += 1) {
         const t = set.items[i];
@@ -1001,9 +999,9 @@ fn setInsert(a: std.mem.Allocator, set: *std.ArrayList(c.llama_token), tok: c.ll
 ///
 /// Return: `error.Runtime`, the text in `arg.what()`, where the C++ throws
 /// `std::runtime_error`.
-pub fn addGrammarTriggers(a: std.mem.Allocator, sampling: *mod.params.Sampling, vocab: ?*const c.llama_vocab, triggers: []const mod.params.GrammarTrigger) !void {
+pub fn addGrammarTriggers(a: std.mem.Allocator, sampling: *mod.params.Sampling, vocab: ?*const llama.impl.llama_c.llama_vocab, triggers: []const mod.params.GrammarTrigger) !void {
     assertC(vocab != null, 1066, "vocab != nullptr");
-    var tmp = std.heap.ArenaAllocator.init(gpa);
+    var tmp = std.heap.ArenaAllocator.init(std.heap.c_allocator);
     defer tmp.deinit();
     for (triggers) |trigger| {
         if (trigger.type == .word) {
@@ -1011,7 +1009,7 @@ pub fn addGrammarTriggers(a: std.mem.Allocator, sampling: *mod.params.Sampling, 
             const ids = try mod.common.tokenize(tmp.allocator(), vocab, word, false, true);
             if (ids.len == 1) {
                 const token = ids[0];
-                if (std.mem.indexOfScalar(c.llama_token, sampling.preserved_tokens.items, token) == null) {
+                if (std.mem.indexOfScalar(llama.impl.llama_c.llama_token, sampling.preserved_tokens.items, token) == null) {
                     const msg = try std.mem.concat(tmp.allocator(), u8, &.{ "Grammar trigger word should be marked as preserved token: ", word });
                     switch (mod.arg.throwStr(msg)) {
                         error.Throw => {},

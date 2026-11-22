@@ -176,12 +176,12 @@ pub const DebugLabel = struct {
         var self: DebugLabel = .{};
         if (!ggml.vulkan.instance.instance.debug_utils_support or !ctx.has_s) return self;
         var name: std.ArrayList(u8) = .empty;
-        const first: *const ggml.impl.c.ggml_tensor = cgraph.nodes[@intCast(node_idx)].?;
-        name.appendSlice(std.heap.c_allocator, std.mem.span(ggml.impl.c.ggml_op_name(first.op))) catch oom();
+        const first: *const ggml.impl.ggml_c.ggml_tensor = cgraph.nodes[@intCast(node_idx)].?;
+        name.appendSlice(std.heap.c_allocator, std.mem.span(ggml.impl.ggml_c.ggml_op_name(first.op))) catch oom();
         var i: c_int = 1;
         while (i <= n_fused) : (i += 1) {
             name.append(std.heap.c_allocator, '+') catch oom();
-            name.appendSlice(std.heap.c_allocator, std.mem.span(ggml.impl.c.ggml_op_name(cgraph.nodes[@intCast(node_idx + i)].?.op))) catch oom();
+            name.appendSlice(std.heap.c_allocator, std.mem.span(ggml.impl.ggml_c.ggml_op_name(cgraph.nodes[@intCast(node_idx + i)].?.op))) catch oom();
         }
         name.append(std.heap.c_allocator, ' ') catch oom();
         name.appendSlice(std.heap.c_allocator, std.mem.sliceTo(&first.name, 0)) catch oom();

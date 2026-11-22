@@ -9,6 +9,7 @@
 //! began at.
 
 const std = @import("std");
+const llama = @import("llama");
 const mtmd = @import("../module.zig");
 
 /// Ports `tfm_layer_forward` (pockettts-spkenc.cpp:7 @b1b770d90), a member
@@ -25,29 +26,29 @@ fn tfmLayerForward(g: *const mtmd.graph.Graph, cur_in: mtmd.graph.T, layer: *con
     var Vcur = g.buildMm(layer.v_w, cur);
 
     const n_pos = mtmd.graph.ne(cur, 1);
-    Qcur = mtmd.impl.c.ggml_reshape_3d(ctx0, Qcur, g.d_head, g.n_head, n_pos);
-    Kcur = mtmd.impl.c.ggml_reshape_3d(ctx0, Kcur, g.d_head, g.n_head, n_pos);
-    Vcur = mtmd.impl.c.ggml_reshape_3d(ctx0, Vcur, g.d_head, g.n_head, n_pos);
+    Qcur = llama.impl.llama_c.ggml_reshape_3d(ctx0, Qcur, g.d_head, g.n_head, n_pos);
+    Kcur = llama.impl.llama_c.ggml_reshape_3d(ctx0, Kcur, g.d_head, g.n_head, n_pos);
+    Vcur = llama.impl.llama_c.ggml_reshape_3d(ctx0, Vcur, g.d_head, g.n_head, n_pos);
 
-    Qcur = mtmd.impl.c.ggml_rope_ext(ctx0, Qcur, inp_pos, null, g.d_head, mtmd.impl.c.GGML_ROPE_TYPE_NORMAL, 0, g.hparams.rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
-    Kcur = mtmd.impl.c.ggml_rope_ext(ctx0, Kcur, inp_pos, null, g.d_head, mtmd.impl.c.GGML_ROPE_TYPE_NORMAL, 0, g.hparams.rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
+    Qcur = llama.impl.llama_c.ggml_rope_ext(ctx0, Qcur, inp_pos, null, g.d_head, llama.impl.llama_c.GGML_ROPE_TYPE_NORMAL, 0, g.hparams.rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
+    Kcur = llama.impl.llama_c.ggml_rope_ext(ctx0, Kcur, inp_pos, null, g.d_head, llama.impl.llama_c.GGML_ROPE_TYPE_NORMAL, 0, g.hparams.rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
 
     cur = g.buildAttn(layer.o_w, null, Qcur, Kcur, Vcur, kq_mask, g.kq_scale, il, null);
-    cur = mtmd.impl.c.ggml_mul(ctx0, cur, layer.ls_1_w);
-    cur = mtmd.impl.c.ggml_add(ctx0, cur, inp);
+    cur = llama.impl.llama_c.ggml_mul(ctx0, cur, layer.ls_1_w);
+    cur = llama.impl.llama_c.ggml_add(ctx0, cur, inp);
 
     inp = cur;
     cur = g.buildNorm(cur, layer.ln_2_w, layer.ln_2_b, .normal, g.eps, il);
     cur = g.buildFfn(cur, layer.ff_up_w, null, null, null, layer.ff_down_w, null, .gelu, il);
-    cur = mtmd.impl.c.ggml_mul(ctx0, cur, layer.ls_2_w);
-    cur = mtmd.impl.c.ggml_add(ctx0, cur, inp);
+    cur = llama.impl.llama_c.ggml_mul(ctx0, cur, layer.ls_2_w);
+    cur = llama.impl.llama_c.ggml_add(ctx0, cur, inp);
 
     return cur;
 }
 
 /// Ports `build` (pockettts-spkenc.cpp:39 @b1b770d90), a member of
 /// `mtmd_graph_pockettts_spkenc`.
-pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*llama.impl.llama_c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
     const model = g.model;
@@ -58,18 +59,18 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
 
     // the preprocessor hands over the waveform as a single-row "mel", already [n_samples, 1]
     const inp_raw = g.buildInpRaw(1);
-    var cur = mtmd.impl.c.ggml_reshape_2d(ctx0, inp_raw, mtmd.graph.ne(inp_raw, 0), mtmd.graph.ne(inp_raw, 1));
+    var cur = llama.impl.llama_c.ggml_reshape_2d(ctx0, inp_raw, mtmd.graph.ne(inp_raw, 0), mtmd.graph.ne(inp_raw, 1));
 
     var seanet: mtmd.models.pockettts_seanet.Seanet = .init(g, arena_state.allocator());
     cur = seanet.encode(cur);
     g.cb(cur, "mimi_enc", -1);
 
     // [T, 512] -> transformer works on [512, T]
-    cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, cur));
+    cur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, cur));
 
-    const inp_pos = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, mtmd.graph.ne(cur, 1));
-    _ = mtmd.impl.c.ggml_set_name(inp_pos, "inp_pos");
-    mtmd.impl.c.ggml_set_input(inp_pos);
+    const inp_pos = llama.impl.llama_c.ggml_new_tensor_1d(ctx0, llama.impl.llama_c.GGML_TYPE_I32, mtmd.graph.ne(cur, 1));
+    _ = llama.impl.llama_c.ggml_set_name(inp_pos, "inp_pos");
+    llama.impl.llama_c.ggml_set_input(inp_pos);
 
     // the mimi transformer is causal with a sliding window, see _build_attention_mask()
     const kq_mask = g.buildInpAttnMask(mtmd.graph.ne(cur, 1), mtmd.graph.ne(cur, 1), 0);
@@ -81,16 +82,16 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     g.cb(cur, "mimi_enc_tfm", -1);
 
     // downsample to the model frame rate, [512, T] -> [T, 512] -> [T / 16, 32]
-    cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, cur));
+    cur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, cur));
     cur = seanet.conv1d(cur, model.downsample_w, null, hparams.mimi_downsample, 1, true, "");
     g.cb(cur, "mimi_downsample", -1);
 
     // voice latent -> backbone embd
-    cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, cur));
+    cur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, cur));
     cur = g.buildMm(model.spk_proj_w, cur);
     g.cb(cur, "spk_proj", -1);
 
-    mtmd.impl.c.ggml_build_forward_expand(g.gf, cur);
+    llama.impl.llama_c.ggml_build_forward_expand(g.gf, cur);
     return g.gf;
 }
 

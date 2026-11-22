@@ -52,7 +52,7 @@ fn gemv(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaq
     var sumf: [8]f32 = undefined;
     var sum_minf: [8]f32 = undefined;
 
-    const a_ptr: [*]const ggml.impl.c.block_q8_K = @ptrCast(@alignCast(vy));
+    const a_ptr: [*]const ggml.impl.ggml_c.block_q8_K = @ptrCast(@alignCast(vy));
     var x: i32 = 0;
     while (x < @divTrunc(nc, ncols_interleaved)) : (x += 1) {
         const b_ptr: [*]const ggml.cpu.repack.blocks.block_q2_Kx8 =

@@ -31,14 +31,11 @@
 //! Darwin has run this.
 
 const std = @import("std");
+const common_chat = @import("common_chat");
 const mod = @import("module.zig");
 const llama = @import("llama");
 const stdlib = @import("stdlib");
 const json = @import("json");
-
-const Allocator = std.mem.Allocator;
-
-const gpa = std.heap.c_allocator;
 
 // -----------------------------------------------------------------------------
 // internal helpers
@@ -61,7 +58,7 @@ fn homeDir() []const u8 {
 }
 
 /// Ports `expand_home` (server-tools.cpp:128 @b1b770d90): a leading `~` or `~/`.
-fn expandHome(a: Allocator, path: []const u8) ![]const u8 {
+fn expandHome(a: std.mem.Allocator, path: []const u8) ![]const u8 {
     if (path.len == 0 or path[0] != '~') return path;
     if (path.len > 1 and path[1] != '/' and path[1] != '\\') return path;
     const home = homeDir();
@@ -123,7 +120,7 @@ const OnChunk = struct {
 /// supervisory timeout, writing `stdin_data` first and reading raw output
 /// as it comes, past the size cap so the child never blocks on a full pipe.
 fn runSubprocess(
-    a: Allocator,
+    a: std.mem.Allocator,
     args: []const []const u8,
     max_output: usize,
     timeout_secs: c_int,
@@ -226,7 +223,7 @@ const Basic = struct {
     /// Ports `tools_io_basic`'s `resolve` (server-tools.cpp:306 @b1b770d90): `~`
     /// expanded, then against `cwd` (or the server's working directory), so
     /// the result is always absolute; `.` and `..` dropped.
-    fn resolve(self: *const Basic, a: Allocator, path: []const u8) ![]const u8 {
+    fn resolve(self: *const Basic, a: std.mem.Allocator, path: []const u8) ![]const u8 {
         const p = try expandHome(a, path);
 
         var full: []const u8 = p;
@@ -247,18 +244,18 @@ const Basic = struct {
     }
 
     /// Ports `tools_io_basic`'s `is_directory` (server-tools.cpp:330 @b1b770d90).
-    fn isDirectory(self: *const Basic, a: Allocator, path: []const u8) !bool {
+    fn isDirectory(self: *const Basic, a: std.mem.Allocator, path: []const u8) !bool {
         return stdlib.fs.isDirectory(try self.resolve(a, path));
     }
 
     /// Ports `tools_io_basic`'s `is_regular_file` (server-tools.cpp:335 @b1b770d90).
-    fn isRegularFile(self: *const Basic, a: Allocator, path: []const u8) !bool {
+    fn isRegularFile(self: *const Basic, a: std.mem.Allocator, path: []const u8) !bool {
         return stdlib.fs.isRegularFile(try self.resolve(a, path));
     }
 
     /// Ports `tools_io_basic`'s `file_size` (server-tools.cpp:340 @b1b770d90): a
     /// regular file's size; anything else is an error.
-    fn fileSize(self: *const Basic, a: Allocator, path: []const u8, out_size: *u64) !bool {
+    fn fileSize(self: *const Basic, a: std.mem.Allocator, path: []const u8, out_size: *u64) !bool {
         const p = try self.resolve(a, path);
         const regular = stdlib.fs.isRegularFile(p);
         out_size.* = if (regular) stdlib.fs.fileSize(p) orelse std.math.maxInt(u64) else std.math.maxInt(u64);
@@ -266,13 +263,13 @@ const Basic = struct {
     }
 
     /// Ports `tools_io_basic`'s `read_file` (server-tools.cpp:346 @b1b770d90).
-    fn readFile(self: *const Basic, a: Allocator, path: []const u8) !?[]const u8 {
+    fn readFile(self: *const Basic, a: std.mem.Allocator, path: []const u8) !?[]const u8 {
         return stdlib.file.readStream(stdlib.file.defaultIo(), a, try self.resolve(a, path)) catch null;
     }
 
     /// Ports `tools_io_basic`'s `write_file` (server-tools.cpp:355 @b1b770d90): parent
     /// directories created first.
-    fn writeFile(self: *const Basic, a: Allocator, path: []const u8, content: []const u8) !bool {
+    fn writeFile(self: *const Basic, a: std.mem.Allocator, path: []const u8, content: []const u8) !bool {
         const fpath = try self.resolve(a, path);
         const parent = stdlib.path.parent(fpath);
         if (parent.len != 0) {
@@ -284,7 +281,7 @@ const Basic = struct {
 
     /// Ports `tools_io_basic`'s `list_entries` (server-tools.cpp:368 @b1b770d90): `git
     /// ls-files` for files inside a repository, the walker otherwise.
-    fn listEntries(self: *const Basic, a: Allocator, base: []const u8, max_depth: c_int, kind: ListKind) !ListResult {
+    fn listEntries(self: *const Basic, a: std.mem.Allocator, base: []const u8, max_depth: c_int, kind: ListKind) !ListResult {
         var out: ListResult = .{};
 
         if (!stdlib.fs.isDirectory(base)) {
@@ -321,14 +318,14 @@ const Basic = struct {
 
     /// Ports `tools_io_basic`'s `run` (server-tools.cpp:405 @b1b770d90): stdout and
     /// stderr combined, in `cwd`.
-    fn run(self: *const Basic, a: Allocator, args: []const []const u8, max_output: usize, timeout_secs: c_int, on_chunk: ?OnChunk) !ExecResult {
+    fn run(self: *const Basic, a: std.mem.Allocator, args: []const []const u8, max_output: usize, timeout_secs: c_int, on_chunk: ?OnChunk) !ExecResult {
         return runSubprocess(a, args, max_output, timeout_secs, on_chunk, true, self.cwd, null);
     }
 
     /// Ports `tools_io_basic`'s `list_entries_fallback` (server-tools.cpp:458 @b1b770d90): a
     /// depth-first walk that lists junk directories without entering them
     /// and never follows a link.
-    fn listEntriesFallback(a: Allocator, base: []const u8, max_depth: c_int, kind: ListKind, deadline: i64, truncated: *bool) !std.ArrayList(ListEntry) {
+    fn listEntriesFallback(a: std.mem.Allocator, base: []const u8, max_depth: c_int, kind: ListKind, deadline: i64, truncated: *bool) !std.ArrayList(ListEntry) {
         var result: std.ArrayList(ListEntry) = .empty;
 
         const Frame = struct { dir: []const u8, rel_dir: []const u8, depth: c_int };
@@ -385,7 +382,7 @@ const Basic = struct {
 
     /// Ports `tools_io_basic`'s `is_link` (server-tools.cpp:417 @b1b770d90): a link can
     /// point back to an ancestor, so it is never walked.
-    fn isLink(a: Allocator, path: []const u8) bool {
+    fn isLink(a: std.mem.Allocator, path: []const u8) bool {
         _ = a;
         const st = stdlib.fs.stat(path, false) orelse return true;
         return (st.mode & stdlib.fs.IFMT) == stdlib.fs.IFLNK;
@@ -435,24 +432,24 @@ const Isolate = struct {
 
     /// Ports `tools_io_isolate`'s `resolve` (server-tools.cpp:532 @b1b770d90): against
     /// `cwd` when relative and `cwd` is set.
-    fn resolve(self: *const Isolate, a: Allocator, path: []const u8) ![]const u8 {
+    fn resolve(self: *const Isolate, a: std.mem.Allocator, path: []const u8) ![]const u8 {
         if (self.cwd.len == 0 or (path.len != 0 and path[0] == '/')) return path;
         return std.mem.concat(a, u8, &.{ self.cwd, "/", path });
     }
 
     /// Ports `tools_io_isolate`'s `is_directory` (server-tools.cpp:539 @b1b770d90).
-    fn isDirectory(self: *const Isolate, a: Allocator, path: []const u8) !bool {
+    fn isDirectory(self: *const Isolate, a: std.mem.Allocator, path: []const u8) !bool {
         return self.shellTest(a, "-d", try self.resolve(a, path));
     }
 
     /// Ports `tools_io_isolate`'s `is_regular_file` (server-tools.cpp:543 @b1b770d90).
-    fn isRegularFile(self: *const Isolate, a: Allocator, path: []const u8) !bool {
+    fn isRegularFile(self: *const Isolate, a: std.mem.Allocator, path: []const u8) !bool {
         return self.shellTest(a, "-f", try self.resolve(a, path));
     }
 
     /// Ports `tools_io_isolate`'s `file_size` (server-tools.cpp:547 @b1b770d90): `wc
     /// -c`, read with `std::stoull`.
-    fn fileSize(self: *const Isolate, a: Allocator, path: []const u8, out_size: *u64) !bool {
+    fn fileSize(self: *const Isolate, a: std.mem.Allocator, path: []const u8, out_size: *u64) !bool {
         const res = try self.exec(a, &.{ "sh", "-c", "wc -c < \"$1\"", "_", try self.resolve(a, path) }, 64, true);
         if (res.exit_code != 0 or res.timed_out) return false;
         const p = stdlib.num.strtoull(res.output, 10);
@@ -463,7 +460,7 @@ const Isolate = struct {
 
     /// Ports `tools_io_isolate`'s `read_file` (server-tools.cpp:559 @b1b770d90): `cat`,
     /// with stderr kept out of the bytes.
-    fn readFile(self: *const Isolate, a: Allocator, path: []const u8) !?[]const u8 {
+    fn readFile(self: *const Isolate, a: std.mem.Allocator, path: []const u8) !?[]const u8 {
         const res = try self.exec(a, &.{ "cat", "--", try self.resolve(a, path) }, isolate_read_file_max_size, false);
         if (res.exit_code != 0 or res.timed_out) return null;
         return res.output;
@@ -471,14 +468,14 @@ const Isolate = struct {
 
     /// Ports `tools_io_isolate`'s `write_file` (server-tools.cpp:567 @b1b770d90): the
     /// content travels on stdin.
-    fn writeFile(self: *const Isolate, a: Allocator, path: []const u8, content: []const u8) !bool {
+    fn writeFile(self: *const Isolate, a: std.mem.Allocator, path: []const u8, content: []const u8) !bool {
         const argv = try self.buildArgv(a, &.{ "sh", "-c", "mkdir -p \"$(dirname \"$1\")\" && cat > \"$1\"", "_", try self.resolve(a, path) }, true);
         const res = try runSubprocess(a, argv, 4096, isolate_exec_timeout, null, true, "", content);
         return res.exit_code == 0 and !res.timed_out;
     }
 
     /// Ports `tools_io_isolate`'s `list_entries` (server-tools.cpp:576 @b1b770d90).
-    fn listEntries(self: *const Isolate, a: Allocator, base: []const u8, max_depth: c_int, kind: ListKind) !ListResult {
+    fn listEntries(self: *const Isolate, a: std.mem.Allocator, base: []const u8, max_depth: c_int, kind: ListKind) !ListResult {
         var out: ListResult = .{};
 
         const abs_base = try self.resolve(a, base);
@@ -515,7 +512,7 @@ const Isolate = struct {
     /// Ports `tools_io_isolate`'s `run` (server-tools.cpp:616 @b1b770d90): wrapped in an
     /// in-isolate `timeout`, since killing the host-side client does not
     /// kill the process tree inside.
-    fn run(self: *const Isolate, a: Allocator, args: []const []const u8, max_output: usize, timeout_secs: c_int, on_chunk: ?OnChunk) !ExecResult {
+    fn run(self: *const Isolate, a: std.mem.Allocator, args: []const []const u8, max_output: usize, timeout_secs: c_int, on_chunk: ?OnChunk) !ExecResult {
         var inner: std.ArrayList([]const u8) = .empty;
         try inner.append(a, "timeout");
         try inner.append(a, try std.fmt.allocPrint(a, "{d}s", .{timeout_secs}));
@@ -529,7 +526,7 @@ const Isolate = struct {
     /// Ports `tools_io_container`'s `build_argv` (server-tools.cpp:725 @b1b770d90), and
     /// `tools_io_ssh`'s `build_argv` (server-tools.cpp:759 @b1b770d90): the host-side
     /// argv that runs `inner` in the isolate.
-    fn buildArgv(self: *const Isolate, a: Allocator, inner: []const []const u8, needs_stdin: bool) ![]const []const u8 {
+    fn buildArgv(self: *const Isolate, a: std.mem.Allocator, inner: []const []const u8, needs_stdin: bool) ![]const []const u8 {
         var argv: std.ArrayList([]const u8) = .empty;
         switch (self.transport) {
             .container => |c| {
@@ -551,7 +548,7 @@ const Isolate = struct {
 
     /// Ports `tools_io_isolate`'s `shell_quote_join` (server-tools.cpp:636 @b1b770d90): one
     /// string a POSIX shell re-parses into exactly `argv`.
-    fn shellQuoteJoin(a: Allocator, argv: []const []const u8) ![]u8 {
+    fn shellQuoteJoin(a: std.mem.Allocator, argv: []const []const u8) ![]u8 {
         var out: std.ArrayList(u8) = .empty;
         for (argv) |arg| {
             if (out.items.len != 0) try out.append(a, ' ');
@@ -567,7 +564,7 @@ const Isolate = struct {
 
     /// Ports `tools_io_isolate`'s `with_cwd` (server-tools.cpp:656 @b1b770d90): the working
     /// directory set in the command itself.
-    fn withCwd(self: *const Isolate, a: Allocator, inner: []const []const u8) ![]const []const u8 {
+    fn withCwd(self: *const Isolate, a: std.mem.Allocator, inner: []const []const u8) ![]const []const u8 {
         if (self.cwd.len == 0) return inner;
         // 127 is what a shell reports for a command it could not run
         var out: std.ArrayList([]const u8) = .empty;
@@ -577,23 +574,23 @@ const Isolate = struct {
     }
 
     /// Ports `tools_io_isolate`'s `exec` (server-tools.cpp:666 @b1b770d90).
-    fn exec(self: *const Isolate, a: Allocator, inner: []const []const u8, max_output: usize, combine_stderr: bool) !ExecResult {
+    fn exec(self: *const Isolate, a: std.mem.Allocator, inner: []const []const u8, max_output: usize, combine_stderr: bool) !ExecResult {
         return runSubprocess(a, try self.buildArgv(a, inner, false), max_output, isolate_exec_timeout, null, combine_stderr, "", null);
     }
 
     /// Ports `tools_io_isolate`'s `shell_run` (server-tools.cpp:672 @b1b770d90).
-    fn shellRun(self: *const Isolate, a: Allocator, inner: []const []const u8) !bool {
+    fn shellRun(self: *const Isolate, a: std.mem.Allocator, inner: []const []const u8) !bool {
         const res = try self.exec(a, inner, 4096, true);
         return res.exit_code == 0 and !res.timed_out;
     }
 
     /// Ports `tools_io_isolate`'s `shell_test` (server-tools.cpp:677 @b1b770d90).
-    fn shellTest(self: *const Isolate, a: Allocator, flag: []const u8, path: []const u8) !bool {
+    fn shellTest(self: *const Isolate, a: std.mem.Allocator, flag: []const u8, path: []const u8) !bool {
         return self.shellRun(a, &.{ "sh", "-c", try std.mem.concat(a, u8, &.{ "[ ", flag, " \"$1\" ]" }), "_", path });
     }
 
     /// Ports `tools_io_isolate`'s `split_lines` (server-tools.cpp:681 @b1b770d90).
-    fn splitLines(a: Allocator, text: []const u8, strip_dot_slash: bool) !std.ArrayList([]const u8) {
+    fn splitLines(a: std.mem.Allocator, text: []const u8, strip_dot_slash: bool) !std.ArrayList([]const u8) {
         var result: std.ArrayList([]const u8) = .empty;
         var it = GetLines.init(text);
         while (it.next()) |raw| {
@@ -610,7 +607,7 @@ const Isolate = struct {
 
     /// Ports `tools_io_isolate`'s `find_entries` (server-tools.cpp:697 @b1b770d90): one
     /// `find` pass; junk directories listed but never entered.
-    fn findEntries(self: *const Isolate, a: Allocator, abs_base: []const u8, max_depth: c_int, dirs: bool, truncated: *bool) !std.ArrayList([]const u8) {
+    fn findEntries(self: *const Isolate, a: std.mem.Allocator, abs_base: []const u8, max_depth: c_int, dirs: bool, truncated: *bool) !std.ArrayList([]const u8) {
         var prune_expr: std.ArrayList(u8) = .empty;
         for (junk_dir_names) |n| {
             if (prune_expr.items.len != 0) try prune_expr.appendSlice(a, " -o ");
@@ -685,42 +682,42 @@ const Io = union(enum) {
     basic: Basic,
     isolate: Isolate,
 
-    fn resolve(self: *const Io, a: Allocator, path: []const u8) ![]const u8 {
+    fn resolve(self: *const Io, a: std.mem.Allocator, path: []const u8) ![]const u8 {
         return switch (self.*) {
             inline else => |*x| x.resolve(a, path),
         };
     }
-    fn isDirectory(self: *const Io, a: Allocator, path: []const u8) !bool {
+    fn isDirectory(self: *const Io, a: std.mem.Allocator, path: []const u8) !bool {
         return switch (self.*) {
             inline else => |*x| x.isDirectory(a, path),
         };
     }
-    fn isRegularFile(self: *const Io, a: Allocator, path: []const u8) !bool {
+    fn isRegularFile(self: *const Io, a: std.mem.Allocator, path: []const u8) !bool {
         return switch (self.*) {
             inline else => |*x| x.isRegularFile(a, path),
         };
     }
-    fn fileSize(self: *const Io, a: Allocator, path: []const u8, out: *u64) !bool {
+    fn fileSize(self: *const Io, a: std.mem.Allocator, path: []const u8, out: *u64) !bool {
         return switch (self.*) {
             inline else => |*x| x.fileSize(a, path, out),
         };
     }
-    fn readFile(self: *const Io, a: Allocator, path: []const u8) !?[]const u8 {
+    fn readFile(self: *const Io, a: std.mem.Allocator, path: []const u8) !?[]const u8 {
         return switch (self.*) {
             inline else => |*x| x.readFile(a, path),
         };
     }
-    fn writeFile(self: *const Io, a: Allocator, path: []const u8, content: []const u8) !bool {
+    fn writeFile(self: *const Io, a: std.mem.Allocator, path: []const u8, content: []const u8) !bool {
         return switch (self.*) {
             inline else => |*x| x.writeFile(a, path, content),
         };
     }
-    fn listEntries(self: *const Io, a: Allocator, base: []const u8, max_depth: c_int, kind: ListKind) !ListResult {
+    fn listEntries(self: *const Io, a: std.mem.Allocator, base: []const u8, max_depth: c_int, kind: ListKind) !ListResult {
         return switch (self.*) {
             inline else => |*x| x.listEntries(a, base, max_depth, kind),
         };
     }
-    fn run(self: *const Io, a: Allocator, args: []const []const u8, max_output: usize, timeout_secs: c_int, on_chunk: ?OnChunk) !ExecResult {
+    fn run(self: *const Io, a: std.mem.Allocator, args: []const []const u8, max_output: usize, timeout_secs: c_int, on_chunk: ?OnChunk) !ExecResult {
         return switch (self.*) {
             inline else => |*x| x.run(a, args, max_output, timeout_secs, on_chunk),
         };
@@ -730,7 +727,7 @@ const Io = union(enum) {
 /// Ports `make_tools_io` (server-tools.cpp:822 @b1b770d90): the host for an empty
 /// `runtime`, an attached container or an ssh host otherwise; anything
 /// else throws rather than fall back to the host.
-fn makeToolsIo(a: Allocator, params: *const json.Value) !Io {
+fn makeToolsIo(a: std.mem.Allocator, params: *const json.Value) !Io {
     const cwd = try a.dupe(u8, mod.common.jsonValue(params, "cwd", []const u8, ""));
     const runtime = try a.dupe(u8, mod.common.jsonValue(params, "runtime", []const u8, ""));
     if (runtime.len == 0) {
@@ -739,18 +736,18 @@ fn makeToolsIo(a: Allocator, params: *const json.Value) !Io {
     }
     if (ContainerSpec.parse(runtime)) |container| {
         // spawning belongs to the runtime that owns the container, a tool call only attaches
-        if (!container.attach) return mod.common.throw(error.RuntimeError, "tool runtime must name a running container: {s}", .{runtime});
-        if (!ContainerSpec.isValidId(container.arg)) return mod.common.throw(error.RuntimeError, "invalid container id: {s}", .{container.arg});
+        if (!container.attach) return common_chat.exception.throw(error.RuntimeError, "tool runtime must name a running container: {s}", .{runtime});
+        if (!ContainerSpec.isValidId(container.arg)) return common_chat.exception.throw(error.RuntimeError, "invalid container id: {s}", .{container.arg});
         return .{ .isolate = .{ .cwd = cwd, .transport = .{ .container = .{ .bin = container.bin, .container_id = container.arg } } } };
     }
     const ssh_prefix = "ssh:";
     if (std.mem.startsWith(u8, runtime, ssh_prefix)) {
         const target = runtime[ssh_prefix.len..];
-        if (!sshIsValidTarget(target)) return mod.common.throw(error.RuntimeError, "invalid ssh target: {s}", .{target});
+        if (!sshIsValidTarget(target)) return common_chat.exception.throw(error.RuntimeError, "invalid ssh target: {s}", .{target});
         return .{ .isolate = .{ .cwd = cwd, .transport = .{ .ssh = .{ .target = target } } } };
     }
     // do not fall back to the host, the caller asked for an isolate
-    return mod.common.throw(error.RuntimeError, "unknown tool runtime: {s}", .{runtime});
+    return common_chat.exception.throw(error.RuntimeError, "unknown tool runtime: {s}", .{runtime});
 }
 
 // -----------------------------------------------------------------------------
@@ -869,7 +866,7 @@ fn globMatchAt(pattern_in: []const u8, str_in: []const u8, depth: usize) bool {
 /// Ports `path_glob_match` (server-tools.cpp:853 @b1b770d90): no `/` in the pattern
 /// matches the basename at any depth; otherwise the full relative path,
 /// anchored with `**/` unless it already is.
-fn pathGlobMatch(a: Allocator, pattern: []const u8, rel_path: []const u8) !bool {
+fn pathGlobMatch(a: std.mem.Allocator, pattern: []const u8, rel_path: []const u8) !bool {
     if (std.mem.findScalar(u8, pattern, '/') == null) return globMatch(pattern, mod.common.pathFilename(rel_path));
     if (std.mem.eql(u8, pattern, "**") or std.mem.startsWith(u8, pattern, "**/") or std.mem.startsWith(u8, pattern, "/")) {
         return globMatch(pattern, rel_path);
@@ -946,7 +943,7 @@ pub const Stream = struct {
         if (chunk.len == 0) return;
         const r = try StreamResult.create();
         r.id = self.id;
-        r.chunk = try gpa.dupe(u8, chunk);
+        r.chunk = try std.heap.c_allocator.dupe(u8, chunk);
         try self.qr.send(r);
     }
 
@@ -979,7 +976,7 @@ pub const Tool = struct {
 
     /// Ports each tool's `get_definition`, `server_mcp_tool`'s
     /// `get_definition` (server-tools.cpp:1823 @b1b770d90) among them.
-    fn getDefinition(self: *const Tool, a: Allocator) !json.Value {
+    fn getDefinition(self: *const Tool, a: std.mem.Allocator) !json.Value {
         const text = switch (self.kind) {
             .read_file => defs.read_file,
             .file_glob_search => defs.file_glob_search,
@@ -1005,7 +1002,7 @@ pub const Tool = struct {
     }
 
     /// Ports `server_tool`'s `to_json` (server-tools.cpp:91 @b1b770d90).
-    fn toJson(self: *const Tool, a: Allocator) !json.Value {
+    fn toJson(self: *const Tool, a: std.mem.Allocator) !json.Value {
         var perms = mod.common.Obj.init(a);
         try perms.put("write", self.permission_write);
         var o = mod.common.Obj.init(a);
@@ -1024,7 +1021,7 @@ pub const Tool = struct {
     /// MCP tools read it.
     ///
     /// Return: allocated by `a`.
-    fn invoke(self: *const Tool, a: Allocator, params: *const json.Value, st: ?*const Stream, should_stop: ?mod.mcp.StopFn) !json.Value {
+    fn invoke(self: *const Tool, a: std.mem.Allocator, params: *const json.Value, st: ?*const Stream, should_stop: ?mod.mcp.StopFn) !json.Value {
         return switch (self.kind) {
             .read_file => invokeReadFile(a, params),
             .file_glob_search => invokeFileGlobSearch(a, params),
@@ -1040,14 +1037,14 @@ pub const Tool = struct {
 };
 
 /// `{"error": msg}`.
-fn errorObj(a: Allocator, msg: []const u8) !json.Value {
+fn errorObj(a: std.mem.Allocator, msg: []const u8) !json.Value {
     var o = mod.common.Obj.init(a);
     try o.put("error", msg);
     return o.done();
 }
 
 /// `{"plain_text_response": text}`.
-fn plainText(a: Allocator, text: []const u8) !json.Value {
+fn plainText(a: std.mem.Allocator, text: []const u8) !json.Value {
     var o = mod.common.Obj.init(a);
     try o.put("plain_text_response", text);
     return o.done();
@@ -1061,7 +1058,7 @@ fn atString(params: *const json.Value, key: []const u8) ![]const u8 {
 /// Ports `server_tool_read_file`'s `invoke` (server-tools.cpp:899 @b1b770d90): a
 /// line range, optionally numbered; or, asked by the `x-resp-type` header,
 /// the whole file in base64.
-fn invokeReadFile(a: Allocator, params: *const json.Value) !json.Value {
+fn invokeReadFile(a: std.mem.Allocator, params: *const json.Value) !json.Value {
     const path = try atString(params, "path");
     const start_line = mod.common.jsonValue(params, "start_line", c_int, 1);
     const end_line = mod.common.jsonValue(params, "end_line", c_int, -1); // -1 = no limit
@@ -1120,7 +1117,7 @@ fn invokeReadFile(a: Allocator, params: *const json.Value) !json.Value {
 }
 
 /// Ports `server_tool_file_glob_search`'s `invoke` (server-tools.cpp:1016 @b1b770d90).
-fn invokeFileGlobSearch(a: Allocator, params: *const json.Value) !json.Value {
+fn invokeFileGlobSearch(a: std.mem.Allocator, params: *const json.Value) !json.Value {
     const io = try makeToolsIo(a, params);
 
     const path = try atString(params, "path");
@@ -1191,7 +1188,7 @@ fn invokeFileGlobSearch(a: Allocator, params: *const json.Value) !json.Value {
 /// Ports `server_tool_grep_search`'s `invoke` (server-tools.cpp:1131 @b1b770d90): an
 /// ECMAScript regex (or a literal) over every line of the files under a
 /// path, with context lines.
-fn invokeGrepSearch(a: Allocator, params: *const json.Value) !json.Value {
+fn invokeGrepSearch(a: std.mem.Allocator, params: *const json.Value) !json.Value {
     const path = try atString(params, "path");
     const pat_str = try atString(params, "pattern");
     const include = mod.common.jsonValue(params, "include", []const u8, "**");
@@ -1259,7 +1256,7 @@ fn invokeGrepSearch(a: Allocator, params: *const json.Value) !json.Value {
                 limit_reached = true;
                 break;
             }
-            const found = pattern.trySearch(line, &m) catch |e| return mod.common.throw(error.RuntimeError, "{s}", .{llama.regex.errorText(e)});
+            const found = pattern.trySearch(line, &m) catch |e| return common_chat.exception.throw(error.RuntimeError, "{s}", .{llama.regex.errorText(e)});
             if (!found) continue;
 
             const ii: i64 = @intCast(i);
@@ -1294,7 +1291,7 @@ fn invokeGrepSearch(a: Allocator, params: *const json.Value) !json.Value {
 /// Ports `server_tool_exec_shell_command`'s `invoke` (server-tools.cpp:1274 @b1b770d90):
 /// `sh -c` with a timeout and an output cap; with a stream, each chunk as
 /// it comes and the exit code last.
-fn invokeExecShellCommand(a: Allocator, params: *const json.Value, st: ?*const Stream) !json.Value {
+fn invokeExecShellCommand(a: std.mem.Allocator, params: *const json.Value, st: ?*const Stream) !json.Value {
     const command = try atString(params, "command");
     var timeout = mod.common.jsonValue(params, "timeout", c_int, 10);
     var max_output: usize = @bitCast(@as(isize, mod.common.jsonValue(params, "max_output_size", c_int, @intCast(exec_shell_command_max_output_size))));
@@ -1334,7 +1331,7 @@ fn invokeExecShellCommand(a: Allocator, params: *const json.Value, st: ?*const S
 }
 
 /// Ports `server_tool_write_file`'s `invoke` (server-tools.cpp:1351 @b1b770d90).
-fn invokeWriteFile(a: Allocator, params: *const json.Value) !json.Value {
+fn invokeWriteFile(a: std.mem.Allocator, params: *const json.Value) !json.Value {
     const path = try atString(params, "path");
     const content = try atString(params, "content");
 
@@ -1363,7 +1360,7 @@ const npos = std.math.maxInt(usize);
 
 /// `s.substr(pos, n)`: throws `std::out_of_range` past the end.
 fn substr(s: []const u8, pos: usize, n: usize) ![]const u8 {
-    if (pos > s.len) return mod.common.throw(error.RuntimeError, "basic_string", .{});
+    if (pos > s.len) return common_chat.exception.throw(error.RuntimeError, "basic_string", .{});
     return s[pos..@min(s.len, pos +| n)];
 }
 
@@ -1375,7 +1372,7 @@ fn find(s: []const u8, needle: []const u8) usize {
 /// Ports `server_tool_edit_file`'s `normalize_line_for_fuzzy_match`
 /// (server-tools.cpp:1499 @b1b770d90): trailing whitespace stripped, smart quotes,
 /// dashes and spaces made ASCII.
-fn normalizeLineForFuzzyMatch(a: Allocator, line: []const u8) ![]const u8 {
+fn normalizeLineForFuzzyMatch(a: std.mem.Allocator, line: []const u8) ![]const u8 {
     var end = line.len;
     while (end > 0 and (line[end - 1] == ' ' or line[end - 1] == '\t' or line[end - 1] == '\r')) end -= 1;
     var s: []const u8 = line[0..end];
@@ -1400,7 +1397,7 @@ fn normalizeLineForFuzzyMatch(a: Allocator, line: []const u8) ![]const u8 {
 
 /// Ports `server_tool_edit_file`'s `normalize_for_fuzzy_match` (server-tools.cpp:1541 @b1b770d90):
 /// every line normalized, line count and positions kept.
-fn normalizeForFuzzyMatch(a: Allocator, content: []const u8) ![]const u8 {
+fn normalizeForFuzzyMatch(a: std.mem.Allocator, content: []const u8) ![]const u8 {
     var result: std.ArrayList(u8) = .empty;
     var start: usize = 0;
     while (true) {
@@ -1415,7 +1412,7 @@ fn normalizeForFuzzyMatch(a: Allocator, content: []const u8) ![]const u8 {
 }
 
 /// Ports `server_tool_edit_file`'s `split_lines_with_endings` (server-tools.cpp:1558 @b1b770d90).
-fn splitLinesWithEndings(a: Allocator, content: []const u8) !std.ArrayList([]const u8) {
+fn splitLinesWithEndings(a: std.mem.Allocator, content: []const u8) !std.ArrayList([]const u8) {
     var lines: std.ArrayList([]const u8) = .empty;
     var start: usize = 0;
     while (start < content.len) {
@@ -1433,7 +1430,7 @@ fn splitLinesWithEndings(a: Allocator, content: []const u8) !std.ArrayList([]con
 const LineSpan = struct { start: usize, end: usize };
 
 /// Ports `server_tool_edit_file`'s `get_line_spans` (server-tools.cpp:1578 @b1b770d90).
-fn getLineSpans(a: Allocator, content: []const u8) !std.ArrayList(LineSpan) {
+fn getLineSpans(a: std.mem.Allocator, content: []const u8) !std.ArrayList(LineSpan) {
     var spans: std.ArrayList(LineSpan) = .empty;
     var offset: usize = 0;
     for ((try splitLinesWithEndings(a, content)).items) |line| {
@@ -1458,7 +1455,7 @@ fn countOccurrences(content: []const u8, needle: []const u8) usize {
 
 /// Ports `server_tool_edit_file`'s `apply_replacements` (server-tools.cpp:1607 @b1b770d90):
 /// sorted, non-overlapping replacements applied from the back.
-fn applyReplacements(a: Allocator, content: []const u8, replacements: []const MatchedEdit, offset: usize) ![]const u8 {
+fn applyReplacements(a: std.mem.Allocator, content: []const u8, replacements: []const MatchedEdit, offset: usize) ![]const u8 {
     var result = content;
     var i = replacements.len;
     while (i > 0) {
@@ -1497,7 +1494,7 @@ fn getReplacementLineRange(lines: []const LineSpan, match_index: usize, match_le
 /// Ports `server_tool_edit_file`'s `apply_replacements_preserving_unchanged_lines`
 /// (server-tools.cpp:1648 @b1b770d90): as `apply_replacements`, but untouched
 /// lines come from the original content.
-fn applyReplacementsPreservingUnchangedLines(a: Allocator, original_content: []const u8, base_content: []const u8, replacements: []const MatchedEdit) ![]const u8 {
+fn applyReplacementsPreservingUnchangedLines(a: std.mem.Allocator, original_content: []const u8, base_content: []const u8, replacements: []const MatchedEdit) ![]const u8 {
     const original_lines = (try splitLinesWithEndings(a, original_content)).items;
     const base_lines = (try getLineSpans(a, base_content)).items;
 
@@ -1545,7 +1542,7 @@ fn applyReplacementsPreservingUnchangedLines(a: Allocator, original_content: []c
 /// Ports `server_tool_edit_file`'s `invoke` (server-tools.cpp:1408 @b1b770d90): every
 /// edit matched against the original content, exactly or -- when any one
 /// has no exact match -- after normalizing whitespace and typography.
-fn invokeEditFile(a: Allocator, params: *const json.Value) !json.Value {
+fn invokeEditFile(a: std.mem.Allocator, params: *const json.Value) !json.Value {
     const path = try atString(params, "path");
     const edits_json = try params.at("edits");
 
@@ -1628,7 +1625,7 @@ fn invokeEditFile(a: Allocator, params: *const json.Value) !json.Value {
 
 /// Ports `server_tool_get_info`'s `invoke` (server-tools.cpp:1724 @b1b770d90): `uname
 /// -a` and the working directory.
-fn invokeGetInfo(a: Allocator, params: *const json.Value) !json.Value {
+fn invokeGetInfo(a: std.mem.Allocator, params: *const json.Value) !json.Value {
     const io = try makeToolsIo(a, params);
 
     // inside an isolate, we always use the linux command
@@ -1664,19 +1661,19 @@ pub const StreamResult = struct {
     error_msg: []u8 = &.{},
 
     fn create() !*StreamResult {
-        const r = try gpa.create(StreamResult);
+        const r = try std.heap.c_allocator.create(StreamResult);
         r.* = .{};
         return r;
     }
 
-    pub fn destroy(self: *StreamResult, al: Allocator) void {
+    pub fn destroy(self: *StreamResult, al: std.mem.Allocator) void {
         al.free(self.chunk);
         al.free(self.error_msg);
         al.destroy(self);
     }
 
     /// Ports `server_tool_stream_result`'s `to_json` (server-tools.cpp:1764 @b1b770d90).
-    fn toJson(self: *const StreamResult, a: Allocator) !json.Value {
+    fn toJson(self: *const StreamResult, a: std.mem.Allocator) !json.Value {
         var o = mod.common.Obj.init(a);
         if (!self.done) {
             try o.put("chunk", self.chunk);
@@ -1706,8 +1703,8 @@ const ToolsRes = struct {
     const vtable: mod.http.Res.VTable = .{ .on_complete = mod.http.Res.noComplete, .destroy = destroyRes };
 
     fn create() !*ToolsRes {
-        const self = try gpa.create(ToolsRes);
-        self.* = .{ .base = .{ .arena = std.heap.ArenaAllocator.init(gpa), .vtable = &vtable } };
+        const self = try std.heap.c_allocator.create(ToolsRes);
+        self.* = .{ .base = .{ .arena = std.heap.ArenaAllocator.init(std.heap.c_allocator), .vtable = &vtable } };
         return self;
     }
 
@@ -1718,10 +1715,10 @@ const ToolsRes = struct {
         if (self.qr) |q| q.removeWaitingTaskId(self.id);
         if (self.worker_arena) |wa| {
             wa.deinit();
-            gpa.destroy(wa);
+            std.heap.c_allocator.destroy(wa);
         }
         self.base.arena.deinit();
-        gpa.destroy(self);
+        std.heap.c_allocator.destroy(self);
     }
 };
 
@@ -1741,7 +1738,7 @@ const Runtime = union(enum) {
     /// the runtime string `make_tools_io` takes, once per tool call.
     ///
     /// Return: owned by `a`.
-    fn spec(self: Runtime, a: Allocator) ![]const u8 {
+    fn spec(self: Runtime, a: std.mem.Allocator) ![]const u8 {
         return switch (self) {
             .static => |s| s,
             .container => |c| c.spec(a),
@@ -1750,7 +1747,7 @@ const Runtime = union(enum) {
 
     fn deinit(self: Runtime) void {
         switch (self) {
-            .static => |s| gpa.free(s),
+            .static => |s| std.heap.c_allocator.free(s),
             .container => |c| c.destroy(),
         }
     }
@@ -1769,15 +1766,15 @@ const ContainerRuntime = struct {
     /// Ports `server_tools_container_runtime`'s constructor (server-tools.cpp:1865 @b1b770d90).
     fn create(spec_str: []const u8) !*ContainerRuntime {
         const parsed = ContainerSpec.parse(spec_str) orelse
-            return mod.common.throw(error.RuntimeError, "unknown --tools-runtime option: {s}", .{spec_str});
+            return common_chat.exception.throw(error.RuntimeError, "unknown --tools-runtime option: {s}", .{spec_str});
         if (parsed.arg.len == 0) {
-            return mod.common.throw(error.RuntimeError, "--tools-runtime {s}:<image> requires an image name", .{parsed.bin});
+            return common_chat.exception.throw(error.RuntimeError, "--tools-runtime {s}:<image> requires an image name", .{parsed.bin});
         }
-        const self = try gpa.create(ContainerRuntime);
-        self.* = .{ .bin = parsed.bin, .image = try gpa.dupe(u8, parsed.arg) };
+        const self = try std.heap.c_allocator.create(ContainerRuntime);
+        self.* = .{ .bin = parsed.bin, .image = try std.heap.c_allocator.dupe(u8, parsed.arg) };
         self.spawn() catch |e| {
-            gpa.free(self.image);
-            gpa.destroy(self);
+            std.heap.c_allocator.free(self.image);
+            std.heap.c_allocator.destroy(self);
             return e;
         };
         return self;
@@ -1789,14 +1786,14 @@ const ContainerRuntime = struct {
         self.proc.closeStdin();
         _ = self.proc.join();
         self.proc.deinit();
-        gpa.free(self.container_id);
-        gpa.free(self.image);
-        gpa.destroy(self);
+        std.heap.c_allocator.free(self.container_id);
+        std.heap.c_allocator.free(self.image);
+        std.heap.c_allocator.destroy(self);
     }
 
     /// Ports `server_tools_container_runtime`'s `spec` (server-tools.cpp:1886 @b1b770d90):
     /// respawns a container that died on its own.
-    fn spec(self: *ContainerRuntime, a: Allocator) ![]const u8 {
+    fn spec(self: *ContainerRuntime, a: std.mem.Allocator) ![]const u8 {
         self.mutex.lock();
         defer self.mutex.unlock();
         if (!self.proc.alive()) {
@@ -1817,7 +1814,7 @@ const ContainerRuntime = struct {
         // create() writes over the handle it is given, so the previous one is released first
         _ = self.proc.join();
 
-        var arena = std.heap.ArenaAllocator.init(gpa);
+        var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer arena.deinit();
         const a = arena.allocator();
         // `std::hash<std::thread::id>` is libc++'s `pthread_self()`; any
@@ -1828,7 +1825,7 @@ const ContainerRuntime = struct {
         const args = [_][]const u8{ self.bin, "run", "--rm", "-i", "--cidfile", cidfile, self.image, "sh" };
         const options = stdlib.subproc.option_no_window | stdlib.subproc.option_inherit_environment | stdlib.subproc.option_search_user_path;
         if (!self.proc.create(&args, options, &.{}, null)) {
-            return mod.common.throw(error.RuntimeError, "failed to spawn {s} container for tools runtime (image: {s})", .{ self.bin, self.image });
+            return common_chat.exception.throw(error.RuntimeError, "failed to spawn {s} container for tools runtime (image: {s})", .{ self.bin, self.image });
         }
 
         var cid: []const u8 = "";
@@ -1842,10 +1839,10 @@ const ContainerRuntime = struct {
         _ = stdlib.fs.remove(cidfile);
         if (cid.len == 0) {
             self.proc.terminate();
-            return mod.common.throw(error.RuntimeError, "timed out waiting for {s} container to start (image: {s})", .{ self.bin, self.image });
+            return common_chat.exception.throw(error.RuntimeError, "timed out waiting for {s} container to start (image: {s})", .{ self.bin, self.image });
         }
-        gpa.free(self.container_id);
-        self.container_id = try gpa.dupe(u8, cid);
+        std.heap.c_allocator.free(self.container_id);
+        self.container_id = try std.heap.c_allocator.dupe(u8, cid);
     }
 };
 
@@ -1856,12 +1853,12 @@ fn makeToolsRuntime(spec_str: []const u8) !Runtime {
     if (ContainerSpec.parse(spec_str)) |parsed| {
         if (!parsed.attach) return .{ .container = try ContainerRuntime.create(spec_str) };
     }
-    var arena = std.heap.ArenaAllocator.init(gpa);
+    var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
     defer arena.deinit();
     var params = json.Value.emptyObject();
     try params.set(arena.allocator(), "runtime", try json.Value.initString(arena.allocator(), spec_str));
     _ = try makeToolsIo(arena.allocator(), &params); // nothing to own, just reject a bad spec now
-    return .{ .static = try gpa.dupe(u8, spec_str) };
+    return .{ .static = try std.heap.c_allocator.dupe(u8, spec_str) };
 }
 
 // -----------------------------------------------------------------------------
@@ -1872,12 +1869,12 @@ fn findTool(tools: []const *Tool, name: []const u8, require_stream: bool) !*Tool
     for (tools) |t| {
         if (std.mem.eql(u8, t.name, name)) {
             if (require_stream and !t.support_stream) {
-                return mod.common.throw(error.InvalidArgument, "tool \"{s}\" does not support stream = true", .{name});
+                return common_chat.exception.throw(error.InvalidArgument, "tool \"{s}\" does not support stream = true", .{name});
             }
             return t;
         }
     }
-    return mod.common.throw(error.InvalidArgument, "unknown tool \"{s}\"", .{name});
+    return common_chat.exception.throw(error.InvalidArgument, "unknown tool \"{s}\"", .{name});
 }
 
 /// Ports `build_tools` (server-tools.cpp:1952 @b1b770d90), with each tool's constructor:
@@ -1900,7 +1897,7 @@ fn buildTools() ![7]*Tool {
     };
     var out: [7]*Tool = undefined;
     for (all, 0..) |t, i| {
-        out[i] = try gpa.create(Tool);
+        out[i] = try std.heap.c_allocator.create(Tool);
         out[i].* = t;
     }
     return out;
@@ -1931,7 +1928,7 @@ pub const Tools = struct {
 
     /// Ports `server_tools`'s constructor (server-tools.cpp:1984 @b1b770d90).
     pub fn init() !Tools {
-        return .{ .queue_res = try ResultQueue.init(gpa) };
+        return .{ .queue_res = try ResultQueue.init(std.heap.c_allocator) };
     }
 
     /// Ports `server_tools`'s destructor (server-tools.cpp:1985 @b1b770d90): the runtime's
@@ -1942,11 +1939,11 @@ pub const Tools = struct {
             if (t.def) |*d| {
                 var dd = d.*;
                 mod.mcp.freeDef(&dd);
-                gpa.free(t.name);
+                std.heap.c_allocator.free(t.name);
             }
-            gpa.destroy(t);
+            std.heap.c_allocator.destroy(t);
         }
-        self.tools.deinit(gpa);
+        self.tools.deinit(std.heap.c_allocator);
         self.queue_res.deinit();
     }
 
@@ -1957,12 +1954,12 @@ pub const Tools = struct {
         if (tools_runtime.len != 0) self.runtime = try makeToolsRuntime(tools_runtime);
 
         if (enabled_tools.len != 0) {
-            if (!stdlib.subproc.Subproc.isSupported()) return mod.common.throw(error.RuntimeError, "subprocess is not enabled on this build", .{});
+            if (!stdlib.subproc.Subproc.isSupported()) return common_chat.exception.throw(error.RuntimeError, "subprocess is not enabled on this build", .{});
 
             var all_tools = try buildTools();
             var taken: [7]bool = @splat(false);
             defer for (all_tools, taken) |t, k| {
-                if (!k) gpa.destroy(t);
+                if (!k) std.heap.c_allocator.destroy(t);
             };
 
             // validate that every requested tool is known
@@ -1972,12 +1969,12 @@ pub const Tools = struct {
                 for (all_tools) |t| known = known or std.mem.eql(u8, t.name, name);
                 if (!known) {
                     var names: std.ArrayList(u8) = .empty;
-                    defer names.deinit(gpa);
+                    defer names.deinit(std.heap.c_allocator);
                     for (all_tools, 0..) |t, i| {
-                        if (i != 0) try names.appendSlice(gpa, ", ");
-                        try names.appendSlice(gpa, t.name);
+                        if (i != 0) try names.appendSlice(std.heap.c_allocator, ", ");
+                        try names.appendSlice(std.heap.c_allocator, t.name);
                     }
-                    return mod.common.throw(error.RuntimeError, "unknown tool \"{s}\". available tools: {s}", .{ name, names.items });
+                    return common_chat.exception.throw(error.RuntimeError, "unknown tool \"{s}\". available tools: {s}", .{ name, names.items });
                 }
             }
 
@@ -1986,7 +1983,7 @@ pub const Tools = struct {
                 var enabled = false;
                 for (enabled_tools) |name| enabled = enabled or std.mem.eql(u8, name, t.name) or std.mem.eql(u8, name, "all");
                 if (enabled) {
-                    try self.tools.append(gpa, t);
+                    try self.tools.append(std.heap.c_allocator, t);
                     taken[i] = true;
                 }
             }
@@ -1995,26 +1992,26 @@ pub const Tools = struct {
         // append MCP tools, skipping any that collide with a server tool or another MCP tool of the same "<server>_<tool>" name
         if (!mcp_mgr.empty()) {
             var seen_names: std.StringHashMapUnmanaged(void) = .empty;
-            defer seen_names.deinit(gpa);
-            for (self.tools.items) |t| try seen_names.put(gpa, t.name, {});
+            defer seen_names.deinit(std.heap.c_allocator);
+            for (self.tools.items) |t| try seen_names.put(std.heap.c_allocator, t.name, {});
             var n_added: usize = 0;
             const list = try mcp_mgr.listTools();
-            defer if (list.len != 0) gpa.free(list);
+            defer if (list.len != 0) std.heap.c_allocator.free(list);
             for (list) |*def| {
-                const mcp_name = try std.mem.concat(gpa, u8, &.{ def.server_name, "_", def.name });
+                const mcp_name = try std.mem.concat(std.heap.c_allocator, u8, &.{ def.server_name, "_", def.name });
                 if (seen_names.contains(mcp_name)) {
                     const n = mod.common.dupZ(mcp_name);
                     defer mod.common.freeZ(n);
                     const s = mod.common.dupZ(def.server_name);
                     defer mod.common.freeZ(s);
                     mod.common.srv(.wrn, "setup", "MCP tool \"%s\" from server \"%s\" collides with an existing tool, skipping\n", .{ n, s });
-                    gpa.free(mcp_name);
+                    std.heap.c_allocator.free(mcp_name);
                     mod.mcp.freeDef(def);
                     continue;
                 }
-                try seen_names.put(gpa, mcp_name, {});
+                try seen_names.put(std.heap.c_allocator, mcp_name, {});
                 // Ports `server_mcp_tool`'s constructor (server-tools.cpp:1809 @b1b770d90).
-                const t = try gpa.create(Tool);
+                const t = try std.heap.c_allocator.create(Tool);
                 t.* = .{
                     .name = mcp_name,
                     .display_name = mcp_name,
@@ -2024,7 +2021,7 @@ pub const Tools = struct {
                     .def = def.*,
                     .mcp_mgr = mcp_mgr,
                 };
-                try self.tools.append(gpa, t);
+                try self.tools.append(std.heap.c_allocator, t);
                 n_added += 1;
             }
             if (n_added > 0) mod.common.srv(.inf, "setup", "Added %zu MCP tools\n", .{n_added});
@@ -2045,7 +2042,7 @@ pub const Tools = struct {
     /// `to_json`.
     fn handleGetImpl(ctx: ?*anyopaque, _: *const mod.http.Req) anyerror!*mod.http.Res {
         const self: *Tools = @ptrCast(@alignCast(ctx.?));
-        const res = try mod.http.Res.create(gpa);
+        const res = try mod.http.Res.create(std.heap.c_allocator);
         errdefer res.destroy();
         const a = res.allocator();
         build: {
@@ -2065,7 +2062,7 @@ pub const Tools = struct {
     /// The handlers' `catch (const std::exception & e)`: logged, 500.
     fn serverError(res: *mod.http.Res, e: anyerror) !void {
         const a = res.allocator();
-        const w = mod.common.exception.what(e);
+        const w = common_chat.exception.what(e);
         const wz = try a.dupeSentinel(u8, w, 0);
         mod.common.srv(.err, "operator()", "got exception: %s\n", .{wz.ptr});
         res.status = 500;
@@ -2090,7 +2087,7 @@ pub const Tools = struct {
             },
             error.InvalidArgument => {
                 res.base.status = 404;
-                var v = try mod.common.formatErrorResponse(a, mod.common.what(e), .invalid_request);
+                var v = try mod.common.formatErrorResponse(a, common_chat.exception.what(e), .invalid_request);
                 try res.base.setData(try mod.common.safeJsonToStr(a, &v));
             },
             else => try serverError(&res.base, e),
@@ -2139,8 +2136,8 @@ pub const Tools = struct {
             res.qr = &self.queue_res;
             res.id = id;
 
-            const wa = try gpa.create(std.heap.ArenaAllocator);
-            wa.* = std.heap.ArenaAllocator.init(gpa);
+            const wa = try std.heap.c_allocator.create(std.heap.ArenaAllocator);
+            wa.* = std.heap.ArenaAllocator.init(std.heap.c_allocator);
             res.worker_arena = wa;
             const job = try wa.allocator().create(Worker);
             job.* = .{ .tools = self, .id = id, .req = req, .tool = tool, .params = try params.clone(wa.allocator()), .arena = wa.allocator() };
@@ -2172,7 +2169,7 @@ pub const Tools = struct {
         req: *const mod.http.Req,
         tool: *Tool,
         params: json.Value,
-        arena: Allocator,
+        arena: std.mem.Allocator,
 
         fn alive(ctx: ?*anyopaque) bool {
             const req: *const mod.http.Req = @ptrCast(@alignCast(ctx.?));
@@ -2183,8 +2180,8 @@ pub const Tools = struct {
             const st: Stream = .{ .qr = &self.tools.queue_res, .id = self.id, .alive = .{ .ctx = @constCast(self.req), .f = alive } };
             const done = StreamResult.create() catch return;
             _ = self.tool.invoke(self.arena, &self.params, &st, .{ .ctx = @constCast(self.req), .f = reqShouldStop }) catch |e| {
-                done.error_msg = gpa.dupe(u8, if (e == error.JsonError or e == error.RuntimeError or e == error.InvalidArgument or e == error.OutOfMemory)
-                    mod.common.exception.what(e)
+                done.error_msg = std.heap.c_allocator.dupe(u8, if (e == error.JsonError or e == error.RuntimeError or e == error.InvalidArgument or e == error.OutOfMemory)
+                    common_chat.exception.what(e)
                 else
                     "An unknown error occurred") catch &.{};
             };
@@ -2201,14 +2198,14 @@ pub const Tools = struct {
         tools: *Tools,
         id: i32,
 
-        fn call(ctx: ?*anyopaque, out: *std.ArrayList(u8), al: Allocator) anyerror!bool {
+        fn call(ctx: ?*anyopaque, out: *std.ArrayList(u8), al: std.mem.Allocator) anyerror!bool {
             const self: *Next = @ptrCast(@alignCast(ctx.?));
-            var ids = try mod.queue.IdSet.init(gpa);
+            var ids = try mod.queue.IdSet.init(std.heap.c_allocator);
             defer ids.deinit();
             try ids.insert(self.id);
             const result = self.tools.queue_res.recv(&ids);
-            defer result.destroy(gpa);
-            var arena = std.heap.ArenaAllocator.init(gpa);
+            defer result.destroy(std.heap.c_allocator);
+            var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
             defer arena.deinit();
             const v = try result.toJson(arena.allocator());
             try out.appendSlice(al, "data: ");

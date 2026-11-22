@@ -118,12 +118,12 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         const layer = &model.layers[@intCast(il)];
 
         // The text weights, or the image's.
-        var wqkv: *llama.impl.c.ggml_tensor = undefined;
-        var wo: *llama.impl.c.ggml_tensor = undefined;
-        var wo_s: ?*llama.impl.c.ggml_tensor = undefined;
-        var ffn_gate: *llama.impl.c.ggml_tensor = undefined;
-        var ffn_down: *llama.impl.c.ggml_tensor = undefined;
-        var ffn_up: *llama.impl.c.ggml_tensor = undefined;
+        var wqkv: *llama.impl.llama_c.ggml_tensor = undefined;
+        var wo: *llama.impl.llama_c.ggml_tensor = undefined;
+        var wo_s: ?*llama.impl.llama_c.ggml_tensor = undefined;
+        var ffn_gate: *llama.impl.llama_c.ggml_tensor = undefined;
+        var ffn_down: *llama.impl.llama_c.ggml_tensor = undefined;
+        var ffn_up: *llama.impl.llama_c.ggml_tensor = undefined;
 
         if (is_text) {
             wqkv = layer.wqkv.?;
@@ -149,9 +149,9 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             const qkv = b.buildLoraMm(wqkv, cur, null);
 
             // Q, K and V, split from the first dimension.
-            var Qcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, qkv, n_embd_head, b.n_head, b.n_tokens, @as(usize, @intCast(n_embd_head)) * @sizeOf(f32), qkv.nb[1], 0);
-            var Kcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, qkv, n_embd_head, b.n_head_kv, b.n_tokens, @as(usize, @intCast(n_embd_head)) * @sizeOf(f32), qkv.nb[1], @as(usize, @intCast(b.n_embd)) * llama.impl.c.ggml_element_size(qkv));
-            const Vcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, qkv, n_embd_head, b.n_head_kv, b.n_tokens, @as(usize, @intCast(n_embd_head)) * @sizeOf(f32), qkv.nb[1], 2 * @as(usize, @intCast(b.n_embd)) * llama.impl.c.ggml_element_size(qkv));
+            var Qcur: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, qkv, n_embd_head, b.n_head, b.n_tokens, @as(usize, @intCast(n_embd_head)) * @sizeOf(f32), qkv.nb[1], 0);
+            var Kcur: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, qkv, n_embd_head, b.n_head_kv, b.n_tokens, @as(usize, @intCast(n_embd_head)) * @sizeOf(f32), qkv.nb[1], @as(usize, @intCast(b.n_embd)) * llama.impl.llama_c.ggml_element_size(qkv));
+            const Vcur: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, qkv, n_embd_head, b.n_head_kv, b.n_tokens, @as(usize, @intCast(n_embd_head)) * @sizeOf(f32), qkv.nb[1], 2 * @as(usize, @intCast(b.n_embd)) * llama.impl.llama_c.ggml_element_size(qkv));
 
             Qcur = b.buildRope(Qcur, inp_pos, il);
             Kcur = b.buildRope(Kcur, inp_pos, il);
@@ -160,7 +160,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             b.cb(cur, "attn_out", il);
         }
 
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -168,7 +168,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 
         cur = b.buildFfn(cur, ffn_up, null, null, ffn_gate, null, null, ffn_down, null, null, null, .silu, .par, il);
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
         b.cb(cur, "ffn_out", il);
 
         cur = b.buildCvec(cur, il);

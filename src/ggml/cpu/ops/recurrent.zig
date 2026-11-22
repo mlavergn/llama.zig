@@ -43,7 +43,7 @@ const ggml = @import("../../module.zig");
 const stdlib = @import("stdlib");
 
 /// `ggml_barrier(params->threadpool)`; see `common.barrier`.
-inline fn f32Data(t: *const ggml.impl.c.ggml_tensor) [*]f32 {
+inline fn f32Data(t: *const ggml.impl.ggml_c.ggml_tensor) [*]f32 {
     return @ptrCast(@alignCast(t.data.?));
 }
 
@@ -71,9 +71,9 @@ fn headRange(params: *const ggml.cpu.defs.ComputeParams, heads: i64) struct { i6
 /// The scalar remainder writes the same three as `a*b + c` and `+=` and clang
 /// fuses them identically, so one loop over `j` covers both. See the file
 /// header.
-fn rwkvWkv6F32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const src5 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[5]);
+fn rwkvWkv6F32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const src5 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[5]);
 
     const T = src1.ne[2];
     const C = dst.ne[0];
@@ -86,11 +86,11 @@ fn rwkvWkv6F32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggm
 
     const h_start, const h_end = headRange(params, HEADS);
 
-    const k = f32Data(ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]));
+    const k = f32Data(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]));
     const v = f32Data(src1);
-    const r = f32Data(ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]));
-    const time_faaaa = f32Data(ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[3]));
-    const time_decay = f32Data(ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[4]));
+    const r = f32Data(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]));
+    const time_faaaa = f32Data(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[3]));
+    const time_decay = f32Data(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[4]));
 
     const t_stride: usize = @intCast(HEADS * head_size); // Same to C
 
@@ -148,11 +148,11 @@ fn rwkvWkv6F32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggm
 }
 
 /// Ports `ggml_compute_forward_rwkv_wkv6` (ops.cpp:10713 @b1b770d90).
-pub export fn ggml_compute_forward_rwkv_wkv6(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_rwkv_wkv6(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => rwkvWkv6F32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => rwkvWkv6F32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -164,9 +164,9 @@ pub export fn ggml_compute_forward_rwkv_wkv6(params: *const ggml.cpu.defs.Comput
 /// `dst += temp * q` fused. As with `rwkv_wkv6`, the vector body and the
 /// scalar remainder agree element for element. `q` is pre-scaled by
 /// `scale` once per `i`, outside the fused steps.
-fn glaF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const src4 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[4]);
+fn glaF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const src4 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[4]);
 
     const T = src1.ne[2];
     const C = dst.ne[0];
@@ -180,10 +180,10 @@ fn glaF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_ten
 
     const h_start, const h_end = headRange(params, HEADS);
 
-    const k = f32Data(ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]));
+    const k = f32Data(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]));
     const v = f32Data(src1);
-    const q = f32Data(ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]));
-    const g = f32Data(ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[3]));
+    const q = f32Data(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]));
+    const g = f32Data(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[3]));
 
     const t_stride: usize = @intCast(HEADS * head_size); // Same to C
 
@@ -238,11 +238,11 @@ fn glaF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_ten
 }
 
 /// Ports `ggml_compute_forward_gla` (ops.cpp:10914 @b1b770d90).
-pub export fn ggml_compute_forward_gla(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_gla(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => glaF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => glaF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -256,25 +256,25 @@ pub export fn ggml_compute_forward_gla(params: *const ggml.cpu.defs.ComputeParam
 /// (vDSP), `mul_f32`, the NEON `ggml_vec_dot_f32`, and `mad_f32` (fused).
 /// The arithmetic outside those helpers has no multiply feeding an add, so
 /// nothing here is fused beyond what the helpers do.
-fn gatedDeltaNetOneChunk(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor, ir0: i64, ir1: i64) void {
-    const src_q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src_k = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const src_v = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
-    const src_g = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[3]);
-    const src_beta = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[4]);
-    const src_state = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[5]);
+fn gatedDeltaNetOneChunk(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor, ir0: i64, ir1: i64) void {
+    const src_q = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src_k = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const src_v = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]);
+    const src_g = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[3]);
+    const src_beta = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[4]);
+    const src_state = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[5]);
 
     const S_v = src_v.ne[0];
     const H = src_v.ne[1];
     const n_tokens = src_v.ne[2];
     const n_seqs = src_v.ne[3];
 
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous_rows(src_q), "ggml_is_contiguous_rows(src_q)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous_rows(src_k), "ggml_is_contiguous_rows(src_k)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous_rows(src_v), "ggml_is_contiguous_rows(src_v)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(src_g), "ggml_is_contiguous(src_g)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(src_beta), "ggml_is_contiguous(src_beta)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(src_state), "ggml_is_contiguous(src_state)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(src_q), "ggml_is_contiguous_rows(src_q)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(src_k), "ggml_is_contiguous_rows(src_k)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(src_v), "ggml_is_contiguous_rows(src_v)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src_g), "ggml_is_contiguous(src_g)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src_beta), "ggml_is_contiguous(src_beta)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src_state), "ggml_is_contiguous(src_state)");
 
     ggml.impl.assert(src_g.ne[0] == 1 or src_g.ne[0] == S_v, "src_g->ne[0] == 1 || src_g->ne[0] == S_v");
     ggml.impl.assert(src_beta.ne[0] == 1, "src_beta->ne[0] == 1");
@@ -424,8 +424,8 @@ fn gatedDeltaNetOneChunk(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.
 /// Chunked work-stealing over the (head, sequence) rows, four chunks per
 /// thread, through the threadpool's shared chunk counter — the same scheme
 /// `mul_mat` uses.
-fn gatedDeltaNetF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const V = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
+fn gatedDeltaNetF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const V = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]);
     const nr = V.ne[1] * V.ne[3];
 
     // disable for NUMA
@@ -465,11 +465,11 @@ fn gatedDeltaNetF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.
 }
 
 /// Ports `ggml_compute_forward_gated_delta_net` (ops.cpp:11198 @b1b770d90).
-pub export fn ggml_compute_forward_gated_delta_net(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_gated_delta_net(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => gatedDeltaNetF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => gatedDeltaNetF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -508,15 +508,15 @@ fn dsv4HcCombNormRows(comb: *[hc_width * hc_width]f32, eps: f32) void {
 ///
 /// Two fusions: `xv * scale_comb + bv` and `comb * inv_sum + eps`, each one
 /// expression in the C.
-fn dsv4HcCombF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const mixes = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const scale = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const base = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
+fn dsv4HcCombF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const mixes = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const scale = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const base = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]);
 
-    ggml.impl.assert(mixes.type == ggml.impl.c.GGML_TYPE_F32, "mixes->type == GGML_TYPE_F32");
-    ggml.impl.assert(scale.type == ggml.impl.c.GGML_TYPE_F32, "scale->type == GGML_TYPE_F32");
-    ggml.impl.assert(base.type == ggml.impl.c.GGML_TYPE_F32, "base->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(mixes.type == ggml.impl.ggml_c.GGML_TYPE_F32, "mixes->type == GGML_TYPE_F32");
+    ggml.impl.assert(scale.type == ggml.impl.ggml_c.GGML_TYPE_F32, "scale->type == GGML_TYPE_F32");
+    ggml.impl.assert(base.type == ggml.impl.ggml_c.GGML_TYPE_F32, "base->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
 
     const hc = hc_width;
     const comb_offset = 2 * hc;
@@ -604,11 +604,11 @@ fn dsv4HcCombF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.g
 }
 
 /// Ports `ggml_compute_forward_dsv4_hc_comb` (ops.cpp:11337 @b1b770d90).
-pub export fn ggml_compute_forward_dsv4_hc_comb(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_dsv4_hc_comb(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => dsv4HcCombF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => dsv4HcCombF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -618,13 +618,13 @@ pub export fn ggml_compute_forward_dsv4_hc_comb(params: *const ggml.cpu.defs.Com
 /// `sum += xv * wv` is fused, one rounding per step. In the gated form the
 /// weight is `1.0f / (1.0f + libm.expf(-gv))`, rounded on its own before the
 /// fused step; the store is `scale * sum`, rounded.
-fn dsv4HcPreF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const x = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const weights = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+fn dsv4HcPreF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const x = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const weights = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    ggml.impl.assert(x.type == ggml.impl.c.GGML_TYPE_F32, "x->type == GGML_TYPE_F32");
-    ggml.impl.assert(weights.type == ggml.impl.c.GGML_TYPE_F32, "weights->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(x.type == ggml.impl.ggml_c.GGML_TYPE_F32, "x->type == GGML_TYPE_F32");
+    ggml.impl.assert(weights.type == ggml.impl.ggml_c.GGML_TYPE_F32, "weights->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
 
     const n_embd = x.ne[0];
     const hc = x.ne[1];
@@ -683,11 +683,11 @@ fn dsv4HcPreF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.gg
 }
 
 /// Ports `ggml_compute_forward_dsv4_hc_pre` (ops.cpp:11417 @b1b770d90).
-pub export fn ggml_compute_forward_dsv4_hc_pre(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_dsv4_hc_pre(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => dsv4HcPreF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => dsv4HcPreF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -697,16 +697,16 @@ pub export fn ggml_compute_forward_dsv4_hc_pre(params: *const ggml.cpu.defs.Comp
 /// `sum = xv * pv` rounds on its own; each `sum += rv * cv` is fused. A null
 /// `comb` (`src[3]`) is identity mixing: each stream adds its own residual,
 /// a plain add.
-fn dsv4HcPostF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const x = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const residual = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const post = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
-    const comb_opt: ?*ggml.impl.c.ggml_tensor = dst.src[3];
+fn dsv4HcPostF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const x = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const residual = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const post = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]);
+    const comb_opt: ?*ggml.impl.ggml_c.ggml_tensor = dst.src[3];
 
-    ggml.impl.assert(x.type == ggml.impl.c.GGML_TYPE_F32, "x->type == GGML_TYPE_F32");
-    ggml.impl.assert(residual.type == ggml.impl.c.GGML_TYPE_F32, "residual->type == GGML_TYPE_F32");
-    ggml.impl.assert(post.type == ggml.impl.c.GGML_TYPE_F32, "post->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(x.type == ggml.impl.ggml_c.GGML_TYPE_F32, "x->type == GGML_TYPE_F32");
+    ggml.impl.assert(residual.type == ggml.impl.ggml_c.GGML_TYPE_F32, "residual->type == GGML_TYPE_F32");
+    ggml.impl.assert(post.type == ggml.impl.ggml_c.GGML_TYPE_F32, "post->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
 
     const n_embd = x.ne[0];
     const n_tokens = x.ne[1];
@@ -725,7 +725,7 @@ fn dsv4HcPostF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.g
     var nbc1: usize = 0;
     var nbc2: usize = 0;
     if (comb_opt) |comb| {
-        ggml.impl.assert(comb.type == ggml.impl.c.GGML_TYPE_F32, "comb->type == GGML_TYPE_F32");
+        ggml.impl.assert(comb.type == ggml.impl.ggml_c.GGML_TYPE_F32, "comb->type == GGML_TYPE_F32");
         ggml.impl.assert(comb.ne[0] == hc, "comb->ne[0] == hc");
         ggml.impl.assert(comb.ne[1] == hc, "comb->ne[1] == hc");
         ggml.impl.assert(comb.ne[2] == n_tokens, "comb->ne[2] == n_tokens");
@@ -780,11 +780,11 @@ fn dsv4HcPostF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.g
 }
 
 /// Ports `ggml_compute_forward_dsv4_hc_post` (ops.cpp:11511 @b1b770d90).
-pub export fn ggml_compute_forward_dsv4_hc_post(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_dsv4_hc_post(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => dsv4HcPostF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => dsv4HcPostF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -807,9 +807,9 @@ pub export fn ggml_compute_forward_dsv4_hc_post(params: *const ggml.cpu.defs.Com
 /// multiple of it (RWKV7 uses 64). The
 /// remainder loop after them therefore never runs; it is kept, as in the C,
 /// fused as the vector body is.
-fn rwkvWkv7F32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const src6 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[6]);
+fn rwkvWkv7F32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const src6 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[6]);
 
     const T = src1.ne[2];
     const C = dst.ne[0];
@@ -822,12 +822,12 @@ fn rwkvWkv7F32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggm
 
     const h_start, const h_end = headRange(params, HEADS);
 
-    const r = f32Data(ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]));
+    const r = f32Data(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]));
     const w = f32Data(src1);
-    const k = f32Data(ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]));
-    const v = f32Data(ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[3]));
-    const a = f32Data(ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[4]));
-    const b = f32Data(ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[5]));
+    const k = f32Data(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]));
+    const v = f32Data(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[3]));
+    const a = f32Data(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[4]));
+    const b = f32Data(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[5]));
 
     const t_stride = HEADS * head_size; // Same to C
 
@@ -924,11 +924,11 @@ fn rwkvWkv7F32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggm
 }
 
 /// Ports `ggml_compute_forward_rwkv_wkv7` (ops.cpp:11813 @b1b770d90).
-pub export fn ggml_compute_forward_rwkv_wkv7(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_rwkv_wkv7(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => rwkvWkv7F32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => rwkvWkv7F32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }

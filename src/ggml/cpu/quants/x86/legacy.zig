@@ -43,7 +43,7 @@ inline fn ue4m3(x: u8) f32 {
 /// the dot product is a plain sum. A `q1_0` block spans four `q8_0` blocks,
 /// summed into `acc_block` (a multiply, then three fused adds) before the
 /// block's own scale is fused in.
-pub export fn ggml_vec_dot_q1_0_q8_0(
+pub fn ggml_vec_dot_q1_0_q8_0(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -52,8 +52,8 @@ pub export fn ggml_vec_dot_q1_0_q8_0(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    const qk = ggml.impl.c.QK1_0;
+) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK1_0;
     const nb: usize = @intCast(@divTrunc(n, qk));
 
     std.debug.assert(@rem(n, qk) == 0);
@@ -142,7 +142,7 @@ inline fn q2_0_acc_block_avx2(x: *const ggml.quants.blocks.Q2_0, y: [*]const ggm
 /// Two Q2_0 blocks per step, each into its own accumulator (two FMA chains),
 /// an odd final block into the first. The `#else` arm, the generic, is for
 /// x86 without AVX2, which is not a target.
-pub export fn ggml_vec_dot_q2_0_q8_0(
+pub fn ggml_vec_dot_q2_0_q8_0(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -151,8 +151,8 @@ pub export fn ggml_vec_dot_q2_0_q8_0(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    const qk = ggml.impl.c.QK2_0;
+) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK2_0;
     std.debug.assert(@rem(n, qk) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
@@ -178,7 +178,7 @@ pub export fn ggml_vec_dot_q2_0_q8_0(
 
 /// Ports `ggml_vec_dot_q4_0_q8_0` (arch/x86/quants.c:765 @b1b770d90), the
 /// `__AVX2__` arm.
-pub export fn ggml_vec_dot_q4_0_q8_0(
+pub fn ggml_vec_dot_q4_0_q8_0(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -187,8 +187,8 @@ pub export fn ggml_vec_dot_q4_0_q8_0(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    const qk = ggml.impl.c.QK8_0;
+) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK8_0;
     const nb: usize = @intCast(@divTrunc(n, qk));
 
     std.debug.assert(@rem(n, qk) == 0);
@@ -229,7 +229,7 @@ pub export fn ggml_vec_dot_q4_0_q8_0(
 /// The weights are unsigned, so no sign trick: `maddubs` takes them
 /// directly. The minimum comes in through `q8_1`'s precomputed `s`, one
 /// fused `summs += m * s` per block.
-pub export fn ggml_vec_dot_q4_1_q8_1(
+pub fn ggml_vec_dot_q4_1_q8_1(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -238,8 +238,8 @@ pub export fn ggml_vec_dot_q4_1_q8_1(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    const qk = ggml.impl.c.QK8_1;
+) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK8_1;
     const nb: usize = @intCast(@divTrunc(n, qk));
 
     std.debug.assert(@rem(n, qk) == 0);
@@ -286,7 +286,7 @@ pub export fn ggml_vec_dot_q4_1_q8_1(
 /// Two blocks a step into two accumulators, summed only at the end; the
 /// four-bit codes go through `kvalues_mxfp4` with a 16-entry `pshufb`. An
 /// odd last block takes the scalar tail.
-pub export fn ggml_vec_dot_mxfp4_q8_0(
+pub fn ggml_vec_dot_mxfp4_q8_0(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -295,21 +295,21 @@ pub export fn ggml_vec_dot_mxfp4_q8_0(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
+) callconv(.c) void {
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
-    std.debug.assert(@rem(n, ggml.impl.c.QK_MXFP4) == 0);
-    comptime std.debug.assert(ggml.impl.c.QK_MXFP4 == ggml.impl.c.QK8_0);
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_MXFP4) == 0);
+    comptime std.debug.assert(ggml.impl.ggml_c.QK_MXFP4 == ggml.impl.ggml_c.QK8_0);
 
     const x = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.MXFP4, vx);
     const y = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.Q8_0, vy);
 
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK_MXFP4));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK_MXFP4));
 
     var ib: usize = 0;
     var sumf: f32 = 0;
 
-    const values128 = ggml.cpu.quants.arch.avx2.mm_loadu_si128(&ggml.impl.c.kvalues_mxfp4);
+    const values128 = ggml.cpu.quants.arch.avx2.mm_loadu_si128(&ggml.impl.ggml_c.kvalues_mxfp4);
     const m4b = ggml.cpu.quants.arch.avx2.mm_set1_epi8(0x0f);
     const mone = ggml.cpu.quants.arch.avx2.mm256_set1_epi16(1);
 
@@ -345,9 +345,9 @@ pub export fn ggml_vec_dot_mxfp4_q8_0(
         const d = ggml.cpu.quants.arch.common.f(y[ib].d) * e8m0Half(x[ib].e);
         var sumi1: i32 = 0;
         var sumi2: i32 = 0;
-        for (0..ggml.impl.c.QK_MXFP4 / 2) |j| {
-            sumi1 += @as(i32, y[ib].qs[j + 0]) * ggml.impl.c.kvalues_mxfp4[x[ib].qs[j] & 0xf];
-            sumi2 += @as(i32, y[ib].qs[j + ggml.impl.c.QK_MXFP4 / 2]) * ggml.impl.c.kvalues_mxfp4[x[ib].qs[j] >> 4];
+        for (0..ggml.impl.ggml_c.QK_MXFP4 / 2) |j| {
+            sumi1 += @as(i32, y[ib].qs[j + 0]) * ggml.impl.ggml_c.kvalues_mxfp4[x[ib].qs[j] & 0xf];
+            sumi2 += @as(i32, y[ib].qs[j + ggml.impl.ggml_c.QK_MXFP4 / 2]) * ggml.impl.ggml_c.kvalues_mxfp4[x[ib].qs[j] >> 4];
         }
         sumf = @mulAdd(f32, d, @floatFromInt(sumi1 + sumi2), sumf);
     }
@@ -360,7 +360,7 @@ pub export fn ggml_vec_dot_mxfp4_q8_0(
 /// A 64-weight block with four UE4M3 sub-block scales over two `q8_0`
 /// blocks. The nibbles come out of `pshufb` low-then-high per sixteen bytes
 /// and are put back in weight order by the two `unpack`s.
-pub export fn ggml_vec_dot_nvfp4_q8_0(
+pub fn ggml_vec_dot_nvfp4_q8_0(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -369,17 +369,17 @@ pub export fn ggml_vec_dot_nvfp4_q8_0(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
+) callconv(.c) void {
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
-    std.debug.assert(@rem(n, ggml.impl.c.QK_NVFP4) == 0);
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_NVFP4) == 0);
 
     const x = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.NVFP4, vx);
     const y = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.Q8_0, vy);
 
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK_NVFP4));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK_NVFP4));
 
-    const values128 = ggml.cpu.quants.arch.avx2.mm_loadu_si128(&ggml.impl.c.kvalues_mxfp4);
+    const values128 = ggml.cpu.quants.arch.avx2.mm_loadu_si128(&ggml.impl.ggml_c.kvalues_mxfp4);
     const m4b = ggml.cpu.quants.arch.avx2.mm_set1_epi8(0x0f);
     const mone = ggml.cpu.quants.arch.avx2.mm256_set1_epi16(1);
 
@@ -428,7 +428,7 @@ pub export fn ggml_vec_dot_nvfp4_q8_0(
 ///
 /// The fifth bit is folded in as a sign: `andnot` leaves `0xF0` where the
 /// bit is clear, so `qx | bxhi` is the nibble minus 16 as a signed byte.
-pub export fn ggml_vec_dot_q5_0_q8_0(
+pub fn ggml_vec_dot_q5_0_q8_0(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -437,12 +437,12 @@ pub export fn ggml_vec_dot_q5_0_q8_0(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    const qk = ggml.impl.c.QK8_0;
+) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK8_0;
     const nb: usize = @intCast(@divTrunc(n, qk));
 
     std.debug.assert(@rem(n, qk) == 0);
-    comptime std.debug.assert(qk == ggml.impl.c.QK5_0);
+    comptime std.debug.assert(qk == ggml.impl.ggml_c.QK5_0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
@@ -478,7 +478,7 @@ pub export fn ggml_vec_dot_q5_0_q8_0(
 ///
 /// Unsigned five-bit weights, so the fifth bit is OR-ed in as `0x10`.
 /// Note the operand order of the fused accumulate, `q * (dx * dy) + acc`.
-pub export fn ggml_vec_dot_q5_1_q8_1(
+pub fn ggml_vec_dot_q5_1_q8_1(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -487,12 +487,12 @@ pub export fn ggml_vec_dot_q5_1_q8_1(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    const qk = ggml.impl.c.QK8_1;
+) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK8_1;
     const nb: usize = @intCast(@divTrunc(n, qk));
 
     std.debug.assert(@rem(n, qk) == 0);
-    comptime std.debug.assert(qk == ggml.impl.c.QK5_1);
+    comptime std.debug.assert(qk == ggml.impl.ggml_c.QK5_1);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
@@ -528,7 +528,7 @@ pub export fn ggml_vec_dot_q5_1_q8_1(
 
 /// Ports `ggml_vec_dot_q8_0_q8_0` (arch/x86/quants.c:1372 @b1b770d90), the
 /// `__AVX2__` arm.
-pub export fn ggml_vec_dot_q8_0_q8_0(
+pub fn ggml_vec_dot_q8_0_q8_0(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -537,8 +537,8 @@ pub export fn ggml_vec_dot_q8_0_q8_0(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    const qk = ggml.impl.c.QK8_0;
+) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK8_0;
     const nb: usize = @intCast(@divTrunc(n, qk));
 
     std.debug.assert(@rem(n, qk) == 0);
@@ -572,7 +572,7 @@ pub export fn ggml_vec_dot_q8_0_q8_0(
 ///
 /// `mxfp4`'s shape over `kvalues_iq4nl`, with an fp16 delta in place of the
 /// E8M0 exponent.
-pub export fn ggml_vec_dot_iq4_nl_q8_0(
+pub fn ggml_vec_dot_iq4_nl_q8_0(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -581,21 +581,21 @@ pub export fn ggml_vec_dot_iq4_nl_q8_0(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
+) callconv(.c) void {
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
-    std.debug.assert(@rem(n, ggml.impl.c.QK4_NL) == 0);
-    comptime std.debug.assert(ggml.impl.c.QK4_NL == ggml.impl.c.QK8_0);
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK4_NL) == 0);
+    comptime std.debug.assert(ggml.impl.ggml_c.QK4_NL == ggml.impl.ggml_c.QK8_0);
 
     const x = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.IQ4_NL, vx);
     const y = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.Q8_0, vy);
 
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK4_NL));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK4_NL));
 
     var ib: usize = 0;
     var sumf: f32 = 0;
 
-    const values128 = ggml.cpu.quants.arch.avx2.mm_loadu_si128(&ggml.impl.c.kvalues_iq4nl);
+    const values128 = ggml.cpu.quants.arch.avx2.mm_loadu_si128(&ggml.impl.ggml_c.kvalues_iq4nl);
     const m4b = ggml.cpu.quants.arch.avx2.mm_set1_epi8(0x0f);
     const mone = ggml.cpu.quants.arch.avx2.mm256_set1_epi16(1);
 
@@ -628,9 +628,9 @@ pub export fn ggml_vec_dot_iq4_nl_q8_0(
         const d = ggml.cpu.quants.arch.common.f(y[ib].d) * ggml.cpu.quants.arch.common.f(x[ib].d);
         var sumi1: i32 = 0;
         var sumi2: i32 = 0;
-        for (0..ggml.impl.c.QK4_NL / 2) |j| {
-            sumi1 += @as(i32, y[ib].qs[j + 0]) * ggml.impl.c.kvalues_iq4nl[x[ib].qs[j] & 0xf];
-            sumi2 += @as(i32, y[ib].qs[j + ggml.impl.c.QK4_NL / 2]) * ggml.impl.c.kvalues_iq4nl[x[ib].qs[j] >> 4];
+        for (0..ggml.impl.ggml_c.QK4_NL / 2) |j| {
+            sumi1 += @as(i32, y[ib].qs[j + 0]) * ggml.impl.ggml_c.kvalues_iq4nl[x[ib].qs[j] & 0xf];
+            sumi2 += @as(i32, y[ib].qs[j + ggml.impl.ggml_c.QK4_NL / 2]) * ggml.impl.ggml_c.kvalues_iq4nl[x[ib].qs[j] >> 4];
         }
         sumf = @mulAdd(f32, d, @floatFromInt(sumi1 + sumi2), sumf);
     }

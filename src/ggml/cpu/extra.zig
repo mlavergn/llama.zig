@@ -46,10 +46,10 @@ pub const TensorTraits = extern struct {
         ///
         /// The C++ takes `size_t &`; a reference is a pointer in the ABI, so
         /// it is spelled as one here.
-        work_size: *const fn (self: *const TensorTraits, n_threads: c_int, op: *const ggml.impl.c.ggml_tensor, size: *usize) callconv(.c) bool,
+        work_size: *const fn (self: *const TensorTraits, n_threads: c_int, op: *const ggml.impl.ggml_c.ggml_tensor, size: *usize) callconv(.c) bool,
 
         /// `virtual bool compute_forward(ggml_compute_params *, ggml_tensor *)`.
-        compute_forward: *const fn (self: *const TensorTraits, params: *ggml.cpu.defs.ComputeParams, op: *ggml.impl.c.ggml_tensor) callconv(.c) bool,
+        compute_forward: *const fn (self: *const TensorTraits, params: *ggml.cpu.defs.ComputeParams, op: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) bool,
     };
 };
 
@@ -60,10 +60,10 @@ pub const ExtraBufferType = extern struct {
 
     pub const VTable = extern struct {
         /// `virtual bool supports_op(ggml_backend_dev_t, const ggml_tensor *)`.
-        supports_op: *const fn (self: *const ExtraBufferType, dev: ggml.impl.c.ggml_backend_dev_t, op: *const ggml.impl.c.ggml_tensor) callconv(.c) bool,
+        supports_op: *const fn (self: *const ExtraBufferType, dev: ggml.impl.ggml_c.ggml_backend_dev_t, op: *const ggml.impl.ggml_c.ggml_tensor) callconv(.c) bool,
 
         /// `virtual tensor_traits * get_tensor_traits(const ggml_tensor *)`.
-        get_tensor_traits: *const fn (self: *const ExtraBufferType, op: *const ggml.impl.c.ggml_tensor) callconv(.c) ?*const TensorTraits,
+        get_tensor_traits: *const fn (self: *const ExtraBufferType, op: *const ggml.impl.ggml_c.ggml_tensor) callconv(.c) ?*const TensorTraits,
     };
 };
 
@@ -82,7 +82,7 @@ pub const ExtraBufferType = extern struct {
 ///
 /// Return: true when an accelerator claimed the op and has computed it, in
 /// which case the caller skips its own kernel.
-pub export fn ggml_cpu_extra_compute_forward(params: *ggml.cpu.defs.ComputeParams, op: *ggml.impl.c.ggml_tensor) callconv(.c) bool {
+pub fn ggml_cpu_extra_compute_forward(params: *ggml.cpu.defs.ComputeParams, op: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) bool {
     for (ggml.cpu.cpu_backend.getExtraBufferTypes()) |extra| {
         const buft = extra orelse continue;
         const ctx = buft.*.context orelse continue;
@@ -102,7 +102,7 @@ pub export fn ggml_cpu_extra_compute_forward(params: *ggml.cpu.defs.ComputeParam
 /// - `size`: receives the work-buffer bytes the accelerator needs.
 ///
 /// Return: true when an accelerator claimed the op and set `size`.
-pub export fn ggml_cpu_extra_work_size(n_threads: c_int, op: *const ggml.impl.c.ggml_tensor, size: *usize) callconv(.c) bool {
+pub fn ggml_cpu_extra_work_size(n_threads: c_int, op: *const ggml.impl.ggml_c.ggml_tensor, size: *usize) callconv(.c) bool {
     for (ggml.cpu.cpu_backend.getExtraBufferTypes()) |extra| {
         const buft = extra orelse continue;
         const ctx = buft.*.context orelse continue;

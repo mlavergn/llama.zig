@@ -20,18 +20,17 @@
 //! libllama.
 
 const std = @import("std");
+const llama = @import("llama");
 const stdlib = @import("stdlib");
-
-pub const c = @import("llama").impl.c;
 
 /// `GGML_ASSERT`, kept in every build mode as upstream keeps it.
 pub fn ggmlAssert(ok: bool, comptime file: [*:0]const u8, comptime line: c_int, comptime expr: [*:0]const u8) void {
-    if (!ok) _ = c.ggml_abort(file, line, "GGML_ASSERT(%s) failed", expr);
+    if (!ok) _ = llama.impl.llama_c.ggml_abort(file, line, "GGML_ASSERT(%s) failed", expr);
 }
 
 /// `GGML_ABORT(msg)`.
 pub fn abort(comptime file: [*:0]const u8, comptime line: c_int, comptime msg: [*:0]const u8) noreturn {
-    _ = c.ggml_abort(file, line, msg);
+    _ = llama.impl.llama_c.ggml_abort(file, line, msg);
     unreachable;
 }
 
@@ -441,7 +440,7 @@ pub const ImageF32Batch = struct {
 // logging
 
 /// Ports `mtmd_log_callback_default` (mtmd-impl.h:953 @b1b770d90).
-pub fn logCallbackDefault(level: c.enum_ggml_log_level, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
+pub fn logCallbackDefault(level: llama.impl.llama_c.enum_ggml_log_level, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
     _ = level;
     _ = user_data;
     const stderr_ = stdlib.stdio.cStream(.stderr);
@@ -452,7 +451,7 @@ pub fn logCallbackDefault(level: c.enum_ggml_log_level, text: [*c]const u8, user
 /// Ports `mtmd_logger_state` (mtmd-impl.h:960 @b1b770d90) and
 /// `g_logger_state` (mtmd.cpp:3863 @b1b770d90).
 pub const LoggerState = struct {
-    log_callback: c.ggml_log_callback = logCallbackDefault,
+    log_callback: llama.impl.llama_c.ggml_log_callback = logCallbackDefault,
     log_callback_user_data: ?*anyopaque = null,
 };
 
@@ -460,7 +459,7 @@ pub var g_logger_state: LoggerState = .{};
 
 /// Ports `mtmd_log_internal_v` (mtmd-impl.h:967 @b1b770d90): format into
 /// 128 bytes, or a heap buffer when that is too short.
-pub fn logInternal(level: c.enum_ggml_log_level, comptime fmt: [*:0]const u8, args: anytype) void {
+pub fn logInternal(level: llama.impl.llama_c.enum_ggml_log_level, comptime fmt: [*:0]const u8, args: anytype) void {
     var buffer: [128]u8 = undefined;
     const len = @call(.auto, stdlib.libc.snprintf, .{ &buffer, buffer.len, fmt } ++ args);
     const cb = g_logger_state.log_callback orelse return;
@@ -478,27 +477,27 @@ pub fn logInternal(level: c.enum_ggml_log_level, comptime fmt: [*:0]const u8, ar
 
 /// `LOG_DBG` and `LOG_TRC` (mtmd-impl.h:995, 994 @b1b770d90).
 pub fn logDbg(comptime fmt: [*:0]const u8, args: anytype) void {
-    logInternal(c.GGML_LOG_LEVEL_DEBUG, fmt, args);
+    logInternal(llama.impl.llama_c.GGML_LOG_LEVEL_DEBUG, fmt, args);
 }
 
 /// `LOG_INF` (mtmd-impl.h:996 @b1b770d90).
 pub fn logInf(comptime fmt: [*:0]const u8, args: anytype) void {
-    logInternal(c.GGML_LOG_LEVEL_INFO, fmt, args);
+    logInternal(llama.impl.llama_c.GGML_LOG_LEVEL_INFO, fmt, args);
 }
 
 /// `LOG_WRN` (mtmd-impl.h:997 @b1b770d90).
 pub fn logWrn(comptime fmt: [*:0]const u8, args: anytype) void {
-    logInternal(c.GGML_LOG_LEVEL_WARN, fmt, args);
+    logInternal(llama.impl.llama_c.GGML_LOG_LEVEL_WARN, fmt, args);
 }
 
 /// `LOG_ERR` (mtmd-impl.h:998 @b1b770d90).
 pub fn logErr(comptime fmt: [*:0]const u8, args: anytype) void {
-    logInternal(c.GGML_LOG_LEVEL_ERROR, fmt, args);
+    logInternal(llama.impl.llama_c.GGML_LOG_LEVEL_ERROR, fmt, args);
 }
 
 /// `LOG_CNT` (mtmd-impl.h:999 @b1b770d90).
 pub fn logCnt(comptime fmt: [*:0]const u8, args: anytype) void {
-    logInternal(c.GGML_LOG_LEVEL_CONT, fmt, args);
+    logInternal(llama.impl.llama_c.GGML_LOG_LEVEL_CONT, fmt, args);
 }
 
 // -----------------------------------------------------------------------------
@@ -538,45 +537,45 @@ pub fn stringSplitStr(a: std.mem.Allocator, s: []const u8, delimiter: []const u8
 
 /// Ports `gguf_data_to_str` (mtmd-impl.h:1100 @b1b770d90): `std::to_string`
 /// per type, `%f` for the floats.
-pub fn ggufDataToStr(a: std.mem.Allocator, t: c.enum_gguf_type, data: ?*const anyopaque, i: usize) ![:0]u8 {
+pub fn ggufDataToStr(a: std.mem.Allocator, t: llama.impl.llama_c.enum_gguf_type, data: ?*const anyopaque, i: usize) ![:0]u8 {
     return switch (t) {
-        c.GGUF_TYPE_UINT8 => stringFormat(a, "%u", .{@as(c_uint, @as([*]const u8, @ptrCast(data))[i])}),
-        c.GGUF_TYPE_INT8 => stringFormat(a, "%d", .{@as(c_int, @as([*]const i8, @ptrCast(data))[i])}),
-        c.GGUF_TYPE_UINT16 => stringFormat(a, "%u", .{@as(c_uint, @as([*]align(1) const u16, @ptrCast(data))[i])}),
-        c.GGUF_TYPE_INT16 => stringFormat(a, "%d", .{@as(c_int, @as([*]align(1) const i16, @ptrCast(data))[i])}),
-        c.GGUF_TYPE_UINT32 => stringFormat(a, "%u", .{@as([*]align(1) const u32, @ptrCast(data))[i]}),
-        c.GGUF_TYPE_INT32 => stringFormat(a, "%d", .{@as([*]align(1) const i32, @ptrCast(data))[i]}),
-        c.GGUF_TYPE_UINT64 => stringFormat(a, "%llu", .{@as(c_ulonglong, @as([*]align(1) const u64, @ptrCast(data))[i])}),
-        c.GGUF_TYPE_INT64 => stringFormat(a, "%lld", .{@as(c_longlong, @as([*]align(1) const i64, @ptrCast(data))[i])}),
-        c.GGUF_TYPE_FLOAT32 => stringFormat(a, "%f", .{@as(f64, @as([*]align(1) const f32, @ptrCast(data))[i])}),
-        c.GGUF_TYPE_FLOAT64 => stringFormat(a, "%f", .{@as([*]align(1) const f64, @ptrCast(data))[i]}),
-        c.GGUF_TYPE_BOOL => a.dupeSentinel(u8, if (@as([*]const i8, @ptrCast(data))[i] != 0) "true" else "false", 0),
+        llama.impl.llama_c.GGUF_TYPE_UINT8 => stringFormat(a, "%u", .{@as(c_uint, @as([*]const u8, @ptrCast(data))[i])}),
+        llama.impl.llama_c.GGUF_TYPE_INT8 => stringFormat(a, "%d", .{@as(c_int, @as([*]const i8, @ptrCast(data))[i])}),
+        llama.impl.llama_c.GGUF_TYPE_UINT16 => stringFormat(a, "%u", .{@as(c_uint, @as([*]align(1) const u16, @ptrCast(data))[i])}),
+        llama.impl.llama_c.GGUF_TYPE_INT16 => stringFormat(a, "%d", .{@as(c_int, @as([*]align(1) const i16, @ptrCast(data))[i])}),
+        llama.impl.llama_c.GGUF_TYPE_UINT32 => stringFormat(a, "%u", .{@as([*]align(1) const u32, @ptrCast(data))[i]}),
+        llama.impl.llama_c.GGUF_TYPE_INT32 => stringFormat(a, "%d", .{@as([*]align(1) const i32, @ptrCast(data))[i]}),
+        llama.impl.llama_c.GGUF_TYPE_UINT64 => stringFormat(a, "%llu", .{@as(c_ulonglong, @as([*]align(1) const u64, @ptrCast(data))[i])}),
+        llama.impl.llama_c.GGUF_TYPE_INT64 => stringFormat(a, "%lld", .{@as(c_longlong, @as([*]align(1) const i64, @ptrCast(data))[i])}),
+        llama.impl.llama_c.GGUF_TYPE_FLOAT32 => stringFormat(a, "%f", .{@as(f64, @as([*]align(1) const f32, @ptrCast(data))[i])}),
+        llama.impl.llama_c.GGUF_TYPE_FLOAT64 => stringFormat(a, "%f", .{@as([*]align(1) const f64, @ptrCast(data))[i]}),
+        llama.impl.llama_c.GGUF_TYPE_BOOL => a.dupeSentinel(u8, if (@as([*]const i8, @ptrCast(data))[i] != 0) "true" else "false", 0),
         else => stringFormat(a, "unknown type %d", .{@as(c_int, @intCast(t))}),
     };
 }
 
 /// Ports `gguf_kv_to_str` (mtmd-impl.h:1117 @b1b770d90).
-pub fn ggufKvToStr(a: std.mem.Allocator, ctx_gguf: ?*const c.gguf_context, i: i64) ![:0]u8 {
-    const t = c.gguf_get_kv_type(ctx_gguf, i);
+pub fn ggufKvToStr(a: std.mem.Allocator, ctx_gguf: ?*const llama.impl.llama_c.gguf_context, i: i64) ![:0]u8 {
+    const t = llama.impl.llama_c.gguf_get_kv_type(ctx_gguf, i);
     switch (t) {
-        c.GGUF_TYPE_STRING => return a.dupeSentinel(u8, std.mem.span(c.gguf_get_val_str(ctx_gguf, i)), 0),
-        c.GGUF_TYPE_ARRAY => {
-            const arr_type = c.gguf_get_arr_type(ctx_gguf, i);
-            const arr_n: c_int = @intCast(c.gguf_get_arr_n(ctx_gguf, i));
-            const data: ?*const anyopaque = if (arr_type == c.GGUF_TYPE_STRING) null else c.gguf_get_arr_data(ctx_gguf, i);
+        llama.impl.llama_c.GGUF_TYPE_STRING => return a.dupeSentinel(u8, std.mem.span(llama.impl.llama_c.gguf_get_val_str(ctx_gguf, i)), 0),
+        llama.impl.llama_c.GGUF_TYPE_ARRAY => {
+            const arr_type = llama.impl.llama_c.gguf_get_arr_type(ctx_gguf, i);
+            const arr_n: c_int = @intCast(llama.impl.llama_c.gguf_get_arr_n(ctx_gguf, i));
+            const data: ?*const anyopaque = if (arr_type == llama.impl.llama_c.GGUF_TYPE_STRING) null else llama.impl.llama_c.gguf_get_arr_data(ctx_gguf, i);
             var ss: std.ArrayList(u8) = .empty;
             try ss.append(a, '[');
             var j: c_int = 0;
             while (j < arr_n) : (j += 1) {
-                if (arr_type == c.GGUF_TYPE_STRING) {
-                    const v0 = std.mem.span(c.gguf_get_arr_str(ctx_gguf, i, @intCast(j)));
+                if (arr_type == llama.impl.llama_c.GGUF_TYPE_STRING) {
+                    const v0 = std.mem.span(llama.impl.llama_c.gguf_get_arr_str(ctx_gguf, i, @intCast(j)));
                     // escape quotes
                     const v1 = try stringReplaceAll(a, v0, "\\", "\\\\");
                     const v2 = try stringReplaceAll(a, v1, "\"", "\\\"");
                     try ss.append(a, '"');
                     try ss.appendSlice(a, v2);
                     try ss.append(a, '"');
-                } else if (arr_type == c.GGUF_TYPE_ARRAY) {
+                } else if (arr_type == llama.impl.llama_c.GGUF_TYPE_ARRAY) {
                     try ss.appendSlice(a, "???");
                 } else {
                     try ss.appendSlice(a, try ggufDataToStr(a, arr_type, data, @intCast(j)));
@@ -586,7 +585,7 @@ pub fn ggufKvToStr(a: std.mem.Allocator, ctx_gguf: ?*const c.gguf_context, i: i6
             try ss.append(a, ']');
             return a.dupeSentinel(u8, ss.items, 0);
         },
-        else => return ggufDataToStr(a, t, c.gguf_get_val_data(ctx_gguf, i), 0),
+        else => return ggufDataToStr(a, t, llama.impl.llama_c.gguf_get_val_data(ctx_gguf, i), 0),
     }
 }
 

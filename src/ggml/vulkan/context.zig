@@ -83,13 +83,13 @@ pub const BackendCtx = struct {
 
     // Cache most recent tensor that was converted into prealloc_y, and what pipeline it used to convert.
     prealloc_y_last_pipeline_used: ?*ggml.vulkan.pipeline.Pipeline = null,
-    prealloc_y_last_tensor_used: ?*const ggml.impl.c.ggml_tensor = null,
+    prealloc_y_last_tensor_used: ?*const ggml.impl.ggml_c.ggml_tensor = null,
     // True when the K dimension in prealloc_y is padded.
     prealloc_y_last_k_padded: bool = false,
 
     // Track which nodes have been used since the last sync, and whether they were written to
-    unsynced_nodes_written: std.ArrayList(*const ggml.impl.c.ggml_tensor) = .empty,
-    unsynced_nodes_read: std.ArrayList(*const ggml.impl.c.ggml_tensor) = .empty,
+    unsynced_nodes_written: std.ArrayList(*const ggml.impl.ggml_c.ggml_tensor) = .empty,
+    unsynced_nodes_read: std.ArrayList(*const ggml.impl.ggml_c.ggml_tensor) = .empty,
     // Track which prealloc buffers have pending reads that need to be synchronized.
     prealloc_x_need_sync: bool = false,
     prealloc_y_need_sync: bool = false,
@@ -130,7 +130,7 @@ pub const BackendCtx = struct {
     query_pool: ggml.vulkan.common.vk.VkQueryPool = null,
     query_fusion_names: std.ArrayList(?[*:0]const u8) = .empty,
     query_fusion_node_count: std.ArrayList(c_int) = .empty,
-    query_nodes: std.ArrayList(?*ggml.impl.c.ggml_tensor) = .empty,
+    query_nodes: std.ArrayList(?*ggml.impl.ggml_c.ggml_tensor) = .empty,
     query_node_idx: std.ArrayList(c_int) = .empty,
     num_queries: i32 = 0,
     query_idx: i32 = 0,
@@ -246,7 +246,7 @@ pub fn subbuffer(ctx: *const BackendCtx, buf: *ggml.vulkan.buffer.Buffer, offset
 /// a tensor's offset within its Vulkan buffer. `vk_tensor_offset` is
 /// relative to `vk_ptr_base`, but mapped host tensors need an offset
 /// relative to their own buffer.
-pub fn tensorBufferOffset(ctx: *const BackendCtx, t: *const ggml.impl.c.ggml_tensor) usize {
+pub fn tensorBufferOffset(ctx: *const BackendCtx, t: *const ggml.impl.ggml_c.ggml_tensor) usize {
     if (ctx.device.uma) {
         var off: usize = 0;
         if (ggml.vulkan.buffer.hostGet(ctx.device, t.data, &off) != null) return off;
@@ -267,9 +267,9 @@ fn descriptorOffset(tensor_offset: usize, alignment: usize, type_size: usize) us
 }
 
 /// Ports `get_misalign_bytes` (ggml-vulkan.cpp:291 @b1b770d90).
-pub fn getMisalignBytes(ctx: *const BackendCtx, t: *const ggml.impl.c.ggml_tensor) u32 {
+pub fn getMisalignBytes(ctx: *const BackendCtx, t: *const ggml.impl.ggml_c.ggml_tensor) u32 {
     const tensor_offset = tensorBufferOffset(ctx, t);
-    const descriptor_offset = descriptorOffset(tensor_offset, ctx.device.properties.limits.minStorageBufferOffsetAlignment, ggml.impl.c.ggml_type_size(t.type));
+    const descriptor_offset = descriptorOffset(tensor_offset, ctx.device.properties.limits.minStorageBufferOffsetAlignment, ggml.impl.ggml_c.ggml_type_size(t.type));
     ggml.impl.assert(tensor_offset - descriptor_offset <= std.math.maxInt(u32), "tensor_offset - descriptor_offset <= UINT32_MAX");
     return @intCast(tensor_offset - descriptor_offset);
 }
@@ -278,7 +278,7 @@ pub fn getMisalignBytes(ctx: *const BackendCtx, t: *const ggml.impl.c.ggml_tenso
 /// buffer range holding a tensor, its offset moved back to a storage
 /// alignment a whole number of elements before it and its size grown to
 /// match.
-pub fn tensorSubbuffer(ctx: *const BackendCtx, tensor: *const ggml.impl.c.ggml_tensor, allow_misalign: bool) ggml.vulkan.buffer.Subbuffer {
+pub fn tensorSubbuffer(ctx: *const BackendCtx, tensor: *const ggml.impl.ggml_c.ggml_tensor, allow_misalign: bool) ggml.vulkan.buffer.Subbuffer {
     var buffer: ?*ggml.vulkan.buffer.Buffer = null;
     var offset: usize = 0;
     if (ctx.device.uma) buffer = ggml.vulkan.buffer.hostGet(ctx.device, tensor.data, &offset);
@@ -288,8 +288,8 @@ pub fn tensorSubbuffer(ctx: *const BackendCtx, tensor: *const ggml.impl.c.ggml_t
     }
     ggml.impl.assert(buffer != null, "buffer != nullptr");
 
-    var size = ggml.impl.c.ggml_nbytes(tensor);
-    const descriptor_offset = descriptorOffset(offset, ctx.device.properties.limits.minStorageBufferOffsetAlignment, ggml.impl.c.ggml_type_size(tensor.type));
+    var size = ggml.impl.ggml_c.ggml_nbytes(tensor);
+    const descriptor_offset = descriptorOffset(offset, ctx.device.properties.limits.minStorageBufferOffsetAlignment, ggml.impl.ggml_c.ggml_type_size(tensor.type));
     const misalign_bytes = offset - descriptor_offset;
     // The shader must support misaligned offsets when indexing into the buffer
     ggml.impl.assert(allow_misalign or misalign_bytes == 0, "allow_misalign || misalign_bytes == 0");

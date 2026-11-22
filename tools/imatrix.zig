@@ -30,30 +30,24 @@
 //! outer multiply fused with the add, as clang contracts it.
 
 const std = @import("std");
+const llama = @import("llama");
 const stdlib = @import("stdlib");
-const tc = @import("tools_common");
-
-comptime {
-    // libllama, compiled in (see `build/tools.zig`).
-    _ = @import("llama").lib;
-}
-
-const gpa = std.heap.c_allocator;
+const tools_common = @import("tools_common");
 
 const int_max: c_int = std.math.maxInt(c_int);
 const fnan = std.math.nan(f32);
 
 /// `GGML_ASSERT`, which upstream keeps in every build mode.
 fn ggmlAssert(ok: bool, comptime line: c_int, comptime expr: [*:0]const u8) void {
-    tc.ggml.ggmlAssert(ok, "imatrix.cpp", line, expr);
+    tools_common.ggml.ggmlAssert(ok, "imatrix.cpp", line, expr);
 }
 
 /// `std::stoi` inside `try { ... } catch (...)`: null on either throw.
 fn stoiOr(s: []const u8) ?c_int {
     var buf: [64]u8 = undefined;
     if (s.len >= buf.len) {
-        const z = gpa.dupeSentinel(u8, s, 0) catch return null;
-        defer gpa.free(z);
+        const z = std.heap.c_allocator.dupeSentinel(u8, s, 0) catch return null;
+        defer std.heap.c_allocator.free(z);
         return switch (stdlib.num.stoi(z)) {
             .ok => |v| v,
             else => null,
@@ -70,13 +64,13 @@ fn stoiOr(s: []const u8) ?c_int {
 
 /// Ports `print_usage` (imatrix.cpp:25 @b1b770d90).
 fn printUsage(argv: []const [:0]const u8) void {
-    tc.log.out("\nexample usage:\n", .{});
-    tc.log.out("\n    %s \\\n" ++
+    tools_common.log.out("\nexample usage:\n", .{});
+    tools_common.log.out("\n    %s \\\n" ++
         "       -m model.gguf -f some-text.txt [-o imatrix.gguf] [--output-format {gguf,dat}] [--no-ppl] \\\n" ++
         "       [--process-output] [--nextn] [--model-draft draft.gguf] [--chunk 123] [--save-frequency 0] \\\n" ++
         "       [--output-frequency 10] [--in-file imatrix-prev-0.gguf --in-file imatrix-prev-1.gguf ...] \\\n" ++
         "       [--parse-special] [--show-statistics] [...]\n", .{argv[0].ptr});
-    tc.log.out("\n", .{});
+    tools_common.log.out("\n", .{});
 }
 
 /// Ports `Stats` (imatrix.cpp:35 @b1b770d90).
@@ -127,7 +121,7 @@ const CollectorParams = struct {
     out_file: []const u8 = "",
     prompt_file: []const u8 = "",
 
-    fn of(p: *const tc.params.Params) CollectorParams {
+    fn of(p: *const tools_common.params.Params) CollectorParams {
         return .{
             .n_ctx = p.n_ctx,
             .n_parallel = p.n_parallel,
@@ -173,10 +167,10 @@ const Collector = struct {
     }
 
     /// Ports `collect_imatrix` (imatrix.cpp:560 @b1b770d90), a member of `IMatrixCollector`.
-    fn collect(self: *Collector, t: *tc.c.ggml_tensor, ask: bool) !bool {
+    fn collect(self: *Collector, t: *llama.impl.llama_c.ggml_tensor, ask: bool) !bool {
         const func = "collect_imatrix";
-        const src0: *tc.c.ggml_tensor = t.src[0];
-        const src1: *tc.c.ggml_tensor = t.src[1];
+        const src0: *llama.impl.llama_c.ggml_tensor = t.src[0];
+        const src1: *llama.impl.llama_c.ggml_tensor = t.src[1];
         const wname = filterTensorName(std.mem.sliceTo(&src0.name, 0));
 
         const chunk_size: i32 = @divTrunc(self.params.n_ctx, self.params.n_parallel);
@@ -184,10 +178,10 @@ const Collector = struct {
         // when ask is true, the scheduler wants to know if we are interested in data from this tensor
         // if we return true, a follow-up call will be made with ask=false in which we can do the actual collection
         if (ask) {
-            if (t.op == tc.c.GGML_OP_MUL_MAT_ID) return true; // collect all indirect matrix multiplications
-            if (t.op != tc.c.GGML_OP_MUL_MAT) return false;
+            if (t.op == llama.impl.llama_c.GGML_OP_MUL_MAT_ID) return true; // collect all indirect matrix multiplications
+            if (t.op != llama.impl.llama_c.GGML_OP_MUL_MAT) return false;
             // why are small batches ignored (<16 tokens)?
-            if (src1.ne[1] < 16 or src1.type != tc.c.GGML_TYPE_F32) return false;
+            if (src1.ne[1] < 16 or src1.type != llama.impl.llama_c.GGML_TYPE_F32) return false;
             const is_output = std.mem.eql(u8, wname, "output.weight") or std.mem.eql(u8, wname, "token_embd.weight") or std.mem.eql(u8, wname, "nextn.post_projection.weight");
             const is_nextn = std.mem.eql(u8, wname, "nextn.pre_projection.weight");
             if (!(std.mem.startsWith(u8, wname, "blk.") or (self.params.process_output and is_output) or (self.params.load_mtp and is_nextn))) return false;
@@ -195,63 +189,63 @@ const Collector = struct {
         }
 
         // copy the data from the GPU memory if needed
-        const is_host = tc.c.ggml_backend_buffer_is_host(src1.buffer);
+        const is_host = llama.impl.llama_c.ggml_backend_buffer_is_host(src1.buffer);
 
         if (!is_host) {
-            const src1_nbytes = tc.c.ggml_nbytes(src1);
-            try self.src1_data.resize(gpa, src1_nbytes);
-            tc.c.ggml_backend_tensor_get(src1, self.src1_data.items.ptr, 0, src1_nbytes);
+            const src1_nbytes = llama.impl.llama_c.ggml_nbytes(src1);
+            try self.src1_data.resize(std.heap.c_allocator, src1_nbytes);
+            llama.impl.llama_c.ggml_backend_tensor_get(src1, self.src1_data.items.ptr, 0, src1_nbytes);
         }
 
         const data: [*]const u8 = if (is_host) @ptrCast(src1.data) else self.src1_data.items.ptr;
-        ggmlAssert(src1.nb[0] == tc.c.ggml_element_size(src1), 595, "src1->nb[0] == ggml_element_size(src1)");
+        ggmlAssert(src1.nb[0] == llama.impl.llama_c.ggml_element_size(src1), 595, "src1->nb[0] == ggml_element_size(src1)");
 
         // this has been adapted to the new format of storing merged experts in a single 3d tensor
-        if (t.op == tc.c.GGML_OP_MUL_MAT_ID) {
+        if (t.op == llama.impl.llama_c.GGML_OP_MUL_MAT_ID) {
             //   ids  -> [n_experts_used, n_tokens]
             //   src1 -> [cols, n_expert_used, n_tokens]
-            const ids: *tc.c.ggml_tensor = t.src[2];
+            const ids: *llama.impl.llama_c.ggml_tensor = t.src[2];
             const n_as = src0.ne[2];
             const n_ids = ids.ne[0];
 
             ggmlAssert(ids.ne[1] == src1.ne[2], 610, "ids->ne[1] == src1->ne[2]");
 
             // the extra dimension would need to be stored somewhere to be reflected in the imatrix file
-            if (tc.c.ggml_nrows(src1) != src1.ne[1] * src1.ne[2]) {
-                tc.log.err("%s: tensor has more than 3 dimensions: %.*s", .{ func, @as(c_int, @intCast(wname.len)), wname.ptr });
+            if (llama.impl.llama_c.ggml_nrows(src1) != src1.ne[1] * src1.ne[2]) {
+                tools_common.log.err("%s: tensor has more than 3 dimensions: %.*s", .{ func, @as(c_int, @intCast(wname.len)), wname.ptr });
                 ggmlAssert(false, 615, "false");
             }
 
-            try self.ids.resize(gpa, tc.c.ggml_nbytes(ids));
-            tc.c.ggml_backend_tensor_get(ids, self.ids.items.ptr, 0, tc.c.ggml_nbytes(ids));
+            try self.ids.resize(std.heap.c_allocator, llama.impl.llama_c.ggml_nbytes(ids));
+            llama.impl.llama_c.ggml_backend_tensor_get(ids, self.ids.items.ptr, 0, llama.impl.llama_c.ggml_nbytes(ids));
 
             const e = (try self.stats.getOrPut(wname, .{})).value;
             const nas: usize = @intCast(n_as);
 
             if (e.counts.items.len == 1 and n_as > 1) {
                 // broadcast, when loading an old imatrix
-                try e.counts.appendNTimes(gpa, e.counts.items[0], nas - 1);
+                try e.counts.appendNTimes(std.heap.c_allocator, e.counts.items[0], nas - 1);
             }
             if (e.values.items.len == 0) {
                 try resizeF32(&e.activations, @intCast(src1.ne[0] * n_as));
-                try e.values.appendNTimes(gpa, 0, @intCast(src1.ne[0] * n_as));
-                if (e.counts.items.len < nas) try e.counts.appendNTimes(gpa, 0, nas - e.counts.items.len) else e.counts.shrinkRetainingCapacity(nas);
+                try e.values.appendNTimes(std.heap.c_allocator, 0, @intCast(src1.ne[0] * n_as));
+                if (e.counts.items.len < nas) try e.counts.appendNTimes(std.heap.c_allocator, 0, nas - e.counts.items.len) else e.counts.shrinkRetainingCapacity(nas);
             } else if (e.values.items.len != @as(usize, @intCast(src1.ne[0] * n_as))) {
-                tc.log.err("%s: inconsistent size for %.*s (%d vs %d)\n", .{ func, @as(c_int, @intCast(wname.len)), wname.ptr, @as(c_int, @truncate(@as(i64, @intCast(e.values.items.len)))), @as(c_int, @truncate(src1.ne[0] * n_as)) });
+                tools_common.log.err("%s: inconsistent size for %.*s (%d vs %d)\n", .{ func, @as(c_int, @intCast(wname.len)), wname.ptr, @as(c_int, @truncate(@as(i64, @intCast(e.values.items.len)))), @as(c_int, @truncate(src1.ne[0] * n_as)) });
                 stdlib.stdio.exit(1);
             } else if (e.counts.items.len != nas) {
-                tc.log.err("%s: inconsistent expert count for %.*s (%d vs %d)\n", .{ func, @as(c_int, @intCast(wname.len)), wname.ptr, @as(c_int, @intCast(e.counts.items.len)), @as(c_int, @truncate(n_as)) });
+                tools_common.log.err("%s: inconsistent expert count for %.*s (%d vs %d)\n", .{ func, @as(c_int, @intCast(wname.len)), wname.ptr, @as(c_int, @intCast(e.counts.items.len)), @as(c_int, @truncate(n_as)) });
                 stdlib.stdio.exit(1);
             }
-            tc.log.tmpl(.debug, 2, "%s[%d]: %32.*s, %s, %5d x %5d, %d\n", .{ func, self.last_chunk, @as(c_int, @intCast(wname.len)), wname.ptr, tc.c.ggml_op_name(t.op), @as(c_int, @intCast(src1.ne[0])), @as(c_int, @intCast(src1.ne[2])), @as(c_int, @intCast(src1.type)) });
+            tools_common.log.tmpl(.debug, 2, "%s[%d]: %32.*s, %s, %5d x %5d, %d\n", .{ func, self.last_chunk, @as(c_int, @intCast(wname.len)), wname.ptr, llama.impl.llama_c.ggml_op_name(t.op), @as(c_int, @intCast(src1.ne[0])), @as(c_int, @intCast(src1.ne[2])), @as(c_int, @intCast(src1.type)) });
 
             const ne0: usize = @intCast(src1.ne[0]);
             const n_tokens = src1.ne[2];
             const has_act = e.activations.items.len != 0;
 
             // single pass over the routing ids
-            const touched = try gpa.alloc(u8, nas);
-            defer gpa.free(touched);
+            const touched = try std.heap.c_allocator.alloc(u8, nas);
+            defer std.heap.c_allocator.free(touched);
             @memset(touched, 0);
             var idx: i64 = 0;
             while (idx < n_ids) : (idx += 1) {
@@ -279,7 +273,7 @@ const Collector = struct {
             // check for non-finite values, only checking experts that were routed to and touched
             for (0..nas) |ex| {
                 if (touched[ex] != 0 and !allFinite(e.values.items[ex * ne0 ..][0..ne0])) {
-                    tc.log.err("%s: non-finite values detected in %.*s\n", .{ func, @as(c_int, @intCast(wname.len)), wname.ptr });
+                    tools_common.log.err("%s: non-finite values detected in %.*s\n", .{ func, @as(c_int, @intCast(wname.len)), wname.ptr });
                     stdlib.stdio.exit(1);
                 }
             }
@@ -307,13 +301,13 @@ const Collector = struct {
             }
             if (e.values.items.len == 0) {
                 try resizeF32(&e.activations, @intCast(src1.ne[0] * n_mat));
-                try e.values.appendNTimes(gpa, 0, @intCast(src1.ne[0] * n_mat));
-                if (e.counts.items.len == 0) try e.counts.append(gpa, 0) else e.counts.shrinkRetainingCapacity(1);
+                try e.values.appendNTimes(std.heap.c_allocator, 0, @intCast(src1.ne[0] * n_mat));
+                if (e.counts.items.len == 0) try e.counts.append(std.heap.c_allocator, 0) else e.counts.shrinkRetainingCapacity(1);
             } else if (e.values.items.len != @as(usize, @intCast(src1.ne[0] * n_mat))) {
-                tc.log.err("%s: inconsistent size for %.*s (%d vs %d)\n", .{ func, @as(c_int, @intCast(wname.len)), wname.ptr, @as(c_int, @truncate(@as(i64, @intCast(e.values.items.len)))), @as(c_int, @truncate(src1.ne[0] * n_mat)) });
+                tools_common.log.err("%s: inconsistent size for %.*s (%d vs %d)\n", .{ func, @as(c_int, @intCast(wname.len)), wname.ptr, @as(c_int, @truncate(@as(i64, @intCast(e.values.items.len)))), @as(c_int, @truncate(src1.ne[0] * n_mat)) });
                 stdlib.stdio.exit(1);
             }
-            tc.log.tmpl(.debug, 2, "%s[%d]: %32.*s, %s, %5d x %5d x %5d, %d\n", .{ func, self.last_chunk, @as(c_int, @intCast(wname.len)), wname.ptr, tc.c.ggml_op_name(t.op), @as(c_int, @intCast(src1.ne[0])), @as(c_int, @intCast(src1.ne[1])), @as(c_int, @intCast(src1.ne[2])), @as(c_int, @intCast(src1.type)) });
+            tools_common.log.tmpl(.debug, 2, "%s[%d]: %32.*s, %s, %5d x %5d x %5d, %d\n", .{ func, self.last_chunk, @as(c_int, @intCast(wname.len)), wname.ptr, llama.impl.llama_c.ggml_op_name(t.op), @as(c_int, @intCast(src1.ne[0])), @as(c_int, @intCast(src1.ne[1])), @as(c_int, @intCast(src1.ne[2])), @as(c_int, @intCast(src1.type)) });
 
             const ne0: usize = @intCast(src1.ne[0]);
             const has_act = e.activations.items.len != 0;
@@ -341,14 +335,14 @@ const Collector = struct {
 
             // check for non-finite values
             if (!allFinite(e.values.items)) {
-                tc.log.err("%s: non-finite values detected in %.*s\n", .{ func, @as(c_int, @intCast(wname.len)), wname.ptr });
+                tools_common.log.err("%s: non-finite values detected in %.*s\n", .{ func, @as(c_int, @intCast(wname.len)), wname.ptr });
                 stdlib.stdio.exit(1);
             }
             // only 1 count in practice, except when a tensor is used for both MUL_MAT_ID and MUL_MAT
             const n_counts = e.counts.items.len;
             for (0..n_counts) |i| {
                 const counts = (self.stats.get(wname).?).counts.items;
-                counts[i] += @divTrunc(tc.c.ggml_nrows(src1), n_mat);
+                counts[i] += @divTrunc(llama.impl.llama_c.ggml_nrows(src1), n_mat);
                 const n_chunk = rowsToChunks(counts[i], chunk_size);
                 try self.maybeSave(n_chunk);
             }
@@ -361,17 +355,17 @@ const Collector = struct {
     fn saveLegacy(self: *const Collector, ncall_in: i32) !void {
         const func = "save_imatrix_legacy";
         var fname: std.ArrayList(u8) = .empty;
-        defer fname.deinit(gpa);
-        try fname.appendSlice(gpa, self.params.out_file);
-        if (ncall_in > 0) try fname.print(gpa, ".at_{d}", .{ncall_in});
-        try fname.append(gpa, 0);
+        defer fname.deinit(std.heap.c_allocator);
+        try fname.appendSlice(std.heap.c_allocator, self.params.out_file);
+        if (ncall_in > 0) try fname.print(std.heap.c_allocator, ".at_{d}", .{ncall_in});
+        try fname.append(std.heap.c_allocator, 0);
 
         // warn when writing imatrix entries that do not have full data
         // this can happen with MoE models where some of the experts end up not being exercised by the provided training data
 
         var n_entries: i32 = 0;
         var to_store: std.ArrayList([]const u8) = .empty;
-        defer to_store.deinit(gpa);
+        defer to_store.deinit(std.heap.c_allocator);
 
         var is_first = true; // for printing
         var it = self.stats.iterator();
@@ -385,26 +379,26 @@ const Collector = struct {
             }
 
             if (n_zeros != 0 and is_first) {
-                tc.log.inf("\n", .{});
+                tools_common.log.inf("\n", .{});
                 is_first = false;
             }
 
             if (n_zeros == n_all) {
-                tc.log.wrn("%s: entry '%40.*s' has no data - skipping\n", .{ func, @as(c_int, @intCast(kv.key.len)), kv.key.ptr });
+                tools_common.log.wrn("%s: entry '%40.*s' has no data - skipping\n", .{ func, @as(c_int, @intCast(kv.key.len)), kv.key.ptr });
                 continue;
             }
 
             if (n_zeros > 0) {
                 const pct: f32 = 100.0 * @as(f32, @floatFromInt(n_all - n_zeros)) / @as(f32, @floatFromInt(n_all));
-                tc.log.wrn("%s: entry '%40.*s' has partial data (%.2f%%)\n", .{ func, @as(c_int, @intCast(kv.key.len)), kv.key.ptr, @as(f64, pct) });
+                tools_common.log.wrn("%s: entry '%40.*s' has partial data (%.2f%%)\n", .{ func, @as(c_int, @intCast(kv.key.len)), kv.key.ptr, @as(f64, pct) });
             }
 
             n_entries += 1;
-            try to_store.append(gpa, kv.key);
+            try to_store.append(std.heap.c_allocator, kv.key);
         }
 
         if (to_store.items.len < self.stats.count()) {
-            tc.log.wrn("%s: storing only %zu out of %zu entries\n", .{ func, to_store.items.len, self.stats.count() });
+            tools_common.log.wrn("%s: storing only %zu out of %zu entries\n", .{ func, to_store.items.len, self.stats.count() });
         }
 
         // deterministic tensor name order
@@ -436,8 +430,8 @@ const Collector = struct {
             const nmat: i32 = @intCast(stat.counts.items.len);
             W.int(&out, nval);
             if (nval > 0 and nmat > 0) {
-                const tmp = try gpa.alloc(f32, @intCast(nval));
-                defer gpa.free(tmp);
+                const tmp = try std.heap.c_allocator.alloc(f32, @intCast(nval));
+                defer std.heap.c_allocator.free(tmp);
                 var i: i32 = 0;
                 while (i < nval) : (i += 1) {
                     var count: f32 = @floatFromInt(stat.counts.items[@intCast(@divTrunc(i, @divTrunc(nval, nmat)))]);
@@ -465,8 +459,8 @@ const Collector = struct {
             W.bytes(&out, dataset_file);
         }
 
-        tc.log.tmpl(.none, 1, "\n", .{});
-        tc.log.tmpl(.debug, 1, "%s: stored collected data after %d chunks in %s\n", .{ func, self.last_chunk, fname.items.ptr });
+        tools_common.log.tmpl(.none, 1, "\n", .{});
+        tools_common.log.tmpl(.debug, 1, "%s: stored collected data after %d chunks in %s\n", .{ func, self.last_chunk, fname.items.ptr });
     }
 
     /// Ports `save_imatrix` (imatrix.cpp:866 @b1b770d90), a member of `IMatrixCollector`.
@@ -478,23 +472,23 @@ const Collector = struct {
 
         // only warn when `--output-format gguf` is not specified
         if (use_legacy_format == 0 and !std.mem.endsWith(u8, self.params.out_file, ".gguf")) {
-            tc.log.wrn("\n%s: saving imatrix using GGUF format with a different suffix than .gguf\n", .{func});
-            tc.log.wrn("%s: if you want the previous imatrix format, use --output-format dat\n", .{func});
+            tools_common.log.wrn("\n%s: saving imatrix using GGUF format with a different suffix than .gguf\n", .{func});
+            tools_common.log.wrn("%s: if you want the previous imatrix format, use --output-format dat\n", .{func});
         }
 
         var fname: std.ArrayList(u8) = .empty;
-        defer fname.deinit(gpa);
-        try fname.appendSlice(gpa, self.params.out_file);
-        if (n_chunk > 0) try fname.print(gpa, ".at_{d}", .{n_chunk});
-        try fname.append(gpa, 0);
+        defer fname.deinit(std.heap.c_allocator);
+        try fname.appendSlice(std.heap.c_allocator, self.params.out_file);
+        if (n_chunk > 0) try fname.print(std.heap.c_allocator, ".at_{d}", .{n_chunk});
+        try fname.append(std.heap.c_allocator, 0);
 
         // write imatrix entries even if they don't have full data. (can be corrected when reading)
 
         var to_store: std.ArrayList([]const u8) = .empty;
-        defer to_store.deinit(gpa);
+        defer to_store.deinit(std.heap.c_allocator);
         var data_size: usize = 0;
 
-        const overhead = tc.c.ggml_tensor_overhead();
+        const overhead = llama.impl.llama_c.ggml_tensor_overhead();
         var is_first = true; // for printing
         var it = self.stats.iterator();
         while (it.next()) |kv| {
@@ -506,20 +500,20 @@ const Collector = struct {
             }
 
             if (n_zeros != 0 and is_first) {
-                tc.log.inf("\n", .{});
+                tools_common.log.inf("\n", .{});
                 is_first = false;
             }
 
             if (n_zeros > 0) {
                 const pct: f32 = 100.0 * @as(f32, @floatFromInt(n_all - n_zeros)) / @as(f32, @floatFromInt(n_all));
-                tc.log.wrn("%s: entry '%40.*s' has partial data (%.2f%%)\n", .{ func, @as(c_int, @intCast(kv.key.len)), kv.key.ptr, @as(f64, pct) });
+                tools_common.log.wrn("%s: entry '%40.*s' has partial data (%.2f%%)\n", .{ func, @as(c_int, @intCast(kv.key.len)), kv.key.ptr, @as(f64, pct) });
             }
 
-            try to_store.append(gpa, kv.key);
-            data_size += stdlib.num.pad(usize, overhead + @sizeOf(f32) * kv.value.activations.items.len, tc.c.GGML_MEM_ALIGN);
-            data_size += stdlib.num.pad(usize, overhead + @sizeOf(f32) * kv.value.values.items.len, tc.c.GGML_MEM_ALIGN);
-            data_size += stdlib.num.pad(usize, overhead + @sizeOf(f32) * kv.value.counts.items.len, tc.c.GGML_MEM_ALIGN);
-            data_size += stdlib.num.pad(usize, overhead + @sizeOf(f32) * 10, tc.c.GGML_MEM_ALIGN);
+            try to_store.append(std.heap.c_allocator, kv.key);
+            data_size += stdlib.num.pad(usize, overhead + @sizeOf(f32) * kv.value.activations.items.len, llama.impl.llama_c.GGML_MEM_ALIGN);
+            data_size += stdlib.num.pad(usize, overhead + @sizeOf(f32) * kv.value.values.items.len, llama.impl.llama_c.GGML_MEM_ALIGN);
+            data_size += stdlib.num.pad(usize, overhead + @sizeOf(f32) * kv.value.counts.items.len, llama.impl.llama_c.GGML_MEM_ALIGN);
+            data_size += stdlib.num.pad(usize, overhead + @sizeOf(f32) * 10, llama.impl.llama_c.GGML_MEM_ALIGN);
         }
 
         // deterministic tensor name order
@@ -527,34 +521,34 @@ const Collector = struct {
 
         // Compute per-tensor statistics
         var tstats: std.ArrayList(TensorStatistics) = .empty;
-        defer tstats.deinit(gpa);
-        try tstats.ensureTotalCapacity(gpa, self.stats.count());
+        defer tstats.deinit(std.heap.c_allocator);
+        try tstats.ensureTotalCapacity(std.heap.c_allocator, self.stats.count());
         var it2 = self.stats.iterator();
         while (it2.next()) |kv| _ = try computeVectorStatistics(&tstats, kv.key, kv.value);
         if (tstats.items.len != 0) try computeTensorStatistics(tstats.items, &self.stats, nextnLayerStart(tstats.items, self.n_layer_nextn));
 
-        const params: tc.c.ggml_init_params = .{ .mem_size = data_size, .mem_buffer = null, .no_alloc = false };
-        const ctx = tc.c.ggml_init(params);
-        const ctx_gguf = tc.c.gguf_init_empty();
+        const params: llama.impl.llama_c.ggml_init_params = .{ .mem_size = data_size, .mem_buffer = null, .no_alloc = false };
+        const ctx = llama.impl.llama_c.ggml_init(params);
+        const ctx_gguf = llama.impl.llama_c.gguf_init_empty();
 
         {
             var datasets: std.ArrayList([*:0]const u8) = .empty;
-            defer datasets.deinit(gpa);
-            for (self.datasets.items) |d| try datasets.append(gpa, (try gpa.dupeSentinel(u8, d, 0)).ptr);
-            if (self.params.prompt_file.len != 0) try datasets.append(gpa, (try gpa.dupeSentinel(u8, self.params.prompt_file, 0)).ptr);
+            defer datasets.deinit(std.heap.c_allocator);
+            for (self.datasets.items) |d| try datasets.append(std.heap.c_allocator, (try std.heap.c_allocator.dupeSentinel(u8, d, 0)).ptr);
+            if (self.params.prompt_file.len != 0) try datasets.append(std.heap.c_allocator, (try std.heap.c_allocator.dupeSentinel(u8, self.params.prompt_file, 0)).ptr);
 
-            tc.c.gguf_set_val_str(ctx_gguf, "general.type", "imatrix");
+            llama.impl.llama_c.gguf_set_val_str(ctx_gguf, "general.type", "imatrix");
             // Write the dataset paths
-            tc.c.gguf_set_arr_str(ctx_gguf, tc.imatrix_loader.kv_datasets, @ptrCast(datasets.items.ptr), datasets.items.len);
+            llama.impl.llama_c.gguf_set_arr_str(ctx_gguf, tools_common.imatrix_loader.kv_datasets, @ptrCast(datasets.items.ptr), datasets.items.len);
             // Write the number of chunks the matrix was computed with
-            tc.c.gguf_set_val_u32(ctx_gguf, tc.imatrix_loader.kv_chunk_count, @bitCast(self.last_chunk));
-            tc.c.gguf_set_val_u32(ctx_gguf, tc.imatrix_loader.kv_chunk_size, @bitCast(self.eChunkSize()));
+            llama.impl.llama_c.gguf_set_val_u32(ctx_gguf, tools_common.imatrix_loader.kv_chunk_count, @bitCast(self.last_chunk));
+            llama.impl.llama_c.gguf_set_val_u32(ctx_gguf, tools_common.imatrix_loader.kv_chunk_size, @bitCast(self.eChunkSize()));
             // Write how many of the top layers are NextN layers, so statistics can tell them apart
-            if (self.n_layer_nextn > 0) tc.c.gguf_set_val_u32(ctx_gguf, tc.imatrix_loader.kv_n_layer_nextn, @bitCast(self.n_layer_nextn));
+            if (self.n_layer_nextn > 0) llama.impl.llama_c.gguf_set_val_u32(ctx_gguf, tools_common.imatrix_loader.kv_n_layer_nextn, @bitCast(self.n_layer_nextn));
             // Define the schema for the tensor statistics (for use in quantize.cpp)
             const stats_schema = [_][*:0]const u8{ "sum_sq", "mean", "elements", "std_deviation", "skewness", "kurtosis", "gain", "h_norm", "l2_dist", "cossim", "pearson", "covariance" };
-            tc.c.gguf_set_arr_str(ctx_gguf, tc.imatrix_loader.kv_stats_schema, @ptrCast(@constCast(&stats_schema)), 12);
-            for (datasets.items) |d| gpa.free(std.mem.span(d));
+            llama.impl.llama_c.gguf_set_arr_str(ctx_gguf, tools_common.imatrix_loader.kv_stats_schema, @ptrCast(@constCast(&stats_schema)), 12);
+            for (datasets.items) |d| std.heap.c_allocator.free(std.mem.span(d));
         }
 
         for (to_store.items) |name| {
@@ -562,29 +556,29 @@ const Collector = struct {
             const nval: i32 = @intCast(stat.values.items.len);
             const nmat: i32 = @intCast(stat.counts.items.len);
             if (nval > 0 and nmat > 0) {
-                const in_sum2 = tc.c.ggml_new_tensor_2d(ctx, tc.c.GGML_TYPE_F32, @divTrunc(nval, nmat), nmat);
-                const counts = tc.c.ggml_new_tensor_2d(ctx, tc.c.GGML_TYPE_F32, 1, nmat);
-                _ = tc.c.ggml_format_name(in_sum2, "%.*s.in_sum2", @as(c_int, @intCast(name.len)), name.ptr);
-                _ = tc.c.ggml_format_name(counts, "%.*s.counts", @as(c_int, @intCast(name.len)), name.ptr);
+                const in_sum2 = llama.impl.llama_c.ggml_new_tensor_2d(ctx, llama.impl.llama_c.GGML_TYPE_F32, @divTrunc(nval, nmat), nmat);
+                const counts = llama.impl.llama_c.ggml_new_tensor_2d(ctx, llama.impl.llama_c.GGML_TYPE_F32, 1, nmat);
+                _ = llama.impl.llama_c.ggml_format_name(in_sum2, "%.*s.in_sum2", @as(c_int, @intCast(name.len)), name.ptr);
+                _ = llama.impl.llama_c.ggml_format_name(counts, "%.*s.counts", @as(c_int, @intCast(name.len)), name.ptr);
 
                 const sd: [*]f32 = @ptrCast(@alignCast(in_sum2.*.data));
                 for (stat.values.items, 0..) |v, j| sd[j] = v;
                 const cd: [*]f32 = @ptrCast(@alignCast(counts.*.data));
                 for (stat.counts.items, 0..) |v, j| cd[j] = @floatFromInt(v);
 
-                tc.c.gguf_add_tensor(ctx_gguf, in_sum2);
-                tc.c.gguf_add_tensor(ctx_gguf, counts);
+                llama.impl.llama_c.gguf_add_tensor(ctx_gguf, in_sum2);
+                llama.impl.llama_c.gguf_add_tensor(ctx_gguf, counts);
 
                 if (stat.activations.items.len != 0) {
                     const nact: i32 = @intCast(stat.activations.items.len);
-                    const in_sum = tc.c.ggml_new_tensor_2d(ctx, tc.c.GGML_TYPE_F32, @divTrunc(nact, nmat), nmat);
-                    _ = tc.c.ggml_format_name(in_sum, "%.*s.in_sum", @as(c_int, @intCast(name.len)), name.ptr);
+                    const in_sum = llama.impl.llama_c.ggml_new_tensor_2d(ctx, llama.impl.llama_c.GGML_TYPE_F32, @divTrunc(nact, nmat), nmat);
+                    _ = llama.impl.llama_c.ggml_format_name(in_sum, "%.*s.in_sum", @as(c_int, @intCast(name.len)), name.ptr);
                     const ad: [*]f32 = @ptrCast(@alignCast(in_sum.*.data));
                     for (stat.activations.items, 0..) |v, j| ad[j] = v;
-                    tc.c.gguf_add_tensor(ctx_gguf, in_sum);
+                    llama.impl.llama_c.gguf_add_tensor(ctx_gguf, in_sum);
                 }
             } else {
-                tc.log.wrn("%s: no data for tensor %.*s\n", .{ func, @as(c_int, @intCast(name.len)), name.ptr });
+                tools_common.log.wrn("%s: no data for tensor %.*s\n", .{ func, @as(c_int, @intCast(name.len)), name.ptr });
             }
 
             // Store per-tensor statistics as a small 1D tensor
@@ -619,8 +613,8 @@ const Collector = struct {
                     break;
                 }
 
-                const stats = tc.c.ggml_new_tensor_1d(ctx, tc.c.GGML_TYPE_F32, 12);
-                _ = tc.c.ggml_format_name(stats, "%.*s.stats", @as(c_int, @intCast(name.len)), name.ptr);
+                const stats = llama.impl.llama_c.ggml_new_tensor_1d(ctx, llama.impl.llama_c.GGML_TYPE_F32, 12);
+                _ = llama.impl.llama_c.ggml_format_name(stats, "%.*s.stats", @as(c_int, @intCast(name.len)), name.ptr);
                 // Store the statistics in the same order as defined in stats_schema[]
                 const st: [*]f32 = @ptrCast(@alignCast(stats.*.data));
                 st[0] = @floatCast(sum_sq);
@@ -635,24 +629,24 @@ const Collector = struct {
                 st[9] = cossim;
                 st[10] = pearson;
                 st[11] = covariance;
-                tc.c.gguf_add_tensor(ctx_gguf, stats);
+                llama.impl.llama_c.gguf_add_tensor(ctx_gguf, stats);
             }
         }
 
-        _ = tc.c.gguf_write_to_file(ctx_gguf, @ptrCast(fname.items.ptr), false);
+        _ = llama.impl.llama_c.gguf_write_to_file(ctx_gguf, @ptrCast(fname.items.ptr), false);
 
-        tc.log.tmpl(.none, 1, "\n", .{});
-        tc.log.tmpl(.debug, 1, "%s: stored collected data after %d chunks in %s\n", .{ func, self.last_chunk, fname.items.ptr });
+        tools_common.log.tmpl(.none, 1, "\n", .{});
+        tools_common.log.tmpl(.debug, 1, "%s: stored collected data after %d chunks in %s\n", .{ func, self.last_chunk, fname.items.ptr });
 
-        tc.c.gguf_free(ctx_gguf);
-        tc.c.ggml_free(ctx);
+        llama.impl.llama_c.gguf_free(ctx_gguf);
+        llama.impl.llama_c.ggml_free(ctx);
     }
 
     /// Ports `load_imatrix` (imatrix.cpp:1057 @b1b770d90), a member of `IMatrixCollector`.
     fn load(self: *Collector, a: std.mem.Allocator, file_name: [:0]const u8) !bool {
         const func = "load_imatrix";
-        var loaded = try tc.imatrix_loader.Imatrix.init(a);
-        if (!try tc.imatrix_loader.load(file_name, &loaded)) return false;
+        var loaded = try tools_common.imatrix_loader.Imatrix.init(a);
+        if (!try tools_common.imatrix_loader.load(file_name, &loaded)) return false;
 
         const is_legacy = loaded.is_legacy;
         const loaded_nextn: i32 = loaded.n_layer_nextn;
@@ -660,7 +654,7 @@ const Collector = struct {
             if (self.n_layer_nextn == 0) {
                 self.n_layer_nextn = loaded_nextn;
             } else if (self.n_layer_nextn != loaded_nextn) {
-                tc.log.wrn("%s: NextN layer count mismatch in %s: %d != %d, using %d\n", .{ func, file_name.ptr, loaded_nextn, self.n_layer_nextn, self.n_layer_nextn });
+                tools_common.log.wrn("%s: NextN layer count mismatch in %s: %d != %d, using %d\n", .{ func, file_name.ptr, loaded_nextn, self.n_layer_nextn, self.n_layer_nextn });
             }
         }
 
@@ -668,7 +662,7 @@ const Collector = struct {
             if (self.chunk_size == 0) {
                 self.chunk_size = loaded.chunk_size;
             } else if (self.chunk_size != loaded.chunk_size) {
-                tc.log.wrn("%s: chunk size mismatch in %s: %d != %d, using %d\n", .{ func, file_name.ptr, loaded.chunk_size, self.chunk_size, self.chunk_size });
+                tools_common.log.wrn("%s: chunk size mismatch in %s: %d != %d, using %d\n", .{ func, file_name.ptr, loaded.chunk_size, self.chunk_size, self.chunk_size });
             }
         }
 
@@ -682,8 +676,8 @@ const Collector = struct {
 
             if (is_legacy) {
                 if (e.values.items.len == 0) {
-                    try e.values.appendNTimes(gpa, 0, entry.sums.items.len);
-                    if (e.counts.items.len == 0) try e.counts.append(gpa, 0) else e.counts.shrinkRetainingCapacity(1);
+                    try e.values.appendNTimes(std.heap.c_allocator, 0, entry.sums.items.len);
+                    if (e.counts.items.len == 0) try e.counts.append(std.heap.c_allocator, 0) else e.counts.shrinkRetainingCapacity(1);
                 }
                 for (entry.sums.items, 0..) |s, j| e.values.items[j] = @mulAdd(f32, s, @floatFromInt(chunk_size), e.values.items[j]);
                 for (e.counts.items) |*cnt| cnt.* += entry.counts.items[0] * chunk_size;
@@ -697,18 +691,18 @@ const Collector = struct {
                 const first_contribution = e.values.items.len == 0;
 
                 if (e.values.items.len == 0) {
-                    try e.values.appendNTimes(gpa, 0, nval);
+                    try e.values.appendNTimes(std.heap.c_allocator, 0, nval);
                 } else if (nval != e.values.items.len) {
-                    tc.log.err("%s: mismatched sums size for %.*s: %zu != %zu\n", .{ func, @as(c_int, @intCast(name.len)), name.ptr, nval, e.values.items.len });
+                    tools_common.log.err("%s: mismatched sums size for %.*s: %zu != %zu\n", .{ func, @as(c_int, @intCast(name.len)), name.ptr, nval, e.values.items.len });
                     return false;
                 }
 
                 if (e.counts.items.len == 0) {
-                    try e.counts.appendNTimes(gpa, 0, ncounts);
+                    try e.counts.appendNTimes(std.heap.c_allocator, 0, ncounts);
                 } else if (e.counts.items.len == 1 and ncounts > 1) {
-                    try e.counts.appendNTimes(gpa, e.counts.items[0], ncounts - 1);
+                    try e.counts.appendNTimes(std.heap.c_allocator, e.counts.items[0], ncounts - 1);
                 } else if (ncounts != e.counts.items.len) {
-                    tc.log.err("%s: mismatched counts size for %.*s: %zu != %zu\n", .{ func, @as(c_int, @intCast(name.len)), name.ptr, ncounts, e.counts.items.len });
+                    tools_common.log.err("%s: mismatched counts size for %.*s: %zu != %zu\n", .{ func, @as(c_int, @intCast(name.len)), name.ptr, ncounts, e.counts.items.len });
                     return false;
                 }
 
@@ -717,14 +711,14 @@ const Collector = struct {
 
                 if (nact > 0 and (first_contribution or e.activations.items.len != 0)) {
                     if (nact != nval) {
-                        tc.log.err("%s: mismatched activations size for %.*s: %zu != %zu\n", .{ func, @as(c_int, @intCast(name.len)), name.ptr, nact, nval });
+                        tools_common.log.err("%s: mismatched activations size for %.*s: %zu != %zu\n", .{ func, @as(c_int, @intCast(name.len)), name.ptr, nact, nval });
                         return false;
                     }
 
                     if (e.activations.items.len == 0) {
                         try resizeF32(&e.activations, nact);
                     } else if (nact != e.activations.items.len) {
-                        tc.log.err("%s: mismatched activations size for %.*s: %zu != %zu\n", .{ func, @as(c_int, @intCast(name.len)), name.ptr, nact, e.activations.items.len });
+                        tools_common.log.err("%s: mismatched activations size for %.*s: %zu != %zu\n", .{ func, @as(c_int, @intCast(name.len)), name.ptr, nact, e.activations.items.len });
                         return false;
                     }
 
@@ -735,7 +729,7 @@ const Collector = struct {
             }
         }
 
-        for (loaded.datasets.items) |d| try self.datasets.append(gpa, try gpa.dupe(u8, d));
+        for (loaded.datasets.items) |d| try self.datasets.append(std.heap.c_allocator, try std.heap.c_allocator.dupe(u8, d));
 
         // Calculate the last chunk count
         var max_count: i64 = 0;
@@ -753,7 +747,7 @@ const Collector = struct {
 /// `v.resize(n, 0)` from empty.
 fn resizeF32(v: *std.ArrayList(f32), n: usize) !void {
     v.clearRetainingCapacity();
-    try v.appendNTimes(gpa, 0, n);
+    try v.appendNTimes(std.heap.c_allocator, 0, n);
 }
 
 /// Ports `filter_tensor_name` (imatrix.cpp:96 @b1b770d90): remove any prefix
@@ -776,12 +770,12 @@ fn processTensorName(input: []const u8, layer: *[]const u8, tensor: *[]const u8,
     buf.clearRetainingCapacity();
 
     var parts: std.ArrayList([]const u8) = .empty;
-    defer parts.deinit(gpa);
+    defer parts.deinit(std.heap.c_allocator);
     // `std::getline(stream, item, '.')`: no empty last item after a final '.'
     var it = std.mem.splitScalar(u8, input, '.');
     while (it.next()) |item| {
         if (it.index == null and item.len == 0) break;
-        parts.append(gpa, item) catch oom();
+        parts.append(std.heap.c_allocator, item) catch oom();
     }
     const name = parts.items;
     for (0..name.len) |i| {
@@ -799,8 +793,8 @@ fn processTensorName(input: []const u8, layer: *[]const u8, tensor: *[]const u8,
                     continue;
                 }
                 if (j == i) break;
-                if (buf.items.len != 0) buf.append(gpa, '.') catch oom();
-                buf.appendSlice(gpa, name[j]) catch oom();
+                if (buf.items.len != 0) buf.append(std.heap.c_allocator, '.') catch oom();
+                buf.appendSlice(std.heap.c_allocator, name[j]) catch oom();
             }
             break;
         }
@@ -812,13 +806,13 @@ fn processTensorName(input: []const u8, layer: *[]const u8, tensor: *[]const u8,
 }
 
 fn oom() noreturn {
-    tc.ggml.oom("imatrix.cpp");
+    tools_common.ggml.oom("imatrix.cpp");
 }
 
 /// The block number of `tensor`, through `process_tensor_name` and `std::stoi`.
 fn tensorBlk(tensor: []const u8) ?c_int {
     var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(gpa);
+    defer buf.deinit(std.heap.c_allocator);
     var layer: []const u8 = "";
     var name: []const u8 = "";
     processTensorName(tensor, &layer, &name, &buf);
@@ -835,7 +829,7 @@ fn computeTensorAverages(tstats: *const Stats, use_activations: bool) ![]f32 {
     if (len == 0 or n_mat == 0 or len % n_mat != 0) return &.{};
 
     const row = len / n_mat;
-    const vec = try gpa.alloc(f32, len);
+    const vec = try std.heap.c_allocator.alloc(f32, len);
     @memset(vec, fnan);
 
     var has_valid = false;
@@ -854,7 +848,7 @@ fn computeTensorAverages(tstats: *const Stats, use_activations: bool) ![]f32 {
     }
 
     if (!has_valid) {
-        gpa.free(vec);
+        std.heap.c_allocator.free(vec);
         return &.{};
     }
 
@@ -869,11 +863,11 @@ fn computeVectorStatistics(tstats: *std.ArrayList(TensorStatistics), name: []con
     const len = if (legacy) e.values.items.len else e.activations.items.len;
 
     if (n_mat == 0 or len == 0 or len % n_mat != 0) {
-        tc.log.err("%s: data size mismatch or empty for tensor %.*s\n", .{ func, @as(c_int, @intCast(name.len)), name.ptr });
+        tools_common.log.err("%s: data size mismatch or empty for tensor %.*s\n", .{ func, @as(c_int, @intCast(name.len)), name.ptr });
         return false;
     }
     if (!legacy and e.values.items.len != len) {
-        tc.log.err("%s: activations/values size mismatch for %.*s\n", .{ func, @as(c_int, @intCast(name.len)), name.ptr });
+        tools_common.log.err("%s: activations/values size mismatch for %.*s\n", .{ func, @as(c_int, @intCast(name.len)), name.ptr });
         return false;
     }
 
@@ -955,7 +949,7 @@ fn computeVectorStatistics(tstats: *std.ArrayList(TensorStatistics), name: []con
         kurtosis = @floatCast(sum_qd_diff / vn / (m2 * m2) - 3.0);
     }
 
-    try tstats.append(gpa, .{
+    try tstats.append(std.heap.c_allocator, .{
         .tensor = name,
         .legacy = legacy,
         .sum = sum,
@@ -981,7 +975,7 @@ fn nextnLayerStart(tstats: []const TensorStatistics, n_layer_nextn: i32) c_int {
     var first: c_int = int_max;
 
     var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(gpa);
+    defer buf.deinit(std.heap.c_allocator);
     for (tstats) |ts| {
         var layer_str: []const u8 = "";
         var name: []const u8 = "";
@@ -1014,14 +1008,14 @@ fn layerLabel(buf: *[32]u8, blk: c_int, nextn_start: c_int) [:0]const u8 {
 fn computeTensorStatistics(tstats: []TensorStatistics, mstats: *const stdlib.libcxx.StringMap(Stats), nextn_start: c_int) !void {
     const func = "compute_tensor_statistics";
     var tensor_map: std.StringHashMapUnmanaged(usize) = .empty;
-    defer tensor_map.deinit(gpa);
-    try tensor_map.ensureTotalCapacity(gpa, @intCast(tstats.len));
+    defer tensor_map.deinit(std.heap.c_allocator);
+    try tensor_map.ensureTotalCapacity(std.heap.c_allocator, @intCast(tstats.len));
     for (tstats, 0..) |ts, i| tensor_map.putAssumeCapacity(ts.tensor, i);
 
     var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(gpa);
+    defer buf.deinit(std.heap.c_allocator);
     var tname: std.ArrayList(u8) = .empty;
-    defer tname.deinit(gpa);
+    defer tname.deinit(std.heap.c_allocator);
 
     for (tstats) |*ts| {
         var layer_str: []const u8 = "";
@@ -1034,8 +1028,8 @@ fn computeTensorStatistics(tstats: []TensorStatistics, mstats: *const stdlib.lib
 
         const blk_first: c_int = if (blk > nextn_start) nextn_start else 0;
         var needle: std.ArrayList(u8) = .empty;
-        defer needle.deinit(gpa);
-        try needle.print(gpa, "blk.{s}", .{layer_str});
+        defer needle.deinit(std.heap.c_allocator);
+        try needle.print(std.heap.c_allocator, "blk.{s}", .{layer_str});
         const blk_start_pos = std.mem.indexOf(u8, ts.tensor, needle.items) orelse continue;
 
         var found: ?usize = null;
@@ -1043,14 +1037,14 @@ fn computeTensorStatistics(tstats: []TensorStatistics, mstats: *const stdlib.lib
         while (prev >= blk_first and found == null) : (prev -= 1) {
             tname.clearRetainingCapacity();
             const end = @min(ts.tensor.len, blk_start_pos + layer_str.len + 4);
-            try tname.appendSlice(gpa, ts.tensor[0..blk_start_pos]);
-            try tname.print(gpa, "blk.{d}", .{prev});
-            try tname.appendSlice(gpa, ts.tensor[end..]);
+            try tname.appendSlice(std.heap.c_allocator, ts.tensor[0..blk_start_pos]);
+            try tname.print(std.heap.c_allocator, "blk.{d}", .{prev});
+            try tname.appendSlice(std.heap.c_allocator, ts.tensor[end..]);
             found = tensor_map.get(tname.items);
         }
 
         const pi = found orelse {
-            tc.log.wrn("%s: no preceding-layer tensor for '%.*s'\n", .{ func, @as(c_int, @intCast(ts.tensor.len)), ts.tensor.ptr });
+            tools_common.log.wrn("%s: no preceding-layer tensor for '%.*s'\n", .{ func, @as(c_int, @intCast(ts.tensor.len)), ts.tensor.ptr });
             continue;
         };
 
@@ -1061,9 +1055,9 @@ fn computeTensorStatistics(tstats: []TensorStatistics, mstats: *const stdlib.lib
         // one side may not have no activation sums so compare both on the energy
         const use_activations = !ts.legacy and !prev_ts.legacy;
         const curr_avg = try computeTensorAverages(curr_e, use_activations);
-        defer if (curr_avg.len != 0) gpa.free(curr_avg);
+        defer if (curr_avg.len != 0) std.heap.c_allocator.free(curr_avg);
         const prev_avg = try computeTensorAverages(prev_e, use_activations);
-        defer if (prev_avg.len != 0) gpa.free(prev_avg);
+        defer if (prev_avg.len != 0) std.heap.c_allocator.free(prev_avg);
 
         if (curr_avg.len == 0 or curr_avg.len != prev_avg.len) continue;
 
@@ -1170,8 +1164,8 @@ const LayerMap = struct {
             self.vals.items[pos] = v;
             return;
         }
-        try self.keys.insert(gpa, pos, k);
-        try self.vals.insert(gpa, pos, v);
+        try self.keys.insert(std.heap.c_allocator, pos, k);
+        try self.vals.insert(std.heap.c_allocator, pos, v);
     }
 
     fn get(self: *const LayerMap, k: c_int) ?f32 {
@@ -1182,8 +1176,8 @@ const LayerMap = struct {
     }
 
     fn deinit(self: *LayerMap) void {
-        self.keys.deinit(gpa);
-        self.vals.deinit(gpa);
+        self.keys.deinit(std.heap.c_allocator);
+        self.vals.deinit(std.heap.c_allocator);
     }
 };
 
@@ -1225,9 +1219,9 @@ const LayerStatistics = struct {
 fn computeLayerStatistics(tstats: []const TensorStatistics, out: *LayerStatistics) !void {
     // `std::map<int, layer_aggregation>`: sorted by layer
     var keys: std.ArrayList(c_int) = .empty;
-    defer keys.deinit(gpa);
+    defer keys.deinit(std.heap.c_allocator);
     var aggs: std.ArrayList(LayerAggregation) = .empty;
-    defer aggs.deinit(gpa);
+    defer aggs.deinit(std.heap.c_allocator);
 
     for (tstats) |ts| {
         const blk: c_int = tensorBlk(ts.tensor) orelse -1;
@@ -1238,8 +1232,8 @@ fn computeLayerStatistics(tstats: []const TensorStatistics, out: *LayerStatistic
         var pos: usize = 0;
         while (pos < keys.items.len and keys.items[pos] < blk) pos += 1;
         if (pos == keys.items.len or keys.items[pos] != blk) {
-            try keys.insert(gpa, pos, blk);
-            try aggs.insert(gpa, pos, .{});
+            try keys.insert(std.heap.c_allocator, pos, blk);
+            try aggs.insert(std.heap.c_allocator, pos, .{});
         }
         const entry = &aggs.items[pos];
         entry.sum_dot_prod += ts.dot_prod;
@@ -1317,7 +1311,7 @@ fn rowsToChunks(n_rows: i64, chunk_size: i32) i32 {
 var g_collector: Collector = undefined;
 
 /// Ports `ik_collect_imatrix` (imatrix.cpp:1161 @b1b770d90).
-fn ikCollectImatrix(t: [*c]tc.c.ggml_tensor, ask: bool, _: ?*anyopaque) callconv(.c) bool {
+fn ikCollectImatrix(t: [*c]llama.impl.llama_c.ggml_tensor, ask: bool, _: ?*anyopaque) callconv(.c) bool {
     return g_collector.collect(t, ask) catch false;
 }
 
@@ -1340,7 +1334,7 @@ fn logSoftmax(n_vocab: usize, logits: [*]const f32, tok: usize) LogSoftmax {
 const LogitsWork = struct {
     n_vocab: usize,
     logits: [*]const f32,
-    tokens: [*]const tc.c.llama_token,
+    tokens: [*]const llama.impl.llama_c.llama_token,
     n_token: usize,
     logit_history: [*]f32,
     prob_history: [*]f32,
@@ -1364,12 +1358,12 @@ const LogitsWork = struct {
 };
 
 /// Ports `process_logits` (imatrix.cpp:1203 @b1b770d90).
-fn processLogits(n_vocab: usize, logits: [*]const f32, tokens: [*]const tc.c.llama_token, n_token: usize, n_workers: usize, nll: *f64, nll2: *f64, logit_history: [*]f32, prob_history: [*]f32) !void {
+fn processLogits(n_vocab: usize, logits: [*]const f32, tokens: [*]const llama.impl.llama_c.llama_token, n_token: usize, n_workers: usize, nll: *f64, nll2: *f64, logit_history: [*]f32, prob_history: [*]f32) !void {
     var work: LogitsWork = .{ .n_vocab = n_vocab, .logits = logits, .tokens = tokens, .n_token = n_token, .logit_history = logit_history, .prob_history = prob_history };
-    const sums = try gpa.alloc([2]f64, n_workers + 1);
-    defer gpa.free(sums);
-    const threads = try gpa.alloc(std.Thread, n_workers);
-    defer gpa.free(threads);
+    const sums = try std.heap.c_allocator.alloc([2]f64, n_workers + 1);
+    defer std.heap.c_allocator.free(sums);
+    const threads = try std.heap.c_allocator.alloc(std.Thread, n_workers);
+    defer std.heap.c_allocator.free(threads);
     for (threads, 0..) |*w, k| w.* = try std.Thread.spawn(.{}, LogitsWork.compute, .{ &work, &sums[k] });
     work.compute(&sums[n_workers]);
     for (threads) |w| w.join();
@@ -1383,22 +1377,22 @@ fn processLogits(n_vocab: usize, logits: [*]const f32, tokens: [*]const tc.c.lla
 /// the trunk's NextN hidden states are decoded through, so the NextN
 /// layers' matrix multiplications reach the collector.
 const NextnCollector = struct {
-    ctx: ?*tc.c.llama_context,
-    batch: tc.common.Batch,
+    ctx: ?*llama.impl.llama_c.llama_context,
+    batch: tools_common.common.Batch,
     n_embd: i32 = 0,
     own_lm_head: bool = false,
     pending_h: std.ArrayList(f32) = .empty,
 
     /// Ports `clear_memory` (imatrix.cpp:1243 @b1b770d90), a member of `nextn_collector`.
     fn clearMemory(self: *NextnCollector) void {
-        tc.c.llama_memory_clear(tc.c.llama_get_memory(self.ctx), true);
+        llama.api.context.llama_memory_clear(llama.api.context.llama_get_memory(self.ctx), true);
         self.pending_h.clearRetainingCapacity(); // a chunk's last h-row has no next token, the trunk restarts at position 0
     }
 
     /// Ports `decode` (imatrix.cpp:1386 @b1b770d90), a member of
     /// `nextn_collector`: each trunk row's NextN hidden state goes in with
     /// the token after it, the last held back for the next batch.
-    fn decode(self: *NextnCollector, ctx_trunk: ?*tc.c.llama_context, batch_trunk: *const tc.common.Batch) !bool {
+    fn decode(self: *NextnCollector, ctx_trunk: ?*llama.impl.llama_c.llama_context, batch_trunk: *const tools_common.common.Batch) !bool {
         const func = "decode";
         const n_embd: usize = @intCast(self.n_embd);
         const n_last = batch_trunk.size() - 1;
@@ -1412,8 +1406,8 @@ const NextnCollector = struct {
         var h_last: ?[*]const f32 = null;
         var i: i32 = 0;
         while (i <= n_last) : (i += 1) {
-            const h = tc.speculative.ext.getEmbeddingsNextnIth(ctx_trunk, i) orelse {
-                tc.log.err("%s: no NextN hidden state for row %d\n", .{ func, i });
+            const h = tools_common.speculative.ext.getEmbeddingsNextnIth(ctx_trunk, i) orelse {
+                tools_common.log.err("%s: no NextN hidden state for row %d\n", .{ func, i });
 
                 return false;
             };
@@ -1429,8 +1423,8 @@ const NextnCollector = struct {
         }
 
         if (self.batch.size() > 0) {
-            if (tc.c.llama_process(self.ctx, tc.c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get()) != 0) {
-                tc.log.err("%s: failed to decode the NextN layer\n", .{func});
+            if (llama.api.context.llama_process(self.ctx, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, self.batch.get()) != 0) {
+                tools_common.log.err("%s: failed to decode the NextN layer\n", .{func});
 
                 return false;
             }
@@ -1438,7 +1432,7 @@ const NextnCollector = struct {
 
         if (h_last) |h| {
             self.pending_h.clearRetainingCapacity();
-            try self.pending_h.appendSlice(gpa, h[0..n_embd]);
+            try self.pending_h.appendSlice(std.heap.c_allocator, h[0..n_embd]);
         }
 
         return true;
@@ -1446,8 +1440,8 @@ const NextnCollector = struct {
 
     fn deinit(self: *NextnCollector) void {
         self.batch.deinit();
-        tc.c.llama_free(self.ctx);
-        self.pending_h.deinit(gpa);
+        llama.api.context.llama_free(self.ctx);
+        self.pending_h.deinit(std.heap.c_allocator);
     }
 };
 
@@ -1465,14 +1459,14 @@ fn nextnReadModelInfo(a: std.mem.Allocator, model_path: []const u8, n_layer: i32
     @memset(info.own_lm_head, false);
 
     const path = try a.dupeSentinel(u8, model_path, 0);
-    const gguf_params: tc.c.gguf_init_params = .{ .no_alloc = true, .ctx = null };
-    const ctx_gguf = tc.c.gguf_init_from_file(path.ptr, gguf_params);
+    const gguf_params: llama.impl.llama_c.gguf_init_params = .{ .no_alloc = true, .ctx = null };
+    const ctx_gguf = llama.impl.llama_c.gguf_init_from_file(path.ptr, gguf_params);
     if (ctx_gguf == null) {
-        tc.log.wrn("%s: cannot read '%s'\n", .{ func, path.ptr });
+        tools_common.log.wrn("%s: cannot read '%s'\n", .{ func, path.ptr });
         return info;
     }
 
-    const n_tensors = tc.c.gguf_get_n_tensors(ctx_gguf);
+    const n_tensors = llama.impl.llama_c.gguf_get_n_tensors(ctx_gguf);
 
     var head: i32 = 0;
     while (head < n_heads) : (head += 1) {
@@ -1480,7 +1474,7 @@ fn nextnReadModelInfo(a: std.mem.Allocator, model_path: []const u8, n_layer: i32
         const lm_head = try std.fmt.allocPrint(a, "{s}shared_head_head.weight", .{prefix});
         var i: i64 = 0;
         while (i < n_tensors) : (i += 1) {
-            const name = std.mem.span(tc.c.gguf_get_tensor_name(ctx_gguf, i));
+            const name = std.mem.span(llama.impl.llama_c.gguf_get_tensor_name(ctx_gguf, i));
             if (!std.mem.startsWith(u8, name, prefix)) continue;
 
             info.has_layers = true;
@@ -1488,7 +1482,7 @@ fn nextnReadModelInfo(a: std.mem.Allocator, model_path: []const u8, n_layer: i32
         }
     }
 
-    tc.c.gguf_free(ctx_gguf);
+    llama.impl.llama_c.gguf_free(ctx_gguf);
 
     return info;
 }
@@ -1522,43 +1516,43 @@ fn modelReadFileShape(a: std.mem.Allocator, model_path: []const u8) !ModelFileSh
     var shape: ModelFileShape = .{};
 
     const path = try a.dupeSentinel(u8, model_path, 0);
-    const gguf_params: tc.c.gguf_init_params = .{ .no_alloc = true, .ctx = null };
-    const ctx_gguf = tc.c.gguf_init_from_file(path.ptr, gguf_params);
+    const gguf_params: llama.impl.llama_c.gguf_init_params = .{ .no_alloc = true, .ctx = null };
+    const ctx_gguf = llama.impl.llama_c.gguf_init_from_file(path.ptr, gguf_params);
     if (ctx_gguf == null) return shape;
     shape.valid = true;
 
-    const arch_key = tc.c.gguf_find_key(ctx_gguf, "general.architecture");
-    if (arch_key >= 0 and tc.c.gguf_get_kv_type(ctx_gguf, arch_key) == tc.c.GGUF_TYPE_STRING) {
-        shape.arch = try a.dupe(u8, std.mem.span(tc.c.gguf_get_val_str(ctx_gguf, arch_key)));
+    const arch_key = llama.impl.llama_c.gguf_find_key(ctx_gguf, "general.architecture");
+    if (arch_key >= 0 and llama.impl.llama_c.gguf_get_kv_type(ctx_gguf, arch_key) == llama.impl.llama_c.GGUF_TYPE_STRING) {
+        shape.arch = try a.dupe(u8, std.mem.span(llama.impl.llama_c.gguf_get_val_str(ctx_gguf, arch_key)));
 
-        const block_key = tc.c.gguf_find_key(ctx_gguf, (try std.fmt.allocPrintSentinel(a, "{s}.block_count", .{shape.arch}, 0)).ptr);
-        if (block_key >= 0 and tc.c.gguf_get_kv_type(ctx_gguf, block_key) == tc.c.GGUF_TYPE_UINT32) {
-            shape.n_layer_all = tc.c.gguf_get_val_u32(ctx_gguf, block_key);
+        const block_key = llama.impl.llama_c.gguf_find_key(ctx_gguf, (try std.fmt.allocPrintSentinel(a, "{s}.block_count", .{shape.arch}, 0)).ptr);
+        if (block_key >= 0 and llama.impl.llama_c.gguf_get_kv_type(ctx_gguf, block_key) == llama.impl.llama_c.GGUF_TYPE_UINT32) {
+            shape.n_layer_all = llama.impl.llama_c.gguf_get_val_u32(ctx_gguf, block_key);
         }
 
-        const nextn_key = tc.c.gguf_find_key(ctx_gguf, (try std.fmt.allocPrintSentinel(a, "{s}.nextn_predict_layers", .{shape.arch}, 0)).ptr);
-        if (nextn_key >= 0 and tc.c.gguf_get_kv_type(ctx_gguf, nextn_key) == tc.c.GGUF_TYPE_UINT32) {
-            shape.n_nextn_layers = tc.c.gguf_get_val_u32(ctx_gguf, nextn_key);
+        const nextn_key = llama.impl.llama_c.gguf_find_key(ctx_gguf, (try std.fmt.allocPrintSentinel(a, "{s}.nextn_predict_layers", .{shape.arch}, 0)).ptr);
+        if (nextn_key >= 0 and llama.impl.llama_c.gguf_get_kv_type(ctx_gguf, nextn_key) == llama.impl.llama_c.GGUF_TYPE_UINT32) {
+            shape.n_nextn_layers = llama.impl.llama_c.gguf_get_val_u32(ctx_gguf, nextn_key);
         }
 
-        const embd_out_key = tc.c.gguf_find_key(ctx_gguf, (try std.fmt.allocPrintSentinel(a, "{s}.embedding_length_out", .{shape.arch}, 0)).ptr);
-        const embd_key = tc.c.gguf_find_key(ctx_gguf, (try std.fmt.allocPrintSentinel(a, "{s}.embedding_length", .{shape.arch}, 0)).ptr);
-        if (embd_out_key >= 0 and tc.c.gguf_get_kv_type(ctx_gguf, embd_out_key) == tc.c.GGUF_TYPE_UINT32) {
-            shape.n_embd_out = tc.c.gguf_get_val_u32(ctx_gguf, embd_out_key);
-        } else if (embd_key >= 0 and tc.c.gguf_get_kv_type(ctx_gguf, embd_key) == tc.c.GGUF_TYPE_UINT32) {
-            shape.n_embd_out = tc.c.gguf_get_val_u32(ctx_gguf, embd_key);
+        const embd_out_key = llama.impl.llama_c.gguf_find_key(ctx_gguf, (try std.fmt.allocPrintSentinel(a, "{s}.embedding_length_out", .{shape.arch}, 0)).ptr);
+        const embd_key = llama.impl.llama_c.gguf_find_key(ctx_gguf, (try std.fmt.allocPrintSentinel(a, "{s}.embedding_length", .{shape.arch}, 0)).ptr);
+        if (embd_out_key >= 0 and llama.impl.llama_c.gguf_get_kv_type(ctx_gguf, embd_out_key) == llama.impl.llama_c.GGUF_TYPE_UINT32) {
+            shape.n_embd_out = llama.impl.llama_c.gguf_get_val_u32(ctx_gguf, embd_out_key);
+        } else if (embd_key >= 0 and llama.impl.llama_c.gguf_get_kv_type(ctx_gguf, embd_key) == llama.impl.llama_c.GGUF_TYPE_UINT32) {
+            shape.n_embd_out = llama.impl.llama_c.gguf_get_val_u32(ctx_gguf, embd_key);
         }
     }
 
-    const split_key = tc.c.gguf_find_key(ctx_gguf, "split.count");
-    if (split_key >= 0 and tc.c.gguf_get_kv_type(ctx_gguf, split_key) == tc.c.GGUF_TYPE_UINT16) {
-        shape.is_split = tc.c.gguf_get_val_u16(ctx_gguf, split_key) > 1;
+    const split_key = llama.impl.llama_c.gguf_find_key(ctx_gguf, "split.count");
+    if (split_key >= 0 and llama.impl.llama_c.gguf_get_kv_type(ctx_gguf, split_key) == llama.impl.llama_c.GGUF_TYPE_UINT16) {
+        shape.is_split = llama.impl.llama_c.gguf_get_val_u16(ctx_gguf, split_key) > 1;
     }
 
-    const n_tensors = tc.c.gguf_get_n_tensors(ctx_gguf);
+    const n_tensors = llama.impl.llama_c.gguf_get_n_tensors(ctx_gguf);
     var i: i64 = 0;
     while (i < n_tensors) : (i += 1) {
-        const name = std.mem.span(tc.c.gguf_get_tensor_name(ctx_gguf, i));
+        const name = std.mem.span(llama.impl.llama_c.gguf_get_tensor_name(ctx_gguf, i));
         if (std.mem.indexOf(u8, name, ".nextn.") != null) {
             shape.has_nextn = true;
             if (shape.first_nextn.len == 0) shape.first_nextn = try a.dupe(u8, name);
@@ -1583,63 +1577,63 @@ fn modelReadFileShape(a: std.mem.Allocator, model_path: []const u8) !ModelFileSh
         }
     }
 
-    tc.c.gguf_free(ctx_gguf);
+    llama.impl.llama_c.gguf_free(ctx_gguf);
 
     return shape;
 }
 
 /// Ports `nextn_collector_init` (imatrix.cpp:1367 @b1b770d90).
-fn nextnCollectorInit(model: ?*tc.c.llama_model, params: *const tc.params.Params, own_lm_head: bool) ?NextnCollector {
+fn nextnCollectorInit(model: ?*llama.impl.llama_c.llama_model, params: *const tools_common.params.Params, own_lm_head: bool) ?NextnCollector {
     const func = "nextn_collector_init";
-    var cparams = tc.common.contextParamsToLlama(params);
-    cparams.ctx_type = tc.c.LLAMA_CONTEXT_TYPE_MTP;
+    var cparams = tools_common.common.contextParamsToLlama(params);
+    cparams.ctx_type = llama.impl.llama_c.LLAMA_CONTEXT_TYPE_MTP;
     cparams.n_rs_seq = 0;
-    const ctx = tc.c.llama_init_from_model(model, cparams);
+    const ctx = llama.api.context.llama_init_from_model(model, cparams);
     if (ctx == null) {
-        tc.log.err("%s: failed to create the NextN context\n", .{func});
+        tools_common.log.err("%s: failed to create the NextN context\n", .{func});
         return null;
     }
 
     return .{
         .ctx = ctx,
-        .batch = tc.common.Batch.init(gpa, ctx),
-        .n_embd = tc.c.llama_model_n_embd_out(model),
+        .batch = tools_common.common.Batch.init(std.heap.c_allocator, ctx),
+        .n_embd = llama.api.model.llama_model_n_embd_out(model),
         .own_lm_head = own_lm_head,
     };
 }
 
 /// Ports `compute_imatrix` (imatrix.cpp:1422 @b1b770d90).
-fn computeImatrix(a: std.mem.Allocator, ctx: ?*tc.c.llama_context, params: *const tc.params.Params, n_ctx: i32, nextn: ?*NextnCollector) !bool {
+fn computeImatrix(a: std.mem.Allocator, ctx: ?*llama.impl.llama_c.llama_context, params: *const tools_common.params.Params, n_ctx: i32, nextn: ?*NextnCollector) !bool {
     const func = "compute_imatrix";
-    const model = tc.c.llama_get_model(ctx);
-    const vocab = tc.c.llama_model_get_vocab(model);
+    const model = llama.api.context.llama_get_model(ctx);
+    const vocab = llama.api.model.llama_model_get_vocab(model);
 
-    const add_bos = tc.c.llama_vocab_get_add_bos(vocab);
+    const add_bos = llama.api.vocab.llama_vocab_get_add_bos(vocab);
 
-    if (tc.c.llama_pooling_type(ctx) != tc.c.LLAMA_POOLING_TYPE_LAST) {
-        ggmlAssert(!tc.c.llama_vocab_get_add_eos(vocab), 1429, "!llama_vocab_get_add_eos(vocab)");
+    if (llama.api.context.llama_pooling_type(ctx) != llama.impl.llama_c.LLAMA_POOLING_TYPE_LAST) {
+        ggmlAssert(!llama.api.vocab.llama_vocab_get_add_eos(vocab), 1429, "!llama_vocab_get_add_eos(vocab)");
     }
 
     const tim1 = stdlib.clock.steadyNs();
-    tc.log.inf("%s: tokenizing the input ..\n", .{func});
+    tools_common.log.inf("%s: tokenizing the input ..\n", .{func});
 
-    var tokens = try tc.common.tokenize(a, vocab, params.prompt, true, params.parse_special);
+    var tokens = try tools_common.common.tokenize(a, vocab, params.prompt, true, params.parse_special);
 
     const tim2 = stdlib.clock.steadyNs();
-    tc.log.inf("%s: tokenization took %g ms\n", .{ func, 1e-3 * @as(f64, @floatFromInt(@divTrunc(tim2 - tim1, 1000))) });
+    tools_common.log.inf("%s: tokenization took %g ms\n", .{ func, 1e-3 * @as(f64, @floatFromInt(@divTrunc(tim2 - tim1, 1000))) });
 
     if (params.i_chunk > 0) {
         if (@as(usize, @intCast((params.i_chunk + 2) * n_ctx)) >= tokens.len) {
-            tc.log.err("%s: there will be not enough tokens left after removing %d chunks\n", .{ func, params.i_chunk });
+            tools_common.log.err("%s: there will be not enough tokens left after removing %d chunks\n", .{ func, params.i_chunk });
             return false;
         }
-        tc.log.inf("%s: removing initial %d chunks (%d tokens)\n", .{ func, params.i_chunk, params.i_chunk * n_ctx });
+        tools_common.log.inf("%s: removing initial %d chunks (%d tokens)\n", .{ func, params.i_chunk, params.i_chunk * n_ctx });
         tokens = tokens[@intCast(params.i_chunk * n_ctx)..];
     }
 
     if (@as(c_int, @intCast(tokens.len)) < 2 * n_ctx) {
-        tc.log.err("%s: you need at least %d tokens for a context of %d tokens\n", .{ func, 2 * n_ctx, n_ctx });
-        tc.log.err("%s: the data file you provided tokenizes to only %zu tokens\n", .{ func, tokens.len });
+        tools_common.log.err("%s: you need at least %d tokens for a context of %d tokens\n", .{ func, 2 * n_ctx, n_ctx });
+        tools_common.log.err("%s: the data file you provided tokenizes to only %zu tokens\n", .{ func, tokens.len });
         return false;
     }
 
@@ -1656,7 +1650,7 @@ fn computeImatrix(a: std.mem.Allocator, ctx: ?*tc.c.llama_context, params: *cons
     const n_chunk_max: c_int = @intCast(tokens.len / @as(usize, @intCast(n_ctx)));
 
     const n_chunk = if (params.n_chunks < 0) n_chunk_max else @min(params.n_chunks, n_chunk_max);
-    const n_vocab: c_int = tc.c.llama_vocab_n_tokens(vocab);
+    const n_vocab: c_int = llama.api.vocab.llama_vocab_n_tokens(vocab);
     const n_batch: c_int = params.n_batch;
 
     var count: c_int = 0;
@@ -1669,14 +1663,14 @@ fn computeImatrix(a: std.mem.Allocator, ctx: ?*tc.c.llama_context, params: *cons
     ggmlAssert(n_batch < n_ctx or @rem(n_batch, n_ctx) == 0, 1476, "n_batch < n_ctx || n_batch % n_ctx == 0");
     ggmlAssert(params.n_ctx == n_seq * n_ctx, 1477, "params.n_ctx == n_seq * n_ctx");
 
-    var batch = tc.common.Batch.init(gpa, ctx);
+    var batch = tools_common.common.Batch.init(std.heap.c_allocator, ctx);
     defer batch.deinit();
 
     var logits: std.ArrayList(f32) = .empty;
-    defer logits.deinit(gpa);
-    if (params.compute_ppl and num_batches > 1) try logits.ensureTotalCapacity(gpa, @as(usize, @intCast(n_ctx)) * @as(usize, @intCast(n_vocab)));
+    defer logits.deinit(std.heap.c_allocator);
+    if (params.compute_ppl and num_batches > 1) try logits.ensureTotalCapacity(std.heap.c_allocator, @as(usize, @intCast(n_ctx)) * @as(usize, @intCast(n_vocab)));
 
-    tc.log.inf("%s: computing over %d chunks, n_ctx=%d, batch_size=%d, n_seq=%d\n", .{ func, n_chunk, n_ctx, n_batch, n_seq });
+    tools_common.log.inf("%s: computing over %d chunks, n_ctx=%d, batch_size=%d, n_seq=%d\n", .{ func, n_chunk, n_ctx, n_batch, n_seq });
 
     // `hardware_concurrency() - 1`, which wraps where the count is unknown;
     // none then, rather than a vector the size of memory
@@ -1693,7 +1687,7 @@ fn computeImatrix(a: std.mem.Allocator, ctx: ?*tc.c.llama_context, params: *cons
         const t_start = stdlib.clock.steadyNs();
 
         // clear the KV cache
-        tc.c.llama_memory_clear(tc.c.llama_get_memory(ctx), true);
+        llama.api.context.llama_memory_clear(llama.api.context.llama_get_memory(ctx), true);
         if (nextn) |n| n.clearMemory();
 
         var j: c_int = 0;
@@ -1712,7 +1706,7 @@ fn computeImatrix(a: std.mem.Allocator, ctx: ?*tc.c.llama_context, params: *cons
                 const token_org = tokens[seq_start];
 
                 // add BOS token for the first batch of each chunk
-                if (add_bos and j == 0) tokens[seq_start] = tc.c.llama_vocab_bos(vocab);
+                if (add_bos and j == 0) tokens[seq_start] = llama.api.vocab.llama_vocab_bos(vocab);
                 var k: c_int = 0;
                 while (k < batch_size) : (k += 1) {
                     // NOTE: specifying all logits to get activations for the output.weight tensor
@@ -1724,8 +1718,8 @@ fn computeImatrix(a: std.mem.Allocator, ctx: ?*tc.c.llama_context, params: *cons
                 tokens[seq_start] = token_org;
             }
 
-            if (tc.c.llama_process(ctx, tc.c.LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) {
-                tc.log.err("%s : failed to eval\n", .{func});
+            if (llama.api.context.llama_process(ctx, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) {
+                tools_common.log.err("%s : failed to eval\n", .{func});
 
                 return false;
             }
@@ -1735,36 +1729,36 @@ fn computeImatrix(a: std.mem.Allocator, ctx: ?*tc.c.llama_context, params: *cons
             }
 
             if (params.compute_ppl and num_batches > 1) {
-                const batch_logits = tc.c.llama_get_logits(ctx);
-                try logits.appendSlice(gpa, batch_logits[0 .. @as(usize, @intCast(batch_size)) * nv]);
+                const batch_logits = llama.api.context.llama_get_logits(ctx).?;
+                try logits.appendSlice(std.heap.c_allocator, batch_logits[0 .. @as(usize, @intCast(batch_size)) * nv]);
             }
         }
 
         if (i == 0) {
-            tc.c.llama_synchronize(ctx);
+            llama.api.context.llama_synchronize(ctx);
             const t_end = stdlib.clock.steadyNs();
             const t_total: f32 = @floatCast(@as(f64, @floatFromInt(t_end - t_start)) / 1e9);
-            tc.log.inf("%s: %.2f seconds per pass - ETA ", .{ func, @as(f64, t_total) });
+            tools_common.log.inf("%s: %.2f seconds per pass - ETA ", .{ func, @as(f64, t_total) });
             var total_seconds: c_int = @intFromFloat(t_total * @as(f32, @floatFromInt(n_chunk)) / @as(f32, @floatFromInt(n_seq)));
             if (total_seconds >= 60 * 60) {
-                tc.log.out("%d hours ", .{@divTrunc(total_seconds, 60 * 60)});
+                tools_common.log.out("%d hours ", .{@divTrunc(total_seconds, 60 * 60)});
                 total_seconds = @rem(total_seconds, 60 * 60);
             }
-            tc.log.out("%.2f minutes\n", .{@as(f64, @floatFromInt(total_seconds)) / 60.0});
+            tools_common.log.out("%.2f minutes\n", .{@as(f64, @floatFromInt(total_seconds)) / 60.0});
         }
 
         if (params.compute_ppl) {
             const first = @divTrunc(n_ctx, 2);
             var seq: c_int = 0;
             while (seq < n_seq_batch) : (seq += 1) {
-                const all_logits: [*]const f32 = if (num_batches > 1) logits.items.ptr else tc.c.llama_get_logits_ith(ctx, seq * n_ctx);
+                const all_logits: [*]const f32 = if (num_batches > 1) logits.items.ptr else llama.api.context.llama_get_logits_ith(ctx, seq * n_ctx).?;
 
                 const base: usize = @intCast(start + seq * n_ctx + first);
                 try processLogits(nv, all_logits + @as(usize, @intCast(first)) * nv, tokens.ptr + base, @intCast(n_ctx - 1 - first), n_workers, &nll, &nll2, logit_history.ptr + base, prob_history.ptr + base);
 
                 count += n_ctx - first - 1;
 
-                tc.log.out("[%d]%.4lf,", .{ i + seq + 1, stdlib.libm.exp(nll / @as(f64, @floatFromInt(count))) });
+                tools_common.log.out("[%d]%.4lf,", .{ i + seq + 1, stdlib.libm.exp(nll / @as(f64, @floatFromInt(count))) });
             }
             stdlib.stdio.stdout().flush();
 
@@ -1772,7 +1766,7 @@ fn computeImatrix(a: std.mem.Allocator, ctx: ?*tc.c.llama_context, params: *cons
         }
     }
 
-    tc.log.out("\n", .{});
+    tools_common.log.out("\n", .{});
 
     if (params.compute_ppl) {
         nll2 /= @floatFromInt(count);
@@ -1781,9 +1775,9 @@ fn computeImatrix(a: std.mem.Allocator, ctx: ?*tc.c.llama_context, params: *cons
         nll2 = @mulAdd(f64, -nll, nll, nll2);
         if (nll2 > 0) {
             nll2 = @sqrt(@as(f64, nll2 / @as(f64, @floatFromInt(count - 1))));
-            tc.log.out("Final estimate: PPL = %.4lf +/- %.5lf\n", .{ ppl, nll2 * ppl });
+            tools_common.log.out("Final estimate: PPL = %.4lf +/- %.5lf\n", .{ ppl, nll2 * ppl });
         } else {
-            tc.log.out("Unexpected negative standard deviation of log(prob)\n", .{});
+            tools_common.log.out("Unexpected negative standard deviation of log(prob)\n", .{});
         }
     }
 
@@ -1793,9 +1787,9 @@ fn computeImatrix(a: std.mem.Allocator, ctx: ?*tc.c.llama_context, params: *cons
 /// Ports `show_statistics`'s `tensor_comparer` (imatrix.cpp:1632 @b1b770d90).
 fn tensorLess(_: void, a: TensorStatistics, b: TensorStatistics) bool {
     var buf_a: std.ArrayList(u8) = .empty;
-    defer buf_a.deinit(gpa);
+    defer buf_a.deinit(std.heap.c_allocator);
     var buf_b: std.ArrayList(u8) = .empty;
-    defer buf_b.deinit(gpa);
+    defer buf_b.deinit(std.heap.c_allocator);
     var lay_a: []const u8 = "";
     var lay_b: []const u8 = "";
     var name_a: []const u8 = "";
@@ -1824,7 +1818,7 @@ fn labelFmt(a: std.mem.Allocator, s: []const u8, w: usize) ![:0]const u8 {
 }
 
 /// Ports `show_statistics` (imatrix.cpp:1603 @b1b770d90).
-fn showStatistics(a: std.mem.Allocator, params: *const tc.params.Params) !bool {
+fn showStatistics(a: std.mem.Allocator, params: *const tools_common.params.Params) !bool {
     const func = "show_statistics";
     g_collector.params = .of(params);
     var ts: std.ArrayList(TensorStatistics) = .empty;
@@ -1834,7 +1828,7 @@ fn showStatistics(a: std.mem.Allocator, params: *const tc.params.Params) !bool {
     // Load and process data
     const in0 = try a.dupeSentinel(u8, params.in_files.items[0], 0);
     if (try g_collector.load(a, in0)) {
-        try ts.ensureTotalCapacity(gpa, g_collector.stats.count());
+        try ts.ensureTotalCapacity(std.heap.c_allocator, g_collector.stats.count());
         var it = g_collector.stats.iterator();
         while (it.next()) |kv| _ = try computeVectorStatistics(&ts, kv.key, kv.value);
     } else {
@@ -1848,7 +1842,7 @@ fn showStatistics(a: std.mem.Allocator, params: *const tc.params.Params) !bool {
         if (t.legacy) n_legacy += 1;
     }
     if (n_legacy > 0 and n_legacy < ts.items.len) {
-        tc.log.wrn("%s: %zu of %zu tensors have no activation data, using the legacy layout\n", .{ func, n_legacy, ts.items.len });
+        tools_common.log.wrn("%s: %zu of %zu tensors have no activation data, using the legacy layout\n", .{ func, n_legacy, ts.items.len });
     }
 
     const legacy = n_legacy > 0;
@@ -1866,10 +1860,10 @@ fn showStatistics(a: std.mem.Allocator, params: *const tc.params.Params) !bool {
     const w_nam: c_int = 40; // Should be wide enough for most tensor names
     const sep = " | ";
 
-    tc.io.printf("\nComputing tensor statistics for %s (%d tensors)\n", .{ in0.ptr, @as(c_int, @intCast(ts.items.len)) });
+    tools_common.io.printf("\nComputing tensor statistics for %s (%d tensors)\n", .{ in0.ptr, @as(c_int, @intCast(ts.items.len)) });
 
     if (legacy) {
-        tc.io.printf("\n%*s%s%-*s%s%10s%10s%12s%12s%9s%s%17s%8s%s%10s%10s\n", .{
+        tools_common.io.printf("\n%*s%s%-*s%s%10s%10s%12s%12s%9s%s%17s%8s%s%10s%10s\n", .{
             w_lay,  "Layer",  sep,
             w_nam,  "Tensor", sep,
             "Mean", "StdDev", "Skew",
@@ -1878,9 +1872,9 @@ fn showStatistics(a: std.mem.Allocator, params: *const tc.params.Params) !bool {
             "Gain", sep,      "PCC",
             "Cov",
         });
-        tc.io.printf("%s\n", .{(try dashes(a, 153)).ptr});
+        tools_common.io.printf("%s\n", .{(try dashes(a, 153)).ptr});
     } else {
-        tc.io.printf("\n%*s%s%-*s%s%10s%10s%12s%12s%9s%s%17s%8s%s%12s%10s%10s\n", .{
+        tools_common.io.printf("\n%*s%s%-*s%s%10s%10s%12s%12s%9s%s%17s%8s%s%12s%10s%10s\n", .{
             w_lay,  "Layer",  sep,
             w_nam,  "Tensor", sep,
             "Mean", "StdDev", "Skew",
@@ -1889,12 +1883,12 @@ fn showStatistics(a: std.mem.Allocator, params: *const tc.params.Params) !bool {
             "Gain", sep,      "L2 Dist",
             "PCC",  "Cov",
         });
-        tc.io.printf("%s\n", .{(try dashes(a, 165)).ptr});
+        tools_common.io.printf("%s\n", .{(try dashes(a, 165)).ptr});
     }
 
     // Tensor Statistics
     var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(gpa);
+    defer buf.deinit(std.heap.c_allocator);
     for (ts.items) |tstat| {
         var layer: []const u8 = "";
         var name: []const u8 = "";
@@ -1908,7 +1902,7 @@ fn showStatistics(a: std.mem.Allocator, params: *const tc.params.Params) !bool {
         const label = layerLabel(&lbuf, blk, nextn_start);
         const tname = try labelFmt(a, tstat.tensor, @intCast(w_nam));
         if (legacy) {
-            tc.io.printf("%*s%s%-*s%s%10.4f%10.4f%12.4f%12.4f%8.2f%%%s%14.4f%8.2f%s%10.4f%10.4f\n", .{
+            tools_common.io.printf("%*s%s%-*s%s%10.4f%10.4f%12.4f%12.4f%8.2f%%%s%14.4f%8.2f%s%10.4f%10.4f\n", .{
                 w_lay,                    label.ptr,                     sep,
                 w_nam,                    tname.ptr,                     sep,
                 @as(f64, tstat.mean),     @as(f64, tstat.std_deviation), @as(f64, tstat.skewness),
@@ -1917,7 +1911,7 @@ fn showStatistics(a: std.mem.Allocator, params: *const tc.params.Params) !bool {
                 @as(f64, tstat.pearson),  @as(f64, tstat.covariance),
             });
         } else {
-            tc.io.printf("%*s%s%-*s%s%10.4f%10.4f%12.4f%12.4f%8.2f%%%s%14.4f%8.2f%s%12.4f%10.4f%10.4f\n", .{
+            tools_common.io.printf("%*s%s%-*s%s%10.4f%10.4f%12.4f%12.4f%8.2f%%%s%14.4f%8.2f%s%12.4f%10.4f%10.4f\n", .{
                 w_lay,                    label.ptr,                     sep,
                 w_nam,                    tname.ptr,                     sep,
                 @as(f64, tstat.mean),     @as(f64, tstat.std_deviation), @as(f64, tstat.skewness),
@@ -1963,19 +1957,19 @@ fn showStatistics(a: std.mem.Allocator, params: *const tc.params.Params) !bool {
     if (trunk_layers > 0) {
         const expected: usize = @intCast(max - min + 1);
         if (trunk_layers != expected) {
-            tc.log.wrn("\n%s: layer sequence gap detected (found %zu layers in range %d-%d, expected %zu); layer statistics will not be shown\n", .{ func, trunk_layers, min, max, expected });
+            tools_common.log.wrn("\n%s: layer sequence gap detected (found %zu layers in range %d-%d, expected %zu); layer statistics will not be shown\n", .{ func, trunk_layers, min, max, expected });
             return false;
         }
     }
 
-    tc.io.printf("\nComputing layer statistics for %s (%zu layers)\n\n", .{ in0.ptr, layers });
+    tools_common.io.printf("\nComputing layer statistics for %s (%zu layers)\n\n", .{ in0.ptr, layers });
 
     if (legacy) {
-        tc.io.printf("%*s%s%17s%8s%s%9s%9s%12s\n", .{ w_lay, "Layer", sep, "∑ E[A²]", "Gain", sep, "CosSim", "PCC", "Cov" });
-        tc.io.printf("%s\n", .{(try dashes(a, 64)).ptr});
+        tools_common.io.printf("%*s%s%17s%8s%s%9s%9s%12s\n", .{ w_lay, "Layer", sep, "∑ E[A²]", "Gain", sep, "CosSim", "PCC", "Cov" });
+        tools_common.io.printf("%s\n", .{(try dashes(a, 64)).ptr});
     } else {
-        tc.io.printf("%*s%s%17s%8s%s%12s%9s%9s%12s\n", .{ w_lay, "Layer", sep, "∑ E[A²]", "Gain", sep, "L2 Dist", "CosSim", "PCC", "Cov" });
-        tc.io.printf("%s\n", .{(try dashes(a, 76)).ptr});
+        tools_common.io.printf("%*s%s%17s%8s%s%12s%9s%9s%12s\n", .{ w_lay, "Layer", sep, "∑ E[A²]", "Gain", sep, "L2 Dist", "CosSim", "PCC", "Cov" });
+        tools_common.io.printf("%s\n", .{(try dashes(a, 76)).ptr});
     }
 
     for (ls_keys.items, ls_vals.items) |layer, stats| {
@@ -1991,13 +1985,13 @@ fn showStatistics(a: std.mem.Allocator, params: *const tc.params.Params) !bool {
         const lyr = layerLabel(&lbuf, layer, nextn_start);
 
         if (legacy) {
-            tc.io.printf("%*s%s%14.4f%8.2f%s%9.4f%9.4f%12.4f\n", .{ w_lay, lyr.ptr, sep, @as(f64, stats.layer_sum), @as(f64, lgn), sep, @as(f64, lcs), @as(f64, lpc), @as(f64, lcv) });
+            tools_common.io.printf("%*s%s%14.4f%8.2f%s%9.4f%9.4f%12.4f\n", .{ w_lay, lyr.ptr, sep, @as(f64, stats.layer_sum), @as(f64, lgn), sep, @as(f64, lcs), @as(f64, lpc), @as(f64, lcv) });
         } else {
-            tc.io.printf("%*s%s%14.4f%8.2f%s%12.4f%9.4f%9.4f%12.4f\n", .{ w_lay, lyr.ptr, sep, @as(f64, stats.layer_sum), @as(f64, lgn), sep, @as(f64, ll2), @as(f64, lcs), @as(f64, lpc), @as(f64, lcv) });
+            tools_common.io.printf("%*s%s%14.4f%8.2f%s%12.4f%9.4f%9.4f%12.4f\n", .{ w_lay, lyr.ptr, sep, @as(f64, stats.layer_sum), @as(f64, lgn), sep, @as(f64, ll2), @as(f64, lcs), @as(f64, lpc), @as(f64, lcv) });
         }
     }
 
-    tc.io.printf("\n", .{});
+    tools_common.io.printf("\n", .{});
     return true;
 }
 
@@ -2011,16 +2005,16 @@ fn dashes(a: std.mem.Allocator, n: usize) ![:0]u8 {
 /// Ports `main` (imatrix.cpp:1819 @b1b770d90).
 fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     const func = "main";
-    var params = try tc.params.Params.init(a);
+    var params = try tools_common.params.Params.init(a);
 
     params.out_file = "imatrix.gguf";
 
     params.n_ctx = 512;
     params.escape = false;
 
-    tc.common.init();
+    tools_common.common.init();
 
-    if (!try tc.arg.parse(argv, &params, .imatrix, printUsage)) return 1;
+    if (!try tools_common.arg.parse(argv, &params, .imatrix, printUsage)) return 1;
 
     const use_draft = params.speculative.draft.mparams.path.len != 0;
     if (use_draft) {
@@ -2028,7 +2022,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
         params.speculative.draft.n_max = 0; // keep trunk's context identical to a plain run
     }
 
-    g_collector = .{ .stats = try stdlib.libcxx.StringMap(Stats).init(gpa), .io = init.io };
+    g_collector = .{ .stats = try stdlib.libcxx.StringMap(Stats).init(std.heap.c_allocator), .io = init.io };
 
     // set_params before show_statistics so load_imatrix has valid n_ctx/n_parallel
     g_collector.params = .of(&params);
@@ -2041,7 +2035,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     const n_ctx = params.n_ctx;
 
     if (n_ctx <= 0) {
-        tc.log.err("%s: imatrix tool requires '--ctx-size' > 0\n", .{func});
+        tools_common.log.err("%s: imatrix tool requires '--ctx-size' > 0\n", .{func});
         return 1;
     }
 
@@ -2050,7 +2044,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
         const n_kv = n_seq * n_ctx;
 
         if (params.load_mtp and n_seq > 1) {
-            tc.log.err("%s: '--nextn' and '--model-draft' need a single sequence per batch, set '--batch-size' to at most '--ctx-size' (%d)\n", .{ func, n_ctx });
+            tools_common.log.err("%s: '--nextn' and '--model-draft' need a single sequence per batch, set '--batch-size' to at most '--ctx-size' (%d)\n", .{ func, n_ctx });
             return 1;
         }
 
@@ -2064,9 +2058,9 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
 
     for (params.in_files.items) |in_file| {
         const z = try a.dupeSentinel(u8, in_file, 0);
-        tc.log.inf("%s : loading imatrix from '%s'\n", .{ func, z.ptr });
+        tools_common.log.inf("%s : loading imatrix from '%s'\n", .{ func, z.ptr });
         if (!try g_collector.load(a, z)) {
-            tc.log.err("%s : failed to load %s\n", .{ func, z.ptr });
+            tools_common.log.err("%s : failed to load %s\n", .{ func, z.ptr });
             return 1;
         }
     }
@@ -2074,17 +2068,17 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     const out_file = try a.dupeSentinel(u8, params.out_file, 0);
 
     if (params.prompt.len == 0) {
-        tc.log.inf("No prompt provided; combining precomputed matrices only.\n", .{});
+        tools_common.log.inf("No prompt provided; combining precomputed matrices only.\n", .{});
 
         if (params.in_files.items.len == 0) {
-            tc.log.err("Error: No prompt provided and no precomputed matrices (--in-file) to combine.\n", .{});
+            tools_common.log.err("Error: No prompt provided and no precomputed matrices (--in-file) to combine.\n", .{});
             return 1;
         }
 
         if (params.in_files.items.len == 1) {
-            tc.log.inf("%s : saving imatrix to '%s'\n", .{ func, out_file.ptr });
+            tools_common.log.inf("%s : saving imatrix to '%s'\n", .{ func, out_file.ptr });
         } else if (params.in_files.items.len > 1) {
-            tc.log.inf("%s : saving combined imatrix to '%s'\n", .{ func, out_file.ptr });
+            tools_common.log.inf("%s : saving combined imatrix to '%s'\n", .{ func, out_file.ptr });
         }
 
         try g_collector.save(-1);
@@ -2095,59 +2089,59 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     {
         const shape = try modelReadFileShape(a, params.model.path);
         if (use_draft and shape.n_nextn_layers > 0) {
-            tc.log.err("%s: model already includes NextN layers\n", .{func});
+            tools_common.log.err("%s: model already includes NextN layers\n", .{func});
             return 1;
         }
         if (use_draft and shape.has_nextn) {
-            tc.log.err("%s: the model already includes NextN layers (NextN tensor '%s')\n", .{ func, (try a.dupeSentinel(u8, shape.first_nextn, 0)).ptr });
+            tools_common.log.err("%s: the model already includes NextN layers (NextN tensor '%s')\n", .{ func, (try a.dupeSentinel(u8, shape.first_nextn, 0)).ptr });
             return 1;
         }
         if (!use_draft and !shape.has_trunk and (shape.n_nextn_layers > 0 or shape.has_nextn)) {
-            tc.log.err("%s: '%s' is a NextN draft, use with --model-draft/-md\n", .{ func, (try a.dupeSentinel(u8, params.model.path, 0)).ptr });
+            tools_common.log.err("%s: '%s' is a NextN draft, use with --model-draft/-md\n", .{ func, (try a.dupeSentinel(u8, params.model.path, 0)).ptr });
             return 1;
         }
         if (use_draft) {
             const path_md = try a.dupeSentinel(u8, params.speculative.draft.mparams.path, 0);
             const shape_md = try modelReadFileShape(a, path_md);
             if (!shape_md.valid or shape_md.is_split) {
-                tc.log.err("%s: '%s' is not a readable single-shard GGUF\n", .{ func, path_md.ptr });
+                tools_common.log.err("%s: '%s' is not a readable single-shard GGUF\n", .{ func, path_md.ptr });
                 return 1;
             }
             if (shape.valid and !std.mem.eql(u8, shape_md.arch, shape.arch)) {
-                tc.log.err("%s: the draft architecture '%s' does not match the target architecture '%s'\n", .{ func, (try a.dupeSentinel(u8, shape_md.arch, 0)).ptr, (try a.dupeSentinel(u8, shape.arch, 0)).ptr });
+                tools_common.log.err("%s: the draft architecture '%s' does not match the target architecture '%s'\n", .{ func, (try a.dupeSentinel(u8, shape_md.arch, 0)).ptr, (try a.dupeSentinel(u8, shape.arch, 0)).ptr });
                 return 1;
             }
             if (shape_md.n_nextn_layers == 0 or shape_md.has_trunk) {
-                tc.log.err("%s: '%s' is not a draft (no NextN layers or trunk tensors present)\n", .{ func, path_md.ptr });
+                tools_common.log.err("%s: '%s' is not a draft (no NextN layers or trunk tensors present)\n", .{ func, path_md.ptr });
                 return 1;
             }
             if (shape_md.n_nextn_layers > 1) {
-                tc.log.err("%s: multi-layer NextN drafts are not supported (found %u)\n", .{ func, shape_md.n_nextn_layers });
+                tools_common.log.err("%s: multi-layer NextN drafts are not supported (found %u)\n", .{ func, shape_md.n_nextn_layers });
                 return 1;
             }
             if (shape_md.nTrunk() == 0) {
-                tc.log.err("%s: NextN layers sharing the trunk's KV cache are not supported\n", .{func});
+                tools_common.log.err("%s: NextN layers sharing the trunk's KV cache are not supported\n", .{func});
                 return 1;
             }
             if (shape.valid and !shape_md.hasNextnIdx(shape.nTrunk())) {
-                tc.log.err("%s: no NextN tensors at layer index %u in '%s' found\n", .{ func, shape.nTrunk(), path_md.ptr });
+                tools_common.log.err("%s: no NextN tensors at layer index %u in '%s' found\n", .{ func, shape.nTrunk(), path_md.ptr });
                 return 1;
             }
             if (shape.valid and shape_md.n_embd_out != shape.n_embd_out) {
-                tc.log.err("%s: the draft output width %u does not match the target's %u\n", .{ func, shape_md.n_embd_out, shape.n_embd_out });
+                tools_common.log.err("%s: the draft output width %u does not match the target's %u\n", .{ func, shape_md.n_embd_out, shape.n_embd_out });
                 return 1;
             }
             for (params.speculative.types.items) |ty| {
                 if (ty != .none and ty != .draft_mtp) {
-                    tc.log.err("%s: speculative type '%s' is not supported with --model-draft/-md (only 'draft-mtp')\n", .{ func, (try a.dupeSentinel(u8, ty.toStr(), 0)).ptr });
+                    tools_common.log.err("%s: speculative type '%s' is not supported with --model-draft/-md (only 'draft-mtp')\n", .{ func, (try a.dupeSentinel(u8, ty.toStr(), 0)).ptr });
                     return 1;
                 }
             }
         }
     }
 
-    tc.c.llama_backend_init();
-    tc.c.llama_numa_init(params.numa);
+    llama.api.llama.llama_backend_init();
+    llama.api.llama.llama_numa_init(params.numa);
 
     // pass the callback to the backend scheduler
     // it will be executed for each node during the graph computation
@@ -2156,35 +2150,35 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     params.warmup = false;
 
     // init
-    var llama_init = try tc.init.initFromParams(init.gpa, &params, false);
+    var llama_init = try tools_common.init.initFromParams(init.gpa, &params, false);
     defer llama_init.deinit();
 
     const model = llama_init.model;
     const ctx = llama_init.context;
 
     if (model == null or ctx == null) {
-        tc.log.err("%s : failed to init\n", .{func});
+        tools_common.log.err("%s : failed to init\n", .{func});
         return 1;
     }
 
-    const n_ctx_train = tc.c.llama_model_n_ctx_train(model);
+    const n_ctx_train = llama.api.model.llama_model_n_ctx_train(model);
     if (params.n_ctx > n_ctx_train) {
-        tc.log.wrn("%s: model was trained on only %d context tokens (%d specified)\n", .{ func, n_ctx_train, params.n_ctx });
+        tools_common.log.wrn("%s: model was trained on only %d context tokens (%d specified)\n", .{ func, n_ctx_train, params.n_ctx });
     }
 
-    var model_draft: ?*tc.c.llama_model = null;
-    defer if (model_draft) |m| tc.c.llama_model_free(m);
+    var model_draft: ?*llama.impl.llama_c.llama_model = null;
+    defer if (model_draft) |m| llama.api.model.llama_model_free(m);
     if (use_draft) {
-        var mparams_sidecar = tc.common.modelParamsToLlama(&params);
+        var mparams_sidecar = tools_common.common.modelParamsToLlama(&params);
         mparams_sidecar.load_mtp = true;
         const path_md = try a.dupeSentinel(u8, params.speculative.draft.mparams.path, 0);
-        model_draft = tc.c.llama_model_load_from_file(path_md.ptr, mparams_sidecar);
+        model_draft = llama.api.llama.llama_model_load_from_file(path_md.ptr, mparams_sidecar);
         if (model_draft == null) {
-            tc.log.err("%s: failed to load the draft model '%s'\n", .{ func, path_md.ptr });
+            tools_common.log.err("%s: failed to load the draft model '%s'\n", .{ func, path_md.ptr });
             return 1;
         }
-        if (!tc.speculative.areCompatible(model, model_draft)) {
-            tc.log.err("%s: the target and draft vocab are not compatible\n", .{func});
+        if (!tools_common.speculative.areCompatible(model, model_draft)) {
+            tools_common.log.err("%s: the target and draft vocab are not compatible\n", .{func});
             return 1;
         }
     }
@@ -2197,44 +2191,44 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
         const path_src = if (use_draft) params.speculative.draft.mparams.path else params.model.path;
         const flag_src: [*:0]const u8 = if (use_draft) "'-md'" else "'--nextn'";
 
-        const n_heads = tc.c.llama_model_n_layer_nextn(model_src);
-        const n_trunk_src = tc.c.llama_model_n_layer(model_src);
-        const n_trunk = tc.c.llama_model_n_layer(model);
+        const n_heads = llama.api.model.llama_model_n_layer_nextn(model_src);
+        const n_trunk_src = llama.api.model.llama_model_n_layer(model_src);
+        const n_trunk = llama.api.model.llama_model_n_layer(model);
         const info: NextnModelInfo = if (n_heads > 0) try nextnReadModelInfo(a, path_src, n_trunk, n_heads) else .{};
 
         if (n_heads == 0) {
-            tc.log.wrn("%s: the model has no NextN layers, %s has no effect\n", .{ func, flag_src });
+            tools_common.log.wrn("%s: the model has no NextN layers, %s has no effect\n", .{ func, flag_src });
         } else if (n_trunk_src == 0) {
-            tc.log.err("%s: NextN layers sharing the trunk's KV cache are not supported\n", .{func});
+            tools_common.log.err("%s: NextN layers sharing the trunk's KV cache are not supported\n", .{func});
             return 1;
         } else if (n_heads > 1) {
-            tc.log.err("%s: multi-layer NextN drafts are not supported (found %u)\n", .{ func, n_heads });
+            tools_common.log.err("%s: multi-layer NextN drafts are not supported (found %u)\n", .{ func, n_heads });
             return 1;
         } else if (!info.has_layers) {
-            tc.log.wrn("%s: no NextN tensor in '%s', %s has no effect\n", .{ func, (try a.dupeSentinel(u8, path_src, 0)).ptr, flag_src });
+            tools_common.log.wrn("%s: no NextN tensor in '%s', %s has no effect\n", .{ func, (try a.dupeSentinel(u8, path_src, 0)).ptr, flag_src });
         } else {
             nextn = nextnCollectorInit(model_src, &params, info.own_lm_head[0]) orelse return 1;
-            tc.speculative.ext.setEmbeddingsNextn(ctx, true, false); // masked = false
+            tools_common.speculative.ext.setEmbeddingsNextn(ctx, true, false); // masked = false
             g_collector.n_layer_nextn = n_heads;
 
-            tc.log.inf("%s: processing %d NextN layer(s) from block %d\n", .{ func, n_heads, n_trunk });
+            tools_common.log.inf("%s: processing %d NextN layer(s) from block %d\n", .{ func, n_heads, n_trunk });
         }
     }
 
     // print system information
     {
-        tc.log.inf("\n", .{});
-        tc.log.inf("%s\n", .{(try tc.common.paramsGetSystemInfo(a, &params)).ptr});
+        tools_common.log.inf("\n", .{});
+        tools_common.log.inf("%s\n", .{(try tools_common.common.paramsGetSystemInfo(a, &params)).ptr});
     }
 
     if (!try computeImatrix(a, ctx, &params, n_ctx, if (nextn) |*n| n else null)) return 1;
 
     try g_collector.save(-1);
 
-    tc.log.out("\n", .{});
-    tc.c.llama_perf_context_print(ctx);
+    tools_common.log.out("\n", .{});
+    llama.api.context.llama_perf_context_print(ctx);
 
-    tc.c.llama_backend_free();
+    llama.api.llama.llama_backend_free();
 
     return 0;
 }

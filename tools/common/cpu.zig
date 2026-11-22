@@ -50,8 +50,8 @@ pub fn numPhysicalCores() i32 {
     } else if (comptime builtin.os.tag.isDarwin()) {
         var num_physical_cores: i32 = 0;
         var len: usize = @sizeOf(i32);
-        if (stdlib.libc.sysctlbyname("hw.perflevel0.physicalcpu", &num_physical_cores, &len, null, 0) == 0) return num_physical_cores;
-        if (stdlib.libc.sysctlbyname("hw.physicalcpu", &num_physical_cores, &len, null, 0) == 0) return num_physical_cores;
+        if (std.c.sysctlbyname("hw.perflevel0.physicalcpu", &num_physical_cores, &len, null, 0) == 0) return num_physical_cores;
+        if (std.c.sysctlbyname("hw.physicalcpu", &num_physical_cores, &len, null, 0) == 0) return num_physical_cores;
     }
     const n_threads = stdlib.thread.hardwareConcurrency();
     return @intCast(if (n_threads > 0) (if (n_threads <= 4) n_threads else n_threads / 2) else 4);

@@ -46,6 +46,7 @@
 //! grammar passes a lambda.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const builtin = @import("builtin");
 
 // -----------------------------------------------------------------------------
@@ -1814,14 +1815,12 @@ pub const RandomDevice = struct {
     /// aarch64 and x86_64 share.
     const rnd_get_ent_cnt: u32 = 0x80045200;
 
-    const libc = @import("libc.zig");
-
     /// The constructor: opens `/dev/urandom` where the device is a file.
     ///
     /// Return: the device; `error.OpenFailed` where the C++ throws.
     pub fn open() Error!RandomDevice {
         if (comptime uses_arc4random or uses_win32_random) return .{};
-        const fd = libc.open("/dev/urandom", .{ .ACCMODE = .RDONLY });
+        const fd = std.c.open("/dev/urandom", .{ .ACCMODE = .RDONLY });
         if (fd < 0) return error.OpenFailed;
         return .{ .fd = fd };
     }
@@ -1829,7 +1828,7 @@ pub const RandomDevice = struct {
     /// The destructor.
     pub fn close(self: *RandomDevice) void {
         if (comptime uses_arc4random or uses_win32_random) return;
-        if (self.fd >= 0) _ = libc.close(self.fd);
+        if (self.fd >= 0) _ = std.c.close(self.fd);
         self.fd = -1;
     }
 
@@ -1840,7 +1839,7 @@ pub const RandomDevice = struct {
         if (comptime uses_arc4random) return 32;
         if (comptime uses_win32_random) return 0;
         var ent: c_int = 0;
-        if (libc.ioctl(self.fd, @bitCast(rnd_get_ent_cnt), &ent) < 0) return 0;
+        if (std.c.ioctl(self.fd, @bitCast(rnd_get_ent_cnt), &ent) < 0) return 0;
         if (ent < 0) return 0;
         if (ent > 32) return 32;
         return @floatFromInt(ent);
@@ -1851,17 +1850,17 @@ pub const RandomDevice = struct {
     /// Return: the value; `error.Eof` or `error.ReadFailed` where the C++
     /// throws.
     pub fn next(self: *const RandomDevice) Error!u32 {
-        if (comptime uses_arc4random) return libc.arc4random();
+        if (comptime uses_arc4random) return mod.libc.arc4random();
         if (comptime uses_win32_random) {
             var r: c_uint = 0;
-            if (libc.rand_s(&r) != 0) return error.ReadFailed;
+            if (mod.libc.rand_s(&r) != 0) return error.ReadFailed;
             return r;
         }
         var r: u32 = 0;
         const p: [*]u8 = @ptrCast(&r);
         var got: usize = 0;
         while (got < @sizeOf(u32)) {
-            const n = libc.read(self.fd, p + got, @sizeOf(u32) - got);
+            const n = std.c.read(self.fd, p + got, @sizeOf(u32) - got);
             if (n == 0) return error.Eof;
             if (n < 0) {
                 if (std.c._errno().* == @backingInt(std.c.E.INTR)) continue;
@@ -1894,13 +1893,11 @@ pub fn randomDevice() u32 {
 }
 
 fn terminate(err: RandomDevice.Error) noreturn {
-    const stdio = @import("stdio.zig");
-    const errno_mod = @import("errno.zig");
-    const s = stdio.stderr();
+    const s = mod.stdio.stderr();
     s.write("libc++abi: terminating due to uncaught exception of type std::system_error: ");
     s.write(RandomDevice.what(err));
     s.write(": ");
-    s.write(std.mem.span(errno_mod.strerror(std.c._errno().*)));
+    s.write(std.mem.span(mod.errno.strerror(std.c._errno().*)));
     s.write("\n");
     std.c.abort();
 }

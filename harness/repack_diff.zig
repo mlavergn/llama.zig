@@ -41,7 +41,7 @@ const builtin = @import("builtin");
 /// `ggml_tensor`, the context API and the backend-buffer API.
 ///
 /// Translated from `repack_diff.h` by `scripts/repack-diff`.
-const c = @import("ggml_h");
+const ggml_h = @import("ggml_h");
 
 /// The reference's `CPU_REPACK` buffer type, by its **mangled** name.
 ///
@@ -51,7 +51,7 @@ const c = @import("ggml_h");
 /// it — which is the same fact, seen from a third direction, that
 /// the symbol count is not this file's contract.
 const refRepackBuft = @extern(
-    *const fn () callconv(.c) c.ggml_backend_buffer_type_t,
+    *const fn () callconv(.c) ggml_h.ggml_backend_buffer_type_t,
     .{ .name = "_Z35ggml_backend_cpu_repack_buffer_typev" },
 );
 
@@ -59,11 +59,11 @@ const refRepackBuft = @extern(
 /// registry's `ggml_backend_dev_get_extra_bufts` proc address. That is a
 /// pure C ABI, and it puts `cpu_backend.zig`'s extra-buffer list under the
 /// same check.
-fn portedRepackBuft() c.ggml_backend_buffer_type_t {
-    const reg = c.ggml_backend_cpu_reg();
-    const proc = c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_dev_get_extra_bufts") orelse return null;
-    const get: *const fn (c.ggml_backend_dev_t) callconv(.c) [*c]c.ggml_backend_buffer_type_t = @ptrCast(@alignCast(proc));
-    const list = get(c.ggml_backend_reg_dev_get(reg, 0));
+fn portedRepackBuft() ggml_h.ggml_backend_buffer_type_t {
+    const reg = ggml_h.ggml_backend_cpu_reg();
+    const proc = ggml_h.ggml_backend_reg_get_proc_address(reg, "ggml_backend_dev_get_extra_bufts") orelse return null;
+    const get: *const fn (ggml_h.ggml_backend_dev_t) callconv(.c) [*c]ggml_h.ggml_backend_buffer_type_t = @ptrCast(@alignCast(proc));
+    const list = get(ggml_h.ggml_backend_reg_dev_get(reg, 0));
     if (list == null) return null;
     return list[0];
 }
@@ -386,16 +386,16 @@ pub fn main() !void {
     // a kernel that multiplies by one compares equal by computing nothing:
     // the generic stood in for the AVX2 `gemv_q4_0_8x8_q8_0` and passed.
     // On ARM the macro is a cast and the call changes nothing.
-    c.ggml_cpu_init();
+    ggml_h.ggml_cpu_init();
 
     // What the port library was compiled for; `scripts/repack-diff` checks
     // this first line against GATE_CPU. The reference objects are compiled
     // by the script itself, for the same CPU.
     std.debug.print("cpu: dotprod={d} matmul_int8={d} sve={d} llamafile={d}\n", .{
-        c.ggml_cpu_has_dotprod(),
-        c.ggml_cpu_has_matmul_int8(),
-        c.ggml_cpu_has_sve(),
-        c.ggml_cpu_has_llamafile(),
+        ggml_h.ggml_cpu_has_dotprod(),
+        ggml_h.ggml_cpu_has_matmul_int8(),
+        ggml_h.ggml_cpu_has_sve(),
+        ggml_h.ggml_cpu_has_llamafile(),
     });
     std.debug.print("=== repack kernels: ported vs reference, on bits ===\n", .{});
 
@@ -435,19 +435,19 @@ pub fn main() !void {
 
     // Both `tensor_traits::repack` implementations log at debug level; the
     // gate compares bytes, so the log is noise here.
-    c.ggml_log_set(silence, null);
+    ggml_h.ggml_log_set(silence, null);
 
     std.debug.print("\n=== repack converters, through the real buffer type ===\n", .{});
     for ([_]ConverterCase{
-        .{ .name = "q4_0", .ty = c.GGML_TYPE_Q4_0 },
-        .{ .name = "q4_K", .ty = c.GGML_TYPE_Q4_K },
-        .{ .name = "q5_K", .ty = c.GGML_TYPE_Q5_K },
-        .{ .name = "q6_K", .ty = c.GGML_TYPE_Q6_K },
-        .{ .name = "q8_0", .ty = c.GGML_TYPE_Q8_0 },
-        .{ .name = "iq4_nl", .ty = c.GGML_TYPE_IQ4_NL },
-        .{ .name = "mxfp4", .ty = c.GGML_TYPE_MXFP4 },
-        .{ .name = "q2_K", .ty = c.GGML_TYPE_Q2_K },
-        .{ .name = "q1_0", .ty = c.GGML_TYPE_Q1_0 },
+        .{ .name = "q4_0", .ty = ggml_h.GGML_TYPE_Q4_0 },
+        .{ .name = "q4_K", .ty = ggml_h.GGML_TYPE_Q4_K },
+        .{ .name = "q5_K", .ty = ggml_h.GGML_TYPE_Q5_K },
+        .{ .name = "q6_K", .ty = ggml_h.GGML_TYPE_Q6_K },
+        .{ .name = "q8_0", .ty = ggml_h.GGML_TYPE_Q8_0 },
+        .{ .name = "iq4_nl", .ty = ggml_h.GGML_TYPE_IQ4_NL },
+        .{ .name = "mxfp4", .ty = ggml_h.GGML_TYPE_MXFP4 },
+        .{ .name = "q2_K", .ty = ggml_h.GGML_TYPE_Q2_K },
+        .{ .name = "q1_0", .ty = ggml_h.GGML_TYPE_Q1_0 },
     }) |case| try runConverter(case, alloc);
 
     std.debug.print("\n", .{});
@@ -459,7 +459,7 @@ pub fn main() !void {
     std.process.exit(1);
 }
 
-fn silence(level: c.ggml_log_level, text: [*c]const u8, user: ?*anyopaque) callconv(.c) void {
+fn silence(level: ggml_h.ggml_log_level, text: [*c]const u8, user: ?*anyopaque) callconv(.c) void {
     _ = level;
     _ = text;
     _ = user;
@@ -495,25 +495,25 @@ fn runConverter(case: ConverterCase, alloc: std.mem.Allocator) !void {
     var src: []u8 = &.{};
     defer if (src.len != 0) alloc.free(src);
 
-    for ([_]c.ggml_backend_buffer_type_t{
+    for ([_]ggml_h.ggml_backend_buffer_type_t{
         portedRepackBuft(),
         refRepackBuft(),
     }, 0..) |buft, side| {
-        var params = std.mem.zeroes(c.struct_ggml_init_params);
+        var params = std.mem.zeroes(ggml_h.struct_ggml_init_params);
         params.mem_size = 16 * 1024 * 1024;
         params.no_alloc = true;
-        const ctx = c.ggml_init(params).?;
-        defer c.ggml_free(ctx);
+        const ctx = ggml_h.ggml_init(params).?;
+        defer ggml_h.ggml_free(ctx);
 
-        const t = c.ggml_new_tensor_2d(ctx, case.ty, ne0, ne1).?;
-        const nbytes = c.ggml_nbytes(t);
+        const t = ggml_h.ggml_new_tensor_2d(ctx, case.ty, ne0, ne1).?;
+        const nbytes = ggml_h.ggml_nbytes(t);
         if (src.len == 0) {
             src = try alloc.alloc(u8, nbytes);
             prng.random().bytes(src);
         }
 
-        const buffer = c.ggml_backend_alloc_ctx_tensors_from_buft(ctx, buft).?;
-        defer c.ggml_backend_buffer_free(buffer);
+        const buffer = ggml_h.ggml_backend_alloc_ctx_tensors_from_buft(ctx, buft).?;
+        defer ggml_h.ggml_backend_buffer_free(buffer);
 
         // `init_tensor` has run by now and hung the traits off `extra`;
         // null means this type and shape have no interleaved kernel here.
@@ -521,9 +521,9 @@ fn runConverter(case: ConverterCase, alloc: std.mem.Allocator) !void {
         if (!repacked[side]) continue;
 
         // The write path is the repack: `set_tensor` interleaves in place.
-        c.ggml_backend_tensor_set(t, src.ptr, 0, nbytes);
+        ggml_h.ggml_backend_tensor_set(t, src.ptr, 0, nbytes);
 
-        const base: [*]const u8 = @ptrCast(c.ggml_backend_buffer_get_base(buffer).?);
+        const base: [*]const u8 = @ptrCast(ggml_h.ggml_backend_buffer_get_base(buffer).?);
         out[side] = try alloc.dupe(u8, base[0..nbytes]);
     }
     defer for (0..2) |i| if (repacked[i]) alloc.free(out[i]);

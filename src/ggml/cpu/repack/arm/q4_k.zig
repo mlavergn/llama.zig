@@ -28,7 +28,6 @@
 //! loop, and each sub-block then takes two of them. That is a pairwise
 //! add across two vectors, not a plain add — see `neon.paddq_s16`.
 
-const std = @import("std");
 const ggml = @import("../../../module.zig");
 
 // The `_generic` bodies, in `cpu/repack/`, that each export below falls to
@@ -48,14 +47,14 @@ inline fn loadq16(p: [*]const i16) ggml.cpu.quants.arch.neon.i16x8 {
 const m4b: ggml.cpu.quants.arch.neon.u8x16 = @splat(0x0f);
 
 /// Ports `ggml_gemv_q4_K_8x4_q8_K` (arch/arm/repack.cpp:648 @b1b770d90).
-pub export fn ggml_gemv_q4_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemv_q4_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.q4_k.ggml_gemv_q4_K_8x4_q8_K_generic(n, s, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 256);
     const ncols_interleaved: c_int = 8;
     const col_groups: usize = 2;
 
     var acc_f32: [col_groups]ggml.cpu.quants.arch.neon.f32x4 = undefined;
-    const q8_ptr: [*]const ggml.impl.c.block_q8_K = @ptrCast(@alignCast(vy));
+    const q8_ptr: [*]const ggml.impl.ggml_c.block_q8_K = @ptrCast(@alignCast(vy));
 
     var x: c_int = 0;
     while (x < @divTrunc(nc, ncols_interleaved)) : (x += 1) {
@@ -160,14 +159,14 @@ pub export fn ggml_gemv_q4_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
 /// 64-bit value duplicated into both halves rather than lane-indexed, and
 /// the pairs folded together at the end by the **pairwise** `vpaddq_s32`.
 /// The mins half is identical, so only the dot-product half differs.
-pub export fn ggml_gemv_q4_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemv_q4_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.q4_k.ggml_gemv_q4_K_8x8_q8_K_generic(n, s, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 256);
     const ncols_interleaved: c_int = 8;
     const col_pairs: usize = 4;
 
     var acc_f32: [2]ggml.cpu.quants.arch.neon.f32x4 = undefined;
-    const q8_ptr: [*]const ggml.impl.c.block_q8_K = @ptrCast(@alignCast(vy));
+    const q8_ptr: [*]const ggml.impl.ggml_c.block_q8_K = @ptrCast(@alignCast(vy));
 
     var x: c_int = 0;
     while (x < @divTrunc(nc, ncols_interleaved)) : (x += 1) {
@@ -277,7 +276,7 @@ pub export fn ggml_gemv_q4_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
 /// the gemv's single `q8_d` splat becomes four lane splats here.
 ///
 /// Unlike `q6_K`, this one *does* use `vfmaq_f32` for the combine.
-pub export fn ggml_gemm_q4_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemm_q4_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.q4_k.ggml_gemm_q4_K_8x4_q8_K_generic(n, s, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 256);
     const ncols_interleaved: c_int = 8;
@@ -402,8 +401,4 @@ pub export fn ggml_gemm_q4_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
             }
         }
     }
-}
-
-comptime {
-    _ = std;
 }

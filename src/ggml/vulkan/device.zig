@@ -43,8 +43,8 @@ pub const FaPipelineState = struct {
     f32acc: bool,
     flags: u32,
     limit_occupancy_shmem: u32,
-    k_type: ggml.impl.c.ggml_type,
-    v_type: ggml.impl.c.ggml_type,
+    k_type: ggml.impl.ggml_c.ggml_type,
+    v_type: ggml.impl.ggml_c.ggml_type,
 };
 
 /// Ports `vk_conv2d_pipeline_state` (ggml-vulkan-types.h:451 @b1b770d90).
@@ -238,21 +238,21 @@ pub const RecursiveMutex = struct {
 
 /// Ports `lightning_indexer_k_types` (ggml-vulkan-types.h:671 @b1b770d90): the
 /// K types the lightning-indexer shader decodes.
-pub const lightning_indexer_k_types = [_]ggml.impl.c.ggml_type{
-    ggml.impl.c.GGML_TYPE_F32,
-    ggml.impl.c.GGML_TYPE_F16,
-    ggml.impl.c.GGML_TYPE_BF16,
-    ggml.impl.c.GGML_TYPE_Q8_0,
-    ggml.impl.c.GGML_TYPE_Q5_1,
-    ggml.impl.c.GGML_TYPE_Q5_0,
-    ggml.impl.c.GGML_TYPE_Q4_1,
-    ggml.impl.c.GGML_TYPE_Q4_0,
-    ggml.impl.c.GGML_TYPE_IQ4_NL,
+pub const lightning_indexer_k_types = [_]ggml.impl.ggml_c.ggml_type{
+    ggml.impl.ggml_c.GGML_TYPE_F32,
+    ggml.impl.ggml_c.GGML_TYPE_F16,
+    ggml.impl.ggml_c.GGML_TYPE_BF16,
+    ggml.impl.ggml_c.GGML_TYPE_Q8_0,
+    ggml.impl.ggml_c.GGML_TYPE_Q5_1,
+    ggml.impl.ggml_c.GGML_TYPE_Q5_0,
+    ggml.impl.ggml_c.GGML_TYPE_Q4_1,
+    ggml.impl.ggml_c.GGML_TYPE_Q4_0,
+    ggml.impl.ggml_c.GGML_TYPE_IQ4_NL,
 };
 
 /// Ports `ggml_vk_lightning_indexer_k_type_supported` (ggml-vulkan.cpp:146 @b1b770d90).
-pub fn lightningIndexerKTypeSupported(t: ggml.impl.c.ggml_type) bool {
-    return std.mem.indexOfScalar(ggml.impl.c.ggml_type, &lightning_indexer_k_types, t) != null;
+pub fn lightningIndexerKTypeSupported(t: ggml.impl.ggml_c.ggml_type) bool {
+    return std.mem.indexOfScalar(ggml.impl.ggml_c.ggml_type, &lightning_indexer_k_types, t) != null;
 }
 
 /// Ports `vk_device_struct` (ggml-vulkan-types.h:685 @b1b770d90).
@@ -366,20 +366,20 @@ pub const Device = struct {
 
     idx: usize = 0,
 
-    mul_mat_l: [ggml.impl.c.GGML_TYPE_COUNT]bool = @splat(false),
-    mul_mat_m: [ggml.impl.c.GGML_TYPE_COUNT]bool = @splat(false),
-    mul_mat_s: [ggml.impl.c.GGML_TYPE_COUNT]bool = @splat(false),
-    mul_mat_id_l: [ggml.impl.c.GGML_TYPE_COUNT]bool = @splat(false),
-    mul_mat_id_m: [ggml.impl.c.GGML_TYPE_COUNT]bool = @splat(false),
-    mul_mat_id_s: [ggml.impl.c.GGML_TYPE_COUNT]bool = @splat(false),
+    mul_mat_l: [ggml.impl.ggml_c.GGML_TYPE_COUNT]bool = @splat(false),
+    mul_mat_m: [ggml.impl.ggml_c.GGML_TYPE_COUNT]bool = @splat(false),
+    mul_mat_s: [ggml.impl.ggml_c.GGML_TYPE_COUNT]bool = @splat(false),
+    mul_mat_id_l: [ggml.impl.ggml_c.GGML_TYPE_COUNT]bool = @splat(false),
+    mul_mat_id_m: [ggml.impl.ggml_c.GGML_TYPE_COUNT]bool = @splat(false),
+    mul_mat_id_s: [ggml.impl.ggml_c.GGML_TYPE_COUNT]bool = @splat(false),
 
     // Separate flags for the q8_1 (integer dot) mmq path.
-    mul_mat_l_int: [ggml.impl.c.GGML_TYPE_COUNT]bool = @splat(false),
-    mul_mat_m_int: [ggml.impl.c.GGML_TYPE_COUNT]bool = @splat(false),
-    mul_mat_s_int: [ggml.impl.c.GGML_TYPE_COUNT]bool = @splat(false),
-    mul_mat_id_l_int: [ggml.impl.c.GGML_TYPE_COUNT]bool = @splat(false),
-    mul_mat_id_m_int: [ggml.impl.c.GGML_TYPE_COUNT]bool = @splat(false),
-    mul_mat_id_s_int: [ggml.impl.c.GGML_TYPE_COUNT]bool = @splat(false),
+    mul_mat_l_int: [ggml.impl.ggml_c.GGML_TYPE_COUNT]bool = @splat(false),
+    mul_mat_m_int: [ggml.impl.ggml_c.GGML_TYPE_COUNT]bool = @splat(false),
+    mul_mat_s_int: [ggml.impl.ggml_c.GGML_TYPE_COUNT]bool = @splat(false),
+    mul_mat_id_l_int: [ggml.impl.ggml_c.GGML_TYPE_COUNT]bool = @splat(false),
+    mul_mat_id_m_int: [ggml.impl.ggml_c.GGML_TYPE_COUNT]bool = @splat(false),
+    mul_mat_id_s_int: [ggml.impl.ggml_c.GGML_TYPE_COUNT]bool = @splat(false),
 
     dsl: ggml.vulkan.common.vk.VkDescriptorSetLayout = null,
 
@@ -390,19 +390,19 @@ pub const Device = struct {
     pipeline_matmul_split_k_reduce: ?*ggml.vulkan.pipeline.Pipeline = null,
     pipeline_quantize_q8_1_x4: ?*ggml.vulkan.pipeline.Pipeline = null,
 
-    pipeline_dequant: [ggml.impl.c.GGML_TYPE_COUNT]?*ggml.vulkan.pipeline.Pipeline = @splat(null),
-    pipeline_dequant_transpose: [ggml.impl.c.GGML_TYPE_COUNT]?*ggml.vulkan.pipeline.Pipeline = @splat(null),
-    pipeline_dequant_mul_mat_vec_f32_f32: [dmmv_wg_size_count][ggml.impl.c.GGML_TYPE_COUNT][mul_mat_vec_max_cols]?*ggml.vulkan.pipeline.Pipeline = @splat(@splat(@splat(null))),
-    pipeline_dequant_mul_mat_vec_f16_f32: [dmmv_wg_size_count][ggml.impl.c.GGML_TYPE_COUNT][mul_mat_vec_max_cols]?*ggml.vulkan.pipeline.Pipeline = @splat(@splat(@splat(null))),
-    pipeline_dequant_mul_mat_vec_id_f32: [dmmv_wg_size_count][ggml.impl.c.GGML_TYPE_COUNT]?*ggml.vulkan.pipeline.Pipeline = @splat(@splat(null)),
+    pipeline_dequant: [ggml.impl.ggml_c.GGML_TYPE_COUNT]?*ggml.vulkan.pipeline.Pipeline = @splat(null),
+    pipeline_dequant_transpose: [ggml.impl.ggml_c.GGML_TYPE_COUNT]?*ggml.vulkan.pipeline.Pipeline = @splat(null),
+    pipeline_dequant_mul_mat_vec_f32_f32: [dmmv_wg_size_count][ggml.impl.ggml_c.GGML_TYPE_COUNT][mul_mat_vec_max_cols]?*ggml.vulkan.pipeline.Pipeline = @splat(@splat(@splat(null))),
+    pipeline_dequant_mul_mat_vec_f16_f32: [dmmv_wg_size_count][ggml.impl.ggml_c.GGML_TYPE_COUNT][mul_mat_vec_max_cols]?*ggml.vulkan.pipeline.Pipeline = @splat(@splat(@splat(null))),
+    pipeline_dequant_mul_mat_vec_id_f32: [dmmv_wg_size_count][ggml.impl.ggml_c.GGML_TYPE_COUNT]?*ggml.vulkan.pipeline.Pipeline = @splat(@splat(null)),
 
-    pipeline_dequant_mul_mat_vec_q8_1_f32: [dmmv_wg_size_count][ggml.impl.c.GGML_TYPE_COUNT][mul_mat_vec_max_cols]?*ggml.vulkan.pipeline.Pipeline = @splat(@splat(@splat(null))),
-    pipeline_dequant_mul_mat_vec_id_q8_1_f32: [dmmv_wg_size_count][ggml.impl.c.GGML_TYPE_COUNT]?*ggml.vulkan.pipeline.Pipeline = @splat(@splat(null)),
+    pipeline_dequant_mul_mat_vec_q8_1_f32: [dmmv_wg_size_count][ggml.impl.ggml_c.GGML_TYPE_COUNT][mul_mat_vec_max_cols]?*ggml.vulkan.pipeline.Pipeline = @splat(@splat(@splat(null))),
+    pipeline_dequant_mul_mat_vec_id_q8_1_f32: [dmmv_wg_size_count][ggml.impl.ggml_c.GGML_TYPE_COUNT]?*ggml.vulkan.pipeline.Pipeline = @splat(@splat(null)),
 
     pipeline_mul_mat_vec_p021_f16_f32: [p021_max_gqa_ratio]?*ggml.vulkan.pipeline.Pipeline = @splat(null),
     pipeline_mul_mat_vec_nc_f16_f32: ?*ggml.vulkan.pipeline.Pipeline = null,
-    pipeline_get_rows: [ggml.impl.c.GGML_TYPE_COUNT]?*ggml.vulkan.pipeline.Pipeline = @splat(null),
-    pipeline_get_rows_f32: [ggml.impl.c.GGML_TYPE_COUNT]?*ggml.vulkan.pipeline.Pipeline = @splat(null),
+    pipeline_get_rows: [ggml.impl.ggml_c.GGML_TYPE_COUNT]?*ggml.vulkan.pipeline.Pipeline = @splat(null),
+    pipeline_get_rows_f32: [ggml.impl.ggml_c.GGML_TYPE_COUNT]?*ggml.vulkan.pipeline.Pipeline = @splat(null),
     pipeline_get_rows_back_f32: ?*ggml.vulkan.pipeline.Pipeline = null,
     pipeline_acc_f32: ?*ggml.vulkan.pipeline.Pipeline = null,
     pipeline_set_f32: ?*ggml.vulkan.pipeline.Pipeline = null,
@@ -465,15 +465,15 @@ pub const Device = struct {
     pipeline_contig_cpy_bf16_f16: ?*ggml.vulkan.pipeline.Pipeline = null,
     pipeline_contig_cpy_f32_i32: ?*ggml.vulkan.pipeline.Pipeline = null,
     pipeline_contig_cpy_i32_f32: ?*ggml.vulkan.pipeline.Pipeline = null,
-    pipeline_cpy_f32_quant: [ggml.impl.c.GGML_TYPE_COUNT]?*ggml.vulkan.pipeline.Pipeline = @splat(null),
-    pipeline_cpy_quant_f32: [ggml.impl.c.GGML_TYPE_COUNT]?*ggml.vulkan.pipeline.Pipeline = @splat(null),
+    pipeline_cpy_f32_quant: [ggml.impl.ggml_c.GGML_TYPE_COUNT]?*ggml.vulkan.pipeline.Pipeline = @splat(null),
+    pipeline_cpy_quant_f32: [ggml.impl.ggml_c.GGML_TYPE_COUNT]?*ggml.vulkan.pipeline.Pipeline = @splat(null),
     pipeline_cpy_transpose_16: ?*ggml.vulkan.pipeline.Pipeline = null,
     pipeline_cpy_transpose_32: ?*ggml.vulkan.pipeline.Pipeline = null,
     pipeline_cpy_transpose_02_16: ?*ggml.vulkan.pipeline.Pipeline = null,
     pipeline_cpy_transpose_02_32: ?*ggml.vulkan.pipeline.Pipeline = null,
     // [src0 0=fp32,1=fp16][dst]
-    pipeline_set_rows_i32: [2][ggml.impl.c.GGML_TYPE_COUNT]?*ggml.vulkan.pipeline.Pipeline = @splat(@splat(null)),
-    pipeline_set_rows_i64: [2][ggml.impl.c.GGML_TYPE_COUNT]?*ggml.vulkan.pipeline.Pipeline = @splat(@splat(null)),
+    pipeline_set_rows_i32: [2][ggml.impl.ggml_c.GGML_TYPE_COUNT]?*ggml.vulkan.pipeline.Pipeline = @splat(@splat(null)),
+    pipeline_set_rows_i64: [2][ggml.impl.ggml_c.GGML_TYPE_COUNT]?*ggml.vulkan.pipeline.Pipeline = @splat(@splat(null)),
     pipeline_norm_f32: ?*ggml.vulkan.pipeline.Pipeline = null,
     pipeline_group_norm_f32: ?*ggml.vulkan.pipeline.Pipeline = null,
     pipeline_rms_norm_f32: [3]?*ggml.vulkan.pipeline.Pipeline = @splat(null),
@@ -609,7 +609,7 @@ pub const Device = struct {
     pipeline_rwkv_wkv6_f32: ?*ggml.vulkan.pipeline.Pipeline = null,
     pipeline_rwkv_wkv7_f32: ?*ggml.vulkan.pipeline.Pipeline = null,
     pipeline_gated_linear_attn_f32: ?*ggml.vulkan.pipeline.Pipeline = null,
-    pipeline_lightning_indexer_f32: [ggml.impl.c.GGML_TYPE_COUNT]?*ggml.vulkan.pipeline.Pipeline = @splat(null),
+    pipeline_lightning_indexer_f32: [ggml.impl.ggml_c.GGML_TYPE_COUNT]?*ggml.vulkan.pipeline.Pipeline = @splat(null),
     // [size_idx][kda] where size_idx: 0=d16, 1=d32, 2=d64, 3=d128
     pipeline_gated_delta_net: [4][2]?*ggml.vulkan.pipeline.Pipeline = @splat(@splat(null)),
     pipeline_ssm_scan_f32_d128: ?*ggml.vulkan.pipeline.Pipeline = null,
@@ -653,7 +653,7 @@ pub const Device = struct {
     fence: ggml.vulkan.common.vk.VkFence = null,
     sync_staging: ?*ggml.vulkan.buffer.Buffer = null,
 
-    buffer_type: ggml.impl.c.struct_ggml_backend_buffer_type = undefined,
+    buffer_type: ggml.impl.ggml_c.struct_ggml_backend_buffer_type = undefined,
 
     disable_fusion: bool = false,
     fusion_stats_enabled: std.atomic.Value(bool) = .init(false),
@@ -1335,7 +1335,7 @@ pub fn getDevice(idx: usize) *Device {
 
     // Shaders
     // Disable matmul tile sizes early if performance low or not supported
-    for (0..ggml.impl.c.GGML_TYPE_COUNT) |i| {
+    for (0..ggml.impl.ggml_c.GGML_TYPE_COUNT) |i| {
         switch (device.vendor_id) {
             ggml.vulkan.common.vendor_id.amd => {
                 device.mul_mat_l[i] = device.coopmat_support and ggml.vulkan.shaders.amdLargeTileSupported(device);
@@ -1347,7 +1347,7 @@ pub fn getDevice(idx: usize) *Device {
             },
             ggml.vulkan.common.vendor_id.intel => {
                 // Current Windows driver does not expose BF16 support.
-                const use_l_warptile = if (i == ggml.impl.c.GGML_TYPE_BF16) device.coopmat_bf16_support and device.coopmat_support else device.coopmat_support;
+                const use_l_warptile = if (i == ggml.impl.ggml_c.GGML_TYPE_BF16) device.coopmat_bf16_support and device.coopmat_support else device.coopmat_support;
                 device.mul_mat_l[i] = use_l_warptile;
                 device.mul_mat_id_l[i] = use_l_warptile;
                 device.mul_mat_m[i] = true;
@@ -1450,7 +1450,7 @@ pub fn getDevice(idx: usize) *Device {
 
     device.buffer_type = .{
         .iface = ggml.vulkan.buffer.buffer_type_iface,
-        .device = ggml.impl.c.ggml_backend_reg_dev_get(ggml.vulkan.backend.reg(), idx),
+        .device = ggml.impl.ggml_c.ggml_backend_reg_dev_get(ggml.vulkan.backend.reg(), idx),
         .context = ggml.vulkan.buffer.BufferTypeCtx.create(device.name, device),
     };
 

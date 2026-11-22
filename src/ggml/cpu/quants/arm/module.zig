@@ -45,15 +45,6 @@ pub const golden_generic = @import("golden_generic.zig");
 
 pub const golden = @import("golden.zig");
 
-comptime {
-    _ = rows;
-    _ = legacy;
-    _ = ternary;
-    _ = k;
-    _ = mmla;
-    _ = iq;
-}
-
 // -----------------------------------------------------------------------------
 // Unit Tests
 

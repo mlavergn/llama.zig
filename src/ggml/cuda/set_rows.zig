@@ -131,7 +131,7 @@ fn setRowsCudaLaunch(comptime S: type, comptime I: type, comptime D: type, src0_
 /// Ports the per-tensor `set_rows_cuda` (set-rows.cu:221 @b1b770d90), as
 /// `set_rows_cuda<src_t, idx_t>`, and its two `half` specialisations, for
 /// `int32_t` and `int64_t` indices (set-rows.cu:336, 361 @b1b770d90), which accept only an `F16` destination.
-fn setRowsCuda(comptime S: type, comptime I: type, ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.c.ggml_tensor, src1: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor) void {
+fn setRowsCuda(comptime S: type, comptime I: type, ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const src0_d: ?*const anyopaque = src0.data;
     const src1_d: ?*const anyopaque = src1.data;
 
@@ -159,50 +159,50 @@ fn setRowsCuda(comptime S: type, comptime I: type, ctx: *ggml.cuda.common.Contex
     const d = dst.data;
 
     if (S == ggml.cuda.kernels.half) {
-        if (dst.type == ggml.impl.c.GGML_TYPE_F16) {
+        if (dst.type == ggml.impl.ggml_c.GGML_TYPE_F16) {
             setRowsCudaLaunch(ggml.cuda.kernels.half, I, ggml.cuda.kernels.half, src0_d, src1_d, d, a, stream);
         } else {
-            ggml.impl.c.ggml_abort(@src().file.ptr, @intCast(@src().line), "unsupported type %s", ggml.impl.c.ggml_type_name(dst.type));
+            ggml.impl.ggml_c.ggml_abort(@src().file.ptr, @intCast(@src().line), "unsupported type %s", ggml.impl.ggml_c.ggml_type_name(dst.type));
         }
         return;
     }
 
     switch (dst.type) {
-        ggml.impl.c.GGML_TYPE_F32 => setRowsCudaLaunch(S, I, f32, src0_d, src1_d, d, a, stream),
-        ggml.impl.c.GGML_TYPE_F16 => setRowsCudaLaunch(S, I, ggml.cuda.kernels.half, src0_d, src1_d, d, a, stream),
-        ggml.impl.c.GGML_TYPE_BF16 => setRowsCudaLaunch(S, I, ggml.cuda.kernels.bf16, src0_d, src1_d, d, a, stream),
-        ggml.impl.c.GGML_TYPE_F8_E4M3 => setRowsCudaLaunch(S, I, ggml.cuda.kernels.fp8_e4m3, src0_d, src1_d, d, a, stream),
-        ggml.impl.c.GGML_TYPE_Q4_0 => setRowsCudaQuant(I, "block_q4_0", 32, "quantize_f32_q4_0_block", src0_d, src1_d, d, a, stream),
-        ggml.impl.c.GGML_TYPE_Q4_1 => setRowsCudaQuant(I, "block_q4_1", 32, "quantize_f32_q4_1_block", src0_d, src1_d, d, a, stream),
-        ggml.impl.c.GGML_TYPE_Q5_0 => setRowsCudaQuant(I, "block_q5_0", 32, "quantize_f32_q5_0_block", src0_d, src1_d, d, a, stream),
-        ggml.impl.c.GGML_TYPE_Q5_1 => setRowsCudaQuant(I, "block_q5_1", 32, "quantize_f32_q5_1_block", src0_d, src1_d, d, a, stream),
-        ggml.impl.c.GGML_TYPE_Q8_0 => setRowsCudaQuant(I, "block_q8_0", 32, "quantize_f32_q8_0_block", src0_d, src1_d, d, a, stream),
-        ggml.impl.c.GGML_TYPE_IQ4_NL => setRowsCudaQuant(I, "block_iq4_nl", 32, "quantize_f32_iq4_nl_block", src0_d, src1_d, d, a, stream),
-        else => ggml.impl.c.ggml_abort(@src().file.ptr, @intCast(@src().line), "unsupported type %s", ggml.impl.c.ggml_type_name(dst.type)),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => setRowsCudaLaunch(S, I, f32, src0_d, src1_d, d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => setRowsCudaLaunch(S, I, ggml.cuda.kernels.half, src0_d, src1_d, d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_BF16 => setRowsCudaLaunch(S, I, ggml.cuda.kernels.bf16, src0_d, src1_d, d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_F8_E4M3 => setRowsCudaLaunch(S, I, ggml.cuda.kernels.fp8_e4m3, src0_d, src1_d, d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_Q4_0 => setRowsCudaQuant(I, "block_q4_0", 32, "quantize_f32_q4_0_block", src0_d, src1_d, d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_Q4_1 => setRowsCudaQuant(I, "block_q4_1", 32, "quantize_f32_q4_1_block", src0_d, src1_d, d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_Q5_0 => setRowsCudaQuant(I, "block_q5_0", 32, "quantize_f32_q5_0_block", src0_d, src1_d, d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_Q5_1 => setRowsCudaQuant(I, "block_q5_1", 32, "quantize_f32_q5_1_block", src0_d, src1_d, d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_Q8_0 => setRowsCudaQuant(I, "block_q8_0", 32, "quantize_f32_q8_0_block", src0_d, src1_d, d, a, stream),
+        ggml.impl.ggml_c.GGML_TYPE_IQ4_NL => setRowsCudaQuant(I, "block_iq4_nl", 32, "quantize_f32_iq4_nl_block", src0_d, src1_d, d, a, stream),
+        else => ggml.impl.ggml_c.ggml_abort(@src().file.ptr, @intCast(@src().line), "unsupported type %s", ggml.impl.ggml_c.ggml_type_name(dst.type)),
     }
 }
 
 /// Ports `ggml_cuda_op_set_rows` (set-rows.cu:386 @b1b770d90).
-pub fn opSetRows(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+pub fn opSetRows(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32 or (src0.type == ggml.impl.c.GGML_TYPE_F16 and dst.type == ggml.impl.c.GGML_TYPE_F16), "src0->type == GGML_TYPE_F32 || (src0->type == GGML_TYPE_F16 && dst->type == GGML_TYPE_F16)");
-    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_I64 or src1.type == ggml.impl.c.GGML_TYPE_I32, "src1->type == GGML_TYPE_I64 || src1->type == GGML_TYPE_I32");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32 or (src0.type == ggml.impl.ggml_c.GGML_TYPE_F16 and dst.type == ggml.impl.ggml_c.GGML_TYPE_F16), "src0->type == GGML_TYPE_F32 || (src0->type == GGML_TYPE_F16 && dst->type == GGML_TYPE_F16)");
+    ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_I64 or src1.type == ggml.impl.ggml_c.GGML_TYPE_I32, "src1->type == GGML_TYPE_I64 || src1->type == GGML_TYPE_I32");
 
-    if (src0.type == ggml.impl.c.GGML_TYPE_F32) {
-        if (src1.type == ggml.impl.c.GGML_TYPE_I64) {
+    if (src0.type == ggml.impl.ggml_c.GGML_TYPE_F32) {
+        if (src1.type == ggml.impl.ggml_c.GGML_TYPE_I64) {
             setRowsCuda(f32, i64, ctx, src0, src1, dst);
         } else {
             setRowsCuda(f32, i32, ctx, src0, src1, dst);
         }
-    } else if (src0.type == ggml.impl.c.GGML_TYPE_F16) {
-        if (src1.type == ggml.impl.c.GGML_TYPE_I64) {
+    } else if (src0.type == ggml.impl.ggml_c.GGML_TYPE_F16) {
+        if (src1.type == ggml.impl.ggml_c.GGML_TYPE_I64) {
             setRowsCuda(ggml.cuda.kernels.half, i64, ctx, src0, src1, dst);
         } else {
             setRowsCuda(ggml.cuda.kernels.half, i32, ctx, src0, src1, dst);
         }
     } else {
-        ggml.impl.c.ggml_abort(@src().file.ptr, @intCast(@src().line), "unsupported type %s", ggml.impl.c.ggml_type_name(src0.type));
+        ggml.impl.ggml_c.ggml_abort(@src().file.ptr, @intCast(@src().line), "unsupported type %s", ggml.impl.ggml_c.ggml_type_name(src0.type));
     }
 }

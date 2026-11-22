@@ -38,21 +38,17 @@
 //! `chatLogSink`.
 
 const std = @import("std");
+const mtmd = @import("mtmd");
+const llama = @import("llama");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const tc = @import("tools_common");
+const tools_common = @import("tools_common");
 const json = @import("json");
-const chat = @import("common_chat");
-const mtmd_mod = @import("mtmd");
-
-const Allocator = std.mem.Allocator;
+const common_chat = @import("common_chat");
 
 pub const TaskQueue = mod.queue.Queue(mod.task.Task);
 pub const ResultQueue = mod.queue.Response(*mod.result.Result);
 pub const Reader = mod.queue.ResponseReader(mod.task.Task, *mod.result.Result, mod.task.TaskResultState);
-
-/// Every allocation that crosses threads: tasks, results, slot state.
-pub const gpa = std.heap.c_allocator;
 
 /// Ports `HTTP_POLLING_SECONDS` (server-context.cpp:46 @b1b770d90).
 pub const http_polling_seconds: c_int = 1;
@@ -62,12 +58,12 @@ pub const http_polling_seconds: c_int = 1;
 
 /// `GGML_ASSERT` with this file's name.
 fn ggmlAssert(ok: bool, comptime line: c_int, comptime cond: [*:0]const u8) void {
-    tc.ggml.ggmlAssert(ok, "server-context.cpp", line, cond);
+    tools_common.ggml.ggmlAssert(ok, "server-context.cpp", line, cond);
 }
 
 /// `GGML_ABORT(msg)`.
 fn ggmlAbort(comptime line: c_int, comptime fmt: [*:0]const u8, args: anytype) noreturn {
-    _ = @call(.auto, tc.c.ggml_abort, .{ "server-context.cpp", line, fmt } ++ args);
+    _ = @call(.auto, llama.impl.llama_c.ggml_abort, .{ "server-context.cpp", line, fmt } ++ args);
     unreachable;
 }
 
@@ -78,49 +74,49 @@ fn slt(comptime level: mod.common.SrvLevel, comptime func: []const u8, slot: *co
     const f = "slot %12.*s: id %2d | task %d | " ++ fmt;
     const pre = .{ @as(c_int, 12), @as([*:0]const u8, func ++ ""), @as(c_int, slot.id), @as(c_int, if (slot.task) |*t| t.id else -1) };
     switch (level) {
-        .dbg => tc.log.dbg(f, pre ++ args),
-        .trc => tc.log.trc(f, pre ++ args),
-        .inf => tc.log.inf(f, pre ++ args),
-        .wrn => tc.log.wrn(f, pre ++ args),
-        .err => tc.log.err(f, pre ++ args),
+        .dbg => tools_common.log.dbg(f, pre ++ args),
+        .trc => tools_common.log.trc(f, pre ++ args),
+        .inf => tools_common.log.inf(f, pre ++ args),
+        .wrn => tools_common.log.wrn(f, pre ++ args),
+        .err => tools_common.log.err(f, pre ++ args),
     }
 }
 
 /// Whether a `LOG_*` line at `verbosity` prints: the macros evaluate their
 /// arguments only then, and some arguments are expensive or throw.
 fn logOn(verbosity: c_int) bool {
-    return verbosity <= tc.log.verbosity_thold;
+    return verbosity <= tools_common.log.verbosity_thold;
 }
 
 /// A NUL-terminated copy for a `%s`, freed by the caller with `freeZ`.
 /// `common/chat.cpp`'s `LOG_DBG`, `LOG_INF`, `LOG_WRN` and `LOG_ERR`, which
 /// `cli/common_chat/log.zig` hands its host as finished lines: into
 /// `common_log` at the macro's level and verbosity.
-fn chatLogSink(level: chat.log.Level, text: []const u8) void {
+fn chatLogSink(level: common_chat.log.Level, text: []const u8) void {
     const z = mod.common.dupZ(text);
     defer mod.common.freeZ(z);
     switch (level) {
-        .debug => tc.log.dbg("%s", .{z}),
-        .info => tc.log.inf("%s", .{z}),
-        .warn => tc.log.wrn("%s", .{z}),
-        .err => tc.log.err("%s", .{z}),
+        .debug => tools_common.log.dbg("%s", .{z}),
+        .info => tools_common.log.inf("%s", .{z}),
+        .warn => tools_common.log.wrn("%s", .{z}),
+        .err => tools_common.log.err("%s", .{z}),
     }
 }
 
 /// `chat.h`'s message helpers' `LOG_WRN` and `LOG_ERR` (`msg.zig`'s own
 /// sink), likewise.
-fn chatMsgLogSink(level: chat.msg.Level, text: []const u8) void {
+fn chatMsgLogSink(level: common_chat.msg.Level, text: []const u8) void {
     chatLogSink(if (level == .warn) .warn else .err, text);
 }
 
 /// Whether `LOG_DBG` prints at the current verbosity.
 fn chatDebugOn() bool {
-    return logOn(tc.log.level_debug);
+    return logOn(tools_common.log.level_debug);
 }
 
 /// `common_chat_verify_template(tmpl, true)`, for `arg.zig`'s parse.
 fn verifyJinjaTemplate(_: std.mem.Allocator, tmpl: []const u8) anyerror!bool {
-    return chat.templates.verifyTemplate(gpa, tmpl, true);
+    return common_chat.templates.verifyTemplate(std.heap.c_allocator, tmpl, true);
 }
 
 /// Wires `cli/common_chat/` into the process, before the arguments are
@@ -128,10 +124,10 @@ fn verifyJinjaTemplate(_: std.mem.Allocator, tmpl: []const u8) anyerror!bool {
 /// logs, and the Jinja arm of `common_chat_verify_template`, which
 /// `--chat-template` runs at parse time.
 pub fn installChat() void {
-    chat.log.sink = chatLogSink;
-    chat.log.debug_on = chatDebugOn;
-    chat.msg.log_sink = chatMsgLogSink;
-    tc.arg.verify_jinja_template = verifyJinjaTemplate;
+    common_chat.log.sink = chatLogSink;
+    common_chat.log.debug_on = chatDebugOn;
+    common_chat.msg.log_sink = chatMsgLogSink;
+    tools_common.arg.verify_jinja_template = verifyJinjaTemplate;
 }
 
 /// `e.what()` for an error from any of the libraries the core calls: the
@@ -141,8 +137,8 @@ pub fn whatOf(e: anyerror) []const u8 {
     return switch (e) {
         error.JsonError => json.what(),
         error.OutOfMemory => "std::bad_alloc",
-        error.InvalidArgument, error.RuntimeError => mod.common.what(e),
-        error.Runtime, error.Throw => tc.arg.what(),
+        error.InvalidArgument, error.RuntimeError => common_chat.exception.what(e),
+        error.Runtime, error.Throw => tools_common.arg.what(),
         else => @errorName(e),
     };
 }
@@ -152,11 +148,11 @@ pub fn whatOf(e: anyerror) []const u8 {
 
 /// Ports `server_output_limits` (server-context.cpp:48 @b1b770d90): the
 /// context's output buffer, sized for every slot verifying a full draft.
-fn serverOutputLimits(params: *const tc.params.Params) tc.speculative.OutputLimits {
+fn serverOutputLimits(params: *const tools_common.params.Params) tools_common.speculative.OutputLimits {
     if (params.mmproj.path.len != 0) {
         const path = mod.common.dupZ(params.mmproj.path);
         defer mod.common.freeZ(path);
-        const mcaps = tc.c.mtmd_get_cap_from_file(path);
+        const mcaps = mtmd.mtmd.mtmd_get_cap_from_file(path);
         if (mcaps.gen_audio) {
             // some TTS models decode with embeddings output for the whole batch
             return .{ .total = params.n_batch, .per_seq = params.n_batch };
@@ -164,12 +160,12 @@ fn serverOutputLimits(params: *const tc.params.Params) tc.speculative.OutputLimi
     }
 
     if (params.embedding or
-        (params.pooling_type != tc.c.LLAMA_POOLING_TYPE_UNSPECIFIED and params.pooling_type != tc.c.LLAMA_POOLING_TYPE_NONE))
+        (params.pooling_type != llama.impl.llama_c.LLAMA_POOLING_TYPE_UNSPECIFIED and params.pooling_type != llama.impl.llama_c.LLAMA_POOLING_TYPE_NONE))
     {
         return .{ .total = params.n_batch, .per_seq = 1 };
     }
 
-    var result = tc.speculative.getOutputLimits(params.n_batch, params.n_parallel, tc.speculative.nMaxParams(&params.speculative));
+    var result = tools_common.speculative.getOutputLimits(params.n_batch, params.n_parallel, tools_common.speculative.nMaxParams(&params.speculative));
 
     result.total = @max(1, result.total);
     result.per_seq = @max(1, result.per_seq);
@@ -182,15 +178,15 @@ fn serverOutputLimits(params: *const tc.params.Params) tc.speculative.OutputLimi
 ///
 /// Return: owned by `a`.
 fn acceptReplay(
-    a: Allocator,
-    smpl: *tc.sampling.Sampler,
-    ctx: ?*tc.c.llama_context,
+    a: std.mem.Allocator,
+    smpl: *tools_common.sampling.Sampler,
+    ctx: ?*llama.impl.llama_c.llama_context,
     idxs: []const i32,
-    draft: []const mod.common.Token,
-) ![]mod.common.Token {
+    draft: []const llama.impl.llama_c.llama_token,
+) ![]llama.impl.llama_c.llama_token {
     ggmlAssert(idxs.len == draft.len + 1, 76, "idxs.size() == draft.size() + 1");
 
-    var result: std.ArrayList(mod.common.Token) = .empty;
+    var result: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
     errdefer result.deinit(a);
     try result.ensureTotalCapacity(a, idxs.len);
 
@@ -216,29 +212,29 @@ fn acceptReplay(
 ///
 /// Return: owned by `a`.
 fn sampleAndAcceptSynth(
-    a: Allocator,
-    smpl: *tc.sampling.Sampler,
-    ctx: ?*tc.c.llama_context,
+    a: std.mem.Allocator,
+    smpl: *tools_common.sampling.Sampler,
+    ctx: ?*llama.impl.llama_c.llama_context,
     idxs: []const i32,
-    draft: []const mod.common.Token,
+    draft: []const llama.impl.llama_c.llama_token,
     synth_probs: []const f64,
     rng: *stdlib.libcxx.Mt19937,
     is_replay: bool,
-) ![]mod.common.Token {
+) ![]llama.impl.llama_c.llama_token {
     ggmlAssert(idxs.len == draft.len + 1, 105, "idxs.size() == draft.size() + 1");
     ggmlAssert(synth_probs.len >= draft.len, 106, "synth_probs.size() >= draft.size()");
 
-    var result: std.ArrayList(mod.common.Token) = .empty;
+    var result: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
     errdefer result.deinit(a);
     try result.ensureTotalCapacity(a, idxs.len);
 
-    const vocab = tc.c.llama_model_get_vocab(tc.c.llama_get_model(ctx));
+    const vocab = llama.api.model.llama_model_get_vocab(llama.api.context.llama_get_model(ctx));
     for (draft, 0..) |d, i| {
         const id = try smpl.sample(ctx, idxs[i], false);
         const accept = is_replay or stdlib.libcxx.uniformF64(rng) < synth_probs[i];
         // do not accept a drafted EOG token - it would end the generation early
         // on replay the last token is from the target and can be EOG, so skip this check
-        if (accept and (is_replay or !tc.c.llama_vocab_is_eog(vocab, d))) {
+        if (accept and (is_replay or !llama.api.vocab.llama_vocab_is_eog(vocab, d))) {
             // synthetic draft tokens do not advance grammar or reasoning state
             // the last replay token is from the target and must advance both
             const is_replay_target = is_replay and i + 1 == draft.len;
@@ -280,15 +276,15 @@ pub const Batch = struct {
     /// Ports `server_batch`'s `token` (server-context.cpp:154 @b1b770d90).
     pub const Tok = struct {
         id_slot: i32,
-        token: mod.common.Token,
-        pos: [tc.c.GGML_MROPE_SECTIONS]tc.c.llama_pos, // only pos[0] is used for text tokens
+        token: llama.impl.llama_c.llama_token,
+        pos: [llama.impl.llama_c.GGML_MROPE_SECTIONS]llama.impl.llama_c.llama_pos, // only pos[0] is used for text tokens
         output: bool,
         is_prompt: bool, // for stats tracking
         decision_order: i32 = 0,
         i_embd: i32 = -1, // row in embd, -1 if this is a token
     };
 
-    view: tc.common.Batch = tc.common.Batch.initEmpty(gpa), // the rendered sub-batch [off, off + n_tokens), see render()
+    view: tools_common.common.Batch = tools_common.common.Batch.initEmpty(std.heap.c_allocator), // the rendered sub-batch [off, off + n_tokens), see render()
 
     tokens: std.ArrayList(Tok) = .empty,
     n_tokens_alloc: i32 = 0,
@@ -306,38 +302,38 @@ pub const Batch = struct {
     /// The destructor of `server_batch`'s members.
     fn deinit(self: *Batch) void {
         self.view.deinit();
-        self.tokens.deinit(gpa);
-        self.embd.deinit(gpa);
+        self.tokens.deinit(std.heap.c_allocator);
+        self.embd.deinit(std.heap.c_allocator);
     }
 
     /// Ports `server_batch`'s `init` (server-context.cpp:176 @b1b770d90).
-    fn init(self: *Batch, ctx: ?*tc.c.llama_context, n_tokens_alloc: i32, n_embd: i32) !void {
+    fn init(self: *Batch, ctx: ?*llama.impl.llama_c.llama_context, n_tokens_alloc: i32, n_embd: i32) !void {
         self.n_tokens_alloc = n_tokens_alloc;
         self.n_embd = n_embd;
         self.view.deinit();
-        self.view = tc.common.Batch.init(gpa, ctx);
-        try self.tokens.ensureTotalCapacity(gpa, @intCast(n_tokens_alloc));
+        self.view = tools_common.common.Batch.init(std.heap.c_allocator, ctx);
+        try self.tokens.ensureTotalCapacity(std.heap.c_allocator, @intCast(n_tokens_alloc));
     }
 
     /// Ports `server_batch`'s `add` (server-context.cpp:183 @b1b770d90), a token.
-    fn add(self: *Batch, id_slot: i32, token: mod.common.Token, pos: tc.c.llama_pos, output: bool, is_prompt: bool) !bool {
+    fn add(self: *Batch, id_slot: i32, token: llama.impl.llama_c.llama_token, pos: llama.impl.llama_c.llama_pos, output: bool, is_prompt: bool) !bool {
         if (@as(i32, @intCast(self.tokens.items.len)) >= self.n_tokens_alloc) {
             return false;
         }
-        try self.tokens.append(gpa, .{ .id_slot = id_slot, .token = token, .pos = .{ pos, 0, 0, 0 }, .output = output, .is_prompt = is_prompt });
+        try self.tokens.append(std.heap.c_allocator, .{ .id_slot = id_slot, .token = token, .pos = .{ pos, 0, 0, 0 }, .output = output, .is_prompt = is_prompt });
         return true;
     }
 
     /// Ports `server_batch`'s `add_embd` (server-context.cpp:192 @b1b770d90):
     /// `embd_in` has `n_embd` values, `pos` has GGML_MROPE_SECTIONS values.
-    fn addEmbd(self: *Batch, id_slot: i32, embd_in: [*]const f32, pos: *const [tc.c.GGML_MROPE_SECTIONS]tc.c.llama_pos, output: bool, is_prompt: bool) !bool {
+    fn addEmbd(self: *Batch, id_slot: i32, embd_in: [*]const f32, pos: *const [llama.impl.llama_c.GGML_MROPE_SECTIONS]llama.impl.llama_c.llama_pos, output: bool, is_prompt: bool) !bool {
         if (@as(i32, @intCast(self.tokens.items.len)) >= self.n_tokens_alloc) {
             return false;
         }
         const n_embd: usize = @intCast(self.n_embd);
-        try self.tokens.append(gpa, .{ .id_slot = id_slot, .token = mod.common.token_null, .pos = pos.*, .output = output, .is_prompt = is_prompt });
+        try self.tokens.append(std.heap.c_allocator, .{ .id_slot = id_slot, .token = mod.common.token_null, .pos = pos.*, .output = output, .is_prompt = is_prompt });
         self.tokens.items[self.tokens.items.len - 1].i_embd = @intCast(self.embd.items.len / n_embd);
-        try self.embd.appendSlice(gpa, embd_in[0..n_embd]);
+        try self.embd.appendSlice(std.heap.c_allocator, embd_in[0..n_embd]);
         return true;
     }
 
@@ -401,7 +397,7 @@ pub const Batch = struct {
         while (i < off + n_tokens) : (i += 1) {
             const t = &self.tokens.items[@intCast(i)];
             if (t.i_embd >= 0) {
-                const embd: tc.c.llama_embd = .{ .data = self.embd.items.ptr + @as(usize, @intCast(t.i_embd)) * n_embd, .n_rows = 1, .n_embd = n_embd };
+                const embd: llama.impl.llama_c.llama_embd = .{ .data = self.embd.items.ptr + @as(usize, @intCast(t.i_embd)) * n_embd, .n_rows = 1, .n_embd = n_embd };
                 _ = self.view.addEmbd(embd, &t.pos, t.id_slot, t.output);
             } else {
                 _ = self.view.add(t.token, t.pos[0], t.id_slot, t.output);
@@ -415,17 +411,17 @@ pub const Batch = struct {
 // server_slot
 
 /// `spec_draft_q.clear()`: the inner vectors freed too.
-fn clearDraftQ(q: *tc.speculative.Candidates) void {
-    tc.speculative.truncateCandidates(q, 0);
+fn clearDraftQ(q: *tools_common.speculative.Candidates) void {
+    tools_common.speculative.truncateCandidates(q, 0);
 }
 
 /// Ports `server_slot`'s `tts_ctx` (server-context.cpp:271 @b1b770d90): the
 /// generation state of a TTS slot.
 const TtsCtx = struct {
-    ctx: ?*tc.c.mtmd_helper_gen_audio = null,
+    ctx: ?*mtmd.helper_gen.GenAudio = null,
     h_state_prompt: std.ArrayList(f32) = .empty, // the first h_state after step_prompt done
     h_state: ?[*]const f32 = null,
-    sampled: mod.common.Token = mod.common.token_null,
+    sampled: llama.impl.llama_c.llama_token = mod.common.token_null,
     n_decoded: i32 = 0,
     stop: bool = false,
 
@@ -434,7 +430,7 @@ const TtsCtx = struct {
     }
 
     fn reset(self: *TtsCtx) void {
-        tc.c.mtmd_helper_gen_audio_reset(self.ctx);
+        mtmd.helper_gen.mtmd_helper_gen_audio_reset(self.ctx);
         self.h_state_prompt.clearRetainingCapacity();
         self.h_state = null;
         self.sampled = mod.common.token_null;
@@ -443,8 +439,8 @@ const TtsCtx = struct {
     }
 
     fn deinit(self: *TtsCtx) void {
-        self.h_state_prompt.deinit(gpa);
-        if (self.ctx) |x| tc.c.mtmd_helper_gen_audio_free(x);
+        self.h_state_prompt.deinit(std.heap.c_allocator);
+        if (self.ctx) |x| mtmd.helper_gen.mtmd_helper_gen_audio_free(x);
         self.ctx = null;
     }
 };
@@ -454,25 +450,25 @@ const TtsCtx = struct {
 pub const Slot = struct {
     id: c_int = 0,
 
-    ctx_tgt: ?*tc.c.llama_context = null,
-    ctx_dft: ?*tc.c.llama_context = null,
+    ctx_tgt: ?*llama.impl.llama_c.llama_context = null,
+    ctx_dft: ?*llama.impl.llama_c.llama_context = null,
 
-    mem: tc.common.Memory = .{},
+    mem: tools_common.common.Memory = .{},
 
     // multimodal
-    mctx: ?*tc.c.mtmd_context = null,
-    mbatch: ?*tc.c.mtmd_batch = null,
+    mctx: ?*mtmd.mtmd.Context = null,
+    mbatch: ?*mtmd.mtmd.Batch = null,
 
     tts: TtsCtx = .{},
 
     // speculative decoding
-    spec: ?*tc.speculative.Speculative = null,
+    spec: ?*tools_common.speculative.Speculative = null,
 
-    spec_draft: std.ArrayList(mod.common.Token) = .empty,
+    spec_draft: std.ArrayList(llama.impl.llama_c.llama_token) = .empty,
 
     // draft candidates per token in spec_draft; only draft-simple and draft-mtp fill it
-    spec_draft_q: tc.speculative.Candidates = .empty,
-    spec_prompt: []mod.common.Token = &.{},
+    spec_draft_q: tools_common.speculative.Candidates = .empty,
+    spec_prompt: []llama.impl.llama_c.llama_token = &.{},
     spec_i_batch: std.ArrayList(i32) = .empty,
     spec_ckpt: mod.task.PromptCheckpoint = .{},
     spec_is_replay: bool = false,
@@ -496,9 +492,9 @@ pub const Slot = struct {
 
     last_nl_pos: usize = 0,
 
-    generated: chat.input.Input = .{ .gpa = gpa },
+    generated: common_chat.input.Input = .{ .gpa = std.heap.c_allocator },
     debug_generated_text: std.ArrayList(u8) = .empty,
-    generated_tokens: std.ArrayList(mod.common.Token) = .empty,
+    generated_tokens: std.ArrayList(llama.impl.llama_c.llama_token) = .empty,
     n_sent_text: usize = 0, // number of sent text character (i.e. handle partial UTF-8 on streaming)
 
     generated_token_probs: std.ArrayList(mod.task.CompletionTokenOutput) = .empty,
@@ -518,15 +514,15 @@ pub const Slot = struct {
 
     prompt: mod.task.ServerPrompt = .{ .tokens = .{} },
 
-    lora: []tc.params.LoraInfo = &.{},
+    lora: []tools_common.params.LoraInfo = &.{},
     alora_invocation_start: i32 = -1,
 
     // sampling
     json_schema: json.Value = .null,
 
-    smpl: ?*tc.sampling.Sampler = null,
+    smpl: ?*tools_common.sampling.Sampler = null,
 
-    sampled: mod.common.Token = 0, // in speculative mode, this is the last accepted token
+    sampled: llama.impl.llama_c.llama_token = 0, // in speculative mode, this is the last accepted token
 
     // for TTS models, this is the embd generated from prev step, decode this to generate next hidden state
     // corresponding to one token position (size = n_embd)
@@ -534,7 +530,7 @@ pub const Slot = struct {
     inp_embd: std.ArrayList(f32) = .empty,
 
     // realtime transcription, see SERVER_TASK_TYPE_TRANSCRIBE_RT
-    audio_stream: ?*tc.c.mtmd_audio_stream = null,
+    audio_stream: ?*mtmd.mtmd.AudioStream = null,
     audio_wait: bool = false, // the stream needs more audio before it can produce rows
     audio_commit_rows: std.ArrayList(i64) = .empty, // end row of each non-final commit not yet completed
 
@@ -556,30 +552,30 @@ pub const Slot = struct {
     n_gen_last: i32 = 0,
 
     fn deinit(self: *Slot) void {
-        if (self.task) |*t| t.deinit(gpa);
-        if (self.task_prev) |*t| t.deinit(gpa);
-        self.spec_draft.deinit(gpa);
+        if (self.task) |*t| t.deinit(std.heap.c_allocator);
+        if (self.task_prev) |*t| t.deinit(std.heap.c_allocator);
+        self.spec_draft.deinit(std.heap.c_allocator);
         clearDraftQ(&self.spec_draft_q);
-        self.spec_draft_q.deinit(gpa);
-        gpa.free(self.spec_prompt);
-        self.spec_i_batch.deinit(gpa);
-        self.spec_ckpt.clear(gpa);
+        self.spec_draft_q.deinit(std.heap.c_allocator);
+        std.heap.c_allocator.free(self.spec_prompt);
+        self.spec_i_batch.deinit(std.heap.c_allocator);
+        self.spec_ckpt.clear(std.heap.c_allocator);
         self.generated.deinit();
-        self.debug_generated_text.deinit(gpa);
-        self.generated_tokens.deinit(gpa);
-        self.generated_token_probs.deinit(gpa);
+        self.debug_generated_text.deinit(std.heap.c_allocator);
+        self.generated_tokens.deinit(std.heap.c_allocator);
+        self.generated_token_probs.deinit(std.heap.c_allocator);
         self.probs_arena.deinit();
-        self.stopping_word.deinit(gpa);
+        self.stopping_word.deinit(std.heap.c_allocator);
         self.prompt.deinit();
-        gpa.free(self.lora);
-        self.json_schema.deinit(gpa);
+        std.heap.c_allocator.free(self.lora);
+        self.json_schema.deinit(std.heap.c_allocator);
         if (self.smpl) |s| s.destroy();
-        self.inp_embd.deinit(gpa);
-        self.n_accepted_per_pos.deinit(gpa);
-        if (self.mbatch) |b| tc.c.mtmd_batch_free(b);
+        self.inp_embd.deinit(std.heap.c_allocator);
+        self.n_accepted_per_pos.deinit(std.heap.c_allocator);
+        if (self.mbatch) |b| mtmd.mtmd.mtmd_batch_free(b);
         self.tts.deinit();
-        if (self.audio_stream) |st| tc.c.mtmd_audio_stream_free(st);
-        self.audio_commit_rows.deinit(gpa);
+        if (self.audio_stream) |st| mtmd.mtmd.mtmd_audio_stream_free(st);
+        self.audio_commit_rows.deinit(std.heap.c_allocator);
         if (self.rt) |r| r.destroy();
     }
 
@@ -593,8 +589,8 @@ pub const Slot = struct {
             return false;
         }
 
-        const cur_size_tgt = tc.c.llama_state_seq_get_size_ext(self.ctx_tgt, self.id, tc.c.LLAMA_STATE_SEQ_FLAGS_NONE);
-        const cur_size_dft: usize = if (self.ctx_dft != null) tc.c.llama_state_seq_get_size_ext(self.ctx_dft, self.id, tc.c.LLAMA_STATE_SEQ_FLAGS_NONE) else 0;
+        const cur_size_tgt = llama.api.state.llama_state_seq_get_size_ext(self.ctx_tgt, self.id, llama.impl.llama_c.LLAMA_STATE_SEQ_FLAGS_NONE);
+        const cur_size_dft: usize = if (self.ctx_dft != null) llama.api.state.llama_state_seq_get_size_ext(self.ctx_dft, self.id, llama.impl.llama_c.LLAMA_STATE_SEQ_FLAGS_NONE) else 0;
 
         const cur_size = cur_size_tgt + cur_size_dft;
 
@@ -606,8 +602,8 @@ pub const Slot = struct {
 
         const cur = (try prompt_cache.alloc(&self.prompt, cur_size_tgt, cur_size_dft)) orelse return false;
 
-        const n_tgt = tc.c.llama_state_seq_get_data_ext(self.ctx_tgt, cur.data.main.ptr, cur_size_tgt, self.id, tc.c.LLAMA_STATE_SEQ_FLAGS_NONE);
-        const n_dft: usize = if (self.ctx_dft != null) tc.c.llama_state_seq_get_data_ext(self.ctx_dft, cur.data.drft.ptr, cur_size_dft, self.id, tc.c.LLAMA_STATE_SEQ_FLAGS_NONE) else 0;
+        const n_tgt = llama.api.state.llama_state_seq_get_data_ext(self.ctx_tgt, cur.data.main.ptr, cur_size_tgt, self.id, llama.impl.llama_c.LLAMA_STATE_SEQ_FLAGS_NONE);
+        const n_dft: usize = if (self.ctx_dft != null) llama.api.state.llama_state_seq_get_data_ext(self.ctx_dft, cur.data.drft.ptr, cur_size_dft, self.id, llama.impl.llama_c.LLAMA_STATE_SEQ_FLAGS_NONE) else 0;
         if (n_tgt != cur_size_tgt or n_dft != cur_size_dft) {
             slt(.err, "prompt_save", self, "%s", .{@as([*:0]const u8, "failed to save complete prompt state\n")});
             prompt_cache.popBack();
@@ -644,7 +640,7 @@ pub const Slot = struct {
 
         self.last_nl_pos = 0;
         self.generated.deinit();
-        self.generated = .init(gpa);
+        self.generated = .init(std.heap.c_allocator);
         self.has_new_line = false;
         self.truncated = false;
         self.stop = .none;
@@ -654,15 +650,15 @@ pub const Slot = struct {
         if (self.canSpeculate()) {
             self.spec_draft.clearRetainingCapacity();
             self.spec_i_batch.clearRetainingCapacity();
-            self.spec_ckpt.clear(gpa);
+            self.spec_ckpt.clear(std.heap.c_allocator);
         }
         self.generated_tokens.clearRetainingCapacity();
         self.generated_token_probs.clearRetainingCapacity();
         _ = self.probs_arena.reset(.retain_capacity);
-        self.json_schema.deinit(gpa);
+        self.json_schema.deinit(std.heap.c_allocator);
         self.json_schema = .null;
 
-        if (self.task_prev) |*t| t.deinit(gpa);
+        if (self.task_prev) |*t| t.deinit(std.heap.c_allocator);
         self.task_prev = self.task;
         self.task = null;
 
@@ -672,18 +668,18 @@ pub const Slot = struct {
 
         self.n_predict_max = -1;
 
-        _ = tc.c.llama_set_sampler(self.ctx_tgt, self.id, null);
+        _ = llama.api.context.llama_set_sampler(self.ctx_tgt, self.id, null);
 
         // clear alora start
         self.alora_invocation_start = -1;
 
         // clear multimodal state
-        if (self.mbatch) |b| tc.c.mtmd_batch_free(b);
+        if (self.mbatch) |b| mtmd.mtmd.mtmd_batch_free(b);
         self.mbatch = null;
 
         self.tts.reset();
 
-        if (self.audio_stream) |st| tc.c.mtmd_audio_stream_free(st);
+        if (self.audio_stream) |st| mtmd.mtmd.mtmd_audio_stream_free(st);
         self.audio_stream = null;
         self.audio_wait = false;
         self.audio_commit_rows.clearRetainingCapacity();
@@ -700,7 +696,7 @@ pub const Slot = struct {
             return;
         }
 
-        const t_start = tc.c.ggml_time_us();
+        const t_start = llama.impl.llama_c.ggml_time_us();
 
         var n_text: c_int = 0;
 
@@ -712,7 +708,7 @@ pub const Slot = struct {
         }
 
         slt(.trc, "init_sampler", self, "init sampler, took %0.2f ms, tokens: text = %d, total = %d\n", .{
-            @as(f64, @floatFromInt(tc.c.ggml_time_us() - t_start)) / 1000.0, n_text, @as(c_int, @intCast(self.prompt.tokens.size())),
+            @as(f64, @floatFromInt(llama.impl.llama_c.ggml_time_us() - t_start)) / 1000.0, n_text, @as(c_int, @intCast(self.prompt.tokens.size())),
         });
     }
 
@@ -726,7 +722,7 @@ pub const Slot = struct {
     fn canSplit(self: *const Slot) bool {
         ggmlAssert(self.task != null, 503, "task");
         // a decision over a non-causal context reads the whole prompt in one batch
-        if (self.taskRef().type == .decision and !tc.c.llama_get_causal_attn(self.ctx_tgt)) {
+        if (self.taskRef().type == .decision and !llama.api.context.llama_get_causal_attn(self.ctx_tgt)) {
             return false;
         }
         // MTP supports splitting - uses task->need_embd() not need_embd()
@@ -734,16 +730,16 @@ pub const Slot = struct {
             return true;
         }
         // if the context does not have a memory module then all embeddings have to be computed within a single ubatch
-        if (tc.c.llama_get_memory(self.ctx_tgt) == null) {
+        if (llama.api.context.llama_get_memory(self.ctx_tgt) == null) {
             return false;
         }
         // context can be chunked/split if the pooling type is LAST
-        const pooling = tc.c.llama_pooling_type(self.ctx_tgt);
-        if (pooling == tc.c.LLAMA_POOLING_TYPE_LAST) {
+        const pooling = llama.api.context.llama_pooling_type(self.ctx_tgt);
+        if (pooling == llama.impl.llama_c.LLAMA_POOLING_TYPE_LAST) {
             return true;
         }
         // causal rerankers read the last token and have a KV cache, so they can also be chunked/split.
-        if (pooling == tc.c.LLAMA_POOLING_TYPE_RANK and tc.c.llama_get_causal_attn(self.ctx_tgt)) {
+        if (pooling == llama.impl.llama_c.LLAMA_POOLING_TYPE_RANK and llama.api.context.llama_get_causal_attn(self.ctx_tgt)) {
             return true;
         }
         // a decision task reads its outputs from the last batch
@@ -808,7 +804,7 @@ pub const Slot = struct {
             return;
         }
 
-        try self.generated_token_probs.append(gpa, try token.clone(self.probs_arena.allocator()));
+        try self.generated_token_probs.append(std.heap.c_allocator, try token.clone(self.probs_arena.allocator()));
     }
 
     /// Ports `server_slot`'s `get_n_draft_max` (server-context.cpp:582 @b1b770d90).
@@ -840,7 +836,7 @@ pub const Slot = struct {
         const func = "handle_last_sampled_token";
         var add_ok = true;
         // the audio stream has no token before the first step, track the position with a dummy token
-        const tok_track: mod.common.Token = if (self.sampled == mod.common.token_null) 0 else self.sampled;
+        const tok_track: llama.impl.llama_c.llama_token = if (self.sampled == mod.common.token_null) 0 else self.sampled;
         if (self.spec_draft.items.len == 0) {
             // no speculative decoding
             self.i_batch = batch.size();
@@ -853,7 +849,7 @@ pub const Slot = struct {
                 while (i < n_rows) : (i += 1) {
                     // text embeddings broadcast the same position across the M-RoPE sections
                     const p = self.prompt.tokens.posNext(-1);
-                    const pos = [tc.c.GGML_MROPE_SECTIONS]tc.c.llama_pos{ p, p, p, 0 };
+                    const pos = [llama.impl.llama_c.GGML_MROPE_SECTIONS]llama.impl.llama_c.llama_pos{ p, p, p, 0 };
                     add_ok = (try batch.addEmbd(self.id, self.inp_embd.items.ptr + @as(usize, @intCast(i)) * @as(usize, @intCast(batch.n_embd)), &pos, i == n_rows - 1, false)) and add_ok;
                     if (i < n_rows - 1) {
                         try self.prompt.tokens.pushBackToken(tok_track);
@@ -876,9 +872,9 @@ pub const Slot = struct {
 
             ggmlAssert(self.spec_i_batch.items.len == 0, 638, "spec_i_batch.empty()");
 
-            try self.spec_i_batch.append(gpa, batch.size());
+            try self.spec_i_batch.append(std.heap.c_allocator, batch.size());
             for (0..self.spec_draft.items.len) |i| {
-                try self.spec_i_batch.append(gpa, batch.size() + @as(i32, @intCast(i)) + 1);
+                try self.spec_i_batch.append(std.heap.c_allocator, batch.size() + @as(i32, @intCast(i)) + 1);
             }
 
             var pos0 = self.prompt.tokens.posNext(-1);
@@ -904,7 +900,7 @@ pub const Slot = struct {
 
             slt(.inf, "release", self, "stop processing: n_tokens = %d, truncated = %d\n", .{ self.prompt.nTokens(), @as(c_int, @intFromBool(self.truncated)) });
 
-            self.t_last_used = tc.c.ggml_time_us();
+            self.t_last_used = llama.impl.llama_c.ggml_time_us();
 
             self.state = .idle;
 
@@ -958,7 +954,7 @@ pub const Slot = struct {
                 if (is_full_stop) {
                     self.stop = .word;
                     self.stopping_word.clearRetainingCapacity();
-                    try self.stopping_word.appendSlice(gpa, word);
+                    try self.stopping_word.appendSlice(std.heap.c_allocator, word);
                     self.has_next_token = false;
                 }
                 stop_pos = pos;
@@ -974,7 +970,7 @@ pub const Slot = struct {
             return;
         }
 
-        const t_now = tc.c.ggml_time_us();
+        const t_now = llama.impl.llama_c.ggml_time_us();
 
         if (t_now - self.t_print_last < 3 * 1000 * 1000) {
             return;
@@ -1030,9 +1026,9 @@ pub const Slot = struct {
             t_prompt_total + t_gen_total, @as(c_int, @intCast(self.stats.n_prompt_processed + self.stats.n_gen)),
         });
 
-        slt(.inf, func, self, "   graphs reused = %10d\n", .{tc.c.llama_perf_context(self.ctx_tgt).n_reused});
+        slt(.inf, func, self, "   graphs reused = %10d\n", .{llama.api.context.llama_perf_context(self.ctx_tgt).n_reused});
 
-        slt(.inf, func, self, "  graph reallocs = %10d    / %5d        (same size) / (changed size)\n", .{ tc.c.llama_perf_context(self.ctx_tgt).n_reallocs_same, tc.c.llama_perf_context(self.ctx_tgt).n_reallocs_diff });
+        slt(.inf, func, self, "  graph reallocs = %10d    / %5d        (same size) / (changed size)\n", .{ llama.api.context.llama_perf_context(self.ctx_tgt).n_reallocs_same, llama.api.context.llama_perf_context(self.ctx_tgt).n_reallocs_diff });
 
         const n_draft_total: i32 = @intCast(self.stats.n_draft_tokens);
         const n_draft_accepted: i32 = @intCast(self.stats.n_draft_accepted);
@@ -1043,16 +1039,16 @@ pub const Slot = struct {
             const mean_acc_len: f64 = if (n_draft_verif_steps > 0) 1.0 + @as(f64, @floatFromInt(n_draft_accepted)) / @as(f64, @floatFromInt(n_draft_verif_steps)) else 1.0;
 
             var rates: std.ArrayList(u8) = .empty;
-            defer rates.deinit(gpa);
+            defer rates.deinit(std.heap.c_allocator);
             if (n_draft_verif_steps > 0) {
                 for (self.n_accepted_per_pos.items, 0..) |n, i| {
-                    if (i > 0) try rates.appendSlice(gpa, ", ");
+                    if (i > 0) try rates.appendSlice(std.heap.c_allocator, ", ");
                     var buf: [64]u8 = undefined;
                     const len = stdlib.libc.snprintf(&buf, buf.len, "%.3f", @as(f64, @floatFromInt(n)) / @as(f64, @floatFromInt(n_draft_verif_steps)));
-                    try rates.appendSlice(gpa, buf[0..@intCast(@min(len, buf.len - 1))]);
+                    try rates.appendSlice(std.heap.c_allocator, buf[0..@intCast(@min(len, buf.len - 1))]);
                 }
             }
-            try rates.append(gpa, 0);
+            try rates.append(std.heap.c_allocator, 0);
 
             slt(.inf, func, self, "draft acceptance = %0.5f (%5d accepted / %5d generated), mean len = %5.2f\n", .{
                 @as(f64, draft_ratio), n_draft_accepted, n_draft_total, mean_acc_len,
@@ -1060,13 +1056,13 @@ pub const Slot = struct {
             slt(.trc, func, self, "     acc per pos = (%s)\n", .{@as([*:0]const u8, @ptrCast(rates.items.ptr))});
         }
 
-        tc.speculative.printStats(self.spec);
+        tools_common.speculative.printStats(self.spec);
     }
 
     /// Ports `server_slot`'s `to_json` (server-context.cpp:811 @b1b770d90).
     ///
     /// Return: owned by `a`.
-    fn toJson(self: *const Slot, a: Allocator, only_metrics: bool) !json.Value {
+    fn toJson(self: *const Slot, a: std.mem.Allocator, only_metrics: bool) !json.Value {
         var res = mod.common.Obj.init(a);
         errdefer res.deinit();
 
@@ -1156,15 +1152,15 @@ fn stringFindPartialStop(str: []const u8, stop: []const u8) ?usize {
 /// possible.
 ///
 /// Return: 0 on success.
-fn encodeMtmdChunk(slot: *const Slot, mbatch: *?*tc.c.mtmd_batch, idx: usize) !i32 {
+fn encodeMtmdChunk(slot: *const Slot, mbatch: *?*mtmd.mtmd.Batch, idx: usize) !i32 {
     const func = "encode_mtmd_chunk";
     const mctx = slot.mctx;
     const input_tokens = &slot.taskRef().tokens;
     const chunk = try input_tokens.findChunk(idx);
 
-    if (mbatch.*) |b| tc.c.mtmd_batch_free(b);
-    mbatch.* = tc.c.mtmd_batch_init(mctx);
-    var res = tc.c.mtmd_batch_add_chunk(mbatch.*, chunk);
+    if (mbatch.*) |b| mtmd.mtmd.mtmd_batch_free(b);
+    mbatch.* = mtmd.mtmd.mtmd_batch_init(mctx.?);
+    var res = mtmd.mtmd.mtmd_batch_add_chunk(mbatch.*.?, chunk);
     ggmlAssert(res == 0, 879, "res == 0"); // we should never have an empty batch
 
     // try batching as much as possible
@@ -1172,7 +1168,7 @@ fn encodeMtmdChunk(slot: *const Slot, mbatch: *?*tc.c.mtmd_batch, idx: usize) !i
     var idx_cur = idx;
     while (res == 0) {
         const next = input_tokens.findNextMediaChunk(idx_cur) orelse break;
-        res = tc.c.mtmd_batch_add_chunk(mbatch.*, next.chunk);
+        res = mtmd.mtmd.mtmd_batch_add_chunk(mbatch.*.?, next.chunk);
         n_added += if (res == 0) 1 else 0;
         idx_cur = next.idx;
         slt(.dbg, func, slot, "try adding media chunk idx = %zu to batch, res = %d\n", .{ next.idx, res });
@@ -1182,7 +1178,7 @@ fn encodeMtmdChunk(slot: *const Slot, mbatch: *?*tc.c.mtmd_batch, idx: usize) !i
     // TODO @ngxson : move this log line to debug when it become more stable
     slt(.trc, func, slot, "encoding mtmd batch from idx = %zu, n_chunks = %d\n", .{ idx, n_added });
 
-    res = tc.c.mtmd_batch_encode(mbatch.*);
+    res = mtmd.mtmd.mtmd_batch_encode(mbatch.*.?);
     if (res != 0) {
         slt(.err, func, slot, "failed to encode mtmd batch for chunk idx = %zu, res = %d\n", .{ idx, res });
         return -1;
@@ -1196,7 +1192,7 @@ fn encodeMtmdChunk(slot: *const Slot, mbatch: *?*tc.c.mtmd_batch, idx: usize) !i
 /// and decoded into the slot's sequence. The caller updates the prompt.
 ///
 /// Return: 0 on success.
-fn processMtmdChunk(slot: *const Slot, mbatch: *?*tc.c.mtmd_batch, idx: usize, n_tokens_out: *usize) !i32 {
+fn processMtmdChunk(slot: *const Slot, mbatch: *?*mtmd.mtmd.Batch, idx: usize, n_tokens_out: *usize) !i32 {
     ggmlAssert(slot.mctx != null, 914, "slot.mctx");
     const input_tokens = &slot.taskRef().tokens;
     const chunk = try input_tokens.findChunk(idx);
@@ -1204,43 +1200,43 @@ fn processMtmdChunk(slot: *const Slot, mbatch: *?*tc.c.mtmd_batch, idx: usize, n
 
     const TryDecode = struct {
         const CbData = struct {
-            spec: ?*tc.speculative.Speculative,
-            ctx: ?*tc.c.llama_context,
+            spec: ?*tools_common.speculative.Speculative,
+            ctx: ?*llama.impl.llama_c.llama_context,
         };
 
-        fn cb(b_ptr: [*c]const tc.c.mtmd_helper_embd_batch, user_data: ?*anyopaque) callconv(.c) i32 {
+        fn cb(b_ptr: [*c]const mtmd.helper.EmbdBatchView, user_data: ?*anyopaque) callconv(.c) i32 {
             const data: *const CbData = @ptrCast(@alignCast(user_data));
             const b = &b_ptr[0];
 
-            var batch = tc.common.Batch.init(gpa, data.ctx);
+            var batch = tools_common.common.Batch.init(std.heap.c_allocator, data.ctx);
             defer batch.deinit();
             const n_tokens: usize = @intCast(b.n_tokens);
             const n_embd: usize = @intCast(b.n_embd);
             for (0..n_tokens) |i| {
-                var pos = [tc.c.GGML_MROPE_SECTIONS]tc.c.llama_pos{ 0, 0, 0, 0 };
+                var pos = [llama.impl.llama_c.GGML_MROPE_SECTIONS]llama.impl.llama_c.llama_pos{ 0, 0, 0, 0 };
                 for (0..@intCast(b.n_pos)) |j| {
-                    pos[j] = b.pos[j * n_tokens + i];
+                    pos[j] = b.pos.?[j * n_tokens + i];
                 }
-                _ = batch.addEmbd(.{ .data = b.embd + i * n_embd, .n_rows = 1, .n_embd = n_embd }, &pos, b.seq_id, false);
+                _ = batch.addEmbd(.{ .data = b.embd.? + i * n_embd, .n_rows = 1, .n_embd = n_embd }, &pos, b.seq_id, false);
             }
 
-            return if (tc.speculative.process(data.spec, &batch)) 0 else 1;
+            return if (tools_common.speculative.process(data.spec, &batch)) 0 else 1;
         }
 
-        fn run(s: *const Slot, mb: *?*tc.c.mtmd_batch, ch: *tc.c.mtmd_input_chunk, i: usize, out: *usize) i32 {
+        fn run(s: *const Slot, mb: *?*mtmd.mtmd.Batch, ch: *mtmd.mtmd.InputChunk, i: usize, out: *usize) i32 {
             if (mb.*) |b| {
-                const embd = tc.c.mtmd_batch_get_output_embd(b, ch);
+                const embd = mtmd.mtmd.mtmd_batch_get_output_embd(b, ch);
                 if (embd != null) {
                     var cb_data: CbData = .{ .spec = s.spec, .ctx = s.ctx_tgt };
-                    var new_n_past: tc.c.llama_pos = 0; // unused for now
-                    const r = tc.c.mtmd_helper_decode_image_chunk(
-                        s.mctx,
+                    var new_n_past: llama.impl.llama_c.llama_pos = 0; // unused for now
+                    const r = mtmd.helper.mtmd_helper_decode_image_chunk(
+                        s.mctx.?,
                         s.ctx_tgt,
                         ch,
                         embd,
                         s.prompt.tokens.posNext(-1),
                         s.id,
-                        @intCast(tc.c.llama_n_batch(s.ctx_tgt)),
+                        @intCast(llama.api.context.llama_n_batch(s.ctx_tgt)),
                         &new_n_past,
                         cb,
                         &cb_data,
@@ -1249,7 +1245,7 @@ fn processMtmdChunk(slot: *const Slot, mbatch: *?*tc.c.mtmd_batch, idx: usize, n
                         slt(.err, "operator()", s, "failed to decode mtmd chunk, idx = %zu, res = %d\n", .{ i, r });
                         return -1;
                     }
-                    out.* = tc.c.mtmd_input_chunk_get_n_tokens(ch);
+                    out.* = mtmd.mtmd.mtmd_input_chunk_get_n_tokens(ch);
                     return 0; // success
                 }
             }
@@ -1281,19 +1277,19 @@ fn processMtmdChunk(slot: *const Slot, mbatch: *?*tc.c.mtmd_batch, idx: usize, n
 /// its own like `processMtmdChunk`; `embd` is the encoder's output for it.
 ///
 /// Return: false if the batch is full.
-fn addMtmdChunk(slot: *const Slot, chunk: ?*const tc.c.mtmd_input_chunk, embd: [*]const f32, batch: *Batch) !bool {
+fn addMtmdChunk(slot: *const Slot, chunk: ?*const mtmd.mtmd.InputChunk, embd: [*]const f32, batch: *Batch) !bool {
     // positions are the ones of mtmd_helper_decode_image_chunk()
-    const image = tc.c.mtmd_input_chunk_get_tokens_image(chunk);
-    const is_mrope = tc.c.mtmd_decode_use_mrope(slot.mctx);
-    const n_tokens = tc.c.mtmd_input_chunk_get_n_tokens(chunk);
+    const image = mtmd.mtmd.mtmd_input_chunk_get_tokens_image(chunk.?);
+    const is_mrope = mtmd.mtmd.mtmd_decode_use_mrope(slot.mctx.?);
+    const n_tokens = mtmd.mtmd.mtmd_input_chunk_get_n_tokens(chunk.?);
     const n_embd: usize = @intCast(batch.n_embd);
     const pos_0 = slot.prompt.tokens.posNext(-1);
 
     for (0..n_tokens) |i| {
-        const p: tc.c.llama_pos = pos_0 + @as(tc.c.llama_pos, @intCast(i));
-        var pos = [tc.c.GGML_MROPE_SECTIONS]tc.c.llama_pos{ p, p, p, p };
+        const p: llama.impl.llama_c.llama_pos = pos_0 + @as(llama.impl.llama_c.llama_pos, @intCast(i));
+        var pos = [llama.impl.llama_c.GGML_MROPE_SECTIONS]llama.impl.llama_c.llama_pos{ p, p, p, p };
         if (is_mrope and image != null) {
-            const rel = tc.c.mtmd_image_tokens_get_decoder_pos(image, pos_0, i);
+            const rel = mtmd.mtmd.mtmd_image_tokens_get_decoder_pos(image.?, pos_0, i);
             pos[0] = @bitCast(rel.t);
             pos[1] = @bitCast(rel.y);
             pos[2] = @bitCast(rel.x);
@@ -1353,7 +1349,7 @@ pub const Meta = struct {
     tts_voices: []const []const u8, // predefined voices of the audio generation model
     json_ui_settings: *const json.Value,
     slot_n_ctx: c_int,
-    pooling_type: tc.c.enum_llama_pooling_type,
+    pooling_type: llama.impl.llama_c.enum_llama_pooling_type,
 
     // chat params
     chat_params: *const mod.oaicompat.ServerChatParams,
@@ -1364,18 +1360,18 @@ pub const Meta = struct {
     // tokens
     bos_token_str: []const u8,
     eos_token_str: []const u8,
-    fim_pre_token: mod.common.Token,
-    fim_sub_token: mod.common.Token,
-    fim_mid_token: mod.common.Token,
-    fim_pad_token: mod.common.Token,
-    fim_rep_token: mod.common.Token,
-    fim_sep_token: mod.common.Token,
+    fim_pre_token: llama.impl.llama_c.llama_token,
+    fim_sub_token: llama.impl.llama_c.llama_token,
+    fim_mid_token: llama.impl.llama_c.llama_token,
+    fim_pad_token: llama.impl.llama_c.llama_token,
+    fim_rep_token: llama.impl.llama_c.llama_token,
+    fim_sep_token: llama.impl.llama_c.llama_token,
 
     // sampling
-    logit_bias_eog: []const tc.c.llama_logit_bias,
+    logit_bias_eog: []const llama.impl.llama_c.llama_logit_bias,
 
     // model meta
-    model_vocab_type: tc.c.enum_llama_vocab_type,
+    model_vocab_type: llama.impl.llama_c.enum_llama_vocab_type,
     model_vocab_n_tokens: i32,
     model_n_ctx_train: i32,
     model_n_embd_inp: i32,
@@ -1401,16 +1397,16 @@ pub const Impl = struct {
     // only use these pointers outside of this class:
     //  - when not in sleeping state
     //  - and, with thread-safe APIs (e.g., tokenizer calls)
-    model_tgt: ?*tc.c.llama_model = null,
+    model_tgt: ?*llama.impl.llama_c.llama_model = null,
 
-    mctx: ?*tc.c.mtmd_context = null,
-    mtmd_cap: tc.c.mtmd_helper_cap = std.mem.zeroes(tc.c.mtmd_helper_cap),
+    mctx: ?*mtmd.mtmd.Context = null,
+    mtmd_cap: mtmd.helper.Cap = std.mem.zeroes(mtmd.helper.Cap),
     // note: video_params.ffmpeg_bin_dir points into params_base, which outlives this struct
-    init_opt: tc.c.mtmd_helper_init_opt = undefined,
-    vocab: ?*const tc.c.llama_vocab = null,
+    init_opt: mtmd.helper.InitOpt = undefined,
+    vocab: ?*const llama.impl.llama_c.llama_vocab = null,
 
     // prompt of the "asr" chat template, for live ASR
-    asr_prompt: []mod.common.Token = &.{},
+    asr_prompt: []llama.impl.llama_c.llama_token = &.{},
 
     decision: mod.decision.DecisionContext = .{},
 
@@ -1421,31 +1417,31 @@ pub const Impl = struct {
     chat_params: mod.oaicompat.ServerChatParams = undefined,
     /// The templates `chat_params.tmpls` points at (see the file's doc
     /// comment).
-    tmpls: ?chat.templates.Templates = null,
+    tmpls: ?common_chat.templates.Templates = null,
 
     callback_state: StateCallback = .{},
 
     // note: accessing these fields outside of this class is not thread-safe
     // use server_context methods instead
 
-    params_base: tc.params.Params = undefined,
+    params_base: tools_common.params.Params = undefined,
 
     // note: keep these alive - they determine the lifetime of the model, context, etc.
-    llama_init: ?tc.init.InitResult = null,
+    llama_init: ?tools_common.init.InitResult = null,
 
-    ctx_tgt: ?*tc.c.llama_context = null,
+    ctx_tgt: ?*llama.impl.llama_c.llama_context = null,
 
     batch: Batch = .{},
 
-    model_dft: ?*tc.c.llama_model = null,
-    ctx_dft: ?*tc.c.llama_context = null,
+    model_dft: ?*llama.impl.llama_c.llama_model = null,
+    ctx_dft: ?*llama.impl.llama_c.llama_context = null,
 
-    spec_init: ?tc.speculative.InitResult = null,
+    spec_init: ?tools_common.speculative.InitResult = null,
 
-    ctx_tgt_seq_rm_type: tc.common.SeqRmType = .no,
-    ctx_dft_seq_rm_type: tc.common.SeqRmType = .no,
+    ctx_tgt_seq_rm_type: tools_common.common.SeqRmType = .no,
+    ctx_dft_seq_rm_type: tools_common.common.SeqRmType = .no,
 
-    spec: ?*tc.speculative.Speculative = null,
+    spec: ?*tools_common.speculative.Speculative = null,
 
     add_bos_token: bool = true,
 
@@ -1501,11 +1497,11 @@ pub const Impl = struct {
     /// Ports the constructor of `server_context_impl` (server-context.cpp:1055 @b1b770d90).
     pub fn init(self: *Impl) !void {
         self.* = .{
-            .queue_tasks = TaskQueue.init(gpa),
-            .queue_results = try ResultQueue.init(gpa),
+            .queue_tasks = TaskQueue.init(std.heap.c_allocator),
+            .queue_results = try ResultQueue.init(std.heap.c_allocator),
         };
-        self.init_opt = tc.c.mtmd_helper_init_opt_default();
-        tc.c.mtmd_helper_log_set(tc.common.defaultLogCallback, null);
+        self.init_opt = mtmd.helper.mtmd_helper_init_opt_default();
+        mtmd.helper.mtmd_helper_log_set(tools_common.common.defaultLogCallback, null);
     }
 
     /// Ports the destructor of `server_context_impl` (server-context.cpp:1059 @b1b770d90).
@@ -1516,23 +1512,23 @@ pub const Impl = struct {
             self.destroy();
         }
         for (self.slots) |*s| s.deinit();
-        gpa.free(self.slots);
+        std.heap.c_allocator.free(self.slots);
         self.batch.deinit();
         self.decision.deinit();
-        gpa.free(self.asr_prompt);
+        std.heap.c_allocator.free(self.asr_prompt);
         if (self.tmpls) |*t| t.deinit();
         if (self.prompt_cache) |pc| {
             pc.deinit();
-            gpa.destroy(pc);
+            std.heap.c_allocator.destroy(pc);
         }
-        self.metrics.deinit(gpa);
+        self.metrics.deinit(std.heap.c_allocator);
         self.queue_tasks.deinit();
         self.queue_results.deinit();
         self.arena.deinit();
     }
 
     /// Ports `server_context_impl`'s `get_metrics` (server-context.cpp:1067 @b1b770d90).
-    pub fn getMetrics(self: *const Impl, a: Allocator) !mod.common.Metrics {
+    pub fn getMetrics(self: *const Impl, a: std.mem.Allocator) !mod.common.Metrics {
         return self.metrics.clone(a);
     }
 
@@ -1543,7 +1539,7 @@ pub const Impl = struct {
 
     /// Ports `server_context_impl`'s `destroy` (server-context.cpp:1138 @b1b770d90).
     fn destroy(self: *Impl) void {
-        tc.speculative.free(self.spec);
+        tools_common.speculative.free(self.spec);
         self.spec = null;
         if (self.spec_init) |*si| si.deinit();
         self.spec_init = null;
@@ -1557,7 +1553,7 @@ pub const Impl = struct {
         self.ctx_tgt = null;
         self.model_tgt = null;
 
-        tc.c.mtmd_free(self.mctx);
+        mtmd.mtmd.mtmd_free(self.mctx);
         self.mctx = null;
     }
 
@@ -1585,7 +1581,7 @@ pub const Impl = struct {
         // always emit the first and final sample; throttle the rest to one per 200ms
         {
             const t_last = &d.t_last_load_progress_ms;
-            const t_now = tc.c.ggml_time_ms();
+            const t_now = llama.impl.llama_c.ggml_time_ms();
             const first = t_last.* == 0;
             const done = progress >= 1.0;
             const throttled = !first and !done and (t_now - t_last.*) < 200;
@@ -1595,7 +1591,7 @@ pub const Impl = struct {
             t_last.* = t_now;
         }
         if (d.ctx.callback_state.func != null) {
-            var a = std.heap.ArenaAllocator.init(gpa);
+            var a = std.heap.ArenaAllocator.init(std.heap.c_allocator);
             defer a.deinit();
             const ar = a.allocator();
             var o = mod.common.Obj.init(ar);
@@ -1611,7 +1607,7 @@ pub const Impl = struct {
     /// Ports `server_context_impl`'s `load_model` (server-context.cpp:1206
     /// @b1b770d90): load the model and initialize llama_context; this may
     /// also be called to resume from sleeping state.
-    pub fn loadModel(self: *Impl, params: *tc.params.Params) !bool {
+    pub fn loadModel(self: *Impl, params: *tools_common.params.Params) !bool {
         const func = "load_model";
         const a = self.arena.allocator();
         var load_progress_text: LoadProgress = .{ .ctx = self, .stage = "text_model" };
@@ -1650,14 +1646,14 @@ pub const Impl = struct {
             defer mod.common.freeZ(name);
             mod.common.srv(.inf, func, "loading model '%s'\n", .{name});
         }
-        if (logOn(tc.log.level_trace)) {
+        if (logOn(tools_common.log.level_trace)) {
             const path = mod.common.dupZ(params.model.path);
             defer mod.common.freeZ(path);
             mod.common.srv(.trc, func, "local path '%s'\n", .{path});
         }
 
         const mmproj_path = try a.dupeSentinel(u8, self.params_base.mmproj.path, 0);
-        var mparams = tc.c.mtmd_context_params_default();
+        var mparams = mtmd.mtmd.mtmd_context_params_default();
         if (has_mmproj) {
             mparams.use_gpu = self.params_base.mmproj_use_gpu;
             mparams.device = self.params_base.mmproj_device;
@@ -1675,15 +1671,15 @@ pub const Impl = struct {
         }
 
         // get the memory usage of mmproj, also used to check image_max_tokens against n_ubatch
-        const MtmdParams = @typeInfo(@TypeOf(mtmd_mod.mtmd.getMemoryUsage)).@"fn".param_types[1].?;
-        var mmproj_usage: mtmd_mod.mtmd.MemoryUsage = .{ .backend_mem_usage = .{}, .image_max_tokens = -1, .use_non_causal = false };
+        const MtmdParams = @typeInfo(@TypeOf(mtmd.mtmd.getMemoryUsage)).@"fn".param_types[1].?;
+        var mmproj_usage: mtmd.mtmd.MemoryUsage = .{ .backend_mem_usage = .{}, .image_max_tokens = -1, .use_non_causal = false };
         defer mmproj_usage.deinit();
         var mmproj_usage_t_us: i64 = 0;
         if (has_mmproj) {
-            const t_start = tc.c.ggml_time_us();
+            const t_start = llama.impl.llama_c.ggml_time_us();
             mmproj_usage.deinit();
-            mmproj_usage = mtmd_mod.mtmd.getMemoryUsage(mmproj_path.ptr, @as(*const MtmdParams, @ptrCast(&mparams)).*);
-            mmproj_usage_t_us = tc.c.ggml_time_us() - t_start;
+            mmproj_usage = mtmd.mtmd.getMemoryUsage(mmproj_path.ptr, @as(*const MtmdParams, @ptrCast(&mparams)).*);
+            mmproj_usage_t_us = llama.impl.llama_c.ggml_time_us() - t_start;
         }
 
         // optionally fit mmproj memory usage
@@ -1701,7 +1697,7 @@ pub const Impl = struct {
         }
 
         if (self.llama_init) |*li| li.deinit();
-        self.llama_init = try tc.init.initFromParams(gpa, &self.params_base, false);
+        self.llama_init = try tools_common.init.initFromParams(std.heap.c_allocator, &self.params_base, false);
 
         self.model_tgt = self.llama_init.?.model;
         self.ctx_tgt = self.llama_init.?.context;
@@ -1720,18 +1716,18 @@ pub const Impl = struct {
             return false;
         }
 
-        self.vocab = tc.c.llama_model_get_vocab(self.model_tgt);
+        self.vocab = llama.api.model.llama_model_get_vocab(self.model_tgt);
 
-        self.decision.init(gpa, self.model_tgt) catch |e| {
+        self.decision.init(std.heap.c_allocator, self.model_tgt) catch |e| {
             const w = mod.common.dupZ(whatOf(e));
             defer mod.common.freeZ(w);
             mod.common.srv(.err, func, "failed to init decision model: %s\n", .{w});
             return false;
         };
 
-        self.n_ctx = @intCast(tc.c.llama_n_ctx(self.ctx_tgt));
+        self.n_ctx = @intCast(llama.api.context.llama_n_ctx(self.ctx_tgt));
 
-        self.add_bos_token = tc.c.llama_vocab_get_add_bos(self.vocab);
+        self.add_bos_token = llama.api.vocab.llama_vocab_get_add_bos(self.vocab);
 
         if (has_spec) {
             // spec_mtp doesn't use load a model internally, so we report 0.0 and 1.0 manually
@@ -1739,13 +1735,13 @@ pub const Impl = struct {
             load_progress_spec.t_last_load_progress_ms = 0; // reset so internal cbs aren't delayed
 
             {
-                var params_dft = tc.speculative.baseParamsToSpeculative(&self.params_base);
+                var params_dft = tools_common.speculative.baseParamsToSpeculative(&self.params_base);
 
                 // progress callback
                 params_dft.load_progress_callback = loadProgressCallback;
                 params_dft.load_progress_callback_user_data = &load_progress_spec;
 
-                self.spec_init = try tc.speculative.initFromParams(&params_dft, self.model_tgt, self.ctx_tgt);
+                self.spec_init = try tools_common.speculative.initFromParams(&params_dft, self.model_tgt, self.ctx_tgt);
                 self.model_dft = self.spec_init.?.model();
                 self.ctx_dft = self.spec_init.?.context();
 
@@ -1777,13 +1773,13 @@ pub const Impl = struct {
             }
 
             if (!is_resume) {
-                tc.c.mtmd_helper_log_set(tc.common.defaultLogCallback, null);
+                mtmd.helper.mtmd_helper_log_set(tools_common.common.defaultLogCallback, null);
             }
 
             // the image must fit in one ubatch if the model needs non-causal attention on it
             // a non-causal model also has the text of the prompt in that ubatch, leave half of it to the text
             {
-                const n_ubatch: c_int = @intCast(tc.c.llama_n_ubatch(self.ctx_tgt));
+                const n_ubatch: c_int = @intCast(llama.api.context.llama_n_ubatch(self.ctx_tgt));
                 const is_mixed = self.useMixedBatch();
                 if (is_mixed or mmproj_usage.use_non_causal) {
                     const n_max: c_int = if (is_mixed) @divTrunc(n_ubatch, 2) else n_ubatch;
@@ -1797,7 +1793,7 @@ pub const Impl = struct {
                 }
             }
 
-            self.mctx = tc.c.mtmd_init_from_file(mmproj_path.ptr, self.model_tgt, mparams);
+            self.mctx = mtmd.mtmd.mtmd_init_from_file(mmproj_path.ptr, self.model_tgt, mparams);
             if (self.mctx == null) {
                 mod.common.srv(.err, func, "failed to load multimodal model, '%s'\n", .{mmproj_path.ptr});
                 return false;
@@ -1822,9 +1818,9 @@ pub const Impl = struct {
             }
         }
 
-        self.mtmd_cap = tc.c.mtmd_helper_get_capabilities(self.model_tgt, self.mctx);
+        self.mtmd_cap = mtmd.helper.mtmd_helper_get_capabilities(self.model_tgt, self.mctx);
 
-        if (!tc.c.llama_memory_can_shift(tc.c.llama_get_memory(self.ctx_tgt))) {
+        if (!llama.api.context.llama_memory_can_shift(llama.api.context.llama_get_memory(self.ctx_tgt))) {
             if (self.params_base.ctx_shift) {
                 self.params_base.ctx_shift = false;
                 mod.common.srv(.wrn, func, "%s\n", .{@as([*:0]const u8, "ctx_shift is not supported by this context, it will be disabled")});
@@ -1836,23 +1832,23 @@ pub const Impl = struct {
             }
         }
 
-        if (tc.c.llama_model_n_swa(self.model_tgt) == 0) {
+        if (llama.api.model.llama_model_n_swa(self.model_tgt) == 0) {
             if (self.params_base.swa_full) {
                 self.params_base.swa_full = false;
                 mod.common.srv(.wrn, func, "%s\n", .{@as([*:0]const u8, "swa_full is not supported by this model, it will be disabled")});
             }
         }
 
-        self.n_swa = if (self.params_base.swa_full) 0 else tc.c.llama_model_n_swa(self.model_tgt);
+        self.n_swa = if (self.params_base.swa_full) 0 else llama.api.model.llama_model_n_swa(self.model_tgt);
 
         // Necessary similarity of prompt for slot selection
         self.slot_prompt_similarity = self.params_base.slot_prompt_similarity;
 
-        const n_ctx_train = tc.c.llama_model_n_ctx_train(self.model_tgt);
+        const n_ctx_train = llama.api.model.llama_model_n_ctx_train(self.model_tgt);
 
         {
             // note: the capping itself is done in n_ctx_slot(), here we only report it
-            const n_ctx_seq: c_int = @intCast(tc.c.llama_n_ctx_seq(self.ctx_tgt));
+            const n_ctx_seq: c_int = @intCast(llama.api.context.llama_n_ctx_seq(self.ctx_tgt));
             const per_slot = self.params_base.kv_unified_per_slot;
 
             if (per_slot > 0) {
@@ -1874,10 +1870,10 @@ pub const Impl = struct {
         }
 
         for (self.slots) |*s| s.deinit();
-        gpa.free(self.slots);
+        std.heap.c_allocator.free(self.slots);
         self.slots = &.{};
 
-        self.ctx_tgt_seq_rm_type = tc.common.contextCanSeqRm(self.ctx_tgt);
+        self.ctx_tgt_seq_rm_type = tools_common.common.contextCanSeqRm(self.ctx_tgt);
         if (self.ctx_tgt_seq_rm_type == .no) {
             mod.common.srv(.wrn, func, "%s", .{@as([*:0]const u8, "speculative decoding not supported by this context\n")});
         }
@@ -1892,16 +1888,16 @@ pub const Impl = struct {
         });
 
         // initialize slots
-        self.slots = try gpa.alloc(Slot, @intCast(self.params_base.n_parallel));
+        self.slots = try std.heap.c_allocator.alloc(Slot, @intCast(self.params_base.n_parallel));
         for (self.slots) |*s| s.* = .{};
 
         // try speculative decoding
         if (self.ctx_tgt_seq_rm_type != .no) {
-            if (tc.speculative.init(&self.params_base.speculative, @intCast(self.params_base.n_parallel))) |sp| {
+            if (tools_common.speculative.init(&self.params_base.speculative, @intCast(self.params_base.n_parallel))) |sp| {
                 self.spec = sp;
             } else |e| {
                 if (e == error.OutOfMemory) return e;
-                const msg = mod.common.dupZ(tc.arg.what());
+                const msg = mod.common.dupZ(tools_common.arg.what());
                 defer mod.common.freeZ(msg);
                 mod.common.srv(.err, func, "failed to initialize speculative decoding context: %s\n", .{msg});
                 if (self.params_base.speculative.hasSynth()) {
@@ -1911,7 +1907,7 @@ pub const Impl = struct {
         }
 
         if (self.ctx_dft != null) {
-            self.ctx_dft_seq_rm_type = tc.common.contextCanSeqRm(self.ctx_dft);
+            self.ctx_dft_seq_rm_type = tools_common.common.contextCanSeqRm(self.ctx_dft);
         }
 
         if (self.spec != null) {
@@ -1940,7 +1936,7 @@ pub const Impl = struct {
             slot.prompt.tokens.has_mtmd = self.mctx != null;
 
             if (self.hasCapTts()) {
-                slot.tts.ctx = tc.c.mtmd_helper_gen_audio_init(self.ctx_tgt, self.mctx);
+                slot.tts.ctx = mtmd.helper_gen.mtmd_helper_gen_audio_init(self.ctx_tgt, self.mctx.?);
             }
 
             slt(.trc, func, slot, "new slot, n_ctx = %d\n", .{slot.n_ctx});
@@ -1978,8 +1974,8 @@ pub const Impl = struct {
         // the update_slots() logic will always submit a maximum of n_batch or n_parallel tokens
         // note that n_batch can be > n_ctx (e.g. for non-causal attention models such as BERT where the KV cache is not used)
         {
-            const n_batch: i32 = @intCast(tc.c.llama_n_batch(self.ctx_tgt));
-            const n_embd: i32 = tc.c.llama_model_n_embd_inp(self.model_tgt);
+            const n_batch: i32 = @intCast(llama.api.context.llama_n_batch(self.ctx_tgt));
+            const n_embd: i32 = llama.api.model.llama_model_n_embd_inp(self.model_tgt);
             self.batch.deinit();
             self.batch = .{};
             try self.batch.init(self.ctx_tgt, @max(n_batch, self.params_base.n_parallel), n_embd);
@@ -2002,10 +1998,10 @@ pub const Impl = struct {
 
             if (self.prompt_cache) |pc| {
                 pc.deinit();
-                gpa.destroy(pc);
+                std.heap.c_allocator.destroy(pc);
             }
-            const pc = try gpa.create(mod.task.PromptCache);
-            pc.* = mod.task.PromptCache.init(gpa, self.params_base.cache_ram_mib, @intCast(self.n_ctx));
+            const pc = try std.heap.c_allocator.create(mod.task.PromptCache);
+            pc.* = mod.task.PromptCache.init(std.heap.c_allocator, self.params_base.cache_ram_mib, @intCast(self.n_ctx));
             self.prompt_cache = pc;
         } else {
             mod.common.srv(.trc, func, "%s", .{@as([*:0]const u8, "prompt cache is disabled - use `--cache-ram N` to enable it\n")});
@@ -2047,7 +2043,7 @@ pub const Impl = struct {
     /// The `has_mmproj && fit_params` block of `load_model`
     /// (server-context.cpp:1206 @b1b770d90): the projector's worst-case
     /// memory added to the fit's target margin, per device.
-    fn addMmprojMemory(self: *Impl, mmproj_usage: *const mtmd_mod.mtmd.MemoryUsage, t_elapsed: i64) !void {
+    fn addMmprojMemory(self: *Impl, mmproj_usage: *const mtmd.mtmd.MemoryUsage, t_elapsed: i64) !void {
         const func = "load_model";
         const mmproj_mem = &mmproj_usage.backend_mem_usage;
         if (mmproj_mem.items.items.len != 0) {
@@ -2061,11 +2057,11 @@ pub const Impl = struct {
                 const dev = e.dev;
                 const sz = e.size;
                 var i: usize = 0;
-                while (i < tc.c.ggml_backend_dev_count()) : (i += 1) {
-                    if (@intFromPtr(tc.c.ggml_backend_dev_get(i)) == @intFromPtr(dev)) {
+                while (i < llama.impl.llama_c.ggml_backend_dev_count()) : (i += 1) {
+                    if (@intFromPtr(llama.impl.llama_c.ggml_backend_dev_get(i)) == @intFromPtr(dev)) {
                         if (i < self.params_base.fit_params_target.items.len) {
                             mod.common.srv(.dbg, func, "[mtmd] adding %.2f MiB to fit_params_target for device %s\n", .{
-                                @as(f64, @floatFromInt(sz)) / (1024.0 * 1024.0), tc.c.ggml_backend_dev_name(tc.c.ggml_backend_dev_get(i)),
+                                @as(f64, @floatFromInt(sz)) / (1024.0 * 1024.0), llama.impl.llama_c.ggml_backend_dev_name(llama.impl.llama_c.ggml_backend_dev_get(i)),
                             });
                             self.params_base.fit_params_target.items[i] += sz;
                         }
@@ -2145,9 +2141,9 @@ pub const Impl = struct {
             };
             if (!ok) return false;
 
-            gpa.free(self.asr_prompt);
+            std.heap.c_allocator.free(self.asr_prompt);
             self.asr_prompt = &.{};
-            self.asr_prompt = mod.convert.getAsrPrompt(gpa, self.model_tgt) catch |e| {
+            self.asr_prompt = mod.convert.getAsrPrompt(std.heap.c_allocator, self.model_tgt) catch |e| {
                 if (e == error.OutOfMemory) return e;
                 const msg = mod.common.dupZ(whatOf(e));
                 defer mod.common.freeZ(msg);
@@ -2178,11 +2174,11 @@ pub const Impl = struct {
             };
 
             {
-                const caps = chat.templates.getCaps(&self.tmpls.?);
+                const caps = common_chat.templates.getCaps(&self.tmpls.?);
                 const it: ?[]const u8 = for (self.params_base.default_template_kwargs.entries.items) |e| {
                     if (std.mem.eql(u8, e.key, "preserve_reasoning")) break e.value;
                 } else null;
-                const supported = chat.templates.capsValue(caps, "supports_preserve_reasoning");
+                const supported = common_chat.templates.capsValue(caps, "supports_preserve_reasoning");
                 const specified = self.params_base.preserve_reasoning_specified;
                 // note: the kwarg is enabled by default if not specified explicitly, so check the value
                 const enabled = it != null and std.mem.eql(u8, it.?, "true");
@@ -2214,23 +2210,23 @@ pub const Impl = struct {
     fn initTemplates(self: *Impl, enable_thinking: *bool) !bool {
         const func = "init";
         const a = self.arena.allocator();
-        var info = try chat.templates.modelInfo(a, @ptrCast(self.model_tgt.?));
-        self.tmpls = try chat.templates.init(gpa, &info, self.params_base.chat_template, "", "");
+        var info = try common_chat.templates.modelInfo(a, @ptrCast(self.model_tgt.?));
+        self.tmpls = try common_chat.templates.init(std.heap.c_allocator, &info, self.params_base.chat_template, "", "");
 
-        if (logOn(tc.log.level_trace)) {
-            var tmp = std.heap.ArenaAllocator.init(gpa);
+        if (logOn(tools_common.log.level_trace)) {
+            var tmp = std.heap.ArenaAllocator.init(std.heap.c_allocator);
             defer tmp.deinit();
             const ta = tmp.allocator();
-            var kwargs: std.ArrayList(chat.templates.KwArg) = .empty;
+            var kwargs: std.ArrayList(common_chat.templates.KwArg) = .empty;
             for (self.params_base.default_template_kwargs.entries.items) |e| try kwargs.append(ta, .{ .key = e.key, .value = e.value });
-            const example = try chat.templates.formatExample(ta, &self.tmpls.?, self.params_base.use_jinja, kwargs.items);
+            const example = try common_chat.templates.formatExample(ta, &self.tmpls.?, self.params_base.use_jinja, kwargs.items);
             mod.common.srv(.trc, func, "%s: chat template, example_format: '%s'\n", .{ @as([*:0]const u8, func), (try ta.dupeSentinel(u8, example, 0)).ptr });
         }
 
         // thinking is enabled if:
         // 1. It's not explicitly disabled via --reasoning off
         // 2. The chat template supports it
-        const template_supports_thinking = self.params_base.use_jinja and try chat.templates.supportEnableThinking(gpa, &self.tmpls.?);
+        const template_supports_thinking = self.params_base.use_jinja and try common_chat.templates.supportEnableThinking(std.heap.c_allocator, &self.tmpls.?);
         enable_thinking.* = self.params_base.enable_reasoning != 0 and template_supports_thinking;
         mod.common.srv(.trc, func, "%s: chat template, thinking = %d\n", .{ @as([*:0]const u8, func), @as(c_int, @intFromBool(enable_thinking.*)) });
         return true;
@@ -2358,8 +2354,8 @@ pub const Impl = struct {
 
         // find an empty slot, or the one that has been least recently used
         if (ret == null) {
-            const free_slots = try self.getFreeSlots(gpa, 1, -1);
-            defer gpa.free(free_slots);
+            const free_slots = try self.getFreeSlots(std.heap.c_allocator, 1, -1);
+            defer std.heap.c_allocator.free(free_slots);
 
             if (free_slots.len != 0) {
                 ret = free_slots[0];
@@ -2379,7 +2375,7 @@ pub const Impl = struct {
             if (update_cache) {
                 mod.common.srv(.trc, func, "%s", .{@as([*:0]const u8, "updating prompt cache\n")});
 
-                const t_start = tc.c.ggml_time_us();
+                const t_start = llama.impl.llama_c.ggml_time_us();
 
                 _ = try r.promptSave(self.prompt_cache.?);
 
@@ -2389,7 +2385,7 @@ pub const Impl = struct {
 
                 self.prompt_cache.?.update();
 
-                mod.common.srv(.trc, func, "prompt cache update took %.2f ms\n", .{@as(f64, @floatFromInt(tc.c.ggml_time_us() - t_start)) / 1000.0});
+                mod.common.srv(.trc, func, "prompt cache update took %.2f ms\n", .{@as(f64, @floatFromInt(llama.impl.llama_c.ggml_time_us() - t_start)) / 1000.0});
             }
         }
 
@@ -2428,8 +2424,8 @@ pub const Impl = struct {
     /// Ports `server_context_impl`'s `construct_lora_list` (server-context.cpp:1942 @b1b770d90).
     ///
     /// Return: owned by `gpa`.
-    fn constructLoraList(self: *const Impl, config: *const mod.common.LoraMap) ![]tc.params.LoraInfo {
-        const output = try gpa.dupe(tc.params.LoraInfo, self.params_base.lora_adapters.items); // copy
+    fn constructLoraList(self: *const Impl, config: *const mod.common.LoraMap) ![]tools_common.params.LoraInfo {
+        const output = try std.heap.c_allocator.dupe(tools_common.params.LoraInfo, self.params_base.lora_adapters.items); // copy
         for (output, 0..) |*o, i| {
             o.scale = 0.0;
             for (config.entries.items) |e| {
@@ -2448,7 +2444,7 @@ pub const Impl = struct {
         const func = "launch_slot_with_task";
         var task = task_in;
         var moved = false;
-        defer if (!moved) task.deinit(gpa);
+        defer if (!moved) task.deinit(std.heap.c_allocator);
 
         // process per-request lora adapters
         if (task.params.lora.entries.items.len != 0) {
@@ -2461,21 +2457,21 @@ pub const Impl = struct {
                 } else {
                     slt(.trc, func, slot, "keeping cache for alora. %zu target loras\n", .{task_loras.len});
                 }
-                gpa.free(slot.lora);
+                std.heap.c_allocator.free(slot.lora);
                 slot.lora = task_loras;
             } else {
-                gpa.free(task_loras);
+                std.heap.c_allocator.free(task_loras);
             }
         } else {
-            gpa.free(slot.lora);
-            slot.lora = try gpa.dupe(tc.params.LoraInfo, self.params_base.lora_adapters.items);
+            std.heap.c_allocator.free(slot.lora);
+            slot.lora = try std.heap.c_allocator.dupe(tools_common.params.LoraInfo, self.params_base.lora_adapters.items);
         }
 
         // if using alora, make sure it's only a single one requested and active
         var alora_invocation_start: usize = task.tokens.size();
         if (mod.common.loraAllAlora(slot.lora)) {
-            const enabled_ids = try mod.common.loraGetEnabledIds(gpa, slot.lora);
-            defer gpa.free(enabled_ids);
+            const enabled_ids = try mod.common.loraGetEnabledIds(std.heap.c_allocator, slot.lora);
+            defer std.heap.c_allocator.free(enabled_ids);
             // TODO: This will error out if a user requests two aloras, but only
             // provides the activation string for one. We could, instead search
             // for all requested alora activation strings and then either keep
@@ -2487,8 +2483,8 @@ pub const Impl = struct {
             const lora = slot.lora[enabled_ids[0]].ptr;
 
             // get the pointer and count for the invocation tokens
-            const n_invocation_tokens = tc.c.llama_adapter_get_alora_n_invocation_tokens(lora);
-            const invocation_tokens = tc.c.llama_adapter_get_alora_invocation_tokens(lora);
+            const n_invocation_tokens = llama.api.adapter.llama_adapter_get_alora_n_invocation_tokens(lora);
+            const invocation_tokens = llama.api.adapter.llama_adapter_get_alora_invocation_tokens(lora);
 
             // scan backwards through the prompt tokens to find the last
             // occurrence of the invocation sequence
@@ -2526,8 +2522,8 @@ pub const Impl = struct {
             return false;
         }
 
-        if (logOn(tc.log.level_debug)) {
-            var tmp = std.heap.ArenaAllocator.init(gpa);
+        if (logOn(tools_common.log.level_debug)) {
+            var tmp = std.heap.ArenaAllocator.init(std.heap.c_allocator);
             defer tmp.deinit();
             var j = try slot.toJson(tmp.allocator(), false);
             const s = try tmp.allocator().dupeSentinel(u8, try mod.common.safeJsonToStr(tmp.allocator(), &j), 0);
@@ -2537,12 +2533,12 @@ pub const Impl = struct {
         if (task.type == .tts) {
             ggmlAssert(self.hasCapTts(), 2029, "has_cap_tts()"); // should already checked in route handler
             if (!slot.tts.isSupported()) {
-                slot.tts.ctx = tc.c.mtmd_helper_gen_audio_init(self.ctx_tgt, slot.mctx);
+                slot.tts.ctx = mtmd.helper_gen.mtmd_helper_gen_audio_init(self.ctx_tgt, slot.mctx.?);
             }
             // mtmd_helper always re-eval the whole prompt
             slot.promptClear();
             task.tts_inp.data.seq_id = slot.id;
-            if (tc.c.mtmd_helper_gen_audio_set_input(slot.tts.ctx, task.tts_inp.get()) != 0) {
+            if (mtmd.helper_gen.mtmd_helper_gen_audio_set_input(slot.tts.ctx.?, task.tts_inp.get()) != 0) {
                 try self.sendErrorTask(&task, "failed to process TTS prompt", .server);
                 return false;
             }
@@ -2550,20 +2546,20 @@ pub const Impl = struct {
 
         // realtime transcription: the rows come from the audio stream, the helper may bias some tokens
         if (task.type == .transcribe_rt) {
-            var sparams = tc.c.mtmd_audio_stream_params_default();
+            var sparams = mtmd.mtmd.mtmd_audio_stream_params_default();
             sparams.prompt = self.asr_prompt.ptr;
             sparams.n_prompt = self.asr_prompt.len;
-            if (slot.audio_stream) |st| tc.c.mtmd_audio_stream_free(st);
-            slot.audio_stream = tc.c.mtmd_audio_stream_init(self.mctx, sparams);
+            if (slot.audio_stream) |st| mtmd.mtmd.mtmd_audio_stream_free(st);
+            slot.audio_stream = mtmd.mtmd.mtmd_audio_stream_init(self.mctx.?, sparams);
             if (slot.audio_stream == null) {
                 try self.sendErrorTask(&task, "failed to initialize the audio stream", .server);
                 return false;
             }
             if (self.asr_prompt.len != 0) {
-                const ta = try task.arenaAlloc(gpa);
-                const n_bias = tc.c.mtmd_helper_audio_stream_get_logit_bias(self.mctx, self.model_tgt, null, 0);
-                const bias = try ta.alloc(tc.c.llama_logit_bias, @intCast(n_bias));
-                _ = tc.c.mtmd_helper_audio_stream_get_logit_bias(self.mctx, self.model_tgt, bias.ptr, n_bias);
+                const ta = try task.arenaAlloc(std.heap.c_allocator);
+                const n_bias = mtmd.helper_gen.mtmd_helper_audio_stream_get_logit_bias(self.mctx.?, self.model_tgt, null, 0);
+                const bias = try ta.alloc(llama.impl.llama_c.llama_logit_bias, @intCast(n_bias));
+                _ = mtmd.helper_gen.mtmd_helper_audio_stream_get_logit_bias(self.mctx.?, self.model_tgt, bias.ptr, n_bias);
                 try task.params.sampling.logit_bias.appendSlice(ta, bias);
             }
         }
@@ -2572,10 +2568,10 @@ pub const Impl = struct {
         if (task.needSampling()) {
             if (slot.smpl) |s| s.destroy();
             slot.smpl = null;
-            slot.smpl = tc.sampling.init(self.model_tgt, &task.params.sampling) catch |e| {
+            slot.smpl = tools_common.sampling.init(self.model_tgt, &task.params.sampling) catch |e| {
                 if (e == error.OutOfMemory) return e;
                 var buf: [4200]u8 = undefined;
-                const err_msg = std.fmt.bufPrint(&buf, "Failed to initialize samplers: {s}", .{tc.arg.what()}) catch &buf;
+                const err_msg = std.fmt.bufPrint(&buf, "Failed to initialize samplers: {s}", .{tools_common.arg.what()}) catch &buf;
                 try self.sendErrorTask(&task, err_msg, .invalid_request);
                 return false;
             };
@@ -2592,23 +2588,23 @@ pub const Impl = struct {
 
             // TODO: tmp until backend sampling is fully implemented
             if (use_backend_sampling) {
-                _ = tc.c.llama_set_sampler(self.ctx_tgt, slot.id, slot.smpl.?.get());
+                _ = llama.api.context.llama_set_sampler(self.ctx_tgt, slot.id, slot.smpl.?.get());
             } else {
-                _ = tc.c.llama_set_sampler(self.ctx_tgt, slot.id, null);
+                _ = llama.api.context.llama_set_sampler(self.ctx_tgt, slot.id, null);
             }
 
-            if (logOn(tc.log.level_trace)) {
-                var tmp = std.heap.ArenaAllocator.init(gpa);
+            if (logOn(tools_common.log.level_trace)) {
+                var tmp = std.heap.ArenaAllocator.init(std.heap.c_allocator);
                 defer tmp.deinit();
                 const ta = tmp.allocator();
                 const chain = try ta.dupeSentinel(u8, try slot.smpl.?.print(ta), 0);
                 slt(.trc, func, slot, "sampler chain: %s\n", .{chain.ptr});
-                const sp = try ta.dupeSentinel(u8, try tc.sampling.paramsPrint(ta, &task.params.sampling), 0);
+                const sp = try ta.dupeSentinel(u8, try tools_common.sampling.paramsPrint(ta, &task.params.sampling), 0);
                 slt(.trc, func, slot, "sampler params: \n%s\n", .{sp.ptr});
             }
 
-            if (self.spec != null and tc.speculative.getSynthProbs(self.spec).len != 0) {
-                const seed: u32 = if (task.params.sampling.seed == tc.c.LLAMA_DEFAULT_SEED)
+            if (self.spec != null and tools_common.speculative.getSynthProbs(self.spec).len != 0) {
+                const seed: u32 = if (task.params.sampling.seed == llama.impl.llama_c.LLAMA_DEFAULT_SEED)
                     stdlib.libcxx.randomDevice()
                 else
                     task.params.sampling.seed;
@@ -2622,7 +2618,7 @@ pub const Impl = struct {
         // the per-request limit takes priority over the global one
         slot.n_predict_max = if (task.params.n_predict != -1) task.params.n_predict else self.params_base.n_predict;
 
-        if (slot.task) |*old| old.deinit(gpa);
+        if (slot.task) |*old| old.deinit(std.heap.c_allocator);
         slot.task = task;
         moved = true;
 
@@ -2669,7 +2665,7 @@ pub const Impl = struct {
     /// Ports `server_context_impl`'s `process_token` (server-context.cpp:2141 @b1b770d90).
     ///
     /// Return: whether the slot continues.
-    fn processToken(self: *Impl, result: *mod.task.CompletionTokenOutput, slot: *Slot, a: Allocator) !bool {
+    fn processToken(self: *Impl, result: *mod.task.CompletionTokenOutput, slot: *Slot, a: std.mem.Allocator) !bool {
         const func = "process_token";
         // remember which tokens were sampled - used for repetition penalties during sampling
         const token_str = result.text_to_send;
@@ -2677,7 +2673,7 @@ pub const Impl = struct {
 
         try slot.generated.append(token_str, result.tok);
         if (slot.taskRef().params.return_tokens) {
-            try slot.generated_tokens.append(gpa, result.tok);
+            try slot.generated_tokens.append(std.heap.c_allocator, result.tok);
         }
         slot.has_next_token = true;
 
@@ -2695,7 +2691,7 @@ pub const Impl = struct {
             if (stop_pos) |sp| {
                 slot.generated.truncate(pos + sp);
                 pos = @min(slot.n_sent_text, slot.generated.text.items.len);
-            } else if (slot.has_next_token and !tc.c.llama_vocab_is_eog(self.vocab, result.tok)) {
+            } else if (slot.has_next_token and !llama.api.vocab.llama_vocab_is_eog(self.vocab, result.tok)) {
                 stop_pos = try slot.findStoppingStrings(str_test, token_str.len, false);
                 send_text = stop_pos == null;
             }
@@ -2787,14 +2783,14 @@ pub const Impl = struct {
             }
         }
 
-        if (tc.c.llama_vocab_is_eog(self.vocab, result.tok)) {
+        if (llama.api.vocab.llama_vocab_is_eog(self.vocab, result.tok)) {
             slot.stop = .eos;
             slot.has_next_token = false;
 
             slt(.dbg, func, slot, "%s", .{@as([*:0]const u8, "stopped by EOS\n")});
         }
 
-        if (logOn(tc.log.level_debug)) {
+        if (logOn(tools_common.log.level_debug)) {
             const z = try a.dupeSentinel(u8, token_str, 0);
             slt(.dbg, func, slot, "n_gen = %d, n_remaining = %d, next token: %5d '%s'\n", .{ @as(c_int, @intCast(slot.stats.n_gen)), slot.nRemaining(), result.tok, z.ptr });
         }
@@ -2803,10 +2799,10 @@ pub const Impl = struct {
     }
 
     /// Ports `server_context_impl`'s `populate_token_probs` (server-context.cpp:2270 @b1b770d90).
-    fn populateTokenProbs(self: *const Impl, slot: *const Slot, result: *mod.task.CompletionTokenOutput, post_sampling: bool, special: bool, idx: c_int, a: Allocator) !void {
+    fn populateTokenProbs(self: *const Impl, slot: *const Slot, result: *mod.task.CompletionTokenOutput, post_sampling: bool, special: bool, idx: c_int, a: std.mem.Allocator) !void {
         const n_probs_request: usize = @intCast(@max(slot.taskRef().params.sampling.n_probs, 0));
         var probs: std.ArrayList(mod.task.CompletionTokenOutput.ProbInfo) = .empty;
-        const vocab = tc.c.llama_model_get_vocab(tc.c.llama_get_model(self.ctx_tgt));
+        const vocab = llama.api.model.llama_model_get_vocab(llama.api.context.llama_get_model(self.ctx_tgt));
 
         if (post_sampling) {
             const cur_p = slot.smpl.?.getCandidates(true);
@@ -2832,7 +2828,7 @@ pub const Impl = struct {
 
                 try probs.append(a, .{
                     .tok = cur_p.data[i].id,
-                    .txt = try tc.common.tokenToPiece(a, vocab, cur_p.data[i].id, special),
+                    .txt = try tools_common.common.tokenToPiece(a, vocab, cur_p.data[i].id, special),
                     .prob = cur_p.data[i].p,
                 });
             }
@@ -2855,7 +2851,7 @@ pub const Impl = struct {
             for (0..n_probs) |i| {
                 try probs.append(a, .{
                     .tok = cur[i].id,
-                    .txt = try tc.common.tokenToPiece(a, vocab, cur[i].id, special),
+                    .txt = try tools_common.common.tokenToPiece(a, vocab, cur[i].id, special),
                     .prob = cur[i].p,
                 });
             }
@@ -2885,8 +2881,8 @@ pub const Impl = struct {
             ggmlAssert(n_ctx > 0 and n_prompt_tokens > 0, 2339, "n_ctx > 0 && n_prompt_tokens > 0");
         }
 
-        const res = try mod.result.Result.create(gpa, .err);
-        errdefer res.destroy(gpa);
+        const res = try mod.result.Result.create(std.heap.c_allocator, .err);
+        errdefer res.destroy(std.heap.c_allocator);
         res.id = id_task;
         res.kind.err.err_type = ty;
         res.kind.err.err_msg = try res.alloc().dupe(u8, err);
@@ -2898,8 +2894,8 @@ pub const Impl = struct {
 
     /// Ports `server_context_impl`'s `send_partial_response` (server-context.cpp:2352 @b1b770d90).
     fn sendPartialResponse(self: *Impl, slot: *Slot, tkn: *const mod.task.CompletionTokenOutput, is_progress: bool, is_begin: bool) !void {
-        const res = try mod.result.Result.create(gpa, .cmpl_partial);
-        errdefer res.destroy(gpa);
+        const res = try mod.result.Result.create(std.heap.c_allocator, .cmpl_partial);
+        errdefer res.destroy(std.heap.c_allocator);
         const ra = res.alloc();
         const p = &res.kind.cmpl_partial;
         const t = slot.taskRef();
@@ -2918,7 +2914,7 @@ pub const Impl = struct {
             p.is_begin = true;
         } else {
             p.content = try slot.generated.substr(ra, slot.n_sent_text - tkn.text_to_send.len, tkn.text_to_send.len);
-            p.tokens = try ra.dupe(mod.common.Token, &.{tkn.tok});
+            p.tokens = try ra.dupe(llama.impl.llama_c.llama_token, &.{tkn.tok});
         }
 
         p.n_decoded = @intCast(slot.stats.n_gen);
@@ -2946,8 +2942,8 @@ pub const Impl = struct {
 
     /// Ports `server_context_impl`'s `send_tts_result` (server-context.cpp:2395 @b1b770d90).
     fn sendTtsResult(self: *Impl, slot: *const Slot, sample_rate: i32, data: [*c]const u8, data_len: usize, final: bool) !void {
-        const res = try mod.result.Result.create(gpa, .tts);
-        errdefer res.destroy(gpa);
+        const res = try mod.result.Result.create(std.heap.c_allocator, .tts);
+        errdefer res.destroy(std.heap.c_allocator);
 
         res.id = slot.taskRef().id;
         res.index = slot.taskRef().index;
@@ -2960,8 +2956,8 @@ pub const Impl = struct {
 
     /// Ports `server_context_impl`'s `send_final_response` (server-context.cpp:2407 @b1b770d90).
     fn sendFinalResponse(self: *Impl, slot: *Slot) !void {
-        const res = try mod.result.Result.create(gpa, .cmpl_final);
-        errdefer res.destroy(gpa);
+        const res = try mod.result.Result.create(std.heap.c_allocator, .cmpl_final);
+        errdefer res.destroy(std.heap.c_allocator);
         const ra = res.alloc();
         const f = &res.kind.cmpl_final;
         const t = &slot.task.?;
@@ -2974,7 +2970,7 @@ pub const Impl = struct {
         // keep copy of last generated text for debugging purposes
         if (self.slots_debug != 0) {
             slot.debug_generated_text.clearRetainingCapacity();
-            try slot.debug_generated_text.appendSlice(gpa, slot.generated.text.items);
+            try slot.debug_generated_text.appendSlice(std.heap.c_allocator, slot.generated.text.items);
         }
 
         // in stream mode, content and tokens are already in last partial chunk
@@ -2984,8 +2980,8 @@ pub const Impl = struct {
         } else {
             f.content = try slot.generated.clone(ra);
             slot.generated.deinit(); // std::move
-            slot.generated = .init(gpa);
-            f.tokens = try ra.dupe(mod.common.Token, slot.generated_tokens.items);
+            slot.generated = .init(std.heap.c_allocator);
+            f.tokens = try ra.dupe(llama.impl.llama_c.llama_token, slot.generated_tokens.items);
             slot.generated_tokens.clearRetainingCapacity(); // std::move
         }
         f.stats = slot.stats;
@@ -3014,7 +3010,7 @@ pub const Impl = struct {
         if (t.params.sampling.n_probs > 0) {
             var n = slot.generated_token_probs.items.len;
             if (!t.params.stream and slot.stop == .word) {
-                const stop_word_toks = try tc.common.tokenize(ra, self.vocab, slot.stopping_word.items, false, false);
+                const stop_word_toks = try tools_common.common.tokenize(ra, self.vocab, slot.stopping_word.items, false, false);
 
                 const safe_offset = @min(slot.generated_token_probs.items.len, stop_word_toks.len);
                 n -= safe_offset;
@@ -3030,9 +3026,9 @@ pub const Impl = struct {
     }
 
     /// Ports `server_context_impl`'s `send_embedding` (server-context.cpp:2470 @b1b770d90).
-    fn sendEmbedding(self: *Impl, slot: *const Slot, batch: *const tc.common.Batch) !void {
-        const res = try mod.result.Result.create(gpa, .embd);
-        errdefer res.destroy(gpa);
+    fn sendEmbedding(self: *Impl, slot: *const Slot, batch: *const tools_common.common.Batch) !void {
+        const res = try mod.result.Result.create(std.heap.c_allocator, .embd);
+        errdefer res.destroy(std.heap.c_allocator);
         const ra = res.alloc();
         const t = slot.taskRef();
         res.id = t.id;
@@ -3040,7 +3036,7 @@ pub const Impl = struct {
         res.kind.embd.n_tokens = t.nTokens();
         res.kind.embd.res_type = t.params.res_type;
 
-        const n_embd_out: usize = @intCast(tc.c.llama_model_n_embd_out(self.model_tgt));
+        const n_embd_out: usize = @intCast(llama.api.model.llama_model_n_embd_out(self.model_tgt));
 
         const embd_res = try ra.alloc(f32, n_embd_out);
         @memset(embd_res, 0.0);
@@ -3055,10 +3051,10 @@ pub const Impl = struct {
             }
 
             var embd: [*c]const f32 = null;
-            if (tc.c.llama_pooling_type(slot.ctx_tgt) == tc.c.LLAMA_POOLING_TYPE_NONE) {
-                embd = tc.c.llama_get_embeddings_ith(slot.ctx_tgt, @intCast(i));
+            if (llama.api.context.llama_pooling_type(slot.ctx_tgt) == llama.impl.llama_c.LLAMA_POOLING_TYPE_NONE) {
+                embd = llama.api.context.llama_get_embeddings_ith(slot.ctx_tgt, @intCast(i)).?;
             } else {
-                embd = tc.c.llama_get_embeddings_seq(slot.ctx_tgt, bt.seq_id);
+                embd = llama.api.context.llama_get_embeddings_seq(slot.ctx_tgt, bt.seq_id).?;
             }
 
             if (embd == null) {
@@ -3071,8 +3067,8 @@ pub const Impl = struct {
             }
 
             // normalize only when there is pooling
-            if (tc.c.llama_pooling_type(slot.ctx_tgt) != tc.c.LLAMA_POOLING_TYPE_NONE) {
-                tc.common.embdNormalize(embd, embd_res.ptr, @intCast(n_embd_out), t.params.embd_normalize);
+            if (llama.api.context.llama_pooling_type(slot.ctx_tgt) != llama.impl.llama_c.LLAMA_POOLING_TYPE_NONE) {
+                tools_common.common.embdNormalize(embd, embd_res.ptr, @intCast(n_embd_out), t.params.embd_normalize);
                 try embeddings.append(ra, embd_res);
                 break;
             }
@@ -3089,10 +3085,10 @@ pub const Impl = struct {
     /// Ports `server_context_impl`'s `send_decision` (server-context.cpp:2515
     /// @b1b770d90): the raw model output of each option -- the logits of the
     /// labels, the scores of a joint head, or the embeddings at the markers.
-    fn sendDecision(self: *Impl, slot: *const Slot, batch: *const tc.common.Batch, i_batch: i32) !void {
+    fn sendDecision(self: *Impl, slot: *const Slot, batch: *const tools_common.common.Batch, i_batch: i32) !void {
         const func = "send_decision";
-        const res = try mod.result.Result.create(gpa, .decision);
-        errdefer res.destroy(gpa);
+        const res = try mod.result.Result.create(std.heap.c_allocator, .decision);
+        errdefer res.destroy(std.heap.c_allocator);
         const ra = res.alloc();
         const t = slot.taskRef();
         res.id = t.id;
@@ -3103,24 +3099,24 @@ pub const Impl = struct {
         var scores: std.ArrayList(f32) = .empty;
 
         if (decision.pooled) {
-            const embd = tc.c.llama_get_embeddings_seq(slot.ctx_tgt, slot.id);
+            const embd = llama.api.context.llama_get_embeddings_seq(slot.ctx_tgt, slot.id);
             if (embd == null) {
-                res.destroy(gpa);
+                res.destroy(std.heap.c_allocator);
                 try self.sendErrorSlot(slot, "failed to get the class scores", .server);
                 return;
             }
-            try scores.appendSlice(ra, embd[0..@intCast(tc.c.llama_model_n_embd_out(self.model_tgt))]);
+            try scores.appendSlice(ra, embd.?[0..@intCast(llama.api.model.llama_model_n_embd_out(self.model_tgt))]);
         } else if (decision.labels.items.len != 0) {
-            const logits = tc.c.llama_get_logits_ith(slot.ctx_tgt, i_batch);
+            const logits = llama.api.context.llama_get_logits_ith(slot.ctx_tgt, i_batch);
             if (logits == null) {
-                res.destroy(gpa);
+                res.destroy(std.heap.c_allocator);
                 try self.sendErrorSlot(slot, "failed to get logits", .server);
                 return;
             }
-            const n_vocab = tc.c.llama_vocab_n_tokens(self.vocab);
+            const n_vocab = llama.api.vocab.llama_vocab_n_tokens(self.vocab);
             for (decision.labels.items) |label| {
                 ggmlAssert(label >= 0 and label < n_vocab, 2538, "label >= 0 && label < n_vocab");
-                try scores.append(ra, logits[@intCast(label)]);
+                try scores.append(ra, logits.?[@intCast(label)]);
             }
             if (decision.label_groups.items.len != 0) {
                 var grouped: std.ArrayList(f32) = .empty;
@@ -3149,25 +3145,25 @@ pub const Impl = struct {
             const n_idx: i32 = @intCast(idx.items.len);
             const pos_first: i32 = slot.prompt.nTokens() - n_idx;
             const GetEmbd = struct {
-                fn run(ctx: ?*tc.c.llama_context, ids: []const i32, first: i32, pos: i32) [*c]const f32 {
+                fn run(ctx: ?*llama.impl.llama_c.llama_context, ids: []const i32, first: i32, pos: i32) [*c]const f32 {
                     const i = pos - first;
-                    return if (i >= 0 and i < @as(i32, @intCast(ids.len))) tc.c.llama_get_embeddings_ith(ctx, ids[@intCast(i)]) else null;
+                    return if (i >= 0 and i < @as(i32, @intCast(ids.len))) llama.api.context.llama_get_embeddings_ith(ctx, ids[@intCast(i)]).? else null;
                 }
             };
 
             // joint head (decision model): the scores are the first rows
             var i: i32 = 0;
             while (i < decision.n_scores) : (i += 1) {
-                const embd: [*c]const f32 = if (i < n_idx) tc.c.llama_get_embeddings_ith(slot.ctx_tgt, idx.items[@intCast(i)]) else null;
+                const embd: [*c]const f32 = if (i < n_idx) llama.api.context.llama_get_embeddings_ith(slot.ctx_tgt, idx.items[@intCast(i)]).? else null;
                 if (embd == null) {
-                    res.destroy(gpa);
+                    res.destroy(std.heap.c_allocator);
                     try self.sendErrorSlot(slot, "failed to get embeddings", .server);
                     return;
                 }
                 try scores.append(ra, embd[0]);
             }
 
-            const n_embd_out = tc.c.llama_model_n_embd_out(self.model_tgt);
+            const n_embd_out = llama.api.model.llama_model_n_embd_out(self.model_tgt);
             const n_pointer = @divTrunc(n_embd_out, 2);
             const embd_q: [*c]const f32 = if (decision.pointer >= 0) GetEmbd.run(slot.ctx_tgt, idx.items, pos_first, decision.pointer) else null;
             ggmlAssert(decision.column >= 0 and decision.column < n_embd_out, 2578, "decision.column >= 0 && decision.column < n_embd_out");
@@ -3175,7 +3171,7 @@ pub const Impl = struct {
             for (decision.markers.items) |marker| {
                 const embd = GetEmbd.run(slot.ctx_tgt, idx.items, pos_first, marker);
                 if (embd == null or (decision.pointer >= 0 and embd_q == null)) {
-                    res.destroy(gpa);
+                    res.destroy(std.heap.c_allocator);
                     try self.sendErrorSlot(slot, "failed to get embeddings, the question and its options must fit in one batch", .server);
                     return;
                 }
@@ -3207,9 +3203,9 @@ pub const Impl = struct {
     }
 
     /// Ports `server_context_impl`'s `send_rerank` (server-context.cpp:2603 @b1b770d90).
-    fn sendRerank(self: *Impl, slot: *const Slot, batch: *const tc.common.Batch) !void {
-        const res = try mod.result.Result.create(gpa, .rerank);
-        errdefer res.destroy(gpa);
+    fn sendRerank(self: *Impl, slot: *const Slot, batch: *const tools_common.common.Batch) !void {
+        const res = try mod.result.Result.create(std.heap.c_allocator, .rerank);
+        errdefer res.destroy(std.heap.c_allocator);
         const t = slot.taskRef();
         res.id = t.id;
         res.index = t.index;
@@ -3222,9 +3218,9 @@ pub const Impl = struct {
                 continue;
             }
 
-            var embd = tc.c.llama_get_embeddings_seq(self.ctx_tgt, bt.seq_id);
+            var embd = llama.api.context.llama_get_embeddings_seq(self.ctx_tgt, bt.seq_id);
             if (embd == null) {
-                embd = tc.c.llama_get_embeddings_ith(self.ctx_tgt, @intCast(i));
+                embd = llama.api.context.llama_get_embeddings_ith(self.ctx_tgt, @intCast(i)).?;
             }
 
             if (embd == null) {
@@ -3234,7 +3230,7 @@ pub const Impl = struct {
                 continue;
             }
 
-            res.kind.rerank.score = embd[0];
+            res.kind.rerank.score = embd.?[0];
         }
 
         slt(.dbg, "send_rerank", slot, "sending rerank result, res.score = %f\n", .{@as(f64, res.kind.rerank.score)});
@@ -3246,18 +3242,18 @@ pub const Impl = struct {
     /// @b1b770d90): the input of a task set by the CLI. Unreached by the
     /// HTTP server, which tokenizes on its own threads.
     fn tokenizeCliInput(self: *Impl, task: *mod.task.Task) !bool {
-        const a = try task.arenaAlloc(gpa);
+        const a = try task.arenaAlloc(std.heap.c_allocator);
         const tokenized = blk: {
             const prompt = task.cli_prompt;
             if (self.mctx != null) {
-                break :blk mod.tokens.processMtmdPrompt(gpa, self.mctx, prompt, task.cli_files, self.init_opt, false);
+                break :blk mod.tokens.processMtmdPrompt(std.heap.c_allocator, self.mctx, prompt, task.cli_files, self.init_opt, false);
             } else {
                 var pv = try json.Value.initString(a, prompt);
-                var list = mod.tokens.tokenizeInputPrompts(gpa, self.vocab, self.mctx, &pv, true, true, self.init_opt) catch |e| break :blk @as(mod.common.Error!mod.tokens.ServerTokens, e);
+                var list = mod.tokens.tokenizeInputPrompts(std.heap.c_allocator, self.vocab, self.mctx, &pv, true, true, self.init_opt) catch |e| break :blk @as(common_chat.exception.Error!mod.tokens.ServerTokens, e);
                 const first = list.items[0];
                 for (list.items[1..]) |*t| t.deinit();
-                list.deinit(gpa);
-                break :blk @as(mod.common.Error!mod.tokens.ServerTokens, first);
+                list.deinit(std.heap.c_allocator);
+                break :blk @as(common_chat.exception.Error!mod.tokens.ServerTokens, first);
             }
         };
         if (tokenized) |toks| {
@@ -3278,7 +3274,7 @@ pub const Impl = struct {
     /// Ports `server_context_impl`'s `get_free_slots` (server-context.cpp:2657 @b1b770d90):
     /// idle slots that lose the least by being reused: empty slots first, then the least
     /// recently used ones.
-    fn getFreeSlots(self: *Impl, a: Allocator, n_slots_needed: usize, exclude_id_slot: c_int) ![]*Slot {
+    fn getFreeSlots(self: *Impl, a: std.mem.Allocator, n_slots_needed: usize, exclude_id_slot: c_int) ![]*Slot {
         var free_slots: std.ArrayList(*Slot) = .empty;
         errdefer free_slots.deinit(a);
         for (self.slots) |*slot| {
@@ -3342,7 +3338,7 @@ pub const Impl = struct {
             if (!try self.launchSlotWithTask(slot, child)) {
                 mod.common.srv(.err, func, "failed to launch slot with child task, id_task = %d\n", .{id_child});
                 try self.releaseSlotsOf(id_parent);
-                parent_task.deinit(gpa);
+                parent_task.deinit(std.heap.c_allocator);
                 return false;
             }
         }
@@ -3360,7 +3356,7 @@ pub const Impl = struct {
     /// Ports `server_context_impl`'s `create_checkpoint` (server-context.cpp:2728
     /// @b1b770d90). `n_tokens_cur`: the number of tokens added to the batch
     /// for the current slot.
-    fn createCheckpoint(self: *Impl, slot: *Slot, n_tokens_cur: i64, pos_min: tc.c.llama_pos, pos_max: tc.c.llama_pos) !void {
+    fn createCheckpoint(self: *Impl, slot: *Slot, n_tokens_cur: i64, pos_min: llama.impl.llama_c.llama_pos, pos_max: llama.impl.llama_c.llama_pos) !void {
         const func = "create_checkpoint";
         const id_task = slot.taskRef().id;
         const cps = &slot.prompt.checkpoints;
@@ -3425,13 +3421,13 @@ pub const Impl = struct {
         //       this is not true for SWA models: https://github.com/ggml-org/llama.cpp/pull/24411#issuecomment-4677983225
         cur.updatePos(@as(i64, slot.prompt.nTokens()) - n_tokens_cur, pos_min, pos_max);
 
-        try cur.updateTgt(ca, self.ctx_tgt, slot.id, tc.c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
-        try cur.updateDft(ca, self.ctx_dft, slot.id, tc.c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+        try cur.updateTgt(ca, self.ctx_tgt, slot.id, llama.impl.llama_c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+        try cur.updateDft(ca, self.ctx_dft, slot.id, llama.impl.llama_c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
         // stash the draft's speculative state with the checkpoint
         {
             var data: std.ArrayList(u8) = .fromOwnedSlice(cur.data_spec);
-            _ = tc.speculative.getState(self.spec, slot.id, &data);
-            cur.data_spec = try data.toOwnedSlice(gpa);
+            _ = tools_common.speculative.getState(self.spec, slot.id, &data);
+            cur.data_spec = try data.toOwnedSlice(std.heap.c_allocator);
         }
 
         try cps.append(ca, ckpt);
@@ -3488,8 +3484,8 @@ pub const Impl = struct {
         if (!ckptReadVal(u64, f, &n, n_read) or n > n_avail - n_read.*) {
             return false;
         }
-        gpa.free(buf.*);
-        buf.* = try gpa.alloc(u8, @intCast(n));
+        std.heap.c_allocator.free(buf.*);
+        buf.* = try std.heap.c_allocator.alloc(u8, @intCast(n));
         return n == 0 or ckptRead(f, buf.*, n_read);
     }
 
@@ -3560,8 +3556,8 @@ pub const Impl = struct {
         if (slot.prompt.checkpoints.items.len == 0) {
             return true;
         }
-        const path_z = try gpa.dupeSentinel(u8, filepath, 0);
-        defer gpa.free(path_z);
+        const path_z = try std.heap.c_allocator.dupeSentinel(u8, filepath, 0);
+        defer std.heap.c_allocator.free(path_z);
         var out = ckptAppend(filepath) orelse {
             slt(.wrn, func, slot, "failed to append context checkpoints to '%s'\n", .{path_z.ptr});
             return false;
@@ -3575,8 +3571,8 @@ pub const Impl = struct {
         for (slot.prompt.checkpoints.items) |ckpt| {
             const cur = &ckpt.ck;
             ckptWriteVal(i64, &out, &cur.n_tokens, n_written);
-            ckptWriteVal(tc.c.llama_pos, &out, &cur.pos_min, n_written);
-            ckptWriteVal(tc.c.llama_pos, &out, &cur.pos_max, n_written);
+            ckptWriteVal(llama.impl.llama_c.llama_pos, &out, &cur.pos_min, n_written);
+            ckptWriteVal(llama.impl.llama_c.llama_pos, &out, &cur.pos_max, n_written);
             ckptWriteBuf(&out, cur.data_tgt, n_written);
             ckptWriteBuf(&out, cur.data_dft, n_written);
             ckptWriteBuf(&out, cur.data_spec, n_written);
@@ -3597,8 +3593,8 @@ pub const Impl = struct {
     /// Return: the number of bytes consumed, 0 if there is no usable appendix.
     fn loadSlotCheckpoints(self: *const Impl, filepath: []const u8, offset: usize, slot: *Slot) !usize {
         const func = "load_slot_checkpoints";
-        const path_z = try gpa.dupeSentinel(u8, filepath, 0);
-        defer gpa.free(path_z);
+        const path_z = try std.heap.c_allocator.dupeSentinel(u8, filepath, 0);
+        defer std.heap.c_allocator.free(path_z);
         var opened = ckptOpenAt(filepath, offset) orelse return 0;
         const f = &opened.f;
         defer f.f.close(stdlib.file.defaultIo());
@@ -3633,8 +3629,8 @@ pub const Impl = struct {
             cur.id_task = -1; // not created by a task - marks a checkpoint restored from a slot file
             var bufs = [3][]u8{ &.{}, &.{}, &.{} };
             const ok = ckptReadVal(i64, f, &cur.n_tokens, &n_read) and
-                ckptReadVal(tc.c.llama_pos, f, &cur.pos_min, &n_read) and
-                ckptReadVal(tc.c.llama_pos, f, &cur.pos_max, &n_read) and
+                ckptReadVal(llama.impl.llama_c.llama_pos, f, &cur.pos_min, &n_read) and
+                ckptReadVal(llama.impl.llama_c.llama_pos, f, &cur.pos_max, &n_read) and
                 try ckptReadBuf(f, &bufs[0], n_avail, &n_read) and
                 try ckptReadBuf(f, &bufs[1], n_avail, &n_read) and
                 try ckptReadBuf(f, &bufs[2], n_avail, &n_read);
@@ -3642,7 +3638,7 @@ pub const Impl = struct {
             cur.data_tgt = try ca.dupe(u8, bufs[0]);
             cur.data_dft = try ca.dupe(u8, bufs[1]);
             cur.data_spec = try ca.dupe(u8, bufs[2]);
-            for (bufs) |b| gpa.free(b);
+            for (bufs) |b| std.heap.c_allocator.free(b);
             if (!ok) {
                 slt(.wrn, func, slot, "truncated context checkpoint appendix in '%s' - ignored\n", .{path_z.ptr});
                 return 0;
@@ -3660,8 +3656,8 @@ pub const Impl = struct {
         }
         // the slot file does not check the draft context - test-load one draft checkpoint, drop the draft data if it does not fit
         if (self.ctx_dft != null and checkpoints.items.len != 0 and checkpoints.items[checkpoints.items.len - 1].ck.data_dft.len != 0) {
-            const ok = checkpoints.items[checkpoints.items.len - 1].ck.loadDft(self.ctx_dft, slot.id, tc.c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
-            _ = tc.c.llama_memory_seq_rm(tc.c.llama_get_memory(self.ctx_dft), slot.id, -1, -1);
+            const ok = checkpoints.items[checkpoints.items.len - 1].ck.loadDft(self.ctx_dft, slot.id, llama.impl.llama_c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+            _ = llama.api.context.llama_memory_seq_rm(llama.api.context.llama_get_memory(self.ctx_dft), slot.id, -1, -1);
             if (!ok) {
                 slt(.wrn, func, slot, "draft context checkpoint data in '%s' does not match the draft context - dropped\n", .{path_z.ptr});
                 for (checkpoints.items) |cur| {
@@ -3691,19 +3687,19 @@ pub const Impl = struct {
         const func = "save_slot_draft";
         n_written.* = 0;
         var data_dft: []u8 = &.{};
-        defer gpa.free(data_dft);
+        defer std.heap.c_allocator.free(data_dft);
         var data_spec: std.ArrayList(u8) = .empty;
-        defer data_spec.deinit(gpa);
+        defer data_spec.deinit(std.heap.c_allocator);
         if (self.ctx_dft != null) {
-            data_dft = try gpa.alloc(u8, tc.c.llama_state_seq_get_size_ext(self.ctx_dft, slot.id, tc.c.LLAMA_STATE_SEQ_FLAGS_NONE));
-            _ = tc.c.llama_state_seq_get_data_ext(self.ctx_dft, data_dft.ptr, data_dft.len, slot.id, tc.c.LLAMA_STATE_SEQ_FLAGS_NONE);
+            data_dft = try std.heap.c_allocator.alloc(u8, llama.api.state.llama_state_seq_get_size_ext(self.ctx_dft, slot.id, llama.impl.llama_c.LLAMA_STATE_SEQ_FLAGS_NONE));
+            _ = llama.api.state.llama_state_seq_get_data_ext(self.ctx_dft, data_dft.ptr, data_dft.len, slot.id, llama.impl.llama_c.LLAMA_STATE_SEQ_FLAGS_NONE);
         }
-        _ = tc.speculative.getState(self.spec, slot.id, &data_spec);
+        _ = tools_common.speculative.getState(self.spec, slot.id, &data_spec);
         if (data_dft.len == 0 and data_spec.items.len == 0) {
             return true;
         }
-        const path_z = try gpa.dupeSentinel(u8, filepath, 0);
-        defer gpa.free(path_z);
+        const path_z = try std.heap.c_allocator.dupeSentinel(u8, filepath, 0);
+        defer std.heap.c_allocator.free(path_z);
         var out = ckptAppend(filepath) orelse {
             slt(.wrn, func, slot, "failed to append the draft state to '%s'\n", .{path_z.ptr});
             return false;
@@ -3730,10 +3726,10 @@ pub const Impl = struct {
     fn loadSlotDraft(self: *const Impl, filepath: []const u8, offset: usize, slot: *Slot) !usize {
         const func = "load_slot_draft";
         if (self.ctx_dft != null) {
-            _ = tc.c.llama_memory_seq_rm(tc.c.llama_get_memory(self.ctx_dft), slot.id, -1, -1);
+            _ = llama.api.context.llama_memory_seq_rm(llama.api.context.llama_get_memory(self.ctx_dft), slot.id, -1, -1);
         }
-        const path_z = try gpa.dupeSentinel(u8, filepath, 0);
-        defer gpa.free(path_z);
+        const path_z = try std.heap.c_allocator.dupeSentinel(u8, filepath, 0);
+        defer std.heap.c_allocator.free(path_z);
         var opened = ckptOpenAt(filepath, offset) orelse return 0;
         const f = &opened.f;
         defer f.f.close(stdlib.file.defaultIo());
@@ -3745,9 +3741,9 @@ pub const Impl = struct {
             return 0;
         }
         var data_dft: []u8 = &.{};
-        defer gpa.free(data_dft);
+        defer std.heap.c_allocator.free(data_dft);
         var data_spec: []u8 = &.{};
-        defer gpa.free(data_spec);
+        defer std.heap.c_allocator.free(data_spec);
         if (!ckptReadVal(u32, f, &version, &n_read) or version != slot_draft_version or
             !try ckptReadBuf(f, &data_dft, n_avail, &n_read) or
             !try ckptReadBuf(f, &data_spec, n_avail, &n_read))
@@ -3757,17 +3753,17 @@ pub const Impl = struct {
         }
         if (data_dft.len != 0) {
             if (self.ctx_dft == null or
-                tc.c.llama_state_seq_set_data_ext(self.ctx_dft, data_dft.ptr, data_dft.len, slot.id, tc.c.LLAMA_STATE_SEQ_FLAGS_NONE) != data_dft.len)
+                llama.api.state.llama_state_seq_set_data_ext(self.ctx_dft, data_dft.ptr, data_dft.len, slot.id, llama.impl.llama_c.LLAMA_STATE_SEQ_FLAGS_NONE) != data_dft.len)
             {
                 if (self.ctx_dft != null) {
-                    _ = tc.c.llama_memory_seq_rm(tc.c.llama_get_memory(self.ctx_dft), slot.id, -1, -1);
+                    _ = llama.api.context.llama_memory_seq_rm(llama.api.context.llama_get_memory(self.ctx_dft), slot.id, -1, -1);
                 }
                 slt(.wrn, func, slot, "draft state in '%s' does not match the draft context - dropped\n", .{path_z.ptr});
                 return n_read;
             }
         }
         if (data_spec.len != 0) {
-            tc.speculative.setState(self.spec, slot.id, data_spec);
+            tools_common.speculative.setState(self.spec, slot.id, data_spec);
         }
         slt(.inf, func, slot, "restored the draft state (%.3f MiB) from '%s'\n", .{ @as(f64, @as(f32, @floatFromInt(n_read)) / 1024 / 1024), path_z.ptr });
         return n_read;
@@ -3788,7 +3784,7 @@ pub const Impl = struct {
         var owned = task.*;
         task.* = .{};
         var moved = false;
-        defer if (!moved) owned.deinit(gpa);
+        defer if (!moved) owned.deinit(std.heap.c_allocator);
 
         switch (owned.type) {
             .completion, .infill, .transcribe_rt, .realtime, .embedding, .rerank, .tts, .decision => blk: {
@@ -3832,8 +3828,8 @@ pub const Impl = struct {
                 if (owned.isParent()) {
                     // try getting free slots for all child tasks
                     const n_child_tasks = owned.child_tasks.items.len;
-                    const child_slots = try self.getFreeSlots(gpa, n_child_tasks, slot.id);
-                    defer gpa.free(child_slots);
+                    const child_slots = try self.getFreeSlots(std.heap.c_allocator, n_child_tasks, slot.id);
+                    defer std.heap.c_allocator.free(child_slots);
                     if (child_slots.len < n_child_tasks) {
                         mod.common.srv(.dbg, func, "not enough free slots for child tasks, n_free = %zu, n_children = %zu, defer task, id_task = %d\n", .{ child_slots.len, n_child_tasks, id_task });
                         moved = true;
@@ -3881,7 +3877,7 @@ pub const Impl = struct {
                 }
             },
             .control => blk: {
-                const res = try mod.result.Result.create(gpa, .control);
+                const res = try mod.result.Result.create(std.heap.c_allocator, .control);
                 res.id = owned.id;
 
                 const slot = self.getSlotByCmplId(owned.params.control_cmpl_id) orelse {
@@ -3920,12 +3916,12 @@ pub const Impl = struct {
                 {
                     if (slot.audio_stream) |audio_stream| {
                         if (owned.params.control_action == .audio_append) {
-                            _ = tc.c.mtmd_audio_stream_push(audio_stream, owned.params.control_audio.ptr, owned.params.control_audio.len);
+                            _ = mtmd.mtmd.mtmd_audio_stream_push(audio_stream, owned.params.control_audio.ptr, owned.params.control_audio.len);
                         } else {
-                            const ret = tc.c.mtmd_audio_stream_flush(audio_stream, owned.params.control_action == .audio_end);
+                            const ret = mtmd.mtmd.mtmd_audio_stream_flush(audio_stream, owned.params.control_action == .audio_end);
                             // a non-final commit completes its item once the rows of its audio are decoded
                             if (ret == 0 and owned.params.control_action == .audio_commit) {
-                                try slot.audio_commit_rows.append(gpa, tc.c.mtmd_audio_stream_get_n_rows_flushed(audio_stream));
+                                try slot.audio_commit_rows.append(std.heap.c_allocator, mtmd.mtmd.mtmd_audio_stream_get_n_rows_flushed(audio_stream));
                             }
                         }
                         slot.audio_wait = false;
@@ -3954,8 +3950,8 @@ pub const Impl = struct {
                 }
                 mod.common.srv(.dbg, func, "n_processing_slots = %d\n", .{n_processing_slots});
 
-                const res = try mod.result.Result.create(gpa, .metrics);
-                errdefer res.destroy(gpa);
+                const res = try mod.result.Result.create(std.heap.c_allocator, .metrics);
+                errdefer res.destroy(std.heap.c_allocator);
                 res.id = owned.id;
                 res.kind.metrics.n_processing_slots = n_processing_slots;
                 res.kind.metrics.n_tasks_deferred = @intCast(self.queue_tasks.queueTasksDeferredSize());
@@ -3967,8 +3963,8 @@ pub const Impl = struct {
                 try self.queue_results.send(res);
             },
             .slot_get => {
-                const res = try mod.result.Result.create(gpa, .slots);
-                errdefer res.destroy(gpa);
+                const res = try mod.result.Result.create(std.heap.c_allocator, .slots);
+                errdefer res.destroy(std.heap.c_allocator);
                 const ra = res.alloc();
                 var slots_data = json.Value.emptyArray();
 
@@ -4003,22 +3999,22 @@ pub const Impl = struct {
                     break :blk;
                 }
 
-                const t_start = tc.c.ggml_time_us();
+                const t_start = llama.impl.llama_c.ggml_time_us();
 
                 const filename = owned.slot_action.filename;
                 const filepath = owned.slot_action.filepath;
 
-                const packed_bytes = slot.prompt.tokens.serialize(gpa) catch |e| {
+                const packed_bytes = slot.prompt.tokens.serialize(std.heap.c_allocator) catch |e| {
                     if (e == error.OutOfMemory) return e;
                     try self.sendErrorTask(&owned, whatOf(e), .not_supported);
                     break :blk;
                 };
-                defer gpa.free(packed_bytes);
+                defer std.heap.c_allocator.free(packed_bytes);
 
-                ggmlAssert(packed_bytes.len % @sizeOf(mod.common.Token) == 0, 3254, "packed.size() % sizeof(llama_token) == 0");
-                const path_z = try gpa.dupeSentinel(u8, filepath, 0);
-                defer gpa.free(path_z);
-                const nwrite = tc.c.llama_state_seq_save_file(self.ctx_tgt, path_z.ptr, slot.id, @ptrCast(@alignCast(packed_bytes.ptr)), packed_bytes.len / @sizeOf(mod.common.Token));
+                ggmlAssert(packed_bytes.len % @sizeOf(llama.impl.llama_c.llama_token) == 0, 3254, "packed.size() % sizeof(llama_token) == 0");
+                const path_z = try std.heap.c_allocator.dupeSentinel(u8, filepath, 0);
+                defer std.heap.c_allocator.free(path_z);
+                const nwrite = llama.api.state.llama_state_seq_save_file(self.ctx_tgt, path_z.ptr, slot.id, @ptrCast(@alignCast(packed_bytes.ptr)), packed_bytes.len / @sizeOf(llama.impl.llama_c.llama_token));
                 if (nwrite == 0) {
                     try self.sendErrorTask(&owned, "Unable to save slot", .server);
                     break :blk;
@@ -4036,11 +4032,11 @@ pub const Impl = struct {
                     break :blk;
                 }
 
-                const t_end = tc.c.ggml_time_us();
+                const t_end = llama.impl.llama_c.ggml_time_us();
                 const t_save_ms = @as(f64, @floatFromInt(t_end - t_start)) / 1000.0;
 
-                const res = try mod.result.Result.create(gpa, .slot_save_load);
-                errdefer res.destroy(gpa);
+                const res = try mod.result.Result.create(std.heap.c_allocator, .slot_save_load);
+                errdefer res.destroy(std.heap.c_allocator);
                 res.id = owned.id;
                 res.id_slot = id_slot;
                 res.kind.slot_save_load.filename = try res.alloc().dupe(u8, filename);
@@ -4064,7 +4060,7 @@ pub const Impl = struct {
                     break :blk;
                 }
 
-                const t_start = tc.c.ggml_time_us();
+                const t_start = llama.impl.llama_c.ggml_time_us();
 
                 const filename = owned.slot_action.filename;
                 const filepath = owned.slot_action.filepath;
@@ -4082,11 +4078,11 @@ pub const Impl = struct {
                 const nread_ckpt = try self.loadSlotCheckpoints(filepath, nread, slot);
                 const nread_dft = try self.loadSlotDraft(filepath, nread + nread_ckpt, slot);
 
-                const t_end = tc.c.ggml_time_us();
+                const t_end = llama.impl.llama_c.ggml_time_us();
                 const t_restore_ms = @as(f64, @floatFromInt(t_end - t_start)) / 1000.0;
 
-                const res = try mod.result.Result.create(gpa, .slot_save_load);
-                errdefer res.destroy(gpa);
+                const res = try mod.result.Result.create(std.heap.c_allocator, .slot_save_load);
+                errdefer res.destroy(std.heap.c_allocator);
                 res.id = owned.id;
                 res.id_slot = id_slot;
                 res.kind.slot_save_load.filename = try res.alloc().dupe(u8, filename);
@@ -4115,7 +4111,7 @@ pub const Impl = struct {
 
                 slot.promptClear();
 
-                const res = try mod.result.Result.create(gpa, .slot_erase);
+                const res = try mod.result.Result.create(std.heap.c_allocator, .slot_erase);
                 res.id = owned.id;
                 res.id_slot = id_slot;
                 res.kind.slot_erase.n_erased = n_erased;
@@ -4124,19 +4120,19 @@ pub const Impl = struct {
             .get_lora => {
                 // TODO @ngxson : make lora_adapters a dedicated member of server_context
                 const loras = self.params_base.lora_adapters.items;
-                const res = try mod.result.Result.create(gpa, .get_lora);
-                errdefer res.destroy(gpa);
+                const res = try mod.result.Result.create(std.heap.c_allocator, .get_lora);
+                errdefer res.destroy(std.heap.c_allocator);
                 const ra = res.alloc();
                 res.id = owned.id;
                 const out = try ra.alloc(mod.result.GetLora.Lora, loras.len);
                 for (loras, 0..) |lora, i| {
                     var alora_invocation_string: std.ArrayList(u8) = .empty;
-                    const n_alora_tokens = tc.c.llama_adapter_get_alora_n_invocation_tokens(lora.ptr);
-                    var alora_invocation_tokens: std.ArrayList(mod.common.Token) = .empty;
+                    const n_alora_tokens = llama.api.adapter.llama_adapter_get_alora_n_invocation_tokens(lora.ptr);
+                    var alora_invocation_tokens: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
                     if (n_alora_tokens != 0) {
-                        const alora_tokens = tc.c.llama_adapter_get_alora_invocation_tokens(lora.ptr);
+                        const alora_tokens = llama.api.adapter.llama_adapter_get_alora_invocation_tokens(lora.ptr);
                         for (0..@intCast(n_alora_tokens)) |j| {
-                            try alora_invocation_string.appendSlice(ra, try tc.common.tokenToPiece(ra, self.vocab, alora_tokens[j], true));
+                            try alora_invocation_string.appendSlice(ra, try tools_common.common.tokenToPiece(ra, self.vocab, alora_tokens[j], true));
                             try alora_invocation_tokens.append(ra, alora_tokens[j]);
                         }
                     }
@@ -4151,7 +4147,7 @@ pub const Impl = struct {
             },
             .set_lora => {
                 const new_loras = try self.constructLoraList(&owned.set_lora);
-                defer gpa.free(new_loras);
+                defer std.heap.c_allocator.free(new_loras);
                 // logging
                 for (new_loras, 0..) |l, i| {
                     mod.common.srv(.trc, func, "set lora adapter idx=%zu scale=%f\n", .{ i, @as(f64, l.scale) });
@@ -4159,7 +4155,7 @@ pub const Impl = struct {
                 // TODO @ngxson : make lora_adapters a dedicated member of server_context
                 self.params_base.lora_adapters = .empty;
                 try self.params_base.lora_adapters.appendSlice(self.params_base.arena, new_loras);
-                const res = try mod.result.Result.create(gpa, .apply_lora);
+                const res = try mod.result.Result.create(std.heap.c_allocator, .apply_lora);
                 res.id = owned.id;
                 try self.queue_results.send(res);
             },
@@ -4173,29 +4169,29 @@ pub const Impl = struct {
     ///
     /// Return: the bytes read.
     fn restoreSlot(self: *Impl, slot: *Slot, filepath: []const u8) !usize {
-        const path_z = try gpa.dupeSentinel(u8, filepath, 0);
-        defer gpa.free(path_z);
+        const path_z = try std.heap.c_allocator.dupeSentinel(u8, filepath, 0);
+        defer std.heap.c_allocator.free(path_z);
         var n_packed: usize = 0;
-        var nread = tc.c.llama_state_seq_load_file(self.ctx_tgt, path_z.ptr, slot.id, null, 0, &n_packed);
-        var packed_tokens: []mod.common.Token = &.{};
-        defer gpa.free(packed_tokens);
+        var nread = llama.api.state.llama_state_seq_load_file(self.ctx_tgt, path_z.ptr, slot.id, null, 0, &n_packed);
+        var packed_tokens: []llama.impl.llama_c.llama_token = &.{};
+        defer std.heap.c_allocator.free(packed_tokens);
         if (nread != 0) {
-            packed_tokens = try gpa.alloc(mod.common.Token, @max(1, n_packed));
-            nread = tc.c.llama_state_seq_load_file(self.ctx_tgt, path_z.ptr, slot.id, packed_tokens.ptr, packed_tokens.len, &n_packed);
+            packed_tokens = try std.heap.c_allocator.alloc(llama.impl.llama_c.llama_token, @max(1, n_packed));
+            nread = llama.api.state.llama_state_seq_load_file(self.ctx_tgt, path_z.ptr, slot.id, packed_tokens.ptr, packed_tokens.len, &n_packed);
         }
         if (nread == 0) {
-            return mod.common.throw(error.RuntimeError, "No available space in KV cache or invalid slot save file", .{});
+            return common_chat.exception.throw(error.RuntimeError, "No available space in KV cache or invalid slot save file", .{});
         }
 
-        var restored = try mod.tokens.ServerTokens.deserialize(gpa, packed_tokens[0..n_packed], self.mctx != null);
+        var restored = try mod.tokens.ServerTokens.deserialize(std.heap.c_allocator, packed_tokens[0..n_packed], self.mctx != null);
         errdefer restored.deinit();
 
         if (restored.size() > @as(usize, @intCast(slot.n_ctx))) {
-            return mod.common.throw(error.RuntimeError, "Restored prompt does not fit in the slot context", .{});
+            return common_chat.exception.throw(error.RuntimeError, "Restored prompt does not fit in the slot context", .{});
         }
 
         if (!restored.validate(self.ctx_tgt)) {
-            return mod.common.throw(error.RuntimeError, "Invalid tokens in slot save file", .{});
+            return common_chat.exception.throw(error.RuntimeError, "Invalid tokens in slot save file", .{});
         }
 
         slot.prompt.clear();
@@ -4218,8 +4214,8 @@ pub const Impl = struct {
     /// @b1b770d90), the two overloads in server_context_impl: an exception
     /// from one slot's step is that slot's error.
     fn slotException(self: *Impl, slot: *Slot, e: anyerror) void {
-        const msg = gpa.dupe(u8, whatOf(e)) catch "std::bad_alloc";
-        defer if (msg.ptr != "std::bad_alloc".ptr) gpa.free(msg);
+        const msg = std.heap.c_allocator.dupe(u8, whatOf(e)) catch "std::bad_alloc";
+        defer if (msg.ptr != "std::bad_alloc".ptr) std.heap.c_allocator.free(msg);
         {
             const z = mod.common.dupZ(msg);
             defer mod.common.freeZ(z);
@@ -4256,14 +4252,14 @@ pub const Impl = struct {
         }
 
         const audio_stream = slot.audio_stream.?;
-        const n = tc.c.mtmd_audio_stream_step(audio_stream, slot.sampled);
+        const n = mtmd.mtmd.mtmd_audio_stream_step(audio_stream, slot.sampled);
 
         // complete the commits whose rows have their text sampled, before the new rows: their text goes to the next item
-        const n_rows = tc.c.mtmd_audio_stream_get_n_rows(audio_stream);
+        const n_rows = mtmd.mtmd.mtmd_audio_stream_get_n_rows(audio_stream);
         while (slot.audio_commit_rows.items.len != 0 and slot.audio_commit_rows.items[0] <= n_rows) {
             _ = slot.audio_commit_rows.orderedRemove(0);
-            const res = try mod.result.Result.create(gpa, .cmpl_partial);
-            errdefer res.destroy(gpa);
+            const res = try mod.result.Result.create(std.heap.c_allocator, .cmpl_partial);
+            errdefer res.destroy(std.heap.c_allocator);
             const ra = res.alloc();
             const p = &res.kind.cmpl_partial;
             const t = slot.taskRef();
@@ -4280,14 +4276,14 @@ pub const Impl = struct {
 
         if (n > 0) {
             // new sequence (e.g. live ASR restart): drop the old one, the text goes on in a new line
-            if (tc.c.mtmd_audio_stream_is_seq_start(audio_stream)) {
+            if (mtmd.mtmd.mtmd_audio_stream_is_seq_start(audio_stream)) {
                 slot.promptClear();
                 if (slot.n_sent_text > 0) {
                     var sep: mod.task.CompletionTokenOutput = .{};
                     sep.tok = mod.common.token_null;
                     sep.text_to_send = "\n";
                     {
-                        var chunk = try chat.input.Input.fromText(gpa, sep.text_to_send);
+                        var chunk = try common_chat.input.Input.fromText(std.heap.c_allocator, sep.text_to_send);
                         defer chunk.deinit();
                         try slot.generated.appendInput(&chunk);
                     }
@@ -4295,9 +4291,9 @@ pub const Impl = struct {
                     try self.sendPartialResponse(slot, &sep, false, false);
                 }
             }
-            const rows = tc.c.mtmd_audio_stream_get_output_embd(audio_stream);
+            const rows = mtmd.mtmd.mtmd_audio_stream_get_output_embd(audio_stream).?;
             slot.inp_embd.clearRetainingCapacity();
-            try slot.inp_embd.appendSlice(gpa, rows[0 .. @as(usize, @intCast(n)) * @as(usize, @intCast(self.batch.n_embd))]);
+            try slot.inp_embd.appendSlice(std.heap.c_allocator, rows[0 .. @as(usize, @intCast(n)) * @as(usize, @intCast(self.batch.n_embd))]);
             slot.audio_wait = false;
             return true;
         }
@@ -4352,8 +4348,8 @@ pub const Impl = struct {
 
         self.preDecode() catch |e| {
             if (e == error.OutOfMemory) return e;
-            const msg = try gpa.dupe(u8, whatOf(e));
-            defer gpa.free(msg);
+            const msg = try std.heap.c_allocator.dupe(u8, whatOf(e));
+            defer std.heap.c_allocator.free(msg);
             const z = mod.common.dupZ(msg);
             defer mod.common.freeZ(z);
             mod.common.srv(.err, func, "pre_decode() failed: %s\n", .{z});
@@ -4367,8 +4363,8 @@ pub const Impl = struct {
         // note: TTS slots bypass the shared batch entirely
         self.processTtsSlots() catch |e| {
             if (e == error.OutOfMemory) return e;
-            const msg = try gpa.dupe(u8, whatOf(e));
-            defer gpa.free(msg);
+            const msg = try std.heap.c_allocator.dupe(u8, whatOf(e));
+            defer std.heap.c_allocator.free(msg);
             const z = mod.common.dupZ(msg);
             defer mod.common.freeZ(z);
             mod.common.srv(.err, func, "process_tts_slots() failed: %s\n", .{z});
@@ -4379,8 +4375,8 @@ pub const Impl = struct {
         // so do the realtime conversations
         self.processRealtimeSlots() catch |e| {
             if (e == error.OutOfMemory) return e;
-            const msg = try gpa.dupe(u8, whatOf(e));
-            defer gpa.free(msg);
+            const msg = try std.heap.c_allocator.dupe(u8, whatOf(e));
+            defer std.heap.c_allocator.free(msg);
             const z = mod.common.dupZ(msg);
             defer mod.common.freeZ(z);
             mod.common.srv(.err, func, "process_realtime_slots() failed: %s\n", .{z});
@@ -4393,7 +4389,7 @@ pub const Impl = struct {
         if (self.batch.slot_batched) |slot_batched| {
             // TODO @ngxson : alora handling is too messy, need to refactor it to be more clear and maintainable
             // apply lora, only need to do it once per batch
-            try tc.common.setAdapterLora(gpa, self.ctx_tgt, slot_batched.lora);
+            try tools_common.common.setAdapterLora(std.heap.c_allocator, self.ctx_tgt, slot_batched.lora);
 
             // if the lora is temporarily disabled for an alora, re-enable it
             // for next time
@@ -4402,11 +4398,11 @@ pub const Impl = struct {
                 slot_batched.lora[self.batch.alora_disabled_id].scale = self.batch.alora_scale;
             }
 
-            tc.c.llama_set_embeddings(self.ctx_tgt, slot_batched.needEmbd());
+            llama.api.context.llama_set_embeddings(self.ctx_tgt, slot_batched.needEmbd());
         }
 
         var off_next: i32 = 0;
-        var n_batch: i32 = @intCast(tc.c.llama_n_batch(self.ctx_tgt));
+        var n_batch: i32 = @intCast(llama.api.context.llama_n_batch(self.ctx_tgt));
         var off: i32 = 0;
         while (off < self.batch.size()) : (off = off_next) {
             const n_tokens = @min(n_batch, self.batch.size() - off);
@@ -4414,8 +4410,8 @@ pub const Impl = struct {
                 self.batch.render(off, n_tokens);
                 const ok = self.decode(&n_batch, off) catch |e| {
                     if (e == error.OutOfMemory) return e;
-                    const msg = try gpa.dupe(u8, whatOf(e));
-                    defer gpa.free(msg);
+                    const msg = try std.heap.c_allocator.dupe(u8, whatOf(e));
+                    defer std.heap.c_allocator.free(msg);
                     const z = mod.common.dupZ(msg);
                     defer mod.common.freeZ(z);
                     mod.common.srv(.err, func, "decode() failed: %s\n", .{z});
@@ -4429,7 +4425,7 @@ pub const Impl = struct {
                     off_next = off + n_tokens;
 
                     // on successful decode, restore the original batch size
-                    n_batch = @intCast(tc.c.llama_n_batch(self.ctx_tgt));
+                    n_batch = @intCast(llama.api.context.llama_n_batch(self.ctx_tgt));
                 } else {
                     // try again with the updated n_batch
                     continue;
@@ -4438,8 +4434,8 @@ pub const Impl = struct {
 
             self.postDecode(n_tokens, off) catch |e| {
                 if (e == error.OutOfMemory) return e;
-                const msg = try gpa.dupe(u8, whatOf(e));
-                defer gpa.free(msg);
+                const msg = try std.heap.c_allocator.dupe(u8, whatOf(e));
+                defer std.heap.c_allocator.free(msg);
                 const z = mod.common.dupZ(msg);
                 defer mod.common.freeZ(z);
                 mod.common.srv(.err, func, "post_decode() failed: %s\n", .{z});
@@ -4487,10 +4483,10 @@ pub const Impl = struct {
             return;
         }
 
-        tc.c.llama_set_embeddings(self.ctx_tgt, true);
+        llama.api.context.llama_set_embeddings(self.ctx_tgt, true);
 
         if (slot.state == .processing_prompt) {
-            const ret = tc.c.mtmd_helper_gen_audio_step_prompt(slot.tts.ctx, @intCast(tc.c.llama_n_batch(self.ctx_tgt)));
+            const ret = mtmd.helper_gen.mtmd_helper_gen_audio_step_prompt(slot.tts.ctx.?, @intCast(llama.api.context.llama_n_batch(self.ctx_tgt)));
             if (ret < 0) {
                 try self.sendErrorSlot(slot, "TTS prompt processing failed", .server);
                 try slot.release();
@@ -4498,9 +4494,9 @@ pub const Impl = struct {
                 // done prompt, do sample and save h_state_prompt
                 slot.tts.sampled = try slot.smpl.?.sample(self.ctx_tgt, -1, false);
                 slot.smpl.?.accept(slot.tts.sampled, true);
-                const h_embd = tc.c.llama_get_embeddings_ith(self.ctx_tgt, -1);
+                const h_embd = llama.api.context.llama_get_embeddings_ith(self.ctx_tgt, -1).?;
                 slot.tts.h_state_prompt.clearRetainingCapacity();
-                try slot.tts.h_state_prompt.appendSlice(gpa, h_embd[0..@intCast(tc.c.llama_model_n_embd(self.model_tgt))]);
+                try slot.tts.h_state_prompt.appendSlice(std.heap.c_allocator, h_embd[0..@intCast(llama.api.model.llama_model_n_embd(self.model_tgt))]);
                 slot.tts.h_state = slot.tts.h_state_prompt.items.ptr;
                 slot.state = .generating;
             }
@@ -4513,7 +4509,7 @@ pub const Impl = struct {
             var data: [*c]const u8 = null;
             var data_len: usize = 0;
             // generation truly ends here: force out any sub-window remainder still buffered
-            if (tc.c.mtmd_helper_gen_audio_flush(slot.tts.ctx) != 0 or tc.c.mtmd_helper_gen_audio_get_output(slot.tts.ctx, &sample_rate, @ptrCast(&data), &data_len, null) != 0) {
+            if (mtmd.helper_gen.mtmd_helper_gen_audio_flush(slot.tts.ctx.?) != 0 or mtmd.helper_gen.mtmd_helper_gen_audio_get_output(slot.tts.ctx.?, &sample_rate, @ptrCast(&data), &data_len, null) != 0) {
                 try self.sendErrorSlot(slot, "failed to finalize TTS output", .server);
             } else {
                 try self.sendTtsResult(slot, sample_rate, data, data_len, true);
@@ -4524,7 +4520,7 @@ pub const Impl = struct {
 
         var h_state_next: [*c]const f32 = null;
         var stop = false;
-        if (tc.c.mtmd_helper_gen_audio_step_gen(slot.tts.ctx, slot.tts.sampled, slot.tts.h_state, &h_state_next, &stop) != 0) {
+        if (mtmd.helper_gen.mtmd_helper_gen_audio_step_gen(slot.tts.ctx.?, slot.tts.sampled, slot.tts.h_state, &h_state_next, &stop) != 0) {
             try self.sendErrorSlot(slot, "TTS generation failed", .server);
             try slot.release();
             return;
@@ -4547,7 +4543,7 @@ pub const Impl = struct {
             var sample_rate: i32 = 0;
             var data: [*c]const u8 = null;
             var data_len: usize = 0;
-            if (tc.c.mtmd_helper_gen_audio_get_output(slot.tts.ctx, &sample_rate, @ptrCast(&data), &data_len, null) != 0) {
+            if (mtmd.helper_gen.mtmd_helper_gen_audio_get_output(slot.tts.ctx.?, &sample_rate, @ptrCast(&data), &data_len, null) != 0) {
                 try self.sendErrorSlot(slot, "TTS streaming output failed", .server);
                 try slot.release();
             } else if (data_len > 0) {
@@ -4611,8 +4607,8 @@ pub const Impl = struct {
             {
                 ggmlAssert(!slot.prompt.tokens.has_mtmd, 3831, "!slot.prompt.tokens.has_mtmd");
 
-                const new_tokens = try gpa.dupe(mod.common.Token, slot.prompt.tokens.getTokens()); // copy
-                defer gpa.free(new_tokens);
+                const new_tokens = try std.heap.c_allocator.dupe(llama.impl.llama_c.llama_token, slot.prompt.tokens.getTokens()); // copy
+                defer std.heap.c_allocator.free(new_tokens);
                 const nk: usize = @intCast(n_keep);
                 const nd: usize = @intCast(n_discard);
                 var i = nk + nd;
@@ -4649,10 +4645,10 @@ pub const Impl = struct {
             return;
         }
 
-        try generating.append(gpa, slot);
+        try generating.append(std.heap.c_allocator, slot);
 
         if (self.spec != null) {
-            tc.speculative.getDraftParams(self.spec, slot.id).drafting = false;
+            tools_common.speculative.getDraftParams(self.spec, slot.id).drafting = false;
 
             const use_ckpt_tgt = self.ctx_tgt_seq_rm_type == .full;
             const use_ckpt_dft = self.ctx_dft_seq_rm_type == .full;
@@ -4675,20 +4671,20 @@ pub const Impl = struct {
 
                     slot.spec_ckpt.updatePos(
                         slot.prompt.nTokens(),
-                        tc.c.llama_memory_seq_pos_min(tc.c.llama_get_memory(self.ctx_tgt), slot.id),
-                        tc.c.llama_memory_seq_pos_max(tc.c.llama_get_memory(self.ctx_tgt), slot.id),
+                        llama.api.context.llama_memory_seq_pos_min(llama.api.context.llama_get_memory(self.ctx_tgt), slot.id),
+                        llama.api.context.llama_memory_seq_pos_max(llama.api.context.llama_get_memory(self.ctx_tgt), slot.id),
                     );
 
                     if (use_ckpt_dft) {
-                        try slot.spec_ckpt.updateDft(gpa, self.ctx_dft, slot.id, tc.c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+                        try slot.spec_ckpt.updateDft(std.heap.c_allocator, self.ctx_dft, slot.id, llama.impl.llama_c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
                     }
 
-                    gpa.free(slot.spec_prompt);
-                    slot.spec_prompt = try slot.prompt.tokens.getTextTokens(gpa);
+                    std.heap.c_allocator.free(slot.spec_prompt);
+                    slot.spec_prompt = try slot.prompt.tokens.getTextTokens(std.heap.c_allocator);
 
                     const spec_reject = slot.useSpecRejection();
 
-                    tc.speculative.getDraftParams(self.spec, slot.id).* = .{
+                    tools_common.speculative.getDraftParams(self.spec, slot.id).* = .{
                         .drafting = true,
                         .n_max = n_draft_max,
                         .pos0 = slot.prompt.tokens.posNext(-1),
@@ -4700,7 +4696,7 @@ pub const Impl = struct {
                         .seed = slot.taskRef().params.sampling.seed,
                     };
 
-                    try drafting.append(gpa, slot);
+                    try drafting.append(std.heap.c_allocator, slot);
                 }
             }
         }
@@ -4719,22 +4715,22 @@ pub const Impl = struct {
 
         if (self.ctx_dft != null) {
             if (use_ckpt_dft_full) {
-                ggmlAssert(ckpt.loadDft(self.ctx_dft, slot.id, tc.c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY), 3948, "ckpt.load_dft(ctx_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY)");
+                ggmlAssert(ckpt.loadDft(self.ctx_dft, slot.id, llama.impl.llama_c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY), 3948, "ckpt.load_dft(ctx_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY)");
             }
 
-            if (!tc.c.llama_memory_seq_rm(tc.c.llama_get_memory(self.ctx_dft), slot.id, ckpt.pos_max + 1, -1)) {
+            if (!llama.api.context.llama_memory_seq_rm(llama.api.context.llama_get_memory(self.ctx_dft), slot.id, ckpt.pos_max + 1, -1)) {
                 ggmlAbort(3952, "failed to remove sequence %d\n", .{slot.id});
             }
         }
 
         if (draft.items.len != 0) {
             const use_ckpt_tgt = self.ctx_tgt_seq_rm_type == .full or
-                (self.ctx_tgt_seq_rm_type == .rs and draft.items.len > tc.c.llama_n_rs_seq(self.ctx_tgt));
+                (self.ctx_tgt_seq_rm_type == .rs and draft.items.len > llama.api.context.llama_n_rs_seq(self.ctx_tgt));
 
-            const use_ckpt_dft = (self.ctx_dft_seq_rm_type == .rs and draft.items.len > tc.c.llama_n_rs_seq(self.ctx_dft));
+            const use_ckpt_dft = (self.ctx_dft_seq_rm_type == .rs and draft.items.len > llama.api.context.llama_n_rs_seq(self.ctx_dft));
 
             if (use_ckpt_tgt) {
-                try ckpt.updateTgt(gpa, self.ctx_tgt, slot.id, tc.c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+                try ckpt.updateTgt(std.heap.c_allocator, self.ctx_tgt, slot.id, llama.impl.llama_c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
 
                 slt(.dbg, "operator()", slot, "created speculative checkpoint (pos_min = %d, pos_max = %d, n_tokens = %d, size = %.3f MiB, draft = %.3f MiB)\n", .{
                     ckpt.pos_min,                                                 ckpt.pos_max,                                                       slot.prompt.nTokens(),
@@ -4743,13 +4739,13 @@ pub const Impl = struct {
             }
 
             if (use_ckpt_dft) {
-                try ckpt.updateDft(gpa, self.ctx_dft, slot.id, tc.c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+                try ckpt.updateDft(std.heap.c_allocator, self.ctx_dft, slot.id, llama.impl.llama_c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
             }
         }
     }
 
     fn draftWork(self: *Impl) anyerror!void {
-        tc.speculative.draft(self.spec);
+        tools_common.speculative.draft(self.spec);
     }
 
     /// Ports `server_context_impl`'s `pre_decode` (server-context.cpp:3779
@@ -4767,9 +4763,9 @@ pub const Impl = struct {
         self.batch.clear();
 
         var generating: std.ArrayList(*Slot) = .empty;
-        defer generating.deinit(gpa);
+        defer generating.deinit(std.heap.c_allocator);
         var drafting: std.ArrayList(*Slot) = .empty;
-        defer drafting.deinit(gpa);
+        defer drafting.deinit(std.heap.c_allocator);
 
         // determine which slots are generating and drafting
         for (0..2) |pass| for (self.slots) |*slot| {
@@ -4793,8 +4789,8 @@ pub const Impl = struct {
         }
 
         // process in chunks of params.n_batch
-        const n_batch: i32 = @intCast(tc.c.llama_n_batch(self.ctx_tgt));
-        const n_ubatch: i32 = @intCast(tc.c.llama_n_ubatch(self.ctx_tgt));
+        const n_batch: i32 = @intCast(llama.api.context.llama_n_batch(self.ctx_tgt));
+        const n_ubatch: i32 = @intCast(llama.api.context.llama_n_ubatch(self.ctx_tgt));
 
         // next, batch any pending prompts without exceeding n_batch
         if (self.params_base.cont_batching or self.batch.size() == 0) {
@@ -4883,7 +4879,7 @@ pub const Impl = struct {
 
                 // TODO: support memory-less logits computation
                 // a decision reads its logits from the one batch of its prompt
-                if (slot.taskRef().needLogits() and tc.c.llama_get_memory(self.ctx_tgt) == null and slot.taskRef().type != .decision) {
+                if (slot.taskRef().needLogits() and llama.api.context.llama_get_memory(self.ctx_tgt) == null and slot.taskRef().type != .decision) {
                     try self.sendErrorSlot(slot, "the current context does not support logits computation. skipping", .server);
                     try slot.release();
                     return;
@@ -4958,7 +4954,7 @@ pub const Impl = struct {
                         const n_cache_reuse = slot.taskRef().params.n_cache_reuse;
 
                         const can_cache_reuse =
-                            tc.c.llama_memory_can_shift(tc.c.llama_get_memory(self.ctx_tgt)) and
+                            llama.api.context.llama_memory_can_shift(llama.api.context.llama_get_memory(self.ctx_tgt)) and
                             !slot.prompt.tokens.has_mtmd;
 
                         if (!can_cache_reuse and n_cache_reuse > 0) {
@@ -5027,13 +5023,13 @@ pub const Impl = struct {
 
                     // the first evaluated token attends to the positions > pos_eval - n_swa, so a SWA state
                     // starting at pos_eval - n_swa + 1 is enough, while a state without SWA must end before pos_eval
-                    const pos_eval: tc.c.llama_pos = pos_next - @as(i32, if (has_new_tokens) 0 else 1);
+                    const pos_eval: llama.impl.llama_c.llama_pos = pos_next - @as(i32, if (has_new_tokens) 0 else 1);
 
                     // a state or a checkpoint is useful when its pos_min is below this threshold
                     const pos_min_thold: i32 = @max(0, if (self.n_swa > 0) pos_eval - self.n_swa + 2 else pos_eval);
 
                     if (n_past > 0 and n_past <= slot.prompt.nTokens()) {
-                        const pos_min = tc.c.llama_memory_seq_pos_min(tc.c.llama_get_memory(self.ctx_tgt), slot.id);
+                        const pos_min = llama.api.context.llama_memory_seq_pos_min(llama.api.context.llama_get_memory(self.ctx_tgt), slot.id);
                         if (pos_min == -1) {
                             slt(.err, func, slot, "n_past = %d, slot.prompt.tokens.size() = %d, seq_id = %d, pos_min = %d\n", .{ n_past, @as(c_int, @intCast(slot.prompt.tokens.size())), slot.id, pos_min });
                             ggmlAbort(4225, "pos_min == -1, but n_past > 0 - should not happen: https://github.com/ggml-org/llama.cpp/pull/13833#discussion_r2116181237", .{});
@@ -5070,8 +5066,8 @@ pub const Impl = struct {
                             if (!do_reset) {
                                 const it = found.?;
                                 // restore the context checkpoint
-                                if (!it.loadTgt(self.ctx_tgt, slot.id, tc.c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) or
-                                    !it.loadDft(self.ctx_dft, slot.id, tc.c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY))
+                                if (!it.loadTgt(self.ctx_tgt, slot.id, llama.impl.llama_c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) or
+                                    !it.loadDft(self.ctx_dft, slot.id, llama.impl.llama_c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY))
                                 {
                                     if (it.id_task != -1) {
                                         ggmlAbort(4297, "failed to restore context checkpoint\n", .{});
@@ -5085,7 +5081,7 @@ pub const Impl = struct {
                             if (!do_reset) {
                                 const it = found.?;
                                 // restore the draft's speculative state
-                                tc.speculative.setState(self.spec, slot.id, it.data_spec);
+                                tools_common.speculative.setState(self.spec, slot.id, it.data_spec);
 
                                 pos_next = @min(pos_next, @max(it.pos_min + 1, it.pos_max));
                                 n_past = @intCast(@min(slot.prompt.tokens.sizeUpToPos(pos_next), @as(usize, @intCast(it.n_tokens))));
@@ -5189,8 +5185,8 @@ pub const Impl = struct {
             // the adapter needs to be enabled for the remaining tokens.
             if (mod.common.loraAllAlora(slot.lora) and slot.alora_invocation_start - 1 > slot.prompt.nTokens()) {
                 slt(.dbg, func, slot, "processing pre-alora tokens without the adapter (n_tokens = %d, alora_invocation_start = %d)\n", .{ slot.prompt.nTokens(), slot.alora_invocation_start });
-                const enabled_loras = try mod.common.loraGetEnabledIds(gpa, slot.lora);
-                defer gpa.free(enabled_loras);
+                const enabled_loras = try mod.common.loraGetEnabledIds(std.heap.c_allocator, slot.lora);
+                defer std.heap.c_allocator.free(enabled_loras);
                 ggmlAssert(enabled_loras.len == 1, 4409, "enabled_loras.size() == 1");
                 alora_scale.* = slot.lora[enabled_loras[0]].scale;
                 slot.lora[enabled_loras[0]].scale = 0.0;
@@ -5363,8 +5359,8 @@ pub const Impl = struct {
                 }
             }
 
-            const pos_min = tc.c.llama_memory_seq_pos_min(tc.c.llama_get_memory(self.ctx_tgt), slot.id);
-            const pos_max = tc.c.llama_memory_seq_pos_max(tc.c.llama_get_memory(self.ctx_tgt), slot.id);
+            const pos_min = llama.api.context.llama_memory_seq_pos_min(llama.api.context.llama_get_memory(self.ctx_tgt), slot.id);
+            const pos_max = llama.api.context.llama_memory_seq_pos_max(llama.api.context.llama_get_memory(self.ctx_tgt), slot.id);
 
             // nothing to checkpoint yet
             // TODO: is this check needed?
@@ -5400,7 +5396,7 @@ pub const Impl = struct {
     /// @b1b770d90): the tokens around a prefix mismatch.
     fn printPrefixMismatch(self: *Impl, slot: *Slot, n_past: i32) !void {
         const func = "operator()";
-        var tmp = std.heap.ArenaAllocator.init(gpa);
+        var tmp = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer tmp.deinit();
         const ta = tmp.allocator();
         const np0: i32 = @max(n_past - self.slots_n_diff, 0);
@@ -5423,14 +5419,14 @@ pub const Impl = struct {
 
             {
                 const token = slot.prompt.tokens.at(@intCast(i));
-                const p = if (token != mod.common.token_null) try tc.common.tokenToPiece(ta, self.vocab, token, true) else "[mtmd]";
+                const p = if (token != mod.common.token_null) try tools_common.common.tokenToPiece(ta, self.vocab, token, true) else "[mtmd]";
                 try ss0.appendSlice(ta, p);
                 try st0.print(ta, "{d:>8}", .{token});
             }
 
             {
                 const token = slot.taskRef().tokens.at(@intCast(i));
-                const p = if (token != mod.common.token_null) try tc.common.tokenToPiece(ta, self.vocab, token, true) else "[mtmd]";
+                const p = if (token != mod.common.token_null) try tools_common.common.tokenToPiece(ta, self.vocab, token, true) else "[mtmd]";
                 try ss1.appendSlice(ta, p);
                 try st1.print(ta, "{d:>8}", .{token});
             }
@@ -5442,26 +5438,26 @@ pub const Impl = struct {
     }
 
     const DecodeWork = struct {
-        ctx: ?*tc.c.llama_context,
-        view: *tc.common.Batch,
+        ctx: ?*llama.impl.llama_c.llama_context,
+        view: *tools_common.common.Batch,
         has_output: bool,
         ret: c_int = 0,
 
         fn run(w: *DecodeWork) anyerror!void {
-            w.ret = tc.c.llama_process(w.ctx, tc.c.LLAMA_PROCESS_TYPE_DECODE, w.view.get());
+            w.ret = llama.api.context.llama_process(w.ctx, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, w.view.get());
             if (w.ret == 0 and w.has_output) {
-                tc.c.llama_synchronize(w.ctx);
+                llama.api.context.llama_synchronize(w.ctx);
             }
         }
     };
 
     const SpecProcessWork = struct {
-        spec: ?*tc.speculative.Speculative,
-        view: *const tc.common.Batch,
+        spec: ?*tools_common.speculative.Speculative,
+        view: *const tools_common.common.Batch,
         ok: bool = true,
 
         fn run(w: *SpecProcessWork) anyerror!void {
-            w.ok = tc.speculative.process(w.spec, w.view);
+            w.ok = tools_common.speculative.process(w.spec, w.view);
         }
     };
 
@@ -5469,7 +5465,7 @@ pub const Impl = struct {
     /// @b1b770d90): the mtmd chunks go in the batch as embeddings beside the
     /// text tokens. See https://github.com/ggml-org/llama.cpp/pull/29969
     fn useMixedBatch(self: *const Impl) bool {
-        return tc.c.llama_get_memory(self.ctx_tgt) == null or !tc.c.llama_get_causal_attn(self.ctx_tgt);
+        return llama.api.context.llama_get_memory(self.ctx_tgt) == null or !llama.api.context.llama_get_causal_attn(self.ctx_tgt);
     }
 
     const EncodeWork = struct {
@@ -5508,12 +5504,12 @@ pub const Impl = struct {
 
             const chunk = try input_tokens.findChunk(cur_token_idx);
 
-            var embd: [*c]f32 = if (slot.mbatch) |mb| tc.c.mtmd_batch_get_output_embd(mb, chunk) else null;
+            var embd: [*c]f32 = if (slot.mbatch) |mb| mtmd.mtmd.mtmd_batch_get_output_embd(mb, chunk) else null;
             if (embd == null) {
                 // encode on the worker thread, so we can still handle metrics tasks
                 var work: EncodeWork = .{ .slot = slot, .idx = cur_token_idx };
                 try self.queue_tasks.yieldToQueue(&work, EncodeWork.run);
-                embd = if (work.res == 0) tc.c.mtmd_batch_get_output_embd(slot.mbatch, chunk) else null;
+                embd = if (work.res == 0) mtmd.mtmd.mtmd_batch_get_output_embd(slot.mbatch.?, chunk) else null;
             }
 
             if (embd == null or !try addMtmdChunk(slot, chunk, embd, &self.batch)) {
@@ -5556,9 +5552,9 @@ pub const Impl = struct {
         // TODO @ngxson : dft model may have different n_embd than the tgt model, so we check & reject if that's the case
         // this case is not currently used by any models, but may need to be supported in the future
         if (self.spec != null and self.batch.hasEmbd()) {
-            if (tc.c.llama_model_n_embd_inp(self.model_dft) != tc.c.llama_model_n_embd_inp(self.model_tgt)) {
+            if (llama.api.model.llama_model_n_embd_inp(self.model_dft) != llama.api.model.llama_model_n_embd_inp(self.model_tgt)) {
                 mod.common.srv(.err, func, "%s", .{@as([*:0]const u8, "unsupported batch.has_embd + spec case\n")});
-                return mod.common.throw(error.RuntimeError, "unsupported batch.has_embd + spec case", .{});
+                return common_chat.exception.throw(error.RuntimeError, "unsupported batch.has_embd + spec case", .{});
             }
         }
 
@@ -5614,7 +5610,7 @@ pub const Impl = struct {
                     }
 
                     // stop, do not retry with smaller batch size
-                    return mod.common.throw(error.RuntimeError, "{s}", .{err});
+                    return common_chat.exception.throw(error.RuntimeError, "{s}", .{err});
                 }
             }
 
@@ -5642,7 +5638,7 @@ pub const Impl = struct {
                 mod.common.srv(.err, func, "%s", .{@as([*:0]const u8, "failed to process speculative batch\n")});
 
                 // TODO: handle error
-                return mod.common.throw(error.RuntimeError, "failed to process speculative batch", .{});
+                return common_chat.exception.throw(error.RuntimeError, "failed to process speculative batch", .{});
             }
         }
 
@@ -5670,7 +5666,7 @@ pub const Impl = struct {
     }
 
     /// The `accept_special_token` lambda of `post_decode` (server-context.cpp:4821 @b1b770d90).
-    fn acceptSpecialToken(self: *const Impl, slot: *const Slot, token: mod.common.Token) bool {
+    fn acceptSpecialToken(self: *const Impl, slot: *const Slot, token: llama.impl.llama_c.llama_token) bool {
         if (self.params_base.special) return true;
         for (slot.taskRef().params.sampling.preserved_tokens.items) |t| {
             if (t == token) return true;
@@ -5680,7 +5676,7 @@ pub const Impl = struct {
 
     /// The sampling step of `post_decode` (server-context.cpp:4821
     /// @b1b770d90), one slot.
-    fn sampleSlot(self: *Impl, slot: *Slot, off: i32, n_batch_tokens: i32, a: Allocator) !void {
+    fn sampleSlot(self: *Impl, slot: *Slot, off: i32, n_batch_tokens: i32, a: std.mem.Allocator) !void {
         const batch_view = &self.batch.view;
         // optionally send prompt processing progress
         if (slot.state == .processing_prompt or slot.state == .done_prompt) {
@@ -5724,7 +5720,7 @@ pub const Impl = struct {
             slot.state = .generating;
 
             if (slot.canSpeculate()) {
-                tc.speculative.begin(self.spec, slot.id, try slot.prompt.tokens.getTextTokens(a));
+                tools_common.speculative.begin(self.spec, slot.id, try slot.prompt.tokens.getTextTokens(a));
             }
         } else if (slot.state != .generating) {
             return;
@@ -5744,7 +5740,7 @@ pub const Impl = struct {
         slot.smpl.?.accept(id, true);
 
         // here we have synchronized the llama_context (due to the sampling above), so we can do time measurement
-        const t_now = tc.c.ggml_time_us();
+        const t_now = llama.impl.llama_c.ggml_time_us();
 
         slot.stats.n_gen += 1;
 
@@ -5756,10 +5752,10 @@ pub const Impl = struct {
 
         slot.stats.updateGenLast();
 
-        const vocab = tc.c.llama_model_get_vocab(tc.c.llama_get_model(slot.ctx_tgt));
+        const vocab = llama.api.model.llama_model_get_vocab(llama.api.context.llama_get_model(slot.ctx_tgt));
         var result: mod.task.CompletionTokenOutput = .{};
         result.tok = id;
-        result.text_to_send = try tc.common.tokenToPiece(a, vocab, result.tok, self.acceptSpecialToken(slot, result.tok));
+        result.text_to_send = try tools_common.common.tokenToPiece(a, vocab, result.tok, self.acceptSpecialToken(slot, result.tok));
         result.prob = 1.0; // TODO: set it here instead of doing inside populate_token_probs
 
         if (slot.taskRef().params.sampling.n_probs > 0) {
@@ -5782,7 +5778,7 @@ pub const Impl = struct {
     /// @b1b770d90), one slot: the main model samples and accepts. A
     /// recurrent target restores its checkpoint when the draft is longer
     /// than its snapshots cover, however much of it was accepted.
-    fn acceptDraft(self: *Impl, slot: *Slot, a: Allocator) !void {
+    fn acceptDraft(self: *Impl, slot: *Slot, a: std.mem.Allocator) !void {
         const func = "operator()";
         if (slot.state != .generating or !slot.canSpeculate() or
             slot.spec_draft.items.len == 0 or slot.spec_i_batch.items.len == 0)
@@ -5798,7 +5794,7 @@ pub const Impl = struct {
         // batch indices of the draft tokens, used to get the token probabilities below
         var spec_i_batch = slot.spec_i_batch;
         slot.spec_i_batch = .empty;
-        defer spec_i_batch.deinit(gpa);
+        defer spec_i_batch.deinit(std.heap.c_allocator);
 
         // verify and try to accept the draft
         {
@@ -5807,19 +5803,19 @@ pub const Impl = struct {
 
             ggmlAssert(spec_i_batch.items.len == n_draft + 1, 4960, "spec_i_batch.size() == n_draft + 1");
             ggmlAssert(slot.spec_draft_q.items.len == 0 or (slot.spec_draft_q.items.len == slot.spec_draft.items.len), 4961, "slot.spec_draft_q.empty() || (slot.spec_draft_q.size() == slot.spec_draft.size())");
-            const synth_probs = tc.speculative.getSynthProbs(self.spec);
+            const synth_probs = tools_common.speculative.getSynthProbs(self.spec);
 
             // drafters that fill no distribution fall back here
             const use_rejection = slot.useSpecRejection() and slot.spec_draft_q.items.len != 0;
 
-            var accepted: []mod.common.Token = undefined;
+            var accepted: []llama.impl.llama_c.llama_token = undefined;
             if (synth_probs.len != 0) {
                 // synthetic acceptance replaces verification entirely, so it comes first
                 accepted = try sampleAndAcceptSynth(a, slot.smpl.?, slot.ctx_tgt, spec_i_batch.items, slot.spec_draft.items, synth_probs, &slot.spec_synth_rng, slot.spec_is_replay);
             } else if (slot.spec_is_replay and slot.useSpecRejection()) {
                 accepted = try acceptReplay(a, slot.smpl.?, slot.ctx_tgt, spec_i_batch.items, slot.spec_draft.items);
             } else if (use_rejection) {
-                const q = try a.alloc([]const tc.c.llama_token_data, slot.spec_draft_q.items.len);
+                const q = try a.alloc([]const llama.impl.llama_c.llama_token_data, slot.spec_draft_q.items.len);
                 for (slot.spec_draft_q.items, q) |*v, *o| o.* = v.items;
                 accepted = try slot.smpl.?.sampleAndAcceptNRejection(a, slot.ctx_tgt, spec_i_batch.items, slot.spec_draft.items, q, false);
             } else {
@@ -5832,7 +5828,7 @@ pub const Impl = struct {
 
             // the recurrent snapshots are only guaranteed for batches of up to n_rs_seq + 1 tokens, so a longer draft uses its checkpoint
             const use_ckpt_tgt = self.ctx_tgt_seq_rm_type == .full or
-                (self.ctx_tgt_seq_rm_type == .rs and n_draft > tc.c.llama_n_rs_seq(self.ctx_tgt));
+                (self.ctx_tgt_seq_rm_type == .rs and n_draft > llama.api.context.llama_n_rs_seq(self.ctx_tgt));
 
             // check for partial draft acceptance
             if (n_rollback > 0) {
@@ -5844,22 +5840,22 @@ pub const Impl = struct {
                     // partial acceptance is not supported by the context -> truncate the draft and restore the state
                     slot.spec_is_replay = true;
                     slot.spec_draft.clearRetainingCapacity();
-                    try slot.spec_draft.appendSlice(gpa, accepted);
+                    try slot.spec_draft.appendSlice(std.heap.c_allocator, accepted);
 
                     const ckpt = &slot.spec_ckpt;
 
                     slt(.dbg, func, slot, "restoring speculative checkpoint (pos_min = %d, pos_max = %d, size = %zu)\n", .{ ckpt.pos_min, ckpt.pos_max, ckpt.size() });
 
-                    ggmlAssert(ckpt.loadTgt(slot.ctx_tgt, slot.id, tc.c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY), 5005, "ckpt.load_tgt(slot.ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY)");
+                    ggmlAssert(ckpt.loadTgt(slot.ctx_tgt, slot.id, llama.impl.llama_c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY), 5005, "ckpt.load_tgt(slot.ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY)");
 
                     if (slot.ctx_dft != null) {
-                        ggmlAssert(ckpt.loadDft(slot.ctx_dft, slot.id, tc.c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY), 5008, "ckpt.load_dft(slot.ctx_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY)");
+                        ggmlAssert(ckpt.loadDft(slot.ctx_dft, slot.id, llama.impl.llama_c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY), 5008, "ckpt.load_dft(slot.ctx_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY)");
                     }
 
                     slot.mem.seqRm(slot.id, ckpt.pos_max + 1, -1);
 
                     try slot.prompt.tokens.keepFirst(@intCast(ckpt.n_tokens));
-                    tc.sampling.Sampler.copy(smpl_save, slot.smpl.?);
+                    tools_common.sampling.Sampler.copy(smpl_save, slot.smpl.?);
 
                     return;
                 }
@@ -5869,13 +5865,13 @@ pub const Impl = struct {
                 slt(.inf, func, slot, "accepted %2zu/%2zu draft tokens\n", .{ accepted.len - 1, n_draft });
             }
 
-            tc.speculative.accept(self.spec.?, slot.id, @intCast(accepted.len - 1));
+            tools_common.speculative.accept(self.spec.?, slot.id, @intCast(accepted.len - 1));
 
             slot.spec_draft.clearRetainingCapacity();
-            try slot.spec_draft.appendSlice(gpa, accepted);
+            try slot.spec_draft.appendSlice(std.heap.c_allocator, accepted);
         }
 
-        const ids = try a.dupe(mod.common.Token, slot.spec_draft.items);
+        const ids = try a.dupe(llama.impl.llama_c.llama_token, slot.spec_draft.items);
         slot.spec_draft.clearRetainingCapacity(); // std::move
 
         var n_accepted = ids.len - 1;
@@ -5892,7 +5888,7 @@ pub const Impl = struct {
 
         const n_accepted_per_pos = &slot.n_accepted_per_pos;
         if (n_accepted_per_pos.items.len == 0) {
-            try n_accepted_per_pos.appendNTimes(gpa, 0, @intCast(tc.speculative.nMax(self.spec)));
+            try n_accepted_per_pos.appendNTimes(std.heap.c_allocator, 0, @intCast(tools_common.speculative.nMax(self.spec)));
         }
         {
             var i: usize = 0;
@@ -5910,12 +5906,12 @@ pub const Impl = struct {
 
         slot.mem.seqRm(slot.id, slot.prompt.tokens.posNext(-1), -1);
 
-        const vocab = tc.c.llama_model_get_vocab(tc.c.llama_get_model(slot.ctx_tgt));
+        const vocab = llama.api.model.llama_model_get_vocab(llama.api.context.llama_get_model(slot.ctx_tgt));
         for (ids, 0..) |tok, i| {
             var result: mod.task.CompletionTokenOutput = .{};
 
             result.tok = tok;
-            result.text_to_send = try tc.common.tokenToPiece(a, vocab, result.tok, self.acceptSpecialToken(slot, result.tok));
+            result.text_to_send = try tools_common.common.tokenToPiece(a, vocab, result.tok, self.acceptSpecialToken(slot, result.tok));
             result.prob = 1.0; // set later
 
             // post_sampling_probs is not supported with speculative decoding
@@ -5941,7 +5937,7 @@ pub const Impl = struct {
 
     /// Ports `server_context_impl`'s `post_decode` (server-context.cpp:4821 @b1b770d90).
     fn postDecode(self: *Impl, n_batch_tokens: i32, off: i32) !void {
-        var tmp = std.heap.ArenaAllocator.init(gpa);
+        var tmp = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer tmp.deinit();
         const a = tmp.allocator();
 
@@ -5951,7 +5947,7 @@ pub const Impl = struct {
             if (!inPass(slot, pass)) continue;
             for (slot.spec_i_batch.items) |i| {
                 if (!(i >= off and i < off + n_batch_tokens)) {
-                    self.slotException(slot, mod.common.throw(error.RuntimeError, "speculative batch index {d} is not inside the current sub-batch [{d}, {d})", .{ i, off, off + n_batch_tokens }));
+                    self.slotException(slot, common_chat.exception.throw(error.RuntimeError, "speculative batch index {d} is not inside the current sub-batch [{d}, {d})", .{ i, off, off + n_batch_tokens }));
                     break;
                 }
             }
@@ -5973,13 +5969,13 @@ pub const Impl = struct {
     /// @b1b770d90): context size of a single slot, capped by
     /// --kv-unified-per-slot and by the training context of the model.
     pub fn nCtxSlot(self: *const Impl) c_int {
-        var res: c_int = @intCast(tc.c.llama_n_ctx_seq(self.ctx_tgt));
+        var res: c_int = @intCast(llama.api.context.llama_n_ctx_seq(self.ctx_tgt));
 
         if (self.params_base.kv_unified_per_slot > 0) {
             res = @min(res, self.params_base.kv_unified_per_slot);
         }
 
-        return @min(res, tc.c.llama_model_n_ctx_train(self.model_tgt));
+        return @min(res, llama.api.model.llama_model_n_ctx_train(self.model_tgt));
     }
 
     //
@@ -5990,7 +5986,7 @@ pub const Impl = struct {
     /// @b1b770d90): call before submitting a decode, so that the queued
     /// prompt stats can be timed.
     fn metricsPreDecode(self: *Impl) void {
-        self.t_decode_start = tc.c.ggml_time_us();
+        self.t_decode_start = llama.impl.llama_c.ggml_time_us();
     }
 
     /// Ports `server_context_impl`'s `metrics_queue_prompt` (server-context.cpp:5114
@@ -6012,7 +6008,7 @@ pub const Impl = struct {
         if (self.n_prompt_queued == 0) {
             return;
         }
-        self.metrics.addPrompt(self.n_prompt_queued, @bitCast(tc.c.ggml_time_us() - self.t_prompt_start));
+        self.metrics.addPrompt(self.n_prompt_queued, @bitCast(llama.impl.llama_c.ggml_time_us() - self.t_prompt_start));
         self.n_prompt_queued = 0;
     }
 
@@ -6058,7 +6054,7 @@ pub const Impl = struct {
 
         // advance the prompt timing of the slots that had tokens in this batch
         // note: a second pass, it must run after the sync to reflect the compute
-        const t_now = tc.c.ggml_time_us();
+        const t_now = llama.impl.llama_c.ggml_time_us();
         i = off;
         while (i < off + n_tokens) : (i += 1) {
             const t = &self.batch.tokens.items[@intCast(i)];
@@ -6076,7 +6072,7 @@ pub const Impl = struct {
             return;
         }
 
-        tc.c.llama_synchronize(self.ctx_tgt);
+        llama.api.context.llama_synchronize(self.ctx_tgt);
         self.metricsFlushPrompt();
     }
 
@@ -6097,7 +6093,7 @@ pub const Impl = struct {
         const src = slot.n_accepted_per_pos.items;
 
         if (dst.items.len < src.len) {
-            try dst.appendNTimes(gpa, 0, src.len - dst.items.len);
+            try dst.appendNTimes(std.heap.c_allocator, 0, src.len - dst.items.len);
         }
         for (src, 0..) |v, i| {
             dst.items[i] += v;
@@ -6120,22 +6116,22 @@ pub const ServerContext = struct {
 
     /// Ports the constructor of `server_context` (server-context.cpp:5220 @b1b770d90).
     pub fn init() !ServerContext {
-        const impl = try gpa.create(Impl);
-        errdefer gpa.destroy(impl);
+        const impl = try std.heap.c_allocator.create(Impl);
+        errdefer std.heap.c_allocator.destroy(impl);
         try impl.init();
         return .{ .impl = impl };
     }
 
     pub fn deinit(self: *ServerContext) void {
         self.impl.deinit();
-        gpa.destroy(self.impl);
+        std.heap.c_allocator.destroy(self.impl);
     }
 
     /// Ports `server_context`'s `load_model` (server-context.cpp:5223
     /// @b1b770d90): load the model and initialize llama_context.
     ///
     /// Return: true on success.
-    pub fn loadModel(self: *ServerContext, params: *tc.params.Params) !bool {
+    pub fn loadModel(self: *ServerContext, params: *tools_common.params.Params) !bool {
         return self.impl.loadModel(params);
     }
 
@@ -6154,7 +6150,7 @@ pub const ServerContext = struct {
 
     /// Ports `server_context`'s `get_llama_context` (server-context.cpp:5236
     /// @b1b770d90): null while sleeping.
-    pub fn getLlamaContext(self: *const ServerContext) ?*tc.c.llama_context {
+    pub fn getLlamaContext(self: *const ServerContext) ?*llama.impl.llama_c.llama_context {
         return self.impl.ctx_tgt;
     }
 
@@ -6168,20 +6164,20 @@ pub const ServerContext = struct {
     /// @b1b770d90): read-only metadata, after `loadModel`.
     ///
     /// Return: strings owned by `a`, or by the context for its lifetime.
-    pub fn getMeta(self: *const ServerContext, a: Allocator) !Meta {
+    pub fn getMeta(self: *const ServerContext, a: std.mem.Allocator) !Meta {
         const impl = self.impl;
-        const bos_id = tc.c.llama_vocab_bos(impl.vocab);
-        const eos_id = tc.c.llama_vocab_eos(impl.vocab);
-        const bos_token_str: []const u8 = if (bos_id != mod.common.token_null) try tc.common.tokenToPiece(a, impl.vocab, bos_id, true) else "";
-        const eos_token_str: []const u8 = if (eos_id != mod.common.token_null) try tc.common.tokenToPiece(a, impl.vocab, eos_id, true) else "";
+        const bos_id = llama.api.vocab.llama_vocab_bos(impl.vocab);
+        const eos_id = llama.api.vocab.llama_vocab_eos(impl.vocab);
+        const bos_token_str: []const u8 = if (bos_id != mod.common.token_null) try tools_common.common.tokenToPiece(a, impl.vocab, bos_id, true) else "";
+        const eos_token_str: []const u8 = if (eos_id != mod.common.token_null) try tools_common.common.tokenToPiece(a, impl.vocab, eos_id, true) else "";
 
-        const ftype_name = std.mem.span(tc.c.llama_ftype_name(tc.c.llama_model_ftype(impl.model_tgt)));
+        const ftype_name = std.mem.span(llama.api.model_loader.llama_ftype_name(llama.api.model.llama_model_ftype(impl.model_tgt)));
 
         var tts_voices: std.ArrayList([]const u8) = .empty;
         if (impl.mctx) |mctx| {
             var i: i32 = 0;
-            while (i < tc.c.mtmd_gen_audio_get_info(mctx).n_voices) : (i += 1) {
-                try tts_voices.append(a, try a.dupe(u8, std.mem.span(tc.c.mtmd_gen_audio_voice_name(mctx, i))));
+            while (i < mtmd.mtmd.mtmd_gen_audio_get_info(mctx).n_voices) : (i += 1) {
+                try tts_voices.append(a, try a.dupe(u8, std.mem.span(mtmd.mtmd.mtmd_gen_audio_voice_name(mctx, i).?)));
             }
         }
 
@@ -6192,7 +6188,7 @@ pub const ServerContext = struct {
             .model_aliases = impl.model_aliases,
             .model_tags = impl.model_tags,
             .model_path = impl.params_base.model.path,
-            .model_output_modalities = mod.common.serverModelOutputModalities(tc.common.getDecisionType(impl.model_tgt), impl.hasCapChat(), impl.hasCapTts()),
+            .model_output_modalities = mod.common.serverModelOutputModalities(tools_common.common.getDecisionType(impl.model_tgt), impl.hasCapChat(), impl.hasCapTts()),
             .has_mtmd = impl.mctx != null,
             .has_inp_image = impl.chat_params.allow_image,
             .has_inp_audio = impl.chat_params.allow_audio,
@@ -6203,30 +6199,30 @@ pub const ServerContext = struct {
             .tts_voices = tts_voices.items,
             .json_ui_settings = &impl.json_ui_settings,
             .slot_n_ctx = impl.nCtxSlot(),
-            .pooling_type = tc.c.llama_pooling_type(impl.ctx_tgt),
+            .pooling_type = llama.api.context.llama_pooling_type(impl.ctx_tgt),
 
             .chat_params = &impl.chat_params,
-            .chat_template_caps = try chat.templates.getCapsJson(a, tmpls),
-            .chat_template = chat.templates.source(tmpls, ""),
-            .chat_template_tool_use = chat.templates.source(tmpls, "tool_use"),
+            .chat_template_caps = try common_chat.templates.getCapsJson(a, tmpls),
+            .chat_template = common_chat.templates.source(tmpls, ""),
+            .chat_template_tool_use = common_chat.templates.source(tmpls, "tool_use"),
 
             .bos_token_str = bos_token_str,
             .eos_token_str = eos_token_str,
-            .fim_pre_token = tc.c.llama_vocab_fim_pre(impl.vocab),
-            .fim_sub_token = tc.c.llama_vocab_fim_suf(impl.vocab),
-            .fim_mid_token = tc.c.llama_vocab_fim_mid(impl.vocab),
-            .fim_pad_token = tc.c.llama_vocab_fim_pad(impl.vocab),
-            .fim_rep_token = tc.c.llama_vocab_fim_rep(impl.vocab),
-            .fim_sep_token = tc.c.llama_vocab_fim_sep(impl.vocab),
+            .fim_pre_token = llama.api.vocab.llama_vocab_fim_pre(impl.vocab),
+            .fim_sub_token = llama.api.vocab.llama_vocab_fim_suf(impl.vocab),
+            .fim_mid_token = llama.api.vocab.llama_vocab_fim_mid(impl.vocab),
+            .fim_pad_token = llama.api.vocab.llama_vocab_fim_pad(impl.vocab),
+            .fim_rep_token = llama.api.vocab.llama_vocab_fim_rep(impl.vocab),
+            .fim_sep_token = llama.api.vocab.llama_vocab_fim_sep(impl.vocab),
 
             .logit_bias_eog = impl.params_base.sampling.logit_bias_eog.items,
 
-            .model_vocab_type = tc.c.llama_vocab_type(impl.vocab),
-            .model_vocab_n_tokens = tc.c.llama_vocab_n_tokens(impl.vocab),
-            .model_n_ctx_train = tc.c.llama_model_n_ctx_train(impl.model_tgt),
-            .model_n_embd_inp = tc.c.llama_model_n_embd(impl.model_tgt),
-            .model_n_params = tc.c.llama_model_n_params(impl.model_tgt),
-            .model_size = tc.c.llama_model_size(impl.model_tgt),
+            .model_vocab_type = llama.api.vocab.llama_vocab_type(impl.vocab),
+            .model_vocab_n_tokens = llama.api.vocab.llama_vocab_n_tokens(impl.vocab),
+            .model_n_ctx_train = llama.api.model.llama_model_n_ctx_train(impl.model_tgt),
+            .model_n_embd_inp = llama.api.model.llama_model_n_embd(impl.model_tgt),
+            .model_n_params = llama.api.model.llama_model_n_params(impl.model_tgt),
+            .model_size = llama.api.model.llama_model_size(impl.model_tgt),
             .model_ftype = ftype_name,
         };
     }

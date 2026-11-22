@@ -32,7 +32,6 @@
 //! comments. They are line comments to the aarch64 assembler too, so they
 //! travel with the code rather than being dropped.
 
-const std = @import("std");
 const ggml = @import("../../../module.zig");
 
 // The `_generic` bodies, in `cpu/repack/`, that each export below falls to
@@ -46,7 +45,7 @@ const ggml = @import("../../../module.zig");
 /// - `s`, `bs`: the result and its row stride in elements.
 /// - `vx`, `vy`: the interleaved weights and the quantized activations.
 /// - `nr`, `nc`: rows and columns of the product.
-pub export fn ggml_gemm_q4_0_4x4_q8_0(
+pub fn ggml_gemm_q4_0_4x4_q8_0(
     n: c_int,
     s: [*]f32,
     bs: usize,
@@ -565,9 +564,4 @@ pub export fn ggml_gemm_q4_0_4x4_q8_0(
           .x27 = true,
           .x28 = true,
         });
-}
-
-comptime {
-    _ = std;
-    _ = ggml.impl.c;
 }

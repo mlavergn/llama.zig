@@ -81,8 +81,6 @@ const stdlib = @import("stdlib");
 /// The registry's vectors never cross the C ABI, but there is no allocator to
 /// be handed one at a C entry point. libc's is the same heap the rest of ggml
 /// uses, and the same choice `backend_reg.zig` makes.
-const allocator = std.heap.c_allocator;
-
 /// Ports `GGUF_MAX_STRING_LENGTH` (gguf.cpp:20 @b1b770d90).
 const max_string_length: u64 = 1024 * 1024 * 1024;
 
@@ -106,7 +104,7 @@ fn oom() noreturn {
 comptime {
     // Ports the `static_assert` that follows each of the two tables. Both
     // name `GGUF_TYPE_COUNT`, `GGUF_TYPE_COUNT` (gguf.cpp:109, 126 @b1b770d90).
-    std.debug.assert(mod.impl.c.GGUF_TYPE_COUNT == 13);
+    std.debug.assert(mod.impl.ggml_c.GGUF_TYPE_COUNT == 13);
 }
 
 /// Ports `type_to_gguf_type` (gguf.cpp:32 @b1b770d90), the twelve explicit
@@ -116,18 +114,18 @@ comptime {
 /// (gguf.cpp:75 @b1b770d90).
 fn typeToGgufType(comptime T: type) c_uint {
     return switch (T) {
-        u8 => mod.impl.c.GGUF_TYPE_UINT8,
-        i8 => mod.impl.c.GGUF_TYPE_INT8,
-        u16 => mod.impl.c.GGUF_TYPE_UINT16,
-        i16 => mod.impl.c.GGUF_TYPE_INT16,
-        u32 => mod.impl.c.GGUF_TYPE_UINT32,
-        i32 => mod.impl.c.GGUF_TYPE_INT32,
-        f32 => mod.impl.c.GGUF_TYPE_FLOAT32,
-        bool => mod.impl.c.GGUF_TYPE_BOOL,
-        Str => mod.impl.c.GGUF_TYPE_STRING,
-        u64 => mod.impl.c.GGUF_TYPE_UINT64,
-        i64 => mod.impl.c.GGUF_TYPE_INT64,
-        f64 => mod.impl.c.GGUF_TYPE_FLOAT64,
+        u8 => mod.impl.ggml_c.GGUF_TYPE_UINT8,
+        i8 => mod.impl.ggml_c.GGUF_TYPE_INT8,
+        u16 => mod.impl.ggml_c.GGUF_TYPE_UINT16,
+        i16 => mod.impl.ggml_c.GGUF_TYPE_INT16,
+        u32 => mod.impl.ggml_c.GGUF_TYPE_UINT32,
+        i32 => mod.impl.ggml_c.GGUF_TYPE_INT32,
+        f32 => mod.impl.ggml_c.GGUF_TYPE_FLOAT32,
+        bool => mod.impl.ggml_c.GGUF_TYPE_BOOL,
+        Str => mod.impl.ggml_c.GGUF_TYPE_STRING,
+        u64 => mod.impl.ggml_c.GGUF_TYPE_UINT64,
+        i64 => mod.impl.ggml_c.GGUF_TYPE_INT64,
+        f64 => mod.impl.ggml_c.GGUF_TYPE_FLOAT64,
         else => @compileError("no gguf_type for " ++ @typeName(T)),
     };
 }
@@ -156,13 +154,13 @@ const Str = [:0]u8;
 /// which is the `it == end` arm.
 fn typeSize(t: c_uint) usize {
     return switch (t) {
-        mod.impl.c.GGUF_TYPE_UINT8, mod.impl.c.GGUF_TYPE_INT8 => @sizeOf(u8),
-        mod.impl.c.GGUF_TYPE_UINT16, mod.impl.c.GGUF_TYPE_INT16 => @sizeOf(u16),
-        mod.impl.c.GGUF_TYPE_UINT32, mod.impl.c.GGUF_TYPE_INT32, mod.impl.c.GGUF_TYPE_FLOAT32 => @sizeOf(u32),
-        mod.impl.c.GGUF_TYPE_BOOL => @sizeOf(i8),
-        mod.impl.c.GGUF_TYPE_STRING => 0, // undefined
-        mod.impl.c.GGUF_TYPE_ARRAY => 0, // undefined
-        mod.impl.c.GGUF_TYPE_UINT64, mod.impl.c.GGUF_TYPE_INT64, mod.impl.c.GGUF_TYPE_FLOAT64 => @sizeOf(u64),
+        mod.impl.ggml_c.GGUF_TYPE_UINT8, mod.impl.ggml_c.GGUF_TYPE_INT8 => @sizeOf(u8),
+        mod.impl.ggml_c.GGUF_TYPE_UINT16, mod.impl.ggml_c.GGUF_TYPE_INT16 => @sizeOf(u16),
+        mod.impl.ggml_c.GGUF_TYPE_UINT32, mod.impl.ggml_c.GGUF_TYPE_INT32, mod.impl.ggml_c.GGUF_TYPE_FLOAT32 => @sizeOf(u32),
+        mod.impl.ggml_c.GGUF_TYPE_BOOL => @sizeOf(i8),
+        mod.impl.ggml_c.GGUF_TYPE_STRING => 0, // undefined
+        mod.impl.ggml_c.GGUF_TYPE_ARRAY => 0, // undefined
+        mod.impl.ggml_c.GGUF_TYPE_UINT64, mod.impl.ggml_c.GGUF_TYPE_INT64, mod.impl.ggml_c.GGUF_TYPE_FLOAT64 => @sizeOf(u64),
         else => 0,
     };
 }
@@ -173,19 +171,19 @@ fn typeSize(t: c_uint) usize {
 /// `it == end` arm of `gguf_type_name`.
 fn typeNameOrNull(t: c_uint) ?[*:0]const u8 {
     return switch (t) {
-        mod.impl.c.GGUF_TYPE_UINT8 => "u8",
-        mod.impl.c.GGUF_TYPE_INT8 => "i8",
-        mod.impl.c.GGUF_TYPE_UINT16 => "u16",
-        mod.impl.c.GGUF_TYPE_INT16 => "i16",
-        mod.impl.c.GGUF_TYPE_UINT32 => "u32",
-        mod.impl.c.GGUF_TYPE_INT32 => "i32",
-        mod.impl.c.GGUF_TYPE_FLOAT32 => "f32",
-        mod.impl.c.GGUF_TYPE_BOOL => "bool",
-        mod.impl.c.GGUF_TYPE_STRING => "str",
-        mod.impl.c.GGUF_TYPE_ARRAY => "arr",
-        mod.impl.c.GGUF_TYPE_UINT64 => "u64",
-        mod.impl.c.GGUF_TYPE_INT64 => "i64",
-        mod.impl.c.GGUF_TYPE_FLOAT64 => "f64",
+        mod.impl.ggml_c.GGUF_TYPE_UINT8 => "u8",
+        mod.impl.ggml_c.GGUF_TYPE_INT8 => "i8",
+        mod.impl.ggml_c.GGUF_TYPE_UINT16 => "u16",
+        mod.impl.ggml_c.GGUF_TYPE_INT16 => "i16",
+        mod.impl.ggml_c.GGUF_TYPE_UINT32 => "u32",
+        mod.impl.ggml_c.GGUF_TYPE_INT32 => "i32",
+        mod.impl.ggml_c.GGUF_TYPE_FLOAT32 => "f32",
+        mod.impl.ggml_c.GGUF_TYPE_BOOL => "bool",
+        mod.impl.ggml_c.GGUF_TYPE_STRING => "str",
+        mod.impl.ggml_c.GGUF_TYPE_ARRAY => "arr",
+        mod.impl.ggml_c.GGUF_TYPE_UINT64 => "u64",
+        mod.impl.ggml_c.GGUF_TYPE_INT64 => "i64",
+        mod.impl.ggml_c.GGUF_TYPE_FLOAT64 => "f64",
         else => null,
     };
 }
@@ -193,13 +191,13 @@ fn typeNameOrNull(t: c_uint) ?[*:0]const u8 {
 /// Duplicates `bytes` into an owned NUL-terminated string. The C++ gets this
 /// from `std::string`'s copy constructor.
 fn dupeStr(bytes: []const u8) Str {
-    return allocator.dupeSentinel(u8, bytes, 0) catch oom();
+    return std.heap.c_allocator.dupeSentinel(u8, bytes, 0) catch oom();
 }
 
 /// Allocates a zero-filled `Str` of `n` bytes, standing in for
 /// `std::string::resize`, which value-initialises to `'\0'`.
 fn allocStr(n: usize) Str {
-    const s = allocator.allocSentinel(u8, n, 0) catch oom();
+    const s = std.heap.c_allocator.allocSentinel(u8, n, 0) catch oom();
     @memset(s, 0);
     return s;
 }
@@ -223,7 +221,7 @@ const Kv = struct {
     fn initScalar(key: []const u8, comptime T: type, value: T) Kv {
         mod.impl.assert(key.len != 0, "!key.empty()");
         var kv: Kv = .{ .key = dupeStr(key), .is_array = false, .type = typeToGgufType(T) };
-        kv.data.resize(allocator, @sizeOf(T)) catch oom();
+        kv.data.resize(std.heap.c_allocator, @sizeOf(T)) catch oom();
         @memcpy(kv.data.items, std.mem.asBytes(&value));
         return kv;
     }
@@ -232,7 +230,7 @@ const Kv = struct {
     fn initArray(key: []const u8, comptime T: type, values: []const T) Kv {
         mod.impl.assert(key.len != 0, "!key.empty()");
         var kv: Kv = .{ .key = dupeStr(key), .is_array = true, .type = typeToGgufType(T) };
-        kv.data.resize(allocator, values.len * @sizeOf(T)) catch oom();
+        kv.data.resize(std.heap.c_allocator, values.len * @sizeOf(T)) catch oom();
         for (values, 0..) |v, i| {
             const tmp = v;
             @memcpy(kv.data.items[i * @sizeOf(T) ..][0..@sizeOf(T)], std.mem.asBytes(&tmp));
@@ -243,8 +241,8 @@ const Kv = struct {
     /// Ports the `std::string` `gguf_kv` constructor (gguf.cpp:161 @b1b770d90).
     fn initStr(key: []const u8, value: []const u8) Kv {
         mod.impl.assert(key.len != 0, "!key.empty()");
-        var kv: Kv = .{ .key = dupeStr(key), .is_array = false, .type = mod.impl.c.GGUF_TYPE_STRING };
-        kv.data_string.append(allocator, dupeStr(value)) catch oom();
+        var kv: Kv = .{ .key = dupeStr(key), .is_array = false, .type = mod.impl.ggml_c.GGUF_TYPE_STRING };
+        kv.data_string.append(std.heap.c_allocator, dupeStr(value)) catch oom();
         return kv;
     }
 
@@ -257,17 +255,17 @@ const Kv = struct {
         return .{
             .key = dupeStr(key),
             .is_array = true,
-            .type = mod.impl.c.GGUF_TYPE_STRING,
+            .type = mod.impl.ggml_c.GGUF_TYPE_STRING,
             .data_string = values,
         };
     }
 
     /// Stands in for `~gguf_kv`, which the C++ gets from its members.
     fn deinit(self: *Kv) void {
-        allocator.free(self.key);
-        self.data.deinit(allocator);
-        for (self.data_string.items) |s| allocator.free(s);
-        self.data_string.deinit(allocator);
+        std.heap.c_allocator.free(self.key);
+        self.data.deinit(std.heap.c_allocator);
+        for (self.data_string.items) |s| std.heap.c_allocator.free(s);
+        self.data_string.deinit(std.heap.c_allocator);
     }
 
     /// Ports `gguf_kv`'s `get_key` (gguf.cpp:173 @b1b770d90).
@@ -284,7 +282,7 @@ const Kv = struct {
     ///
     /// Return: the number of elements this value holds.
     fn getNe(self: *const Kv) usize {
-        if (self.type == mod.impl.c.GGUF_TYPE_STRING) {
+        if (self.type == mod.impl.ggml_c.GGUF_TYPE_STRING) {
             const ne = self.data_string.items.len;
             mod.impl.assert(self.is_array or ne == 1, "is_array || ne == 1");
             return ne;
@@ -310,7 +308,7 @@ const Kv = struct {
     /// Ports `gguf_kv`'s `get_val` (gguf.cpp:195 @b1b770d90), the
     /// `std::string` `if constexpr` arm.
     fn getValStr(self: *const Kv, i: usize) Str {
-        mod.impl.assert(mod.impl.c.GGUF_TYPE_STRING == self.type, "type_to_gguf_type<T>::value == type");
+        mod.impl.assert(mod.impl.ggml_c.GGUF_TYPE_STRING == self.type, "type_to_gguf_type<T>::value == type");
         mod.impl.assert(self.data_string.items.len >= i + 1, "data_string.size() >= i+1");
         return self.data_string.items[i];
     }
@@ -334,7 +332,7 @@ const Kv = struct {
 const TensorInfo = struct {
     /// `struct ggml_tensor t` — held for the shape, type and name it carries,
     /// not as a live tensor. Zero-initialised; see the file header.
-    t: mod.impl.c.ggml_tensor,
+    t: mod.impl.ggml_c.ggml_tensor,
     /// Offset from the start of `data`, a multiple of `alignment`.
     offset: u64,
 };
@@ -344,12 +342,12 @@ const TensorInfo = struct {
 /// The C++ gives every field a default member initialiser and relies on `new
 /// gguf_context` to apply them; the defaults here are the same values.
 const Context = struct {
-    version: u32 = mod.impl.c.GGUF_VERSION,
+    version: u32 = mod.impl.ggml_c.GGUF_VERSION,
 
     kv: std.ArrayList(Kv) = .empty,
     info: std.ArrayList(TensorInfo) = .empty,
 
-    alignment: usize = mod.impl.c.GGUF_DEFAULT_ALIGNMENT,
+    alignment: usize = mod.impl.ggml_c.GGUF_DEFAULT_ALIGNMENT,
     /// Offset of `data` from the beginning of the file.
     offset: usize = 0,
     /// Size of `data` in bytes.
@@ -359,7 +357,7 @@ const Context = struct {
 
     /// Stands in for `new gguf_context`.
     fn create() *Context {
-        const self = allocator.create(Context) catch oom();
+        const self = std.heap.c_allocator.create(Context) catch oom();
         self.* = .{};
         return self;
     }
@@ -368,19 +366,19 @@ const Context = struct {
     /// member's destructor.
     fn destroy(self: *Context) void {
         for (self.kv.items) |*kv| kv.deinit();
-        self.kv.deinit(allocator);
-        self.info.deinit(allocator);
-        allocator.destroy(self);
+        self.kv.deinit(std.heap.c_allocator);
+        self.info.deinit(std.heap.c_allocator);
+        std.heap.c_allocator.destroy(self);
     }
 };
 
 /// Narrows the opaque `struct gguf_context *` the C ABI passes to the real type.
-inline fn ctxOf(p: ?*mod.impl.c.struct_gguf_context) *Context {
+inline fn ctxOf(p: ?*mod.impl.ggml_c.struct_gguf_context) *Context {
     return @ptrCast(@alignCast(p.?));
 }
 
 /// Narrows a `const struct gguf_context *`.
-inline fn ctxOfConst(p: ?*const mod.impl.c.struct_gguf_context) *const Context {
+inline fn ctxOfConst(p: ?*const mod.impl.ggml_c.struct_gguf_context) *const Context {
     return @ptrCast(@alignCast(p.?));
 }
 
@@ -408,7 +406,7 @@ const Libc = struct {
 };
 
 const Reader = struct {
-    callback: mod.impl.c.gguf_reader_callback_t,
+    callback: mod.impl.ggml_c.gguf_reader_callback_t,
     userdata: ?*anyopaque,
     max_chunk_read: usize,
     start_offset: u64 = 0,
@@ -417,7 +415,7 @@ const Reader = struct {
 
     /// Ports the `gguf_reader` constructor (gguf.cpp:233 @b1b770d90).
     fn init(
-        callback: mod.impl.c.gguf_reader_callback_t,
+        callback: mod.impl.ggml_c.gguf_reader_callback_t,
         userdata: ?*anyopaque,
         max_chunk_read: usize,
         data_offset: u64,
@@ -439,7 +437,7 @@ const Reader = struct {
     /// Return: bytes from the current position to end of file, or 0 if any of
     /// the three seeks fails — in which case the original position is restored
     /// first, as the C++ does.
-    fn fileRemain(file: *mod.impl.c.FILE) u64 {
+    fn fileRemain(file: *mod.impl.ggml_c.FILE) u64 {
         const cur = stdlib.libc.ftello(file);
         if (cur < 0) return 0;
         if (stdlib.libc.fseeko(file, 0, Libc.SEEK_END) != 0) {
@@ -511,7 +509,7 @@ const Reader = struct {
             return false;
         }
 
-        allocator.free(dst.*);
+        std.heap.c_allocator.free(dst.*);
         dst.* = allocStr(@intCast(size));
         return self.readRaw(dst.*[0..@intCast(size)]) == size;
     }
@@ -532,7 +530,7 @@ const Reader = struct {
     /// non-string arm, including its `bool` special case.
     fn readVec(self: *Reader, comptime T: type, dst: *std.ArrayList(T), n: u64) bool {
         if (!self.vecGuard(n, @sizeOf(T))) return false;
-        dst.resize(allocator, @intCast(n)) catch oom();
+        dst.resize(std.heap.c_allocator, @intCast(n)) catch oom();
         // `std::vector::resize` value-initialises; Zig's leaves the new items
         // undefined. Nothing reads them on the failure path, but matching the
         // C++ keeps the port's output a function of its input only.
@@ -556,13 +554,13 @@ const Reader = struct {
     /// owned by `dst` and the rest empty; the caller frees the whole list.
     fn readVecStr(self: *Reader, dst: *std.ArrayList(Str), n: u64) bool {
         if (!self.vecGuard(n, @sizeOf(u64))) return false;
-        dst.resize(allocator, @intCast(n)) catch oom();
+        dst.resize(std.heap.c_allocator, @intCast(n)) catch oom();
         // Give every slot an owned empty string before any read can fail, so a
         // short read leaves the whole list freeable rather than half of it
         // pointing at undefined memory. `readStr` replaces each in turn.
         for (dst.items) |*slot| slot.* = allocStr(0);
         for (dst.items) |*slot| {
-            allocator.free(slot.*);
+            std.heap.c_allocator.free(slot.*);
             if (!self.readStr(slot)) return false;
         }
         return true;
@@ -646,7 +644,7 @@ const Reader = struct {
 ///
 /// Return: a context with no keys and no tensors, owned by the caller and
 /// released with `gguf_free`.
-export fn gguf_init_empty() callconv(.c) ?*mod.impl.c.struct_gguf_context {
+pub fn gguf_init_empty() callconv(.c) ?*mod.impl.ggml_c.struct_gguf_context {
     return @ptrCast(Context.create());
 }
 
@@ -667,13 +665,13 @@ fn readEmplaceHelper(
 ) bool {
     if (is_array) {
         var value: std.ArrayList(T) = .empty;
-        defer value.deinit(allocator);
+        defer value.deinit(std.heap.c_allocator);
         if (!gr.readVec(T, &value, n)) return false;
-        kv.append(allocator, Kv.initArray(key, T, value.items)) catch oom();
+        kv.append(std.heap.c_allocator, Kv.initArray(key, T, value.items)) catch oom();
     } else {
         var value: T = std.mem.zeroes(T);
         if (!gr.readInto(T, &value)) return false;
-        kv.append(allocator, Kv.initScalar(key, T, value)) catch oom();
+        kv.append(std.heap.c_allocator, Kv.initScalar(key, T, value)) catch oom();
     }
     return true;
 }
@@ -693,13 +691,13 @@ fn readEmplaceHelperBool(
 ) bool {
     if (is_array) {
         var value: std.ArrayList(bool) = .empty;
-        defer value.deinit(allocator);
+        defer value.deinit(std.heap.c_allocator);
         if (!gr.readVec(bool, &value, n)) return false;
-        kv.append(allocator, Kv.initArray(key, bool, value.items)) catch oom();
+        kv.append(std.heap.c_allocator, Kv.initArray(key, bool, value.items)) catch oom();
     } else {
         var value: bool = false;
         if (!gr.readBool(&value)) return false;
-        kv.append(allocator, Kv.initScalar(key, bool, value)) catch oom();
+        kv.append(std.heap.c_allocator, Kv.initScalar(key, bool, value)) catch oom();
     }
     return true;
 }
@@ -717,19 +715,19 @@ fn readEmplaceHelperStr(
         var value: std.ArrayList(Str) = .empty;
         const ok = gr.readVecStr(&value, n);
         if (!ok) {
-            for (value.items) |s| allocator.free(s);
-            value.deinit(allocator);
+            for (value.items) |s| std.heap.c_allocator.free(s);
+            value.deinit(std.heap.c_allocator);
             return false;
         }
         // `initStrArrayOwned` takes the list; the C++ copies it and lets the
         // local go out of scope.
-        kv.append(allocator, Kv.initStrArrayOwned(key, value)) catch oom();
+        kv.append(std.heap.c_allocator, Kv.initStrArrayOwned(key, value)) catch oom();
     } else {
         var value: Str = undefined;
         const ok = gr.readStr(&value);
-        defer allocator.free(value);
+        defer std.heap.c_allocator.free(value);
         if (!ok) return false;
-        kv.append(allocator, Kv.initStr(key, value)) catch oom();
+        kv.append(std.heap.c_allocator, Kv.initStr(key, value)) catch oom();
     }
     return true;
 }
@@ -756,7 +754,7 @@ fn insertNew(set: *std.BufSet, key: []const u8) bool {
 ///
 /// Return: the parsed context, or null on any malformed input. Every failure
 /// path frees what it built, as the C++ does.
-fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
+fn initFromReader(gr: *Reader, params: mod.impl.ggml_c.gguf_init_params) ?*Context {
     const ctx = Context.create();
 
     var ok = true;
@@ -764,7 +762,7 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
     // file magic
     {
         var magic: std.ArrayList(u8) = .empty;
-        defer magic.deinit(allocator);
+        defer magic.deinit(std.heap.c_allocator);
         ok = ok and gr.readVec(u8, &magic, 4);
 
         if (!ok) {
@@ -774,7 +772,7 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
         }
 
         for (magic.items, 0..) |ch, i| {
-            if (ch != mod.impl.c.GGUF_MAGIC[i]) {
+            if (ch != mod.impl.ggml_c.GGUF_MAGIC[i]) {
                 const c0 = if (std.ascii.isPrint(magic.items[0])) magic.items[0] else '?';
                 const c1 = if (std.ascii.isPrint(magic.items[1])) magic.items[1] else '?';
                 const c2 = if (std.ascii.isPrint(magic.items[2])) magic.items[2] else '?';
@@ -816,10 +814,10 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
             );
             ok = false;
         }
-        if (ok and ctx.version > mod.impl.c.GGUF_VERSION) {
+        if (ok and ctx.version > mod.impl.ggml_c.GGUF_VERSION) {
             mod.impl.logError(
                 "%s: this GGUF file is version %u but this software only supports up to version %d\n",
-                .{ "gguf_init_from_reader", ctx.version, @as(c_int, mod.impl.c.GGUF_VERSION) },
+                .{ "gguf_init_from_reader", ctx.version, @as(c_int, mod.impl.ggml_c.GGUF_VERSION) },
             );
             ok = false;
         }
@@ -865,14 +863,14 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
     {
         // `std::unordered_set<std::string>`: whole-string equality, embedded
         // NULs included. Only membership is read, so its order is moot.
-        var seen_keys = std.BufSet.init(allocator);
+        var seen_keys = std.BufSet.init(std.heap.c_allocator);
         defer seen_keys.deinit();
 
         var i: i64 = 0;
         while (ok and i < n_kv) : (i += 1) {
             var key: Str = undefined;
             const key_ok = gr.readStr(&key);
-            defer allocator.free(key);
+            defer std.heap.c_allocator.free(key);
             ok = ok and key_ok;
 
             if (ok and key.len == 0) {
@@ -893,7 +891,7 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
             var n: u64 = 1;
 
             ok = ok and gr.readEnum(&kv_type);
-            if (kv_type == mod.impl.c.GGUF_TYPE_ARRAY) {
+            if (kv_type == mod.impl.ggml_c.GGUF_TYPE_ARRAY) {
                 is_array = true;
                 ok = ok and gr.readEnum(&kv_type);
                 ok = ok and gr.readInto(u64, &n);
@@ -901,18 +899,18 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
             if (!ok) break;
 
             ok = ok and switch (kv_type) {
-                mod.impl.c.GGUF_TYPE_UINT8 => readEmplaceHelper(u8, gr, &ctx.kv, key, is_array, n),
-                mod.impl.c.GGUF_TYPE_INT8 => readEmplaceHelper(i8, gr, &ctx.kv, key, is_array, n),
-                mod.impl.c.GGUF_TYPE_UINT16 => readEmplaceHelper(u16, gr, &ctx.kv, key, is_array, n),
-                mod.impl.c.GGUF_TYPE_INT16 => readEmplaceHelper(i16, gr, &ctx.kv, key, is_array, n),
-                mod.impl.c.GGUF_TYPE_UINT32 => readEmplaceHelper(u32, gr, &ctx.kv, key, is_array, n),
-                mod.impl.c.GGUF_TYPE_INT32 => readEmplaceHelper(i32, gr, &ctx.kv, key, is_array, n),
-                mod.impl.c.GGUF_TYPE_FLOAT32 => readEmplaceHelper(f32, gr, &ctx.kv, key, is_array, n),
-                mod.impl.c.GGUF_TYPE_BOOL => readEmplaceHelperBool(gr, &ctx.kv, key, is_array, n),
-                mod.impl.c.GGUF_TYPE_STRING => readEmplaceHelperStr(gr, &ctx.kv, key, is_array, n),
-                mod.impl.c.GGUF_TYPE_UINT64 => readEmplaceHelper(u64, gr, &ctx.kv, key, is_array, n),
-                mod.impl.c.GGUF_TYPE_INT64 => readEmplaceHelper(i64, gr, &ctx.kv, key, is_array, n),
-                mod.impl.c.GGUF_TYPE_FLOAT64 => readEmplaceHelper(f64, gr, &ctx.kv, key, is_array, n),
+                mod.impl.ggml_c.GGUF_TYPE_UINT8 => readEmplaceHelper(u8, gr, &ctx.kv, key, is_array, n),
+                mod.impl.ggml_c.GGUF_TYPE_INT8 => readEmplaceHelper(i8, gr, &ctx.kv, key, is_array, n),
+                mod.impl.ggml_c.GGUF_TYPE_UINT16 => readEmplaceHelper(u16, gr, &ctx.kv, key, is_array, n),
+                mod.impl.ggml_c.GGUF_TYPE_INT16 => readEmplaceHelper(i16, gr, &ctx.kv, key, is_array, n),
+                mod.impl.ggml_c.GGUF_TYPE_UINT32 => readEmplaceHelper(u32, gr, &ctx.kv, key, is_array, n),
+                mod.impl.ggml_c.GGUF_TYPE_INT32 => readEmplaceHelper(i32, gr, &ctx.kv, key, is_array, n),
+                mod.impl.ggml_c.GGUF_TYPE_FLOAT32 => readEmplaceHelper(f32, gr, &ctx.kv, key, is_array, n),
+                mod.impl.ggml_c.GGUF_TYPE_BOOL => readEmplaceHelperBool(gr, &ctx.kv, key, is_array, n),
+                mod.impl.ggml_c.GGUF_TYPE_STRING => readEmplaceHelperStr(gr, &ctx.kv, key, is_array, n),
+                mod.impl.ggml_c.GGUF_TYPE_UINT64 => readEmplaceHelper(u64, gr, &ctx.kv, key, is_array, n),
+                mod.impl.ggml_c.GGUF_TYPE_INT64 => readEmplaceHelper(i64, gr, &ctx.kv, key, is_array, n),
+                mod.impl.ggml_c.GGUF_TYPE_FLOAT64 => readEmplaceHelper(f64, gr, &ctx.kv, key, is_array, n),
                 else => blk: {
                     mod.impl.logError(
                         "%s: key '%s' has invalid GGUF type %d\n",
@@ -930,14 +928,14 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
         }
         mod.impl.assert(@as(i64, @intCast(ctx.kv.items.len)) == n_kv, "int64_t(ctx->kv.size()) == n_kv");
 
-        const alignment_idx = gguf_find_key(@ptrCast(ctx), mod.impl.c.GGUF_KEY_GENERAL_ALIGNMENT);
-        if (alignment_idx != -1 and gguf_get_kv_type(@ptrCast(ctx), alignment_idx) != mod.impl.c.GGUF_TYPE_UINT32) {
+        const alignment_idx = gguf_find_key(@ptrCast(ctx), mod.impl.ggml_c.GGUF_KEY_GENERAL_ALIGNMENT);
+        if (alignment_idx != -1 and gguf_get_kv_type(@ptrCast(ctx), alignment_idx) != mod.impl.ggml_c.GGUF_TYPE_UINT32) {
             mod.impl.logError(
                 "%s: key '%s' must be of type %s but is %s\n",
                 .{
                     "gguf_init_from_reader",
-                    @as([*:0]const u8, mod.impl.c.GGUF_KEY_GENERAL_ALIGNMENT),
-                    gguf_type_name(mod.impl.c.GGUF_TYPE_UINT32),
+                    @as([*:0]const u8, mod.impl.ggml_c.GGUF_KEY_GENERAL_ALIGNMENT),
+                    gguf_type_name(mod.impl.ggml_c.GGUF_TYPE_UINT32),
                     gguf_type_name(gguf_get_kv_type(@ptrCast(ctx), alignment_idx)),
                 },
             );
@@ -945,7 +943,7 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
             return null;
         }
         ctx.alignment = if (alignment_idx == -1)
-            mod.impl.c.GGUF_DEFAULT_ALIGNMENT
+            mod.impl.ggml_c.GGUF_DEFAULT_ALIGNMENT
         else
             gguf_get_val_u32(@ptrCast(ctx), alignment_idx);
 
@@ -961,30 +959,30 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
 
     // read the tensor info
     {
-        var seen_tensor_names = std.BufSet.init(allocator);
+        var seen_tensor_names = std.BufSet.init(std.heap.c_allocator);
         defer seen_tensor_names.deinit();
 
         var i: i64 = 0;
         while (ok and i < n_tensors) : (i += 1) {
             // Zeroed rather than left indeterminate; see the file header.
-            var info: TensorInfo = .{ .t = std.mem.zeroes(mod.impl.c.ggml_tensor), .offset = 0 };
+            var info: TensorInfo = .{ .t = std.mem.zeroes(mod.impl.ggml_c.ggml_tensor), .offset = 0 };
 
             // tensor name
             {
                 var name: Str = undefined;
                 const name_ok = gr.readStr(&name);
-                defer allocator.free(name);
+                defer std.heap.c_allocator.free(name);
                 ok = ok and name_ok;
 
-                if (name.len >= mod.impl.c.GGML_MAX_NAME) {
+                if (name.len >= mod.impl.ggml_c.GGML_MAX_NAME) {
                     mod.impl.logError(
                         "%s: tensor name %lld is too long: %zu >= %d\n",
-                        .{ "gguf_init_from_reader", i, name.len, @as(c_int, mod.impl.c.GGML_MAX_NAME) },
+                        .{ "gguf_init_from_reader", i, name.len, @as(c_int, mod.impl.ggml_c.GGML_MAX_NAME) },
                     );
                     ok = false;
                     break;
                 }
-                _ = mod.impl.c.ggml_set_name(&info.t, name.ptr);
+                _ = mod.impl.ggml_c.ggml_set_name(&info.t, name.ptr);
 
                 // make sure there are no duplicate tensor names; the set holds
                 // the read `std::string`, not the NUL-terminated copy in
@@ -1004,17 +1002,17 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
             {
                 var n_dims: u32 = 0;
                 ok = ok and gr.readInto(u32, &n_dims);
-                if (n_dims > mod.impl.c.GGML_MAX_DIMS) {
+                if (n_dims > mod.impl.ggml_c.GGML_MAX_DIMS) {
                     mod.impl.logError(
                         "%s: tensor '%s' has invalid number of dimensions: %u > %u\n",
-                        .{ "gguf_init_from_reader", @as([*:0]const u8, @ptrCast(&info.t.name)), n_dims, @as(c_uint, mod.impl.c.GGML_MAX_DIMS) },
+                        .{ "gguf_init_from_reader", @as([*:0]const u8, @ptrCast(&info.t.name)), n_dims, @as(c_uint, mod.impl.ggml_c.GGML_MAX_DIMS) },
                     );
                     ok = false;
                     break;
                 }
                 var bad_dim = false;
                 var j: u32 = 0;
-                while (ok and j < mod.impl.c.GGML_MAX_DIMS) : (j += 1) {
+                while (ok and j < mod.impl.ggml_c.GGML_MAX_DIMS) : (j += 1) {
                     info.t.ne[j] = 1;
                     if (j < n_dims) {
                         ok = ok and gr.readInto(i64, &info.t.ne[j]);
@@ -1039,7 +1037,7 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
                 // and 0 or 1 cannot grow it.
                 if (ok) {
                     var current_nelements: i64 = info.t.ne[0];
-                    for (1..mod.impl.c.GGML_MAX_DIMS) |k| {
+                    for (1..mod.impl.ggml_c.GGML_MAX_DIMS) |k| {
                         if (info.t.ne[k] > 1) { // 1 or 0 won't cause an overflow
                             if (@divTrunc(std.math.maxInt(i64), info.t.ne[k]) < current_nelements) {
                                 ok = false;
@@ -1074,21 +1072,21 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
                 info.t.type = t_type;
 
                 // check that tensor type is within defined range
-                if (@as(i32, @bitCast(info.t.type)) < 0 or info.t.type >= mod.impl.c.GGML_TYPE_COUNT) {
+                if (@as(i32, @bitCast(info.t.type)) < 0 or info.t.type >= mod.impl.ggml_c.GGML_TYPE_COUNT) {
                     mod.impl.logError(
                         "%s: tensor '%s' has invalid ggml type %d. should be in [0, %d)\n",
                         .{
                             "gguf_init_from_reader",
                             @as([*:0]const u8, @ptrCast(&info.t.name)),
                             @as(c_int, @bitCast(info.t.type)),
-                            @as(c_int, mod.impl.c.GGML_TYPE_COUNT),
+                            @as(c_int, mod.impl.ggml_c.GGML_TYPE_COUNT),
                         },
                     );
                     ok = false;
                     break;
                 }
-                const type_size = mod.impl.c.ggml_type_size(info.t.type);
-                const blck_size = mod.impl.c.ggml_blck_size(info.t.type);
+                const type_size = mod.impl.ggml_c.ggml_type_size(info.t.type);
+                const blck_size = mod.impl.ggml_c.ggml_blck_size(info.t.type);
 
                 // check that row size is divisible by block size
                 if (blck_size == 0 or @rem(info.t.ne[0], blck_size) != 0) {
@@ -1098,7 +1096,7 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
                             "gguf_init_from_reader",
                             @as([*:0]const u8, @ptrCast(&info.t.name)),
                             @as(c_int, @bitCast(info.t.type)),
-                            mod.impl.c.ggml_type_name(info.t.type),
+                            mod.impl.ggml_c.ggml_type_name(info.t.type),
                             info.t.ne[0],
                             blck_size,
                         },
@@ -1108,8 +1106,8 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
                 }
 
                 // check that the size of the tensor in bytes is representable
-                if (ok and @as(u64, @intCast(@divTrunc(mod.impl.c.ggml_nelements(&info.t), mod.impl.c.ggml_blck_size(info.t.type)))) >
-                    std.math.maxInt(usize) / mod.impl.c.ggml_type_size(info.t.type))
+                if (ok and @as(u64, @intCast(@divTrunc(mod.impl.ggml_c.ggml_nelements(&info.t), mod.impl.ggml_c.ggml_blck_size(info.t.type)))) >
+                    std.math.maxInt(usize) / mod.impl.ggml_c.ggml_type_size(info.t.type))
                 {
                     mod.impl.logError(
                         "%s: tensor '%s' with shape (%lld, %lld, %lld, %lld) has a size in bytes > %zu\n",
@@ -1130,7 +1128,7 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
                 // calculate byte offsets given the tensor shape and type
                 info.t.nb[0] = type_size;
                 info.t.nb[1] = info.t.nb[0] * @as(usize, @intCast(@divTrunc(info.t.ne[0], blck_size)));
-                for (2..mod.impl.c.GGML_MAX_DIMS) |j| {
+                for (2..mod.impl.ggml_c.GGML_MAX_DIMS) |j| {
                     info.t.nb[j] = info.t.nb[j - 1] * @as(usize, @intCast(info.t.ne[j - 1]));
                 }
             }
@@ -1139,7 +1137,7 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
             // tensor data offset within buffer
             ok = ok and gr.readInto(u64, &info.offset);
 
-            ctx.info.append(allocator, info) catch oom();
+            ctx.info.append(std.heap.c_allocator, info) catch oom();
         }
     }
 
@@ -1173,7 +1171,7 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
                 ctx.destroy();
                 return null;
             }
-            const nbytes = mod.impl.c.ggml_nbytes(&ti.t);
+            const nbytes = mod.impl.ggml_c.ggml_nbytes(&ti.t);
             // GGML_PAD adds (alignment - 1) to nbytes. when nbytes is near
             // SIZE_MAX this wraps to 0 and makes the check below dead.
             if (nbytes > std.math.maxInt(usize) - (ctx.alignment - 1)) {
@@ -1208,21 +1206,21 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
         var mem_size: usize = 0;
         const n_tensors_u: usize = @intCast(n_tensors);
         if (params.no_alloc) {
-            if (n_tensors != 0 and std.math.maxInt(usize) / n_tensors_u < mod.impl.c.ggml_tensor_overhead()) {
+            if (n_tensors != 0 and std.math.maxInt(usize) / n_tensors_u < mod.impl.ggml_c.ggml_tensor_overhead()) {
                 mod.impl.logError("%s: memory size overflow while allocating ggml context\n", .{"gguf_init_from_reader"});
                 ctx.destroy();
                 return null;
             }
 
-            mem_size = n_tensors_u * mod.impl.c.ggml_tensor_overhead();
+            mem_size = n_tensors_u * mod.impl.ggml_c.ggml_tensor_overhead();
         } else {
-            if ((n_tensors + 1) != 0 and std.math.maxInt(usize) / (n_tensors_u + 1) < mod.impl.c.ggml_tensor_overhead()) {
+            if ((n_tensors + 1) != 0 and std.math.maxInt(usize) / (n_tensors_u + 1) < mod.impl.ggml_c.ggml_tensor_overhead()) {
                 mod.impl.logError("%s: memory size overflow while allocating ggml context\n", .{"gguf_init_from_reader"});
                 ctx.destroy();
                 return null;
             }
 
-            const overhead = (n_tensors_u + 1) * mod.impl.c.ggml_tensor_overhead();
+            const overhead = (n_tensors_u + 1) * mod.impl.ggml_c.ggml_tensor_overhead();
 
             if (std.math.maxInt(usize) - overhead < ctx.size) {
                 mod.impl.logError("%s: memory size overflow while allocating ggml context\n", .{"gguf_init_from_reader"});
@@ -1233,13 +1231,13 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
             mem_size = overhead + ctx.size;
         }
 
-        const pdata: mod.impl.c.ggml_init_params = .{
+        const pdata: mod.impl.ggml_c.ggml_init_params = .{
             .mem_size = mem_size,
             .mem_buffer = null,
             .no_alloc = params.no_alloc,
         };
 
-        params.ctx.* = mod.impl.c.ggml_init(pdata);
+        params.ctx.* = mod.impl.ggml_c.ggml_init(pdata);
         if (params.ctx.* == null) {
             mod.impl.logError("%s: failed to initialize ggml context for storing tensors\n", .{"gguf_init_from_reader"});
             ctx.destroy();
@@ -1248,15 +1246,15 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
 
         const ctx_data = params.ctx.*;
 
-        var data: ?*mod.impl.c.ggml_tensor = null;
+        var data: ?*mod.impl.ggml_c.ggml_tensor = null;
 
         if (!params.no_alloc) {
-            data = mod.impl.c.ggml_new_tensor_1d(ctx_data, mod.impl.c.GGML_TYPE_I8, @intCast(ctx.size));
+            data = mod.impl.ggml_c.ggml_new_tensor_1d(ctx_data, mod.impl.ggml_c.GGML_TYPE_I8, @intCast(ctx.size));
 
             ok = ok and data != null;
 
             if (ok) {
-                _ = mod.impl.c.ggml_set_name(data, "GGUF tensor data binary blob");
+                _ = mod.impl.ggml_c.ggml_set_name(data, "GGUF tensor data binary blob");
             }
 
             // read the binary blob with the tensor data
@@ -1264,7 +1262,7 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
 
             if (!ok) {
                 mod.impl.logError("%s: failed to read tensor data binary blob\n", .{"gguf_init_from_reader"});
-                mod.impl.c.ggml_free(ctx_data);
+                mod.impl.ggml_c.ggml_free(ctx_data);
                 params.ctx.* = null;
                 ctx.destroy();
                 return null;
@@ -1273,17 +1271,17 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
             ctx.data = data.?.data;
         }
 
-        mod.impl.c.ggml_set_no_alloc(ctx_data, true);
+        mod.impl.ggml_c.ggml_set_no_alloc(ctx_data, true);
 
         // create the tensors
         for (ctx.info.items) |*info| {
-            const cur = mod.impl.c.ggml_new_tensor(ctx_data, info.t.type, mod.impl.c.GGML_MAX_DIMS, &info.t.ne);
+            const cur = mod.impl.ggml_c.ggml_new_tensor(ctx_data, info.t.type, mod.impl.ggml_c.GGML_MAX_DIMS, &info.t.ne);
 
             ok = ok and cur != null;
 
             if (!ok) break;
 
-            _ = mod.impl.c.ggml_set_name(cur, @ptrCast(&info.t.name));
+            _ = mod.impl.ggml_c.ggml_set_name(cur, @ptrCast(&info.t.name));
 
             // point the data member to the appropriate location in the binary
             // blob using the tensor info
@@ -1294,13 +1292,13 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
 
         if (!ok) {
             mod.impl.logError("%s: failed to create tensors\n", .{"gguf_init_from_reader"});
-            mod.impl.c.ggml_free(ctx_data);
+            mod.impl.ggml_c.ggml_free(ctx_data);
             params.ctx.* = null;
             ctx.destroy();
             return null;
         }
 
-        mod.impl.c.ggml_set_no_alloc(ctx_data, params.no_alloc);
+        mod.impl.ggml_c.ggml_set_no_alloc(ctx_data, params.no_alloc);
     }
 
     return ctx;
@@ -1316,13 +1314,13 @@ fn initFromReader(gr: *Reader, params: mod.impl.c.gguf_init_params) ?*Context {
 /// - `params`: forwarded to the reader.
 ///
 /// Return: the parsed context, or null.
-export fn gguf_init_from_callback(
-    callback: mod.impl.c.gguf_reader_callback_t,
+pub fn gguf_init_from_callback(
+    callback: mod.impl.ggml_c.gguf_reader_callback_t,
     userdata: ?*anyopaque,
     max_chunk_read: usize,
     max_expected_size: u64,
-    params: mod.impl.c.gguf_init_params,
-) callconv(.c) ?*mod.impl.c.struct_gguf_context {
+    params: mod.impl.ggml_c.gguf_init_params,
+) callconv(.c) ?*mod.impl.ggml_c.struct_gguf_context {
     if (callback == null) return null;
 
     var gr = Reader.init(
@@ -1337,7 +1335,7 @@ export fn gguf_init_from_callback(
 
 /// Ports `struct gguf_file_reader` (gguf.cpp:943 @b1b770d90).
 const FileReader = struct {
-    file: *mod.impl.c.FILE,
+    file: *mod.impl.ggml_c.FILE,
     offset: u64,
 };
 
@@ -1373,7 +1371,7 @@ fn fileReaderCallback(userdata: ?*anyopaque, output: ?*anyopaque, offset: u64, l
 ///
 /// Return: the parsed context, or null. The stream is left where the parse
 /// stopped and is not closed.
-export fn gguf_init_from_file_ptr(file: ?*mod.impl.c.FILE, params: mod.impl.c.gguf_init_params) callconv(.c) ?*mod.impl.c.struct_gguf_context {
+pub fn gguf_init_from_file_ptr(file: ?*mod.impl.ggml_c.FILE, params: mod.impl.ggml_c.gguf_init_params) callconv(.c) ?*mod.impl.ggml_c.struct_gguf_context {
     const f = file orelse return null;
 
     const cur = stdlib.libc.ftello(f);
@@ -1418,7 +1416,7 @@ fn bufferReaderCallback(userdata: ?*anyopaque, output: ?*anyopaque, offset: u64,
 /// - `params`: forwarded to the reader.
 ///
 /// Return: the parsed context, or null. `data` is only read during the call.
-export fn gguf_init_from_buffer(data: ?*const anyopaque, size: usize, params: mod.impl.c.gguf_init_params) callconv(.c) ?*mod.impl.c.struct_gguf_context {
+pub fn gguf_init_from_buffer(data: ?*const anyopaque, size: usize, params: mod.impl.ggml_c.gguf_init_params) callconv(.c) ?*mod.impl.ggml_c.struct_gguf_context {
     if (data == null or size == 0) return null;
 
     var reader: BufferReader = .{ .data = @ptrCast(data.?), .size = size };
@@ -1434,8 +1432,8 @@ export fn gguf_init_from_buffer(data: ?*const anyopaque, size: usize, params: mo
 ///
 /// Return: the parsed context, or null. The file is closed before returning
 /// either way.
-export fn gguf_init_from_file(fname: [*:0]const u8, params: mod.impl.c.gguf_init_params) callconv(.c) ?*mod.impl.c.struct_gguf_context {
-    const file = mod.impl.c.ggml_fopen(fname, "rb") orelse {
+pub fn gguf_init_from_file(fname: [*:0]const u8, params: mod.impl.ggml_c.gguf_init_params) callconv(.c) ?*mod.impl.ggml_c.struct_gguf_context {
+    const file = mod.impl.ggml_c.ggml_fopen(fname, "rb") orelse {
         mod.impl.logError(
             "%s: failed to open GGUF file '%s' (%s)\n",
             .{ "gguf_init_from_file", fname, stdlib.errno.strerror(std.c._errno().*) },
@@ -1451,7 +1449,7 @@ export fn gguf_init_from_file(fname: [*:0]const u8, params: mod.impl.c.gguf_init
 /// Ports `gguf_free` (gguf.cpp:1030 @b1b770d90).
 ///
 /// Return: nothing. Null is accepted and ignored, as the C++'s `delete` is.
-export fn gguf_free(ctx: ?*mod.impl.c.struct_gguf_context) callconv(.c) void {
+pub fn gguf_free(ctx: ?*mod.impl.ggml_c.struct_gguf_context) callconv(.c) void {
     if (ctx == null) return;
     ctxOf(ctx).destroy();
 }
@@ -1459,7 +1457,7 @@ export fn gguf_free(ctx: ?*mod.impl.c.struct_gguf_context) callconv(.c) void {
 /// Ports `gguf_type_name` (gguf.cpp:1037 @b1b770d90).
 ///
 /// Return: a static name, or null for a value outside `enum gguf_type`.
-export fn gguf_type_name(t: c_uint) callconv(.c) ?[*:0]const u8 {
+pub fn gguf_type_name(t: c_uint) callconv(.c) ?[*:0]const u8 {
     return typeNameOrNull(t);
 }
 
@@ -1471,22 +1469,22 @@ export fn gguf_type_name(t: c_uint) callconv(.c) ?[*:0]const u8 {
 // than reporting.
 
 /// Ports `gguf_get_version` (gguf.cpp:1042 @b1b770d90).
-export fn gguf_get_version(ctx: ?*const mod.impl.c.struct_gguf_context) callconv(.c) u32 {
+pub fn gguf_get_version(ctx: ?*const mod.impl.ggml_c.struct_gguf_context) callconv(.c) u32 {
     return ctxOfConst(ctx).version;
 }
 
 /// Ports `gguf_get_alignment` (gguf.cpp:1046 @b1b770d90).
-export fn gguf_get_alignment(ctx: ?*const mod.impl.c.struct_gguf_context) callconv(.c) usize {
+pub fn gguf_get_alignment(ctx: ?*const mod.impl.ggml_c.struct_gguf_context) callconv(.c) usize {
     return ctxOfConst(ctx).alignment;
 }
 
 /// Ports `gguf_get_data_offset` (gguf.cpp:1050 @b1b770d90).
-export fn gguf_get_data_offset(ctx: ?*const mod.impl.c.struct_gguf_context) callconv(.c) usize {
+pub fn gguf_get_data_offset(ctx: ?*const mod.impl.ggml_c.struct_gguf_context) callconv(.c) usize {
     return ctxOfConst(ctx).offset;
 }
 
 /// Ports `gguf_get_n_kv` (gguf.cpp:1054 @b1b770d90).
-export fn gguf_get_n_kv(ctx: ?*const mod.impl.c.struct_gguf_context) callconv(.c) i64 {
+pub fn gguf_get_n_kv(ctx: ?*const mod.impl.ggml_c.struct_gguf_context) callconv(.c) i64 {
     return @intCast(ctxOfConst(ctx).kv.items.len);
 }
 
@@ -1495,7 +1493,7 @@ export fn gguf_get_n_kv(ctx: ?*const mod.impl.c.struct_gguf_context) callconv(.c
 /// Return: the key's index, or -1 if absent. Matching is `strcmp`, so it stops
 /// at the first NUL in either string — unlike the duplicate-key check in
 /// `initFromReader`, which compares full lengths.
-export fn gguf_find_key(ctx: ?*const mod.impl.c.struct_gguf_context, key: [*:0]const u8) callconv(.c) i64 {
+pub fn gguf_find_key(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, key: [*:0]const u8) callconv(.c) i64 {
     var keyfound: i64 = -1;
 
     const n_kv = gguf_get_n_kv(ctx);
@@ -1515,7 +1513,7 @@ export fn gguf_find_key(ctx: ?*const mod.impl.c.struct_gguf_context, key: [*:0]c
 ///
 /// Return: the key, borrowed from the context and valid until it is freed or
 /// the key is removed.
-export fn gguf_get_key(ctx: ?*const mod.impl.c.struct_gguf_context, key_id: i64) callconv(.c) [*:0]const u8 {
+pub fn gguf_get_key(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, key_id: i64) callconv(.c) [*:0]const u8 {
     mod.impl.assert(key_id >= 0 and key_id < gguf_get_n_kv(ctx), "key_id >= 0 && key_id < gguf_get_n_kv(ctx)");
     return ctxOfConst(ctx).kv.items[@intCast(key_id)].getKey().ptr;
 }
@@ -1524,14 +1522,14 @@ export fn gguf_get_key(ctx: ?*const mod.impl.c.struct_gguf_context, key_id: i64)
 ///
 /// Return: `GGUF_TYPE_ARRAY` for any array-valued key, whatever its elements
 /// are; `gguf_get_arr_type` reports the element type.
-export fn gguf_get_kv_type(ctx: ?*const mod.impl.c.struct_gguf_context, key_id: i64) callconv(.c) c_uint {
+pub fn gguf_get_kv_type(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, key_id: i64) callconv(.c) c_uint {
     mod.impl.assert(key_id >= 0 and key_id < gguf_get_n_kv(ctx), "key_id >= 0 && key_id < gguf_get_n_kv(ctx)");
     const kv = &ctxOfConst(ctx).kv.items[@intCast(key_id)];
-    return if (kv.is_array) mod.impl.c.GGUF_TYPE_ARRAY else kv.getType();
+    return if (kv.is_array) mod.impl.ggml_c.GGUF_TYPE_ARRAY else kv.getType();
 }
 
 /// Ports `gguf_get_arr_type` (gguf.cpp:1084 @b1b770d90).
-export fn gguf_get_arr_type(ctx: ?*const mod.impl.c.struct_gguf_context, key_id: i64) callconv(.c) c_uint {
+pub fn gguf_get_arr_type(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, key_id: i64) callconv(.c) c_uint {
     mod.impl.assert(key_id >= 0 and key_id < gguf_get_n_kv(ctx), "key_id >= 0 && key_id < gguf_get_n_kv(ctx)");
     const kv = &ctxOfConst(ctx).kv.items[@intCast(key_id)];
     mod.impl.assert(kv.is_array, "ctx->kv[key_id].is_array");
@@ -1542,20 +1540,20 @@ export fn gguf_get_arr_type(ctx: ?*const mod.impl.c.struct_gguf_context, key_id:
 ///
 /// Return: the first element of the array, borrowed. Bool arrays are stored
 /// one byte per element, as the header notes.
-export fn gguf_get_arr_data(ctx: ?*const mod.impl.c.struct_gguf_context, key_id: i64) callconv(.c) ?*const anyopaque {
+pub fn gguf_get_arr_data(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, key_id: i64) callconv(.c) ?*const anyopaque {
     mod.impl.assert(key_id >= 0 and key_id < gguf_get_n_kv(ctx), "key_id >= 0 && key_id < gguf_get_n_kv(ctx)");
     const kv = &ctxOfConst(ctx).kv.items[@intCast(key_id)];
-    mod.impl.assert(kv.getType() != mod.impl.c.GGUF_TYPE_STRING, "ctx->kv[key_id].get_type() != GGUF_TYPE_STRING");
+    mod.impl.assert(kv.getType() != mod.impl.ggml_c.GGUF_TYPE_STRING, "ctx->kv[key_id].get_type() != GGUF_TYPE_STRING");
     return @ptrCast(kv.data.items.ptr);
 }
 
 /// Ports `gguf_get_arr_str` (gguf.cpp:1096 @b1b770d90).
 ///
 /// Return: the `i`th string, borrowed from the context.
-export fn gguf_get_arr_str(ctx: ?*const mod.impl.c.struct_gguf_context, key_id: i64, i: usize) callconv(.c) [*:0]const u8 {
+pub fn gguf_get_arr_str(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, key_id: i64, i: usize) callconv(.c) [*:0]const u8 {
     mod.impl.assert(key_id >= 0 and key_id < gguf_get_n_kv(ctx), "key_id >= 0 && key_id < gguf_get_n_kv(ctx)");
     const kv = &ctxOfConst(ctx).kv.items[@intCast(key_id)];
-    mod.impl.assert(kv.getType() == mod.impl.c.GGUF_TYPE_STRING, "ctx->kv[key_id].get_type() == GGUF_TYPE_STRING");
+    mod.impl.assert(kv.getType() == mod.impl.ggml_c.GGUF_TYPE_STRING, "ctx->kv[key_id].get_type() == GGUF_TYPE_STRING");
     return kv.data_string.items[i].ptr;
 }
 
@@ -1563,11 +1561,11 @@ export fn gguf_get_arr_str(ctx: ?*const mod.impl.c.struct_gguf_context, key_id: 
 ///
 /// Return: the element count. Computed from the byte length rather than by
 /// calling `get_ne`, so it does not assert the non-array single-element rule.
-export fn gguf_get_arr_n(ctx: ?*const mod.impl.c.struct_gguf_context, key_id: i64) callconv(.c) usize {
+pub fn gguf_get_arr_n(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, key_id: i64) callconv(.c) usize {
     mod.impl.assert(key_id >= 0 and key_id < gguf_get_n_kv(ctx), "key_id >= 0 && key_id < gguf_get_n_kv(ctx)");
     const kv = &ctxOfConst(ctx).kv.items[@intCast(key_id)];
 
-    if (kv.type == mod.impl.c.GGUF_TYPE_STRING) {
+    if (kv.type == mod.impl.ggml_c.GGUF_TYPE_STRING) {
         return kv.data_string.items.len;
     }
 
@@ -1579,7 +1577,7 @@ export fn gguf_get_arr_n(ctx: ?*const mod.impl.c.struct_gguf_context, key_id: i6
 /// Shared body of the twelve `gguf_get_val_*` accessors, each the same three
 /// lines over a different type. The family begins at `gguf_get_val_u8`
 /// (gguf.cpp:1114 @b1b770d90) and ends at `gguf_get_val_data`.
-inline fn getVal(comptime T: type, ctx: ?*const mod.impl.c.struct_gguf_context, key_id: i64) T {
+inline fn getVal(comptime T: type, ctx: ?*const mod.impl.ggml_c.struct_gguf_context, key_id: i64) T {
     mod.impl.assert(key_id >= 0 and key_id < gguf_get_n_kv(ctx), "key_id >= 0 && key_id < gguf_get_n_kv(ctx)");
     const kv = &ctxOfConst(ctx).kv.items[@intCast(key_id)];
     mod.impl.assert(kv.getNe() == 1, "ctx->kv[key_id].get_ne() == 1");
@@ -1587,64 +1585,64 @@ inline fn getVal(comptime T: type, ctx: ?*const mod.impl.c.struct_gguf_context, 
 }
 
 /// Ports `gguf_get_val_u8` (gguf.cpp:1114 @b1b770d90).
-export fn gguf_get_val_u8(ctx: ?*const mod.impl.c.struct_gguf_context, key_id: i64) callconv(.c) u8 {
+pub fn gguf_get_val_u8(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, key_id: i64) callconv(.c) u8 {
     return getVal(u8, ctx, key_id);
 }
 
 /// Ports `gguf_get_val_i8` (gguf.cpp:1120 @b1b770d90).
-export fn gguf_get_val_i8(ctx: ?*const mod.impl.c.struct_gguf_context, key_id: i64) callconv(.c) i8 {
+pub fn gguf_get_val_i8(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, key_id: i64) callconv(.c) i8 {
     return getVal(i8, ctx, key_id);
 }
 
 /// Ports `gguf_get_val_u16` (gguf.cpp:1126 @b1b770d90).
-export fn gguf_get_val_u16(ctx: ?*const mod.impl.c.struct_gguf_context, key_id: i64) callconv(.c) u16 {
+pub fn gguf_get_val_u16(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, key_id: i64) callconv(.c) u16 {
     return getVal(u16, ctx, key_id);
 }
 
 /// Ports `gguf_get_val_i16` (gguf.cpp:1132 @b1b770d90).
-export fn gguf_get_val_i16(ctx: ?*const mod.impl.c.struct_gguf_context, key_id: i64) callconv(.c) i16 {
+pub fn gguf_get_val_i16(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, key_id: i64) callconv(.c) i16 {
     return getVal(i16, ctx, key_id);
 }
 
 /// Ports `gguf_get_val_u32` (gguf.cpp:1138 @b1b770d90).
-export fn gguf_get_val_u32(ctx: ?*const mod.impl.c.struct_gguf_context, key_id: i64) callconv(.c) u32 {
+pub fn gguf_get_val_u32(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, key_id: i64) callconv(.c) u32 {
     return getVal(u32, ctx, key_id);
 }
 
 /// Ports `gguf_get_val_i32` (gguf.cpp:1144 @b1b770d90).
-export fn gguf_get_val_i32(ctx: ?*const mod.impl.c.struct_gguf_context, key_id: i64) callconv(.c) i32 {
+pub fn gguf_get_val_i32(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, key_id: i64) callconv(.c) i32 {
     return getVal(i32, ctx, key_id);
 }
 
 /// Ports `gguf_get_val_f32` (gguf.cpp:1150 @b1b770d90).
-export fn gguf_get_val_f32(ctx: ?*const mod.impl.c.struct_gguf_context, key_id: i64) callconv(.c) f32 {
+pub fn gguf_get_val_f32(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, key_id: i64) callconv(.c) f32 {
     return getVal(f32, ctx, key_id);
 }
 
 /// Ports `gguf_get_val_u64` (gguf.cpp:1156 @b1b770d90).
-export fn gguf_get_val_u64(ctx: ?*const mod.impl.c.struct_gguf_context, key_id: i64) callconv(.c) u64 {
+pub fn gguf_get_val_u64(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, key_id: i64) callconv(.c) u64 {
     return getVal(u64, ctx, key_id);
 }
 
 /// Ports `gguf_get_val_i64` (gguf.cpp:1162 @b1b770d90).
-export fn gguf_get_val_i64(ctx: ?*const mod.impl.c.struct_gguf_context, key_id: i64) callconv(.c) i64 {
+pub fn gguf_get_val_i64(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, key_id: i64) callconv(.c) i64 {
     return getVal(i64, ctx, key_id);
 }
 
 /// Ports `gguf_get_val_f64` (gguf.cpp:1168 @b1b770d90).
-export fn gguf_get_val_f64(ctx: ?*const mod.impl.c.struct_gguf_context, key_id: i64) callconv(.c) f64 {
+pub fn gguf_get_val_f64(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, key_id: i64) callconv(.c) f64 {
     return getVal(f64, ctx, key_id);
 }
 
 /// Ports `gguf_get_val_bool` (gguf.cpp:1174 @b1b770d90).
-export fn gguf_get_val_bool(ctx: ?*const mod.impl.c.struct_gguf_context, key_id: i64) callconv(.c) bool {
+pub fn gguf_get_val_bool(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, key_id: i64) callconv(.c) bool {
     return getVal(bool, ctx, key_id);
 }
 
 /// Ports `gguf_get_val_str` (gguf.cpp:1180 @b1b770d90).
 ///
 /// Return: the value, borrowed from the context.
-export fn gguf_get_val_str(ctx: ?*const mod.impl.c.struct_gguf_context, key_id: i64) callconv(.c) [*:0]const u8 {
+pub fn gguf_get_val_str(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, key_id: i64) callconv(.c) [*:0]const u8 {
     mod.impl.assert(key_id >= 0 and key_id < gguf_get_n_kv(ctx), "key_id >= 0 && key_id < gguf_get_n_kv(ctx)");
     const kv = &ctxOfConst(ctx).kv.items[@intCast(key_id)];
     mod.impl.assert(kv.getNe() == 1, "ctx->kv[key_id].get_ne() == 1");
@@ -1654,23 +1652,23 @@ export fn gguf_get_val_str(ctx: ?*const mod.impl.c.struct_gguf_context, key_id: 
 /// Ports `gguf_get_val_data` (gguf.cpp:1186 @b1b770d90).
 ///
 /// Return: the raw bytes of a single non-string value, borrowed.
-export fn gguf_get_val_data(ctx: ?*const mod.impl.c.struct_gguf_context, key_id: i64) callconv(.c) ?*const anyopaque {
+pub fn gguf_get_val_data(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, key_id: i64) callconv(.c) ?*const anyopaque {
     mod.impl.assert(key_id >= 0 and key_id < gguf_get_n_kv(ctx), "key_id >= 0 && key_id < gguf_get_n_kv(ctx)");
     const kv = &ctxOfConst(ctx).kv.items[@intCast(key_id)];
     mod.impl.assert(kv.getNe() == 1, "ctx->kv[key_id].get_ne() == 1");
-    mod.impl.assert(kv.getType() != mod.impl.c.GGUF_TYPE_STRING, "ctx->kv[key_id].get_type() != GGUF_TYPE_STRING");
+    mod.impl.assert(kv.getType() != mod.impl.ggml_c.GGUF_TYPE_STRING, "ctx->kv[key_id].get_type() != GGUF_TYPE_STRING");
     return @ptrCast(kv.data.items.ptr);
 }
 
 /// Ports `gguf_get_n_tensors` (gguf.cpp:1193 @b1b770d90).
-export fn gguf_get_n_tensors(ctx: ?*const mod.impl.c.struct_gguf_context) callconv(.c) i64 {
+pub fn gguf_get_n_tensors(ctx: ?*const mod.impl.ggml_c.struct_gguf_context) callconv(.c) i64 {
     return @intCast(ctxOfConst(ctx).info.items.len);
 }
 
 /// Ports `gguf_find_tensor` (gguf.cpp:1197 @b1b770d90).
 ///
 /// Return: the tensor's index, or -1 if absent.
-export fn gguf_find_tensor(ctx: ?*const mod.impl.c.struct_gguf_context, name: [*:0]const u8) callconv(.c) i64 {
+pub fn gguf_find_tensor(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, name: [*:0]const u8) callconv(.c) i64 {
     var tensor_id: i64 = -1;
 
     const n_tensors = gguf_get_n_tensors(ctx);
@@ -1687,7 +1685,7 @@ export fn gguf_find_tensor(ctx: ?*const mod.impl.c.struct_gguf_context, name: [*
 }
 
 /// Ports `gguf_get_tensor_offset` (gguf.cpp:1213 @b1b770d90).
-export fn gguf_get_tensor_offset(ctx: ?*const mod.impl.c.struct_gguf_context, tensor_id: i64) callconv(.c) usize {
+pub fn gguf_get_tensor_offset(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, tensor_id: i64) callconv(.c) usize {
     mod.impl.assert(tensor_id >= 0 and tensor_id < gguf_get_n_tensors(ctx), "tensor_id >= 0 && tensor_id < gguf_get_n_tensors(ctx)");
     return @intCast(ctxOfConst(ctx).info.items[@intCast(tensor_id)].offset);
 }
@@ -1695,7 +1693,7 @@ export fn gguf_get_tensor_offset(ctx: ?*const mod.impl.c.struct_gguf_context, te
 /// Ports `gguf_get_tensor_name` (gguf.cpp:1218 @b1b770d90).
 ///
 /// Return: the name, borrowed from the context.
-export fn gguf_get_tensor_name(ctx: ?*const mod.impl.c.struct_gguf_context, tensor_id: i64) callconv(.c) [*:0]const u8 {
+pub fn gguf_get_tensor_name(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, tensor_id: i64) callconv(.c) [*:0]const u8 {
     mod.impl.assert(tensor_id >= 0 and tensor_id < gguf_get_n_tensors(ctx), "tensor_id >= 0 && tensor_id < gguf_get_n_tensors(ctx)");
     return @ptrCast(&ctxOfConst(ctx).info.items[@intCast(tensor_id)].t.name);
 }
@@ -1704,21 +1702,21 @@ export fn gguf_get_tensor_name(ctx: ?*const mod.impl.c.struct_gguf_context, tens
 ///
 /// Return: `GGML_MAX_DIMS` extents, borrowed; entries past the tensor's rank
 /// are 1.
-export fn gguf_get_tensor_ne(ctx: ?*const mod.impl.c.struct_gguf_context, tensor_id: i64) callconv(.c) [*]const i64 {
+pub fn gguf_get_tensor_ne(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, tensor_id: i64) callconv(.c) [*]const i64 {
     mod.impl.assert(tensor_id >= 0 and tensor_id < gguf_get_n_tensors(ctx), "tensor_id >= 0 && tensor_id < gguf_get_n_tensors(ctx)");
     return &ctxOfConst(ctx).info.items[@intCast(tensor_id)].t.ne;
 }
 
 /// Ports `gguf_get_tensor_type` (gguf.cpp:1228 @b1b770d90).
-export fn gguf_get_tensor_type(ctx: ?*const mod.impl.c.struct_gguf_context, tensor_id: i64) callconv(.c) c_uint {
+pub fn gguf_get_tensor_type(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, tensor_id: i64) callconv(.c) c_uint {
     mod.impl.assert(tensor_id >= 0 and tensor_id < gguf_get_n_tensors(ctx), "tensor_id >= 0 && tensor_id < gguf_get_n_tensors(ctx)");
     return ctxOfConst(ctx).info.items[@intCast(tensor_id)].t.type;
 }
 
 /// Ports `gguf_get_tensor_size` (gguf.cpp:1233 @b1b770d90).
-export fn gguf_get_tensor_size(ctx: ?*const mod.impl.c.struct_gguf_context, tensor_id: i64) callconv(.c) usize {
+pub fn gguf_get_tensor_size(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, tensor_id: i64) callconv(.c) usize {
     mod.impl.assert(tensor_id >= 0 and tensor_id < gguf_get_n_tensors(ctx), "tensor_id >= 0 && tensor_id < gguf_get_n_tensors(ctx)");
-    return mod.impl.c.ggml_nbytes(&ctxOfConst(ctx).info.items[@intCast(tensor_id)].t);
+    return mod.impl.ggml_c.ggml_nbytes(&ctxOfConst(ctx).info.items[@intCast(tensor_id)].t);
 }
 
 // -----------------------------------------------------------------------------
@@ -1728,7 +1726,7 @@ export fn gguf_get_tensor_size(ctx: ?*const mod.impl.c.struct_gguf_context, tens
 ///
 /// Return: the index the key held before removal, or -1 if it was absent.
 /// Later keys shift down, which is what `std::vector::erase` does.
-export fn gguf_remove_key(ctx: ?*mod.impl.c.struct_gguf_context, key: [*:0]const u8) callconv(.c) i64 {
+pub fn gguf_remove_key(ctx: ?*mod.impl.ggml_c.struct_gguf_context, key: [*:0]const u8) callconv(.c) i64 {
     const key_id = gguf_find_key(ctx, key);
     if (key_id >= 0) {
         var removed = ctxOf(ctx).kv.orderedRemove(@intCast(key_id));
@@ -1743,14 +1741,14 @@ export fn gguf_remove_key(ctx: ?*mod.impl.c.struct_gguf_context, key: [*:0]const
 /// Only `general.alignment` is reserved: it must be a `u32` power of two,
 /// because `gguf_init_from_reader` pads the data section by it.
 fn checkReservedKeys(comptime T: type, key: [*:0]const u8, val: T) void {
-    if (std.mem.orderZ(u8, key, mod.impl.c.GGUF_KEY_GENERAL_ALIGNMENT) == .eq) {
+    if (std.mem.orderZ(u8, key, mod.impl.ggml_c.GGUF_KEY_GENERAL_ALIGNMENT) == .eq) {
         if (T == u32) {
             mod.impl.assert(
                 val > 0 and (val & (val - 1)) == 0,
-                mod.impl.c.GGUF_KEY_GENERAL_ALIGNMENT ++ " must be power of 2",
+                mod.impl.ggml_c.GGUF_KEY_GENERAL_ALIGNMENT ++ " must be power of 2",
             );
         } else {
-            mod.impl.abort(mod.impl.c.GGUF_KEY_GENERAL_ALIGNMENT ++ " must be type u32");
+            mod.impl.abort(mod.impl.ggml_c.GGUF_KEY_GENERAL_ALIGNMENT ++ " must be type u32");
         }
     }
 }
@@ -1759,74 +1757,74 @@ fn checkReservedKeys(comptime T: type, key: [*:0]const u8, val: T) void {
 /// `gguf_set_val_u8` (gguf.cpp:1258 @b1b770d90). Each removes any existing key
 /// of that name and appends the new pair at the back, so a set is also a
 /// move-to-end.
-inline fn setVal(comptime T: type, ctx: ?*mod.impl.c.struct_gguf_context, key: [*:0]const u8, val: T) void {
+inline fn setVal(comptime T: type, ctx: ?*mod.impl.ggml_c.struct_gguf_context, key: [*:0]const u8, val: T) void {
     checkReservedKeys(T, key, val);
     _ = gguf_remove_key(ctx, key);
-    ctxOf(ctx).kv.append(allocator, Kv.initScalar(std.mem.span(key), T, val)) catch oom();
+    ctxOf(ctx).kv.append(std.heap.c_allocator, Kv.initScalar(std.mem.span(key), T, val)) catch oom();
 }
 
 /// Ports `gguf_set_val_u8` (gguf.cpp:1258 @b1b770d90).
-export fn gguf_set_val_u8(ctx: ?*mod.impl.c.struct_gguf_context, key: [*:0]const u8, val: u8) callconv(.c) void {
+pub fn gguf_set_val_u8(ctx: ?*mod.impl.ggml_c.struct_gguf_context, key: [*:0]const u8, val: u8) callconv(.c) void {
     setVal(u8, ctx, key, val);
 }
 
 /// Ports `gguf_set_val_i8` (gguf.cpp:1264 @b1b770d90).
-export fn gguf_set_val_i8(ctx: ?*mod.impl.c.struct_gguf_context, key: [*:0]const u8, val: i8) callconv(.c) void {
+pub fn gguf_set_val_i8(ctx: ?*mod.impl.ggml_c.struct_gguf_context, key: [*:0]const u8, val: i8) callconv(.c) void {
     setVal(i8, ctx, key, val);
 }
 
 /// Ports `gguf_set_val_u16` (gguf.cpp:1270 @b1b770d90).
-export fn gguf_set_val_u16(ctx: ?*mod.impl.c.struct_gguf_context, key: [*:0]const u8, val: u16) callconv(.c) void {
+pub fn gguf_set_val_u16(ctx: ?*mod.impl.ggml_c.struct_gguf_context, key: [*:0]const u8, val: u16) callconv(.c) void {
     setVal(u16, ctx, key, val);
 }
 
 /// Ports `gguf_set_val_i16` (gguf.cpp:1276 @b1b770d90).
-export fn gguf_set_val_i16(ctx: ?*mod.impl.c.struct_gguf_context, key: [*:0]const u8, val: i16) callconv(.c) void {
+pub fn gguf_set_val_i16(ctx: ?*mod.impl.ggml_c.struct_gguf_context, key: [*:0]const u8, val: i16) callconv(.c) void {
     setVal(i16, ctx, key, val);
 }
 
 /// Ports `gguf_set_val_u32` (gguf.cpp:1282 @b1b770d90).
-export fn gguf_set_val_u32(ctx: ?*mod.impl.c.struct_gguf_context, key: [*:0]const u8, val: u32) callconv(.c) void {
+pub fn gguf_set_val_u32(ctx: ?*mod.impl.ggml_c.struct_gguf_context, key: [*:0]const u8, val: u32) callconv(.c) void {
     setVal(u32, ctx, key, val);
 }
 
 /// Ports `gguf_set_val_i32` (gguf.cpp:1288 @b1b770d90).
-export fn gguf_set_val_i32(ctx: ?*mod.impl.c.struct_gguf_context, key: [*:0]const u8, val: i32) callconv(.c) void {
+pub fn gguf_set_val_i32(ctx: ?*mod.impl.ggml_c.struct_gguf_context, key: [*:0]const u8, val: i32) callconv(.c) void {
     setVal(i32, ctx, key, val);
 }
 
 /// Ports `gguf_set_val_f32` (gguf.cpp:1294 @b1b770d90).
-export fn gguf_set_val_f32(ctx: ?*mod.impl.c.struct_gguf_context, key: [*:0]const u8, val: f32) callconv(.c) void {
+pub fn gguf_set_val_f32(ctx: ?*mod.impl.ggml_c.struct_gguf_context, key: [*:0]const u8, val: f32) callconv(.c) void {
     setVal(f32, ctx, key, val);
 }
 
 /// Ports `gguf_set_val_u64` (gguf.cpp:1300 @b1b770d90).
-export fn gguf_set_val_u64(ctx: ?*mod.impl.c.struct_gguf_context, key: [*:0]const u8, val: u64) callconv(.c) void {
+pub fn gguf_set_val_u64(ctx: ?*mod.impl.ggml_c.struct_gguf_context, key: [*:0]const u8, val: u64) callconv(.c) void {
     setVal(u64, ctx, key, val);
 }
 
 /// Ports `gguf_set_val_i64` (gguf.cpp:1306 @b1b770d90).
-export fn gguf_set_val_i64(ctx: ?*mod.impl.c.struct_gguf_context, key: [*:0]const u8, val: i64) callconv(.c) void {
+pub fn gguf_set_val_i64(ctx: ?*mod.impl.ggml_c.struct_gguf_context, key: [*:0]const u8, val: i64) callconv(.c) void {
     setVal(i64, ctx, key, val);
 }
 
 /// Ports `gguf_set_val_f64` (gguf.cpp:1312 @b1b770d90).
-export fn gguf_set_val_f64(ctx: ?*mod.impl.c.struct_gguf_context, key: [*:0]const u8, val: f64) callconv(.c) void {
+pub fn gguf_set_val_f64(ctx: ?*mod.impl.ggml_c.struct_gguf_context, key: [*:0]const u8, val: f64) callconv(.c) void {
     setVal(f64, ctx, key, val);
 }
 
 /// Ports `gguf_set_val_bool` (gguf.cpp:1318 @b1b770d90).
-export fn gguf_set_val_bool(ctx: ?*mod.impl.c.struct_gguf_context, key: [*:0]const u8, val: bool) callconv(.c) void {
+pub fn gguf_set_val_bool(ctx: ?*mod.impl.ggml_c.struct_gguf_context, key: [*:0]const u8, val: bool) callconv(.c) void {
     setVal(bool, ctx, key, val);
 }
 
 /// Ports `gguf_set_val_str` (gguf.cpp:1324 @b1b770d90).
 ///
 /// `val` is copied; the caller keeps ownership of what it passed.
-export fn gguf_set_val_str(ctx: ?*mod.impl.c.struct_gguf_context, key: [*:0]const u8, val: [*:0]const u8) callconv(.c) void {
+pub fn gguf_set_val_str(ctx: ?*mod.impl.ggml_c.struct_gguf_context, key: [*:0]const u8, val: [*:0]const u8) callconv(.c) void {
     checkReservedKeys([*:0]const u8, key, val);
     _ = gguf_remove_key(ctx, key);
-    ctxOf(ctx).kv.append(allocator, Kv.initStr(std.mem.span(key), std.mem.span(val))) catch oom();
+    ctxOf(ctx).kv.append(std.heap.c_allocator, Kv.initStr(std.mem.span(key), std.mem.span(val))) catch oom();
 }
 
 /// Ports `gguf_set_arr_data` (gguf.cpp:1330 @b1b770d90).
@@ -1836,8 +1834,8 @@ export fn gguf_set_val_str(ctx: ?*mod.impl.c.struct_gguf_context, key: [*:0]cons
 /// - `t`: element type; `GGUF_TYPE_STRING` is not valid here.
 /// - `data`: `n * gguf_type_size(t)` bytes, copied.
 /// - `n`: element count.
-export fn gguf_set_arr_data(
-    ctx: ?*mod.impl.c.struct_gguf_context,
+pub fn gguf_set_arr_data(
+    ctx: ?*mod.impl.ggml_c.struct_gguf_context,
     key: [*:0]const u8,
     t: c_uint,
     data: ?*const anyopaque,
@@ -1851,12 +1849,12 @@ export fn gguf_set_arr_data(
     // constructor as a byte array, and then re-labels the element type with
     // `cast`. Same two steps here.
     var tmp: std.ArrayList(u8) = .empty;
-    defer tmp.deinit(allocator);
-    tmp.resize(allocator, nbytes) catch oom();
+    defer tmp.deinit(std.heap.c_allocator);
+    tmp.resize(std.heap.c_allocator, nbytes) catch oom();
     if (tmp.items.len != 0) {
         @memcpy(tmp.items, @as([*]const u8, @ptrCast(data.?))[0..nbytes]);
     }
-    ctxOf(ctx).kv.append(allocator, Kv.initArray(std.mem.span(key), u8, tmp.items)) catch oom();
+    ctxOf(ctx).kv.append(std.heap.c_allocator, Kv.initArray(std.mem.span(key), u8, tmp.items)) catch oom();
     ctxOf(ctx).kv.items[ctxOf(ctx).kv.items.len - 1].cast(t);
 }
 
@@ -1866,8 +1864,8 @@ export fn gguf_set_arr_data(
 /// - `key`: overwritten if present.
 /// - `data`: `n` NUL-terminated strings, each copied.
 /// - `n`: element count.
-export fn gguf_set_arr_str(
-    ctx: ?*mod.impl.c.struct_gguf_context,
+pub fn gguf_set_arr_str(
+    ctx: ?*mod.impl.ggml_c.struct_gguf_context,
     key: [*:0]const u8,
     data: [*]const [*:0]const u8,
     n: usize,
@@ -1876,15 +1874,15 @@ export fn gguf_set_arr_str(
     _ = gguf_remove_key(ctx, key);
 
     var tmp: std.ArrayList(Str) = .empty;
-    tmp.resize(allocator, n) catch oom();
+    tmp.resize(std.heap.c_allocator, n) catch oom();
     for (tmp.items, 0..) |*slot, i| slot.* = dupeStr(std.mem.span(data[i]));
-    ctxOf(ctx).kv.append(allocator, Kv.initStrArrayOwned(std.mem.span(key), tmp)) catch oom();
+    ctxOf(ctx).kv.append(std.heap.c_allocator, Kv.initStrArrayOwned(std.mem.span(key), tmp)) catch oom();
 }
 
 /// Ports `gguf_set_kv` (gguf.cpp:1355 @b1b770d90).
 ///
 /// Copies every key from `src` into `ctx`, overwriting same-named keys.
-export fn gguf_set_kv(ctx: ?*mod.impl.c.struct_gguf_context, src: ?*const mod.impl.c.struct_gguf_context) callconv(.c) void {
+pub fn gguf_set_kv(ctx: ?*mod.impl.ggml_c.struct_gguf_context, src: ?*const mod.impl.ggml_c.struct_gguf_context) callconv(.c) void {
     const n_kv = gguf_get_n_kv(src);
     var i: i64 = 0;
     while (i < n_kv) : (i += 1) {
@@ -1892,18 +1890,18 @@ export fn gguf_set_kv(ctx: ?*mod.impl.c.struct_gguf_context, src: ?*const mod.im
 
         if (!kv.is_array) {
             switch (kv.getType()) {
-                mod.impl.c.GGUF_TYPE_UINT8 => gguf_set_val_u8(ctx, kv.getKey().ptr, kv.getVal(u8, 0)),
-                mod.impl.c.GGUF_TYPE_INT8 => gguf_set_val_i8(ctx, kv.getKey().ptr, kv.getVal(i8, 0)),
-                mod.impl.c.GGUF_TYPE_UINT16 => gguf_set_val_u16(ctx, kv.getKey().ptr, kv.getVal(u16, 0)),
-                mod.impl.c.GGUF_TYPE_INT16 => gguf_set_val_i16(ctx, kv.getKey().ptr, kv.getVal(i16, 0)),
-                mod.impl.c.GGUF_TYPE_UINT32 => gguf_set_val_u32(ctx, kv.getKey().ptr, kv.getVal(u32, 0)),
-                mod.impl.c.GGUF_TYPE_INT32 => gguf_set_val_i32(ctx, kv.getKey().ptr, kv.getVal(i32, 0)),
-                mod.impl.c.GGUF_TYPE_FLOAT32 => gguf_set_val_f32(ctx, kv.getKey().ptr, kv.getVal(f32, 0)),
-                mod.impl.c.GGUF_TYPE_UINT64 => gguf_set_val_u64(ctx, kv.getKey().ptr, kv.getVal(u64, 0)),
-                mod.impl.c.GGUF_TYPE_INT64 => gguf_set_val_i64(ctx, kv.getKey().ptr, kv.getVal(i64, 0)),
-                mod.impl.c.GGUF_TYPE_FLOAT64 => gguf_set_val_f64(ctx, kv.getKey().ptr, kv.getVal(f64, 0)),
-                mod.impl.c.GGUF_TYPE_BOOL => gguf_set_val_bool(ctx, kv.getKey().ptr, kv.getVal(bool, 0)),
-                mod.impl.c.GGUF_TYPE_STRING => gguf_set_val_str(ctx, kv.getKey().ptr, kv.getValStr(0).ptr),
+                mod.impl.ggml_c.GGUF_TYPE_UINT8 => gguf_set_val_u8(ctx, kv.getKey().ptr, kv.getVal(u8, 0)),
+                mod.impl.ggml_c.GGUF_TYPE_INT8 => gguf_set_val_i8(ctx, kv.getKey().ptr, kv.getVal(i8, 0)),
+                mod.impl.ggml_c.GGUF_TYPE_UINT16 => gguf_set_val_u16(ctx, kv.getKey().ptr, kv.getVal(u16, 0)),
+                mod.impl.ggml_c.GGUF_TYPE_INT16 => gguf_set_val_i16(ctx, kv.getKey().ptr, kv.getVal(i16, 0)),
+                mod.impl.ggml_c.GGUF_TYPE_UINT32 => gguf_set_val_u32(ctx, kv.getKey().ptr, kv.getVal(u32, 0)),
+                mod.impl.ggml_c.GGUF_TYPE_INT32 => gguf_set_val_i32(ctx, kv.getKey().ptr, kv.getVal(i32, 0)),
+                mod.impl.ggml_c.GGUF_TYPE_FLOAT32 => gguf_set_val_f32(ctx, kv.getKey().ptr, kv.getVal(f32, 0)),
+                mod.impl.ggml_c.GGUF_TYPE_UINT64 => gguf_set_val_u64(ctx, kv.getKey().ptr, kv.getVal(u64, 0)),
+                mod.impl.ggml_c.GGUF_TYPE_INT64 => gguf_set_val_i64(ctx, kv.getKey().ptr, kv.getVal(i64, 0)),
+                mod.impl.ggml_c.GGUF_TYPE_FLOAT64 => gguf_set_val_f64(ctx, kv.getKey().ptr, kv.getVal(f64, 0)),
+                mod.impl.ggml_c.GGUF_TYPE_BOOL => gguf_set_val_bool(ctx, kv.getKey().ptr, kv.getVal(bool, 0)),
+                mod.impl.ggml_c.GGUF_TYPE_STRING => gguf_set_val_str(ctx, kv.getKey().ptr, kv.getValStr(0).ptr),
                 else => mod.impl.abort("invalid type"),
             }
             continue;
@@ -1912,22 +1910,22 @@ export fn gguf_set_kv(ctx: ?*mod.impl.c.struct_gguf_context, src: ?*const mod.im
         const ne = kv.getNe();
 
         switch (kv.getType()) {
-            mod.impl.c.GGUF_TYPE_UINT8,
-            mod.impl.c.GGUF_TYPE_INT8,
-            mod.impl.c.GGUF_TYPE_UINT16,
-            mod.impl.c.GGUF_TYPE_INT16,
-            mod.impl.c.GGUF_TYPE_UINT32,
-            mod.impl.c.GGUF_TYPE_INT32,
-            mod.impl.c.GGUF_TYPE_FLOAT32,
-            mod.impl.c.GGUF_TYPE_UINT64,
-            mod.impl.c.GGUF_TYPE_INT64,
-            mod.impl.c.GGUF_TYPE_FLOAT64,
-            mod.impl.c.GGUF_TYPE_BOOL,
+            mod.impl.ggml_c.GGUF_TYPE_UINT8,
+            mod.impl.ggml_c.GGUF_TYPE_INT8,
+            mod.impl.ggml_c.GGUF_TYPE_UINT16,
+            mod.impl.ggml_c.GGUF_TYPE_INT16,
+            mod.impl.ggml_c.GGUF_TYPE_UINT32,
+            mod.impl.ggml_c.GGUF_TYPE_INT32,
+            mod.impl.ggml_c.GGUF_TYPE_FLOAT32,
+            mod.impl.ggml_c.GGUF_TYPE_UINT64,
+            mod.impl.ggml_c.GGUF_TYPE_INT64,
+            mod.impl.ggml_c.GGUF_TYPE_FLOAT64,
+            mod.impl.ggml_c.GGUF_TYPE_BOOL,
             => gguf_set_arr_data(ctx, kv.getKey().ptr, kv.getType(), @ptrCast(kv.data.items.ptr), ne),
-            mod.impl.c.GGUF_TYPE_STRING => {
+            mod.impl.ggml_c.GGUF_TYPE_STRING => {
                 var tmp: std.ArrayList([*:0]const u8) = .empty;
-                defer tmp.deinit(allocator);
-                tmp.resize(allocator, ne) catch oom();
+                defer tmp.deinit(std.heap.c_allocator);
+                tmp.resize(std.heap.c_allocator, ne) catch oom();
                 for (tmp.items, 0..) |*slot, j| slot.* = kv.data_string.items[j].ptr;
                 gguf_set_arr_str(ctx, kv.getKey().ptr, tmp.items.ptr, ne);
             },
@@ -1940,7 +1938,7 @@ export fn gguf_set_kv(ctx: ?*mod.impl.c.struct_gguf_context, src: ?*const mod.im
 ///
 /// The tensor struct is copied by value; only its shape, type, name and data
 /// pointer are used. Aborts on a duplicate name, as the C++ does.
-export fn gguf_add_tensor(ctx: ?*mod.impl.c.struct_gguf_context, tensor: ?*const mod.impl.c.ggml_tensor) callconv(.c) void {
+pub fn gguf_add_tensor(ctx: ?*mod.impl.ggml_c.struct_gguf_context, tensor: ?*const mod.impl.ggml_c.ggml_tensor) callconv(.c) void {
     mod.impl.assert(tensor != null, "tensor");
     if (gguf_find_tensor(@ptrCast(ctx), @ptrCast(&tensor.?.name)) != -1) {
         mod.impl.abort("duplicate tensor name");
@@ -1950,31 +1948,31 @@ export fn gguf_add_tensor(ctx: ?*mod.impl.c.struct_gguf_context, tensor: ?*const
     var ti: TensorInfo = .{ .t = tensor.?.*, .offset = 0 };
     ti.offset = if (self.info.items.len == 0) 0 else blk: {
         const back = &self.info.items[self.info.items.len - 1];
-        break :blk back.offset + stdlib.num.pad(usize, mod.impl.c.ggml_nbytes(&back.t), self.alignment);
+        break :blk back.offset + stdlib.num.pad(usize, mod.impl.ggml_c.ggml_nbytes(&back.t), self.alignment);
     };
-    self.info.append(allocator, ti) catch oom();
+    self.info.append(std.heap.c_allocator, ti) catch oom();
 }
 
 /// Ports `gguf_set_tensor_type` (gguf.cpp:1424 @b1b770d90).
 ///
 /// Recomputes this tensor's strides and then every later tensor's offset, so
 /// the data section stays one contiguous block.
-export fn gguf_set_tensor_type(ctx: ?*mod.impl.c.struct_gguf_context, name: [*:0]const u8, t: c_uint) callconv(.c) void {
+pub fn gguf_set_tensor_type(ctx: ?*mod.impl.ggml_c.struct_gguf_context, name: [*:0]const u8, t: c_uint) callconv(.c) void {
     const tensor_id = gguf_find_tensor(@ptrCast(ctx), name);
     if (tensor_id < 0) {
         mod.impl.abort("tensor not found");
     }
     const self = ctxOf(ctx);
     const tensor = &self.info.items[@intCast(tensor_id)].t;
-    const type_size = mod.impl.c.ggml_type_size(t);
-    const blck_size = mod.impl.c.ggml_blck_size(t);
+    const type_size = mod.impl.ggml_c.ggml_type_size(t);
+    const blck_size = mod.impl.ggml_c.ggml_blck_size(t);
 
     tensor.type = t;
     mod.impl.assert(@rem(tensor.ne[0], blck_size) == 0, "tensor row size not divisible by block size of new type");
 
     tensor.nb[0] = type_size;
     tensor.nb[1] = tensor.nb[0] * @as(usize, @intCast(@divTrunc(tensor.ne[0], blck_size)));
-    for (2..mod.impl.c.GGML_MAX_DIMS) |i| {
+    for (2..mod.impl.ggml_c.GGML_MAX_DIMS) |i| {
         tensor.nb[i] = tensor.nb[i - 1] * @as(usize, @intCast(tensor.ne[i - 1]));
     }
 
@@ -1983,7 +1981,7 @@ export fn gguf_set_tensor_type(ctx: ?*mod.impl.c.struct_gguf_context, name: [*:0
     var i: i64 = tensor_id + 1;
     while (i < n_tensors) : (i += 1) {
         const prev = &self.info.items[@intCast(i - 1)];
-        self.info.items[@intCast(i)].offset = prev.offset + stdlib.num.pad(usize, mod.impl.c.ggml_nbytes(&prev.t), self.alignment);
+        self.info.items[@intCast(i)].offset = prev.offset + stdlib.num.pad(usize, mod.impl.ggml_c.ggml_nbytes(&prev.t), self.alignment);
     }
 }
 
@@ -1991,7 +1989,7 @@ export fn gguf_set_tensor_type(ctx: ?*mod.impl.c.struct_gguf_context, name: [*:0
 ///
 /// Records where the tensor's bytes live; the context does not take ownership
 /// and does not copy.
-export fn gguf_set_tensor_data(ctx: ?*mod.impl.c.struct_gguf_context, name: [*:0]const u8, data: ?*const anyopaque) callconv(.c) void {
+pub fn gguf_set_tensor_data(ctx: ?*mod.impl.ggml_c.struct_gguf_context, name: [*:0]const u8, data: ?*const anyopaque) callconv(.c) void {
     const tensor_id = gguf_find_tensor(@ptrCast(ctx), name);
     if (tensor_id < 0) {
         mod.impl.abort("tensor not found");
@@ -2091,7 +2089,7 @@ fn Writer(comptime Impl: type) type {
             try self.writeStr(kv.getKey());
 
             if (kv.is_array) {
-                try self.writeEnum(mod.impl.c.GGUF_TYPE_ARRAY);
+                try self.writeEnum(mod.impl.ggml_c.GGUF_TYPE_ARRAY);
                 try self.writeEnum(kv.getType());
                 try self.write(ne);
             } else {
@@ -2099,21 +2097,21 @@ fn Writer(comptime Impl: type) type {
             }
 
             switch (kv.getType()) {
-                mod.impl.c.GGUF_TYPE_UINT8,
-                mod.impl.c.GGUF_TYPE_INT8,
-                mod.impl.c.GGUF_TYPE_UINT16,
-                mod.impl.c.GGUF_TYPE_INT16,
-                mod.impl.c.GGUF_TYPE_UINT32,
-                mod.impl.c.GGUF_TYPE_INT32,
-                mod.impl.c.GGUF_TYPE_FLOAT32,
-                mod.impl.c.GGUF_TYPE_UINT64,
-                mod.impl.c.GGUF_TYPE_INT64,
-                mod.impl.c.GGUF_TYPE_FLOAT64,
+                mod.impl.ggml_c.GGUF_TYPE_UINT8,
+                mod.impl.ggml_c.GGUF_TYPE_INT8,
+                mod.impl.ggml_c.GGUF_TYPE_UINT16,
+                mod.impl.ggml_c.GGUF_TYPE_INT16,
+                mod.impl.ggml_c.GGUF_TYPE_UINT32,
+                mod.impl.ggml_c.GGUF_TYPE_INT32,
+                mod.impl.ggml_c.GGUF_TYPE_FLOAT32,
+                mod.impl.ggml_c.GGUF_TYPE_UINT64,
+                mod.impl.ggml_c.GGUF_TYPE_INT64,
+                mod.impl.ggml_c.GGUF_TYPE_FLOAT64,
                 => try self.writeBytes(kv.data.items),
-                mod.impl.c.GGUF_TYPE_BOOL => {
+                mod.impl.ggml_c.GGUF_TYPE_BOOL => {
                     for (0..ne) |i| try self.writeBool(kv.getVal(bool, i));
                 },
-                mod.impl.c.GGUF_TYPE_STRING => {
+                mod.impl.ggml_c.GGUF_TYPE_STRING => {
                     for (0..ne) |i| try self.writeStr(kv.getValStr(i));
                 },
                 else => mod.impl.abort("invalid type"),
@@ -2129,7 +2127,7 @@ fn Writer(comptime Impl: type) type {
             const name: [*:0]const u8 = @ptrCast(&info.t.name);
             try self.writeStr(std.mem.span(name));
 
-            const n_dims: u32 = @intCast(mod.impl.c.ggml_n_dims(&info.t));
+            const n_dims: u32 = @intCast(mod.impl.ggml_c.ggml_n_dims(&info.t));
             try self.write(n_dims);
 
             for (0..n_dims) |j| {
@@ -2166,18 +2164,18 @@ const BufWriter = struct {
 
     /// Ports `gguf_writer_buf`'s `int8_t` `write` (gguf.cpp:1573 @b1b770d90).
     fn writeByte(self: *BufWriter, val: u8) WriteError!void {
-        self.buf.append(allocator, val) catch oom();
+        self.buf.append(std.heap.c_allocator, val) catch oom();
     }
 
     /// Ports `gguf_writer_buf`'s `std::vector<int8_t>` `write`
     /// (gguf.cpp:1578 @b1b770d90).
     fn writeBytes(self: *BufWriter, val: []const u8) WriteError!void {
-        self.buf.appendSlice(allocator, val) catch oom();
+        self.buf.appendSlice(std.heap.c_allocator, val) catch oom();
     }
 
     /// Ports `gguf_writer_buf`'s `const void *` `write` (gguf.cpp:1583 @b1b770d90).
     fn writeData(self: *BufWriter, data: [*]const u8, size: usize) WriteError!void {
-        self.buf.appendSlice(allocator, data[0..size]) catch oom();
+        self.buf.appendSlice(std.heap.c_allocator, data[0..size]) catch oom();
     }
 
     /// Ports `gguf_writer_buf`'s `write_tensor_data` (gguf.cpp:1588 @b1b770d90).
@@ -2196,17 +2194,17 @@ const BufWriter = struct {
         _ = alignment;
         mod.impl.assert(self.buf.items.len - offset_data == info.offset, "buf.size() - offset_data == info.offset");
 
-        mod.impl.assert(mod.impl.c.ggml_is_contiguous(&info.t), "ggml_is_contiguous(&info.t)");
-        const nbytes = mod.impl.c.ggml_nbytes(&info.t);
+        mod.impl.assert(mod.impl.ggml_c.ggml_is_contiguous(&info.t), "ggml_is_contiguous(&info.t)");
+        const nbytes = mod.impl.ggml_c.ggml_nbytes(&info.t);
 
-        if (info.t.buffer != null and mod.impl.c.ggml_backend_buffer_is_host(info.t.buffer)) {
+        if (info.t.buffer != null and mod.impl.ggml_c.ggml_backend_buffer_is_host(info.t.buffer)) {
             mod.impl.assert(info.t.data != null, "info.t.data != NULL && \"tensor not allocated\"");
             try w.writeData(@ptrCast(info.t.data), nbytes);
         } else {
             const offset = self.buf.items.len;
-            self.buf.resize(allocator, offset + nbytes) catch oom();
+            self.buf.resize(std.heap.c_allocator, offset + nbytes) catch oom();
             if (info.t.buffer != null) {
-                mod.impl.c.ggml_backend_tensor_get(&info.t, @ptrCast(self.buf.items[offset..].ptr), 0, nbytes);
+                mod.impl.ggml_c.ggml_backend_tensor_get(&info.t, @ptrCast(self.buf.items[offset..].ptr), 0, nbytes);
             } else {
                 mod.impl.assert(info.t.data != null, "info.t.data");
                 @memcpy(self.buf.items[offset..][0..nbytes], @as([*]const u8, @ptrCast(info.t.data))[0..nbytes]);
@@ -2218,7 +2216,7 @@ const BufWriter = struct {
 
 /// Ports `struct gguf_writer_file` (gguf.cpp:1614 @b1b770d90).
 const FileWriter = struct {
-    file: *mod.impl.c.FILE,
+    file: *mod.impl.ggml_c.FILE,
 
     /// Ports `gguf_writer_file`'s `int8_t` `write` (gguf.cpp:1621 @b1b770d90).
     ///
@@ -2279,18 +2277,18 @@ const FileWriter = struct {
         _ = alignment;
         mod.impl.assert(w.written_bytes - offset_data == info.offset, "written_bytes - offset_data == info.offset");
 
-        mod.impl.assert(mod.impl.c.ggml_is_contiguous(&info.t), "ggml_is_contiguous(&info.t)");
-        const nbytes = mod.impl.c.ggml_nbytes(&info.t);
+        mod.impl.assert(mod.impl.ggml_c.ggml_is_contiguous(&info.t), "ggml_is_contiguous(&info.t)");
+        const nbytes = mod.impl.ggml_c.ggml_nbytes(&info.t);
 
-        if (info.t.buffer != null and mod.impl.c.ggml_backend_buffer_is_host(info.t.buffer)) {
+        if (info.t.buffer != null and mod.impl.ggml_c.ggml_backend_buffer_is_host(info.t.buffer)) {
             mod.impl.assert(info.t.data != null, "info.t.data != NULL && \"tensor not allocated\"");
             try w.writeData(@ptrCast(info.t.data), nbytes);
         } else {
             var buf: std.ArrayList(u8) = .empty;
-            defer buf.deinit(allocator);
-            buf.resize(allocator, nbytes) catch oom();
+            defer buf.deinit(std.heap.c_allocator);
+            buf.resize(std.heap.c_allocator, nbytes) catch oom();
             if (info.t.buffer != null) {
-                mod.impl.c.ggml_backend_tensor_get(&info.t, @ptrCast(buf.items.ptr), 0, nbytes);
+                mod.impl.ggml_c.ggml_backend_tensor_get(&info.t, @ptrCast(buf.items.ptr), 0, nbytes);
             } else {
                 mod.impl.assert(info.t.data != null, "info.t.data");
                 @memcpy(buf.items, @as([*]const u8, @ptrCast(info.t.data))[0..nbytes]);
@@ -2311,10 +2309,10 @@ fn writeOut(ctx: *const Context, gw: anytype, only_meta: bool) WriteError!void {
     const n_tensors = ctx.info.items.len;
 
     // write header
-    try gw.write(@as(u8, mod.impl.c.GGUF_MAGIC[0]));
-    try gw.write(@as(u8, mod.impl.c.GGUF_MAGIC[1]));
-    try gw.write(@as(u8, mod.impl.c.GGUF_MAGIC[2]));
-    try gw.write(@as(u8, mod.impl.c.GGUF_MAGIC[3]));
+    try gw.write(@as(u8, mod.impl.ggml_c.GGUF_MAGIC[0]));
+    try gw.write(@as(u8, mod.impl.ggml_c.GGUF_MAGIC[1]));
+    try gw.write(@as(u8, mod.impl.ggml_c.GGUF_MAGIC[2]));
+    try gw.write(@as(u8, mod.impl.ggml_c.GGUF_MAGIC[3]));
     try gw.write(ctx.version);
     try gw.write(@as(i64, @intCast(n_tensors)));
     try gw.write(@as(i64, @intCast(n_kv)));
@@ -2358,7 +2356,7 @@ fn writeToBuf(ctx: *const Context, buf: *std.ArrayList(u8), only_meta: bool) voi
 ///
 /// Return: true on success. The C++'s `catch (const std::runtime_error &)` is
 /// this `catch`; the message it logged is emitted at the failing write.
-export fn gguf_write_to_file_ptr(ctx: ?*const mod.impl.c.struct_gguf_context, file: ?*mod.impl.c.FILE, only_meta: bool) callconv(.c) bool {
+pub fn gguf_write_to_file_ptr(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, file: ?*mod.impl.ggml_c.FILE, only_meta: bool) callconv(.c) bool {
     mod.impl.assert(file != null, "file");
 
     const backing: FileWriter = .{ .file = file.? };
@@ -2370,8 +2368,8 @@ export fn gguf_write_to_file_ptr(ctx: ?*const mod.impl.c.struct_gguf_context, fi
 /// Ports `gguf_write_to_file` (gguf.cpp:1727 @b1b770d90).
 ///
 /// Return: true on success. The file is closed either way.
-export fn gguf_write_to_file(ctx: ?*const mod.impl.c.struct_gguf_context, fname: [*:0]const u8, only_meta: bool) callconv(.c) bool {
-    const file = mod.impl.c.ggml_fopen(fname, "wb") orelse {
+pub fn gguf_write_to_file(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, fname: [*:0]const u8, only_meta: bool) callconv(.c) bool {
+    const file = mod.impl.ggml_c.ggml_fopen(fname, "wb") orelse {
         mod.impl.logError(
             "%s: failed to open file '%s' for writing GGUF data\n",
             .{ "gguf_write_to_file", fname },
@@ -2392,10 +2390,10 @@ export fn gguf_write_to_file(ctx: ?*const mod.impl.c.struct_gguf_context, fname:
 ///
 /// Return: the byte length of the metadata section, padding included. Computed
 /// by serialising it and measuring, as the C++ does.
-export fn gguf_get_meta_size(ctx: ?*const mod.impl.c.struct_gguf_context) callconv(.c) usize {
+pub fn gguf_get_meta_size(ctx: ?*const mod.impl.ggml_c.struct_gguf_context) callconv(.c) usize {
     // only return size
     var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(allocator);
+    defer buf.deinit(std.heap.c_allocator);
     writeToBuf(ctxOfConst(ctx), &buf, true);
     return buf.items.len;
 }
@@ -2404,9 +2402,9 @@ export fn gguf_get_meta_size(ctx: ?*const mod.impl.c.struct_gguf_context) callco
 ///
 /// Parameters:
 /// - `data`: at least `gguf_get_meta_size` bytes, written in full.
-export fn gguf_get_meta_data(ctx: ?*const mod.impl.c.struct_gguf_context, data: ?*anyopaque) callconv(.c) void {
+pub fn gguf_get_meta_data(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, data: ?*anyopaque) callconv(.c) void {
     var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(allocator);
+    defer buf.deinit(std.heap.c_allocator);
     writeToBuf(ctxOfConst(ctx), &buf, true);
     @memcpy(@as([*]u8, @ptrCast(data.?))[0..buf.items.len], buf.items);
 }
@@ -2425,27 +2423,27 @@ test {
 }
 
 test "type sizes and names match the C's two tables" {
-    try std.testing.expectEqual(@as(usize, 1), typeSize(mod.impl.c.GGUF_TYPE_UINT8));
-    try std.testing.expectEqual(@as(usize, 1), typeSize(mod.impl.c.GGUF_TYPE_INT8));
-    try std.testing.expectEqual(@as(usize, 2), typeSize(mod.impl.c.GGUF_TYPE_UINT16));
-    try std.testing.expectEqual(@as(usize, 4), typeSize(mod.impl.c.GGUF_TYPE_FLOAT32));
-    try std.testing.expectEqual(@as(usize, 8), typeSize(mod.impl.c.GGUF_TYPE_FLOAT64));
+    try std.testing.expectEqual(@as(usize, 1), typeSize(mod.impl.ggml_c.GGUF_TYPE_UINT8));
+    try std.testing.expectEqual(@as(usize, 1), typeSize(mod.impl.ggml_c.GGUF_TYPE_INT8));
+    try std.testing.expectEqual(@as(usize, 2), typeSize(mod.impl.ggml_c.GGUF_TYPE_UINT16));
+    try std.testing.expectEqual(@as(usize, 4), typeSize(mod.impl.ggml_c.GGUF_TYPE_FLOAT32));
+    try std.testing.expectEqual(@as(usize, 8), typeSize(mod.impl.ggml_c.GGUF_TYPE_FLOAT64));
     // The C++ map gives these entries 0 and comments them "undefined".
-    try std.testing.expectEqual(@as(usize, 0), typeSize(mod.impl.c.GGUF_TYPE_STRING));
-    try std.testing.expectEqual(@as(usize, 0), typeSize(mod.impl.c.GGUF_TYPE_ARRAY));
+    try std.testing.expectEqual(@as(usize, 0), typeSize(mod.impl.ggml_c.GGUF_TYPE_STRING));
+    try std.testing.expectEqual(@as(usize, 0), typeSize(mod.impl.ggml_c.GGUF_TYPE_ARRAY));
     // The `it == end` arm.
     try std.testing.expectEqual(@as(usize, 0), typeSize(999));
 
-    try std.testing.expectEqualStrings("u8", std.mem.span(gguf_type_name(mod.impl.c.GGUF_TYPE_UINT8).?));
-    try std.testing.expectEqualStrings("f32", std.mem.span(gguf_type_name(mod.impl.c.GGUF_TYPE_FLOAT32).?));
-    try std.testing.expectEqualStrings("arr", std.mem.span(gguf_type_name(mod.impl.c.GGUF_TYPE_ARRAY).?));
-    try std.testing.expectEqualStrings("f64", std.mem.span(gguf_type_name(mod.impl.c.GGUF_TYPE_FLOAT64).?));
+    try std.testing.expectEqualStrings("u8", std.mem.span(gguf_type_name(mod.impl.ggml_c.GGUF_TYPE_UINT8).?));
+    try std.testing.expectEqualStrings("f32", std.mem.span(gguf_type_name(mod.impl.ggml_c.GGUF_TYPE_FLOAT32).?));
+    try std.testing.expectEqualStrings("arr", std.mem.span(gguf_type_name(mod.impl.ggml_c.GGUF_TYPE_ARRAY).?));
+    try std.testing.expectEqualStrings("f64", std.mem.span(gguf_type_name(mod.impl.ggml_c.GGUF_TYPE_FLOAT64).?));
     try std.testing.expect(gguf_type_name(999) == null);
 }
 
 /// Serialises `ctx` the way `gguf_get_meta_data` does and hands back the bytes.
 /// The caller frees them.
-fn metaBytes(ctx: ?*const mod.impl.c.struct_gguf_context) ![]u8 {
+fn metaBytes(ctx: ?*const mod.impl.ggml_c.struct_gguf_context) ![]u8 {
     const n = gguf_get_meta_size(ctx);
     const buf = try std.testing.allocator.alloc(u8, n);
     gguf_get_meta_data(ctx, buf.ptr);
@@ -2478,7 +2476,7 @@ test "every scalar type round-trips through write and read" {
     defer gguf_free(back);
 
     try std.testing.expectEqual(gguf_get_n_kv(ctx), gguf_get_n_kv(back));
-    try std.testing.expectEqual(@as(u32, mod.impl.c.GGUF_VERSION), gguf_get_version(back));
+    try std.testing.expectEqual(@as(u32, mod.impl.ggml_c.GGUF_VERSION), gguf_get_version(back));
 
     try std.testing.expectEqual(@as(u8, 0xAB), gguf_get_val_u8(back, gguf_find_key(back, "k.u8")));
     try std.testing.expectEqual(@as(i8, -7), gguf_get_val_i8(back, gguf_find_key(back, "k.i8")));
@@ -2511,13 +2509,13 @@ test "arrays round-trip, and a bool array stays one byte per element" {
     defer gguf_free(ctx);
 
     const i32s = [_]i32{ 1, -2, 3, -4, 5 };
-    gguf_set_arr_data(ctx, "a.i32", mod.impl.c.GGUF_TYPE_INT32, &i32s, i32s.len);
+    gguf_set_arr_data(ctx, "a.i32", mod.impl.ggml_c.GGUF_TYPE_INT32, &i32s, i32s.len);
 
     const f32s = [_]f32{ 0.5, 0.25, 0.125 };
-    gguf_set_arr_data(ctx, "a.f32", mod.impl.c.GGUF_TYPE_FLOAT32, &f32s, f32s.len);
+    gguf_set_arr_data(ctx, "a.f32", mod.impl.ggml_c.GGUF_TYPE_FLOAT32, &f32s, f32s.len);
 
     const bools = [_]i8{ 1, 0, 1, 1 };
-    gguf_set_arr_data(ctx, "a.bool", mod.impl.c.GGUF_TYPE_BOOL, &bools, bools.len);
+    gguf_set_arr_data(ctx, "a.bool", mod.impl.ggml_c.GGUF_TYPE_BOOL, &bools, bools.len);
 
     const strs = [_][*:0]const u8{ "alpha", "beta", "" };
     gguf_set_arr_str(ctx, "a.str", &strs, strs.len);
@@ -2531,8 +2529,8 @@ test "arrays round-trip, and a bool array stays one byte per element" {
 
     {
         const id = gguf_find_key(back, "a.i32");
-        try std.testing.expectEqual(@as(c_uint, mod.impl.c.GGUF_TYPE_ARRAY), gguf_get_kv_type(back, id));
-        try std.testing.expectEqual(@as(c_uint, mod.impl.c.GGUF_TYPE_INT32), gguf_get_arr_type(back, id));
+        try std.testing.expectEqual(@as(c_uint, mod.impl.ggml_c.GGUF_TYPE_ARRAY), gguf_get_kv_type(back, id));
+        try std.testing.expectEqual(@as(c_uint, mod.impl.ggml_c.GGUF_TYPE_INT32), gguf_get_arr_type(back, id));
         try std.testing.expectEqual(@as(usize, i32s.len), gguf_get_arr_n(back, id));
         const got: [*]const i32 = @ptrCast(@alignCast(gguf_get_arr_data(back, id).?));
         try std.testing.expectEqualSlices(i32, &i32s, got[0..i32s.len]);
@@ -2545,14 +2543,14 @@ test "arrays round-trip, and a bool array stays one byte per element" {
     {
         // The header promises bool arrays are stored as int8 on all platforms.
         const id = gguf_find_key(back, "a.bool");
-        try std.testing.expectEqual(@as(c_uint, mod.impl.c.GGUF_TYPE_BOOL), gguf_get_arr_type(back, id));
+        try std.testing.expectEqual(@as(c_uint, mod.impl.ggml_c.GGUF_TYPE_BOOL), gguf_get_arr_type(back, id));
         try std.testing.expectEqual(@as(usize, bools.len), gguf_get_arr_n(back, id));
         const got: [*]const i8 = @ptrCast(gguf_get_arr_data(back, id).?);
         try std.testing.expectEqualSlices(i8, &bools, got[0..bools.len]);
     }
     {
         const id = gguf_find_key(back, "a.str");
-        try std.testing.expectEqual(@as(c_uint, mod.impl.c.GGUF_TYPE_STRING), gguf_get_arr_type(back, id));
+        try std.testing.expectEqual(@as(c_uint, mod.impl.ggml_c.GGUF_TYPE_STRING), gguf_get_arr_type(back, id));
         try std.testing.expectEqual(@as(usize, strs.len), gguf_get_arr_n(back, id));
         try std.testing.expectEqualStrings("alpha", std.mem.span(gguf_get_arr_str(back, id, 0)));
         try std.testing.expectEqualStrings("beta", std.mem.span(gguf_get_arr_str(back, id, 1)));
@@ -2563,17 +2561,17 @@ test "arrays round-trip, and a bool array stays one byte per element" {
 }
 
 test "tensor metadata round-trips with shape, type and offset" {
-    const gctx = mod.impl.c.ggml_init(.{ .mem_size = 16 * 1024 * 1024, .mem_buffer = null, .no_alloc = true });
-    defer mod.impl.c.ggml_free(gctx);
+    const gctx = mod.impl.ggml_c.ggml_init(.{ .mem_size = 16 * 1024 * 1024, .mem_buffer = null, .no_alloc = true });
+    defer mod.impl.ggml_c.ggml_free(gctx);
 
     // 5 f32 is 20 bytes, which the default 32-byte alignment has to round up.
     // A shape whose size is already a multiple of the alignment would let an
     // unpadded offset calculation pass -- measured: with 8x4 f32 (128 bytes,
     // pad(128, 32) == 128) dropping the `GGML_PAD` here changes nothing.
-    const a = mod.impl.c.ggml_new_tensor_1d(gctx, mod.impl.c.GGML_TYPE_F32, 5);
-    _ = mod.impl.c.ggml_set_name(a, "weight.a");
-    const b = mod.impl.c.ggml_new_tensor_1d(gctx, mod.impl.c.GGML_TYPE_F16, 16);
-    _ = mod.impl.c.ggml_set_name(b, "bias.b");
+    const a = mod.impl.ggml_c.ggml_new_tensor_1d(gctx, mod.impl.ggml_c.GGML_TYPE_F32, 5);
+    _ = mod.impl.ggml_c.ggml_set_name(a, "weight.a");
+    const b = mod.impl.ggml_c.ggml_new_tensor_1d(gctx, mod.impl.ggml_c.GGML_TYPE_F16, 16);
+    _ = mod.impl.ggml_c.ggml_set_name(b, "bias.b");
 
     const ctx = gguf_init_empty().?;
     defer gguf_free(ctx);
@@ -2582,10 +2580,10 @@ test "tensor metadata round-trips with shape, type and offset" {
 
     // The second tensor starts after the first, padded to the alignment.
     try std.testing.expectEqual(@as(usize, 0), gguf_get_tensor_offset(ctx, 0));
-    try std.testing.expectEqual(@as(usize, 20), mod.impl.c.ggml_nbytes(a));
+    try std.testing.expectEqual(@as(usize, 20), mod.impl.ggml_c.ggml_nbytes(a));
     try std.testing.expectEqual(@as(usize, 32), gguf_get_tensor_offset(ctx, 1));
     try std.testing.expectEqual(
-        stdlib.num.pad(usize, mod.impl.c.ggml_nbytes(a), gguf_get_alignment(ctx)),
+        stdlib.num.pad(usize, mod.impl.ggml_c.ggml_nbytes(a), gguf_get_alignment(ctx)),
         gguf_get_tensor_offset(ctx, 1),
     );
 
@@ -2600,17 +2598,17 @@ test "tensor metadata round-trips with shape, type and offset" {
 
     const ia = gguf_find_tensor(back, "weight.a");
     try std.testing.expectEqual(@as(i64, 0), ia);
-    try std.testing.expectEqual(@as(c_uint, mod.impl.c.GGML_TYPE_F32), gguf_get_tensor_type(back, ia));
+    try std.testing.expectEqual(@as(c_uint, mod.impl.ggml_c.GGML_TYPE_F32), gguf_get_tensor_type(back, ia));
     const ne = gguf_get_tensor_ne(back, ia);
     try std.testing.expectEqual(@as(i64, 5), ne[0]);
     // Trailing extents are not written; the reader fills them back in as 1.
     try std.testing.expectEqual(@as(i64, 1), ne[1]);
     try std.testing.expectEqual(@as(i64, 1), ne[2]);
     try std.testing.expectEqual(@as(i64, 1), ne[3]);
-    try std.testing.expectEqual(mod.impl.c.ggml_nbytes(a), gguf_get_tensor_size(back, ia));
+    try std.testing.expectEqual(mod.impl.ggml_c.ggml_nbytes(a), gguf_get_tensor_size(back, ia));
 
     const ib = gguf_find_tensor(back, "bias.b");
-    try std.testing.expectEqual(@as(c_uint, mod.impl.c.GGML_TYPE_F16), gguf_get_tensor_type(back, ib));
+    try std.testing.expectEqual(@as(c_uint, mod.impl.ggml_c.GGML_TYPE_F16), gguf_get_tensor_type(back, ib));
     try std.testing.expectEqual(gguf_get_tensor_offset(ctx, 1), gguf_get_tensor_offset(back, ib));
 
     try std.testing.expectEqual(@as(i64, -1), gguf_find_tensor(back, "nope"));
@@ -2621,10 +2619,10 @@ test "a GGUF that starts mid-file aligns its data section to its own start" {
     // `gguf_init_from_reader` pads the data section relative to that
     // start, not to the file; a prefix whose length is not a multiple of the
     // alignment is what tells the two apart.
-    const gctx = mod.impl.c.ggml_init(.{ .mem_size = 1024 * 1024, .mem_buffer = null, .no_alloc = true });
-    defer mod.impl.c.ggml_free(gctx);
-    const a = mod.impl.c.ggml_new_tensor_1d(gctx, mod.impl.c.GGML_TYPE_F32, 5);
-    _ = mod.impl.c.ggml_set_name(a, "weight.a");
+    const gctx = mod.impl.ggml_c.ggml_init(.{ .mem_size = 1024 * 1024, .mem_buffer = null, .no_alloc = true });
+    defer mod.impl.ggml_c.ggml_free(gctx);
+    const a = mod.impl.ggml_c.ggml_new_tensor_1d(gctx, mod.impl.ggml_c.GGML_TYPE_F32, 5);
+    _ = mod.impl.ggml_c.ggml_set_name(a, "weight.a");
 
     const ctx = gguf_init_empty().?;
     defer gguf_free(ctx);
@@ -2654,7 +2652,7 @@ test "a GGUF that starts mid-file aligns its data section to its own start" {
 }
 
 test "a malformed buffer is rejected rather than parsed" {
-    const params: mod.impl.c.gguf_init_params = .{ .no_alloc = true, .ctx = null };
+    const params: mod.impl.ggml_c.gguf_init_params = .{ .no_alloc = true, .ctx = null };
 
     try std.testing.expect(gguf_init_from_buffer(null, 0, params) == null);
 
@@ -2740,7 +2738,7 @@ test "gguf_set_kv copies every key from another context" {
     gguf_set_val_i32(src, "s.i32", -42);
     gguf_set_val_str(src, "s.str", "copied");
     const arr = [_]u16{ 7, 8, 9 };
-    gguf_set_arr_data(src, "s.arr", mod.impl.c.GGUF_TYPE_UINT16, &arr, arr.len);
+    gguf_set_arr_data(src, "s.arr", mod.impl.ggml_c.GGUF_TYPE_UINT16, &arr, arr.len);
     const strs = [_][*:0]const u8{ "x", "y" };
     gguf_set_arr_str(src, "s.strs", &strs, strs.len);
 
@@ -2765,9 +2763,9 @@ test "general.alignment is honoured and validated" {
     const ctx = gguf_init_empty().?;
     defer gguf_free(ctx);
 
-    try std.testing.expectEqual(@as(usize, mod.impl.c.GGUF_DEFAULT_ALIGNMENT), gguf_get_alignment(ctx));
+    try std.testing.expectEqual(@as(usize, mod.impl.ggml_c.GGUF_DEFAULT_ALIGNMENT), gguf_get_alignment(ctx));
 
-    gguf_set_val_u32(ctx, mod.impl.c.GGUF_KEY_GENERAL_ALIGNMENT, 64);
+    gguf_set_val_u32(ctx, mod.impl.ggml_c.GGUF_KEY_GENERAL_ALIGNMENT, 64);
     const bytes = try metaBytes(ctx);
     defer std.testing.allocator.free(bytes);
 
@@ -2847,7 +2845,7 @@ const RawGguf = struct {
     }
     fn kvU32(self: *RawGguf, key: []const u8, v: u32) !void {
         try self.str(key);
-        try self.int(u32, mod.impl.c.GGUF_TYPE_UINT32);
+        try self.int(u32, mod.impl.ggml_c.GGUF_TYPE_UINT32);
         try self.int(u32, v);
     }
     fn tensor(self: *RawGguf, name: []const u8, ne: []const i64, t: u32, offset: u64) !void {
@@ -2859,7 +2857,7 @@ const RawGguf = struct {
     }
     /// Pads to the default alignment, where the data section would start.
     fn pad(self: *RawGguf) !void {
-        while (self.buf.items.len % mod.impl.c.GGUF_DEFAULT_ALIGNMENT != 0) try self.buf.append(std.testing.allocator, 0);
+        while (self.buf.items.len % mod.impl.ggml_c.GGUF_DEFAULT_ALIGNMENT != 0) try self.buf.append(std.testing.allocator, 0);
     }
     fn parses(self: *RawGguf) bool {
         const ctx = gguf_init_from_buffer(self.buf.items.ptr, self.buf.items.len, .{ .no_alloc = true, .ctx = null }) orelse return false;
@@ -2872,9 +2870,9 @@ const RawGguf = struct {
 var captured_log: [512]u8 = undefined;
 var captured_len: usize = 0;
 
-fn captureLog(level: mod.impl.c.enum_ggml_log_level, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
+fn captureLog(level: mod.impl.ggml_c.enum_ggml_log_level, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
     _ = user_data;
-    if (level != mod.impl.c.GGML_LOG_LEVEL_ERROR) return;
+    if (level != mod.impl.ggml_c.GGML_LOG_LEVEL_ERROR) return;
     const s = std.mem.span(text);
     if (std.mem.indexOf(u8, s, "failed to read") != null) return; // the generic trailer
     captured_len = @min(s.len, captured_log.len);
@@ -2883,8 +2881,8 @@ fn captureLog(level: mod.impl.c.enum_ggml_log_level, text: [*c]const u8, user_da
 
 fn expectRejected(raw: *RawGguf, message: []const u8) !void {
     captured_len = 0;
-    mod.impl.c.ggml_log_set(captureLog, null);
-    defer mod.impl.c.ggml_log_set(null, null);
+    mod.impl.ggml_c.ggml_log_set(captureLog, null);
+    defer mod.impl.ggml_c.ggml_log_set(null, null);
     try std.testing.expect(!raw.parses());
     try std.testing.expectEqualStrings(message, captured_log[0..captured_len]);
 }
@@ -2915,9 +2913,9 @@ test "a duplicate tensor name is rejected with upstream's message" {
     var raw: RawGguf = .{};
     defer raw.deinit();
     try raw.header(3, 0);
-    try raw.tensor("u", &.{8}, mod.impl.c.GGML_TYPE_F32, 0);
-    try raw.tensor("t", &.{8}, mod.impl.c.GGML_TYPE_F32, 32);
-    try raw.tensor("t", &.{8}, mod.impl.c.GGML_TYPE_F32, 64);
+    try raw.tensor("u", &.{8}, mod.impl.ggml_c.GGML_TYPE_F32, 0);
+    try raw.tensor("t", &.{8}, mod.impl.ggml_c.GGML_TYPE_F32, 32);
+    try raw.tensor("t", &.{8}, mod.impl.ggml_c.GGML_TYPE_F32, 64);
     try expectRejected(&raw, "gguf_init_from_reader: duplicate tensor name 't' for tensor 2\n");
 }
 
@@ -2926,7 +2924,7 @@ test "a shape whose element count overflows int64 is rejected" {
         var raw: RawGguf = .{};
         defer raw.deinit();
         try raw.header(1, 0);
-        try raw.tensor("big", &.{ 1 << 32, 1 << 31 }, mod.impl.c.GGML_TYPE_I8, 0);
+        try raw.tensor("big", &.{ 1 << 32, 1 << 31 }, mod.impl.ggml_c.GGML_TYPE_I8, 0);
         try expectRejected(&raw, "gguf_init_from_reader: incorrect shape for a tensor 'big' may cause overflow errors: (4294967296, 2147483648, 1, 1) is >= INT64_MAX (9223372036854775807)\n");
     }
     {
@@ -2934,7 +2932,7 @@ test "a shape whose element count overflows int64 is rejected" {
         var raw: RawGguf = .{};
         defer raw.deinit();
         try raw.header(1, 0);
-        try raw.tensor("big", &.{ 4, 1 << 20, 1, 1 << 41 }, mod.impl.c.GGML_TYPE_I8, 0);
+        try raw.tensor("big", &.{ 4, 1 << 20, 1, 1 << 41 }, mod.impl.ggml_c.GGML_TYPE_I8, 0);
         try expectRejected(&raw, "gguf_init_from_reader: incorrect shape for a tensor 'big' may cause overflow errors: (4, 1048576, 1, 2199023255552) is >= INT64_MAX (9223372036854775807)\n");
     }
     {
@@ -2942,7 +2940,7 @@ test "a shape whose element count overflows int64 is rejected" {
         var raw: RawGguf = .{};
         defer raw.deinit();
         try raw.header(1, 0);
-        try raw.tensor("empty", &.{ 3, 0, 1 << 62 }, mod.impl.c.GGML_TYPE_I8, 0);
+        try raw.tensor("empty", &.{ 3, 0, 1 << 62 }, mod.impl.ggml_c.GGML_TYPE_I8, 0);
         try raw.pad();
         try std.testing.expect(raw.parses());
     }
@@ -2953,7 +2951,7 @@ test "a tensor whose padded size wraps is rejected" {
     var raw: RawGguf = .{};
     defer raw.deinit();
     try raw.header(1, 0);
-    try raw.tensor("huge", &.{(1 << 62) - 1}, mod.impl.c.GGML_TYPE_F32, 0);
+    try raw.tensor("huge", &.{(1 << 62) - 1}, mod.impl.ggml_c.GGML_TYPE_F32, 0);
     try raw.pad();
     try expectRejected(&raw, "gguf_init_from_reader: tensor 'huge' size 18446744073709551612 overflows after padding (alignment 32)\n");
 }

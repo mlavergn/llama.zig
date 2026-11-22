@@ -135,11 +135,11 @@ fn quantizeMatQ8K(comptime blck_size_interleave: i32, x: [*]const f32, vy: *anyo
     }
 }
 
-pub export fn ggml_quantize_mat_q8_0_4x4_generic(x: [*]const f32, vy: *anyopaque, k: i64) callconv(.c) void {
+pub fn ggml_quantize_mat_q8_0_4x4_generic(x: [*]const f32, vy: *anyopaque, k: i64) callconv(.c) void {
     quantizeMatQ80(4, x, vy, k);
 }
 
-pub export fn ggml_quantize_mat_q8_0_4x8_generic(x: [*]const f32, vy: *anyopaque, k: i64) callconv(.c) void {
+pub fn ggml_quantize_mat_q8_0_4x8_generic(x: [*]const f32, vy: *anyopaque, k: i64) callconv(.c) void {
     quantizeMatQ80(8, x, vy, k);
 }
 

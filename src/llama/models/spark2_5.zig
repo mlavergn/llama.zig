@@ -85,7 +85,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/spark2-5.cpp", 59, "n_embd_head == hparams.n_embd_head_k()");
     llama.impl.assert(hp.swa_type == @backingInt(llama.hparams.SwaType.standard), "models/spark2-5.cpp", 60, "hparams.swa_type == LLAMA_SWA_TYPE_STANDARD");
 
-    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.llama_c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
     const inp_pos = b.buildInpPos();
     const inp_attn = b.buildAttnInpKvIswa();
     const inp_out_ids = b.buildInpOutIds();
@@ -118,15 +118,15 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         b.cb(cur, "attn_out", il);
 
         // The head-wise gate, from the attention input.
-        var gate: *llama.impl.c.ggml_tensor = b.buildLoraMm(layer.wqkv_gate.?, attn_inp, null);
-        gate = llama.impl.c.ggml_sigmoid(ctx, gate);
+        var gate: *llama.impl.llama_c.ggml_tensor = b.buildLoraMm(layer.wqkv_gate.?, attn_inp, null);
+        gate = llama.impl.llama_c.ggml_sigmoid(ctx, gate);
         b.cb(gate, "attn_gate", il);
 
         const n_tokens_i = cur.ne[1];
-        cur = llama.impl.c.ggml_reshape_3d(ctx, cur, n_embd_head, n_head_i, n_tokens_i);
-        gate = llama.impl.c.ggml_reshape_3d(ctx, gate, 1, n_head_i, n_tokens_i);
-        cur = llama.impl.c.ggml_mul(ctx, cur, gate);
-        cur = llama.impl.c.ggml_reshape_2d(ctx, cur, n_embd_head * n_head_i, n_tokens_i);
+        cur = llama.impl.llama_c.ggml_reshape_3d(ctx, cur, n_embd_head, n_head_i, n_tokens_i);
+        gate = llama.impl.llama_c.ggml_reshape_3d(ctx, gate, 1, n_head_i, n_tokens_i);
+        cur = llama.impl.llama_c.ggml_mul(ctx, cur, gate);
+        cur = llama.impl.llama_c.ggml_reshape_2d(ctx, cur, n_embd_head * n_head_i, n_tokens_i);
         b.cb(cur, "attn_gated", il);
 
         cur = b.buildLoraMm(layer.wo.?, cur, layer.wo_s);
@@ -134,11 +134,11 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
 
         if (il == b.n_layer - 1) {
             // Skip computing the output of unused tokens.
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -147,7 +147,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         cur = b.buildFfn(cur, layer.ffn_up, null, null, layer.ffn_gate, null, null, layer.ffn_down, null, null, null, .gelu, .par, il);
         b.cb(cur, "ffn_out", il);
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
 

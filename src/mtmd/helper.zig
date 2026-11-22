@@ -45,9 +45,9 @@ pub const EmbdBatchView = extern struct {
     n_tokens: i32,
     embd: ?[*]const f32, // [n_tokens, n_embd]
     n_embd: i32,
-    pos: ?[*]const mod.impl.c.llama_pos, // [n_pos, n_tokens], section-major
+    pos: ?[*]const llama.impl.llama_c.llama_pos, // [n_pos, n_tokens], section-major
     n_pos: i32, // 4 for M-RoPE models, 1 otherwise
-    seq_id: mod.impl.c.llama_seq_id,
+    seq_id: llama.impl.llama_c.llama_seq_id,
 };
 
 /// Ports `mtmd_helper_post_decode_callback` (mtmd-helper.h:141 @b1b770d90):
@@ -97,7 +97,7 @@ pub const InitOpt = extern struct {
 // -----------------------------------------------------------------------------
 // mtmd-helper-common.h: logging
 
-fn defaultCallback(level: mod.impl.c.enum_ggml_log_level, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
+fn defaultCallback(level: llama.impl.llama_c.enum_ggml_log_level, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
     _ = level;
     _ = user_data;
     const f = stdlib.stdio.cStream(.stderr);
@@ -108,13 +108,13 @@ fn defaultCallback(level: mod.impl.c.enum_ggml_log_level, text: [*c]const u8, us
 /// Ports `mtmd_helper_logger` (mtmd-helper-common.h:21 @b1b770d90): the
 /// helpers' logger, separate from libmtmd's.
 pub const Logger = struct {
-    default_callback: mod.impl.c.ggml_log_callback = defaultCallback,
-    log_callback: mod.impl.c.ggml_log_callback = defaultCallback,
+    default_callback: llama.impl.llama_c.ggml_log_callback = defaultCallback,
+    log_callback: llama.impl.llama_c.ggml_log_callback = defaultCallback,
     log_callback_user_data: ?*anyopaque = null,
 
     /// `log` (mtmd-helper-common.h:52 @b1b770d90): format into 128 bytes,
     /// or a heap buffer when that is too short.
-    pub fn log(self: *const Logger, level: mod.impl.c.enum_ggml_log_level, comptime fmt: [*:0]const u8, args: anytype) void {
+    pub fn log(self: *const Logger, level: llama.impl.llama_c.enum_ggml_log_level, comptime fmt: [*:0]const u8, args: anytype) void {
         var buffer: [128]u8 = undefined;
         const len = @call(.auto, stdlib.libc.snprintf, .{ &buffer, buffer.len, fmt } ++ args);
         const cb = self.log_callback orelse return;
@@ -137,16 +137,16 @@ pub const Logger = struct {
 pub var g_logger: Logger = .{};
 
 pub fn logDbg(comptime fmt: [*:0]const u8, args: anytype) void {
-    g_logger.log(mod.impl.c.GGML_LOG_LEVEL_DEBUG, fmt, args);
+    g_logger.log(llama.impl.llama_c.GGML_LOG_LEVEL_DEBUG, fmt, args);
 }
 pub fn logInf(comptime fmt: [*:0]const u8, args: anytype) void {
-    g_logger.log(mod.impl.c.GGML_LOG_LEVEL_INFO, fmt, args);
+    g_logger.log(llama.impl.llama_c.GGML_LOG_LEVEL_INFO, fmt, args);
 }
 pub fn logWrn(comptime fmt: [*:0]const u8, args: anytype) void {
-    g_logger.log(mod.impl.c.GGML_LOG_LEVEL_WARN, fmt, args);
+    g_logger.log(llama.impl.llama_c.GGML_LOG_LEVEL_WARN, fmt, args);
 }
 pub fn logErr(comptime fmt: [*:0]const u8, args: anytype) void {
-    g_logger.log(mod.impl.c.GGML_LOG_LEVEL_ERROR, fmt, args);
+    g_logger.log(llama.impl.llama_c.GGML_LOG_LEVEL_ERROR, fmt, args);
 }
 
 // -----------------------------------------------------------------------------
@@ -160,12 +160,12 @@ pub const EmbdBatch = struct {
     n_mmproj_embd: c_int,
     n_tokens: i32,
     embd: ?[*]const f32, // [n_tokens, n_mmproj_embd], not owned
-    pos: std.ArrayList(mod.impl.c.llama_pos) = .empty, // [n_pos_per_embd, n_tokens], section-major
-    pos_view: std.ArrayList(mod.impl.c.llama_pos) = .empty, // sliced positions of the last get_view()
+    pos: std.ArrayList(llama.impl.llama_c.llama_pos) = .empty, // [n_pos_per_embd, n_tokens], section-major
+    pos_view: std.ArrayList(llama.impl.llama_c.llama_pos) = .empty, // sliced positions of the last get_view()
     logits: std.ArrayList(i8) = .empty,
-    seq_id: mod.impl.c.llama_seq_id = 0,
+    seq_id: llama.impl.llama_c.llama_seq_id = 0,
 
-    batch: ?*mod.impl.c.struct_llama_batch_ext = null, // rendered sub-batch, see render()
+    batch: ?*llama.impl.llama_c.struct_llama_batch_ext = null, // rendered sub-batch, see render()
 
     /// The constructor `decode_embd_batch` (mtmd-helper-common.h:86 @b1b770d90).
     /// Heap-allocated, as the callers hold it by pointer.
@@ -174,7 +174,7 @@ pub const EmbdBatch = struct {
         const self = std.heap.c_allocator.create(EmbdBatch) catch oom();
         self.* = .{ .n_pos_per_embd = n_pos_per_embd, .n_mmproj_embd = n_mmproj_embd, .n_tokens = n_tokens, .embd = embd };
         const n: usize = @intCast(n_tokens);
-        resizeZero(mod.impl.c.llama_pos, &self.pos, n * @as(usize, @intCast(n_pos_per_embd)));
+        resizeZero(llama.impl.llama_c.llama_pos, &self.pos, n * @as(usize, @intCast(n_pos_per_embd)));
         resizeZero(i8, &self.logits, n);
         return self;
     }
@@ -189,7 +189,7 @@ pub const EmbdBatch = struct {
     }
 
     /// `set_position_normal` (mtmd-helper-common.h:93 @b1b770d90).
-    pub fn setPositionNormal(self: *EmbdBatch, pos_0: mod.impl.c.llama_pos, seq_id: mod.impl.c.llama_seq_id) void {
+    pub fn setPositionNormal(self: *EmbdBatch, pos_0: llama.impl.llama_c.llama_pos, seq_id: llama.impl.llama_c.llama_seq_id) void {
         self.seq_id = seq_id;
         var i: i32 = 0;
         while (i < self.n_tokens) : (i += 1) {
@@ -199,7 +199,7 @@ pub const EmbdBatch = struct {
 
     /// `set_position_mrope_2d` (mtmd-helper-common.h:101 @b1b770d90): M-RoPE
     /// for image.
-    pub fn setPositionMrope2d(self: *EmbdBatch, rel_pos: []const mod.mtmd.DecoderPos, seq_id: mod.impl.c.llama_seq_id) void {
+    pub fn setPositionMrope2d(self: *EmbdBatch, rel_pos: []const mod.mtmd.DecoderPos, seq_id: llama.impl.llama_c.llama_seq_id) void {
         mod.impl.ggmlAssert(self.n_pos_per_embd == 4, "mtmd-helper-common.h", 102, "n_pos_per_embd == 4");
         mod.impl.ggmlAssert(rel_pos.len != 0 and @as(i32, @truncate(@as(isize, @intCast(rel_pos.len)))) == self.n_tokens, "mtmd-helper-common.h", 103, "!rel_pos.empty() && (int32_t)rel_pos.size() == n_tokens");
         self.seq_id = seq_id;
@@ -214,7 +214,7 @@ pub const EmbdBatch = struct {
 
     /// `set_position_mrope_1d` (mtmd-helper-common.h:116 @b1b770d90): M-RoPE
     /// for audio.
-    pub fn setPositionMrope1d(self: *EmbdBatch, pos_0: mod.impl.c.llama_pos, seq_id: mod.impl.c.llama_seq_id) void {
+    pub fn setPositionMrope1d(self: *EmbdBatch, pos_0: llama.impl.llama_c.llama_pos, seq_id: llama.impl.llama_c.llama_seq_id) void {
         mod.impl.ggmlAssert(self.n_pos_per_embd == 4, "mtmd-helper-common.h", 117, "n_pos_per_embd == 4");
         self.seq_id = seq_id;
         const n: usize = @intCast(self.n_tokens);
@@ -254,7 +254,7 @@ pub const EmbdBatch = struct {
     /// `render` (mtmd-helper-common.h:149 @b1b770d90): the entries
     /// `[offset, offset + n)` as a batch this object owns, ready for
     /// `llama_process`.
-    pub fn render(self: *EmbdBatch, lctx: ?*mod.impl.c.struct_llama_context, offset: c_int, n: c_int) ?*mod.impl.c.struct_llama_batch_ext {
+    pub fn render(self: *EmbdBatch, lctx: ?*llama.impl.llama_c.struct_llama_context, offset: c_int, n: c_int) ?*llama.impl.llama_c.struct_llama_batch_ext {
         mod.impl.ggmlAssert(offset >= 0 and n > 0 and offset + n <= self.n_tokens, "mtmd-helper-common.h", 150, "offset >= 0 && n > 0 && offset + n <= n_tokens");
         if (self.batch == null) {
             self.batch = llama.api.batch.llama_batch_ext_init(lctx);
@@ -263,7 +263,7 @@ pub const EmbdBatch = struct {
         const n_tokens: usize = @intCast(self.n_tokens);
         var i: usize = @intCast(offset);
         while (i < @as(usize, @intCast(offset + n))) : (i += 1) {
-            const e: mod.impl.c.struct_llama_embd = .{
+            const e: llama.impl.llama_c.struct_llama_embd = .{
                 .data = if (self.embd) |p| p + i * @as(usize, @intCast(self.n_mmproj_embd)) else null,
                 .n_rows = 1,
                 .n_embd = @intCast(self.n_mmproj_embd),
@@ -271,7 +271,7 @@ pub const EmbdBatch = struct {
             const idx = llama.api.batch.llama_batch_ext_add_embd(self.batch, self.seq_id, e);
             mod.impl.ggmlAssert(idx >= 0, "mtmd-helper-common.h", 158, "idx >= 0");
 
-            var p = [_]mod.impl.c.llama_pos{ 0, 0, 0, 0 }; // GGML_MROPE_SECTIONS
+            var p = [_]llama.impl.llama_c.llama_pos{ 0, 0, 0, 0 }; // GGML_MROPE_SECTIONS
             var j: usize = 0;
             while (j < @as(usize, @intCast(self.n_pos_per_embd))) : (j += 1) {
                 p[j] = self.pos.items[j * n_tokens + i];
@@ -301,7 +301,7 @@ fn resizeZero(comptime T: type, list: *std.ArrayList(T), n: usize) void {
 
 /// Ports `mtmd_helper_log_set` (mtmd-helper.cpp:58 @b1b770d90): the
 /// helpers' logger and libmtmd's together.
-pub fn mtmd_helper_log_set(log_callback_in: mod.impl.c.ggml_log_callback, user_data: ?*anyopaque) callconv(.c) void {
+pub fn mtmd_helper_log_set(log_callback_in: llama.impl.llama_c.ggml_log_callback, user_data: ?*anyopaque) callconv(.c) void {
     const log_callback = log_callback_in orelse g_logger.default_callback;
     g_logger.log_callback = log_callback;
     g_logger.log_callback_user_data = user_data;
@@ -320,8 +320,8 @@ pub fn mtmd_helper_get_n_tokens(chunks: *const mod.mtmd.InputChunks) callconv(.c
 }
 
 /// Ports `mtmd_helper_get_n_pos` (mtmd-helper.cpp:80 @b1b770d90).
-pub fn mtmd_helper_get_n_pos(chunks: *const mod.mtmd.InputChunks) callconv(.c) mod.impl.c.llama_pos {
-    var n_pos: mod.impl.c.llama_pos = 0;
+pub fn mtmd_helper_get_n_pos(chunks: *const mod.mtmd.InputChunks) callconv(.c) llama.impl.llama_c.llama_pos {
+    var n_pos: llama.impl.llama_c.llama_pos = 0;
     var i: usize = 0;
     while (i < mod.mtmd.mtmd_input_chunks_size(chunks)) : (i += 1) {
         const chunk = mod.mtmd.mtmd_input_chunks_get(chunks, i).?;
@@ -331,7 +331,7 @@ pub fn mtmd_helper_get_n_pos(chunks: *const mod.mtmd.InputChunks) callconv(.c) m
 }
 
 /// Ports `mtmd_helper_image_get_decoder_pos` (mtmd-helper.cpp:89 @b1b770d90).
-pub fn mtmd_helper_image_get_decoder_pos(chunks: *const mod.mtmd.ImageTokens, pos_0: mod.impl.c.llama_pos, out_pos: [*]mod.mtmd.DecoderPos) callconv(.c) void {
+pub fn mtmd_helper_image_get_decoder_pos(chunks: *const mod.mtmd.ImageTokens, pos_0: llama.impl.llama_c.llama_pos, out_pos: [*]mod.mtmd.DecoderPos) callconv(.c) void {
     const n_tokens = mod.mtmd.mtmd_image_tokens_get_n_tokens(chunks);
     for (0..n_tokens) |i| out_pos[i] = mod.mtmd.mtmd_image_tokens_get_decoder_pos(chunks, pos_0, i);
 }
@@ -341,13 +341,13 @@ pub fn mtmd_helper_image_get_decoder_pos(chunks: *const mod.mtmd.ImageTokens, po
 /// `scope_non_causal` (mtmd-helper.cpp:97 @b1b770d90) is the `defer`.
 pub fn mtmd_helper_decode_image_chunk(
     ctx: *mod.mtmd.Context,
-    lctx: ?*mod.impl.c.struct_llama_context,
+    lctx: ?*llama.impl.llama_c.struct_llama_context,
     chunk: *const mod.mtmd.InputChunk,
     encoded_embd: ?[*]f32,
-    n_past_in: mod.impl.c.llama_pos,
-    seq_id: mod.impl.c.llama_seq_id,
+    n_past_in: llama.impl.llama_c.llama_pos,
+    seq_id: llama.impl.llama_c.llama_seq_id,
     n_batch: i32,
-    new_n_past: *mod.impl.c.llama_pos,
+    new_n_past: *llama.impl.llama_c.llama_pos,
     callback: PostDecodeCallback,
     user_data: ?*anyopaque,
 ) callconv(.c) i32 {
@@ -402,8 +402,8 @@ pub fn mtmd_helper_decode_image_chunk(
 
         logInf("decoding %s batch %d/%d, n_tokens_batch = %d\n", .{ name, i_batch + 1, n_img_batches, n_tokens_batch });
 
-        const t1 = mod.impl.c.ggml_time_ms();
-        var ret = llama.api.context.llama_process(lctx, mod.impl.c.LLAMA_PROCESS_TYPE_DECODE, batch_embd.render(lctx, pos_offset, n_tokens_batch));
+        const t1 = llama.impl.llama_c.ggml_time_ms();
+        var ret = llama.api.context.llama_process(lctx, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, batch_embd.render(lctx, pos_offset, n_tokens_batch));
         if (ret != 0) {
             logErr("failed to decode %s\n", .{name});
             return ret;
@@ -418,7 +418,7 @@ pub fn mtmd_helper_decode_image_chunk(
             }
         }
 
-        logInf("%s decoded (batch %d/%d) in %lld ms\n", .{ name, i_batch + 1, n_img_batches, @as(c_longlong, mod.impl.c.ggml_time_ms() - t1) });
+        logInf("%s decoded (batch %d/%d) in %lld ms\n", .{ name, i_batch + 1, n_img_batches, @as(c_longlong, llama.impl.llama_c.ggml_time_ms() - t1) });
 
         i_batch += 1;
     }
@@ -433,13 +433,13 @@ pub fn mtmd_helper_decode_image_chunk(
 /// a text chunk goes through a `llama_batch_ext`.
 pub fn mtmd_helper_eval_chunk_single(
     ctx: *mod.mtmd.Context,
-    lctx: ?*mod.impl.c.struct_llama_context,
+    lctx: ?*llama.impl.llama_c.struct_llama_context,
     chunk: *const mod.mtmd.InputChunk,
-    n_past_in: mod.impl.c.llama_pos,
-    seq_id: mod.impl.c.llama_seq_id,
+    n_past_in: llama.impl.llama_c.llama_pos,
+    seq_id: llama.impl.llama_c.llama_seq_id,
     n_batch: i32,
     logits_last: bool,
-    new_n_past: *mod.impl.c.llama_pos,
+    new_n_past: *llama.impl.llama_c.llama_pos,
 ) callconv(.c) i32 {
     var n_past = n_past_in;
     mod.impl.ggmlAssert(n_batch > 0, "mtmd-helper.cpp", 212, "n_batch > 0");
@@ -460,7 +460,7 @@ pub fn mtmd_helper_eval_chunk_single(
             while (i < n_tokens and n_added < n_batch) : (i += 1) {
                 idx = llama.api.batch.llama_batch_ext_add_token(text_batch, seq_id, tokens.?[i]);
                 mod.impl.ggmlAssert(idx >= 0, "mtmd-helper.cpp", 228, "idx >= 0");
-                const pos: mod.impl.c.llama_pos = n_past;
+                const pos: llama.impl.llama_c.llama_pos = n_past;
                 n_past +%= 1;
                 _ = llama.api.batch.llama_batch_ext_set_pos(text_batch, idx, &pos);
                 n_added += 1;
@@ -469,7 +469,7 @@ pub fn mtmd_helper_eval_chunk_single(
             if (logits_last and is_last_token) {
                 _ = llama.api.batch.llama_batch_ext_set_output_logits(text_batch, idx, true);
             }
-            ret = llama.api.context.llama_process(lctx, mod.impl.c.LLAMA_PROCESS_TYPE_DECODE, text_batch);
+            ret = llama.api.context.llama_process(lctx, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, text_batch);
             if (ret != 0) {
                 logErr("failed to decode text\n", .{});
                 return ret;
@@ -478,7 +478,7 @@ pub fn mtmd_helper_eval_chunk_single(
         }
     } else if (chunk_type == .image or chunk_type == .audio) {
         const name: [*:0]const u8 = if (chunk_type == .image) "image" else "audio";
-        const t0 = mod.impl.c.ggml_time_ms();
+        const t0 = llama.impl.llama_c.ggml_time_ms();
 
         logInf("encoding %s slice...\n", .{name});
 
@@ -488,7 +488,7 @@ pub fn mtmd_helper_eval_chunk_single(
             return ret;
         }
 
-        logInf("%s slice encoded in %lld ms\n", .{ name, @as(c_longlong, mod.impl.c.ggml_time_ms() - t0) });
+        logInf("%s slice encoded in %lld ms\n", .{ name, @as(c_longlong, llama.impl.llama_c.ggml_time_ms() - t0) });
 
         const embd = mod.mtmd.mtmd_get_output_embd(ctx);
         ret = mtmd_helper_decode_image_chunk(ctx, lctx, chunk, embd, n_past, seq_id, n_batch, new_n_past, null, null);
@@ -506,13 +506,13 @@ pub fn mtmd_helper_eval_chunk_single(
 /// Ports `mtmd_helper_eval_chunks` (mtmd-helper.cpp:272 @b1b770d90).
 pub fn mtmd_helper_eval_chunks(
     ctx: *mod.mtmd.Context,
-    lctx: ?*mod.impl.c.struct_llama_context,
+    lctx: ?*llama.impl.llama_c.struct_llama_context,
     chunks: *const mod.mtmd.InputChunks,
-    n_past_in: mod.impl.c.llama_pos,
-    seq_id: mod.impl.c.llama_seq_id,
+    n_past_in: llama.impl.llama_c.llama_pos,
+    seq_id: llama.impl.llama_c.llama_seq_id,
     n_batch: i32,
     logits_last: bool,
-    new_n_past: *mod.impl.c.llama_pos,
+    new_n_past: *llama.impl.llama_c.llama_pos,
 ) callconv(.c) i32 {
     var n_past = n_past_in;
     const n_chunks = mod.mtmd.mtmd_input_chunks_size(chunks);
@@ -759,7 +759,7 @@ pub fn mtmd_helper_video_read_next(ctx: ?*anyopaque, out_bitmap: ?*?*mod.mtmd.Bi
 
 /// Ports `mtmd_helper_get_capabilities` (mtmd-helper.cpp:1312 @b1b770d90): `mctx` can be
 /// null (text-only model). Video is not compiled in.
-pub fn mtmd_helper_get_capabilities(model: ?*const mod.impl.c.struct_llama_model, mctx: ?*const mod.mtmd.Context) callconv(.c) Cap {
+pub fn mtmd_helper_get_capabilities(model: ?*const llama.impl.llama_c.struct_llama_model, mctx: ?*const mod.mtmd.Context) callconv(.c) Cap {
     var cap = std.mem.zeroes(Cap);
     cap.chat = true;
     cap.text_gen = true;
@@ -781,7 +781,7 @@ pub fn mtmd_helper_get_capabilities(model: ?*const mod.impl.c.struct_llama_model
 }
 
 /// Ports `mtmd_helper_model_can_chat` (mtmd-helper.cpp:1339 @b1b770d90).
-pub fn mtmd_helper_model_can_chat(lctx: ?*const mod.impl.c.struct_llama_context, mctx: ?*const mod.mtmd.Context) callconv(.c) bool {
+pub fn mtmd_helper_model_can_chat(lctx: ?*const llama.impl.llama_c.struct_llama_context, mctx: ?*const mod.mtmd.Context) callconv(.c) bool {
     return mtmd_helper_get_capabilities(llama.api.context.llama_get_model(lctx), mctx).chat;
 }
 

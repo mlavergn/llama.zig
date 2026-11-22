@@ -180,11 +180,22 @@ report_unit() {
     fi
 
     : > "$d/objs.txt"
-    local f
+    # A ported file exports nothing by itself: `src/ggml/lib.zig`, forced by
+    # `ported.zig`, is the one place its functions become C symbols. So every
+    # file under src/ggml is measured through `ported.zig`, compiled once.
+    local mapped=() f
     for f in "${files[@]}"; do
+        case "$f" in "$PORTED_DIR"/*) f="$PORTED_DIR/ported.zig" ;; esac
+        case " ${mapped[*]-} " in *" $f "*) ;; *) mapped+=("$f") ;; esac
+    done
+    for f in "${mapped[@]}"; do
         [ -f "$f" ] || continue
         local base
         base="$(basename "$f" .zig)"
+        if [ "$f" = "$PORTED_DIR/ported.zig" ] && [ -f "$tmp/ported.o" ]; then
+            echo "$tmp/ported.o" >> "$d/objs.txt"
+            continue
+        fi
         # alloc.zig and cpu/forward.zig read their probe flags from the
         # `config` module the build graph supplies; a bare build-obj has to
         # stand one in. Every flag build.zig defines has to appear here, or the
@@ -203,6 +214,7 @@ report_unit() {
             grep error "$d/$base.log" | head -5 >&2
             exit 1
         fi
+        if [ "$f" = "$PORTED_DIR/ported.zig" ]; then cp "$d/$base.o" "$tmp/ported.o"; fi
         echo "$d/$base.o" >> "$d/objs.txt"
     done
 

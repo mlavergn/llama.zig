@@ -62,7 +62,7 @@ fn gemvDot(r0123: [4]ggml.cpu.quants.arch.avx2.m256i, r4567: [4]ggml.cpu.quants.
 /// The row is stored as `permute(acc_row) - acc_min_rows`: the minima's
 /// accumulator is already in column order and is not permuted, and the store
 /// is at `y * nr`, as in the `q4_0` gemv.
-pub export fn ggml_gemv_q4_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemv_q4_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     const qk = QK_K;
     const nb: usize = @intCast(@divTrunc(n, qk));
 
@@ -347,7 +347,7 @@ fn accumulate4(comptime L: type, acc: *[4]L.F, acc_min: *[4]L.F, rhs: *const Rhs
 
 /// A column block's `d` or `dmin` as floats: `GGML_F32Cx8_LOAD`, or
 /// `GGML_F32Cx8x2_LOAD` over two blocks at 512 bits.
-inline fn colLoad(comptime L: type, d0: *const [8]ggml.impl.c.ggml_half, d1: *const [8]ggml.impl.c.ggml_half) L.F {
+inline fn colLoad(comptime L: type, d0: *const [8]ggml.impl.ggml_c.ggml_half, d1: *const [8]ggml.impl.ggml_c.ggml_half) L.F {
     if (L.width == 256) return ggml.cpu.repack.arch.common.f32cx8Load(d0);
     return L.joinF(ggml.cpu.repack.arch.common.f32cx8Load(d0), ggml.cpu.repack.arch.common.f32cx8Load(d1));
 }
@@ -414,7 +414,7 @@ fn rowLoops(comptime L: type, y: *usize, x_begin: usize, x_end: usize, nb: usize
 /// With `__AVX512BW__ && __AVX512DQ__` the 512-bit arm, from line 2077,
 /// runs first over the columns up to the last multiple of
 /// sixteen; the AVX2 loops then take any left, from the first row again.
-pub export fn ggml_gemm_q4_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemm_q4_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     const qk = QK_K;
     const nb: usize = @intCast(@divTrunc(n, qk));
 

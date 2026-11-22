@@ -8,6 +8,7 @@
 //! what it ports and the line it began at.
 
 const std = @import("std");
+const llama = @import("llama");
 const mod = @import("module.zig");
 
 /// Ports `ffn_op_type` (mtmd-model.h:34 @b1b770d90).
@@ -303,115 +304,115 @@ pub const Hparams = struct {
 /// Ports `mtmd_layer` (mtmd-model.h:299 @b1b770d90).
 pub const Layer = struct {
     // layernorm 1 (or layer input norm, or pre-attention norm)
-    ln_1_w: ?*mod.impl.c.ggml_tensor = null,
-    ln_1_b: ?*mod.impl.c.ggml_tensor = null,
+    ln_1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    ln_1_b: ?*llama.impl.llama_c.ggml_tensor = null,
     // attention
-    k_w: ?*mod.impl.c.ggml_tensor = null,
-    k_b: ?*mod.impl.c.ggml_tensor = null,
-    q_w: ?*mod.impl.c.ggml_tensor = null,
-    q_b: ?*mod.impl.c.ggml_tensor = null,
-    v_w: ?*mod.impl.c.ggml_tensor = null,
-    v_b: ?*mod.impl.c.ggml_tensor = null,
-    qkv_w: ?*mod.impl.c.ggml_tensor = null,
-    qkv_b: ?*mod.impl.c.ggml_tensor = null,
-    o_w: ?*mod.impl.c.ggml_tensor = null,
-    o_b: ?*mod.impl.c.ggml_tensor = null,
-    attn_sinks: ?*mod.impl.c.ggml_tensor = null,
-    k_norm: ?*mod.impl.c.ggml_tensor = null,
-    q_norm: ?*mod.impl.c.ggml_tensor = null,
-    k_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    q_norm_b: ?*mod.impl.c.ggml_tensor = null,
+    k_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    k_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    q_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    q_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    v_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    v_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    qkv_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    qkv_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    o_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    o_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    attn_sinks: ?*llama.impl.llama_c.ggml_tensor = null,
+    k_norm: ?*llama.impl.llama_c.ggml_tensor = null,
+    q_norm: ?*llama.impl.llama_c.ggml_tensor = null,
+    k_norm_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    q_norm_b: ?*llama.impl.llama_c.ggml_tensor = null,
     // lfm3: per-head sigmoid gate on the attention output
-    attn_gate_w: ?*mod.impl.c.ggml_tensor = null,
-    attn_post_norm_w: ?*mod.impl.c.ggml_tensor = null,
-    ff_up_w: ?*mod.impl.c.ggml_tensor = null,
-    ff_up_b: ?*mod.impl.c.ggml_tensor = null,
-    ff_gate_w: ?*mod.impl.c.ggml_tensor = null,
-    ff_gate_b: ?*mod.impl.c.ggml_tensor = null,
-    ff_down_w: ?*mod.impl.c.ggml_tensor = null,
-    ff_down_b: ?*mod.impl.c.ggml_tensor = null,
+    attn_gate_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    attn_post_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    ff_up_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    ff_up_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    ff_gate_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    ff_gate_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    ff_down_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    ff_down_b: ?*llama.impl.llama_c.ggml_tensor = null,
     // MoE FFN (dots3note vision pyramid blocks)
-    ff_gate_inp_w: ?*mod.impl.c.ggml_tensor = null,
-    ff_gate_exps_w: ?*mod.impl.c.ggml_tensor = null,
-    ff_up_exps_w: ?*mod.impl.c.ggml_tensor = null,
-    ff_down_exps_w: ?*mod.impl.c.ggml_tensor = null,
-    ff_exp_probs_b: ?*mod.impl.c.ggml_tensor = null,
+    ff_gate_inp_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    ff_gate_exps_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    ff_up_exps_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    ff_down_exps_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    ff_exp_probs_b: ?*llama.impl.llama_c.ggml_tensor = null,
     // layernorm 2 (or pre-FFN norm)
-    ln_2_w: ?*mod.impl.c.ggml_tensor = null,
-    ln_2_b: ?*mod.impl.c.ggml_tensor = null,
-    ff_post_norm_w: ?*mod.impl.c.ggml_tensor = null,
+    ln_2_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    ln_2_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    ff_post_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
     // depthwise causal conv block (muse-spark audio), conv_norm_w is declared below
-    conv_w: ?*mod.impl.c.ggml_tensor = null,
-    conv_b: ?*mod.impl.c.ggml_tensor = null,
+    conv_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    conv_b: ?*llama.impl.llama_c.ggml_tensor = null,
     // layer scale (no bias)
-    ls_1_w: ?*mod.impl.c.ggml_tensor = null,
-    ls_2_w: ?*mod.impl.c.ggml_tensor = null,
-    ls_out_w: ?*mod.impl.c.ggml_tensor = null, // gemma4
+    ls_1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    ls_2_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    ls_out_w: ?*llama.impl.llama_c.ggml_tensor = null, // gemma4
     // qwen3vl deepstack merger
-    deepstack_norm_w: ?*mod.impl.c.ggml_tensor = null,
-    deepstack_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    deepstack_fc1_w: ?*mod.impl.c.ggml_tensor = null,
-    deepstack_fc1_b: ?*mod.impl.c.ggml_tensor = null,
-    deepstack_fc2_w: ?*mod.impl.c.ggml_tensor = null,
-    deepstack_fc2_b: ?*mod.impl.c.ggml_tensor = null,
+    deepstack_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    deepstack_norm_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    deepstack_fc1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    deepstack_fc1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    deepstack_fc2_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    deepstack_fc2_b: ?*llama.impl.llama_c.ggml_tensor = null,
     // lfm3vl conv layers
-    conv2d_in_proj_w: ?*mod.impl.c.ggml_tensor = null,
-    conv2d_spatial_w: ?*mod.impl.c.ggml_tensor = null, // may be null
-    conv2d_out_proj_w: ?*mod.impl.c.ggml_tensor = null,
+    conv2d_in_proj_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    conv2d_spatial_w: ?*llama.impl.llama_c.ggml_tensor = null, // may be null
+    conv2d_out_proj_w: ?*llama.impl.llama_c.ggml_tensor = null,
     // sam rel_pos
-    rel_pos_w: ?*mod.impl.c.ggml_tensor = null,
-    rel_pos_h: ?*mod.impl.c.ggml_tensor = null,
+    rel_pos_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    rel_pos_h: ?*llama.impl.llama_c.ggml_tensor = null,
     // lfm2
-    ff_norm_w: ?*mod.impl.c.ggml_tensor = null,
-    ff_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    ff_norm_1_w: ?*mod.impl.c.ggml_tensor = null,
-    ff_norm_1_b: ?*mod.impl.c.ggml_tensor = null,
-    ff_up_1_w: ?*mod.impl.c.ggml_tensor = null,
-    ff_up_1_b: ?*mod.impl.c.ggml_tensor = null,
-    ff_down_1_w: ?*mod.impl.c.ggml_tensor = null,
-    ff_down_1_b: ?*mod.impl.c.ggml_tensor = null,
-    pos_bias_u: ?*mod.impl.c.ggml_tensor = null,
-    pos_bias_v: ?*mod.impl.c.ggml_tensor = null,
-    norm_conv_w: ?*mod.impl.c.ggml_tensor = null,
-    norm_conv_b: ?*mod.impl.c.ggml_tensor = null,
-    linear_pos_w: ?*mod.impl.c.ggml_tensor = null,
-    conv_norm_w: ?*mod.impl.c.ggml_tensor = null,
-    conv_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    conv_norm_mean: ?*mod.impl.c.ggml_tensor = null, // parakeet
-    conv_norm_var: ?*mod.impl.c.ggml_tensor = null, // parakeet
-    conv_dw_w: ?*mod.impl.c.ggml_tensor = null,
-    conv_dw_b: ?*mod.impl.c.ggml_tensor = null,
-    conv_pw1_w: ?*mod.impl.c.ggml_tensor = null,
-    conv_pw1_b: ?*mod.impl.c.ggml_tensor = null,
-    conv_pw2_w: ?*mod.impl.c.ggml_tensor = null,
-    conv_pw2_b: ?*mod.impl.c.ggml_tensor = null,
+    ff_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    ff_norm_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    ff_norm_1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    ff_norm_1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    ff_up_1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    ff_up_1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    ff_down_1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    ff_down_1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    pos_bias_u: ?*llama.impl.llama_c.ggml_tensor = null,
+    pos_bias_v: ?*llama.impl.llama_c.ggml_tensor = null,
+    norm_conv_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    norm_conv_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    linear_pos_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    conv_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    conv_norm_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    conv_norm_mean: ?*llama.impl.llama_c.ggml_tensor = null, // parakeet
+    conv_norm_var: ?*llama.impl.llama_c.ggml_tensor = null, // parakeet
+    conv_dw_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    conv_dw_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    conv_pw1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    conv_pw1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    conv_pw2_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    conv_pw2_b: ?*llama.impl.llama_c.ggml_tensor = null,
     // gemma4 audio conformer per-layer
-    attn_pre_norm_w: ?*mod.impl.c.ggml_tensor = null,
-    attn_k_rel_w: ?*mod.impl.c.ggml_tensor = null,
-    per_dim_scale_w: ?*mod.impl.c.ggml_tensor = null,
-    per_dim_k_scale_w: ?*mod.impl.c.ggml_tensor = null,
-    ff_post_norm_1_w: ?*mod.impl.c.ggml_tensor = null,
+    attn_pre_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    attn_k_rel_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    per_dim_scale_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    per_dim_k_scale_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    ff_post_norm_1_w: ?*llama.impl.llama_c.ggml_tensor = null,
     // granite_speech conformer per-layer
-    attn_rel_pos_emb: ?*mod.impl.c.ggml_tensor = null,
+    attn_rel_pos_emb: ?*llama.impl.llama_c.ggml_tensor = null,
     // granite_speech qformer cross-attention
-    cross_attn_q_w: ?*mod.impl.c.ggml_tensor = null,
-    cross_attn_q_b: ?*mod.impl.c.ggml_tensor = null,
-    cross_attn_k_w: ?*mod.impl.c.ggml_tensor = null,
-    cross_attn_k_b: ?*mod.impl.c.ggml_tensor = null,
-    cross_attn_v_w: ?*mod.impl.c.ggml_tensor = null,
-    cross_attn_v_b: ?*mod.impl.c.ggml_tensor = null,
-    cross_attn_o_w: ?*mod.impl.c.ggml_tensor = null,
-    cross_attn_o_b: ?*mod.impl.c.ggml_tensor = null,
-    cross_attn_norm_w: ?*mod.impl.c.ggml_tensor = null,
-    cross_attn_norm_b: ?*mod.impl.c.ggml_tensor = null,
+    cross_attn_q_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    cross_attn_q_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    cross_attn_k_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    cross_attn_k_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    cross_attn_v_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    cross_attn_v_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    cross_attn_o_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    cross_attn_o_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    cross_attn_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    cross_attn_norm_b: ?*llama.impl.llama_c.ggml_tensor = null,
     // qwen3tts speaker encoder: SE-Res2Net block, tdnn1/tdnn2 reuse conv_pw1_w/b and conv_pw2_w/b above
-    se_conv1_w: ?*mod.impl.c.ggml_tensor = null,
-    se_conv1_b: ?*mod.impl.c.ggml_tensor = null,
-    se_conv2_w: ?*mod.impl.c.ggml_tensor = null,
-    se_conv2_b: ?*mod.impl.c.ggml_tensor = null,
+    se_conv1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    se_conv1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    se_conv2_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    se_conv2_b: ?*llama.impl.llama_c.ggml_tensor = null,
 
-    res2_conv_w: std.ArrayList(?*mod.impl.c.ggml_tensor) = .empty, // Res2Net hierarchical branches
-    res2_conv_b: std.ArrayList(?*mod.impl.c.ggml_tensor) = .empty,
+    res2_conv_w: std.ArrayList(?*llama.impl.llama_c.ggml_tensor) = .empty, // Res2Net hierarchical branches
+    res2_conv_b: std.ArrayList(?*llama.impl.llama_c.ggml_tensor) = .empty,
 
     pub fn hasDeepstack(self: *const Layer) bool {
         return self.deepstack_fc1_w != null;
@@ -427,68 +428,68 @@ pub const Layer = struct {
 /// MobileNetV5 block of the Gemma3n vision encoder.
 pub const MobilenetV5Block = struct {
     // Stage 0 (Edge Residual)
-    s0_conv_exp_w: ?*mod.impl.c.ggml_tensor = null,
-    s0_bn1_w: ?*mod.impl.c.ggml_tensor = null,
-    s0_conv_pwl_w: ?*mod.impl.c.ggml_tensor = null,
-    s0_bn2_w: ?*mod.impl.c.ggml_tensor = null,
+    s0_conv_exp_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    s0_bn1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    s0_conv_pwl_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    s0_bn2_w: ?*llama.impl.llama_c.ggml_tensor = null,
     // Stage 1+ (Universal Inverted Residual)
-    dw_start_w: ?*mod.impl.c.ggml_tensor = null,
-    dw_start_bn_w: ?*mod.impl.c.ggml_tensor = null,
-    pw_exp_w: ?*mod.impl.c.ggml_tensor = null,
-    pw_exp_bn_w: ?*mod.impl.c.ggml_tensor = null,
-    dw_mid_w: ?*mod.impl.c.ggml_tensor = null,
-    dw_mid_bn_w: ?*mod.impl.c.ggml_tensor = null,
-    pw_proj_w: ?*mod.impl.c.ggml_tensor = null,
-    pw_proj_bn_w: ?*mod.impl.c.ggml_tensor = null,
-    layer_scale_w: ?*mod.impl.c.ggml_tensor = null,
+    dw_start_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    dw_start_bn_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    pw_exp_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    pw_exp_bn_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    dw_mid_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    dw_mid_bn_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    pw_proj_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    pw_proj_bn_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    layer_scale_w: ?*llama.impl.llama_c.ggml_tensor = null,
     // Attention (MQA) components
-    attn_q_w: ?*mod.impl.c.ggml_tensor = null,
-    attn_k_w: ?*mod.impl.c.ggml_tensor = null,
-    attn_v_w: ?*mod.impl.c.ggml_tensor = null,
-    attn_o_w: ?*mod.impl.c.ggml_tensor = null,
+    attn_q_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    attn_k_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    attn_v_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    attn_o_w: ?*llama.impl.llama_c.ggml_tensor = null,
     // Optional downsampling/norm in attention
-    attn_k_dw_w: ?*mod.impl.c.ggml_tensor = null,
-    attn_k_norm_w: ?*mod.impl.c.ggml_tensor = null,
-    attn_v_dw_w: ?*mod.impl.c.ggml_tensor = null,
-    attn_v_norm_w: ?*mod.impl.c.ggml_tensor = null,
+    attn_k_dw_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    attn_k_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    attn_v_dw_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    attn_v_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
     // Block norm (often present in attention blocks)
-    attn_norm_w: ?*mod.impl.c.ggml_tensor = null,
+    attn_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
 };
 
 /// Ports `yasa2_block` (mtmd-model.h:474 @b1b770d90).
 pub const Yasa2Block = struct {
-    dw_w: ?*mod.impl.c.ggml_tensor = null,
-    dw_b: ?*mod.impl.c.ggml_tensor = null,
-    ln_w: ?*mod.impl.c.ggml_tensor = null,
-    ln_b: ?*mod.impl.c.ggml_tensor = null,
-    pw1_w: ?*mod.impl.c.ggml_tensor = null,
-    pw1_b: ?*mod.impl.c.ggml_tensor = null,
-    grn_w: ?*mod.impl.c.ggml_tensor = null,
-    grn_b: ?*mod.impl.c.ggml_tensor = null,
-    pw2_w: ?*mod.impl.c.ggml_tensor = null,
-    pw2_b: ?*mod.impl.c.ggml_tensor = null,
+    dw_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    dw_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    ln_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    ln_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    pw1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    pw1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    grn_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    grn_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    pw2_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    pw2_b: ?*llama.impl.llama_c.ggml_tensor = null,
 };
 
 /// Ports `yasa2_stage` (mtmd-model.h:487 @b1b770d90).
 pub const Yasa2Stage = struct {
-    down_ln_w: ?*mod.impl.c.ggml_tensor = null,
-    down_ln_b: ?*mod.impl.c.ggml_tensor = null,
-    down_conv_w: ?*mod.impl.c.ggml_tensor = null,
-    down_conv_b: ?*mod.impl.c.ggml_tensor = null,
+    down_ln_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    down_ln_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    down_conv_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    down_conv_b: ?*llama.impl.llama_c.ggml_tensor = null,
     blocks: std.ArrayList(Yasa2Block) = .empty,
 };
 
 /// Ports `qf_block` (mtmd-model.h:497 @b1b770d90): a QFormer projector block
 /// (Granite Speech, Granite4 Vision).
 pub const QfBlock = struct {
-    qf_proj_query: ?*mod.impl.c.ggml_tensor = null,
-    qf_proj_norm_w: ?*mod.impl.c.ggml_tensor = null,
-    qf_proj_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    qf_proj_linear_w: ?*mod.impl.c.ggml_tensor = null,
-    qf_proj_linear_b: ?*mod.impl.c.ggml_tensor = null,
-    qf_proj_post_norm_w: ?*mod.impl.c.ggml_tensor = null,
-    qf_proj_post_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    qf_proj_img_pos: ?*mod.impl.c.ggml_tensor = null, // Vision only
+    qf_proj_query: ?*llama.impl.llama_c.ggml_tensor = null,
+    qf_proj_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    qf_proj_norm_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    qf_proj_linear_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    qf_proj_linear_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    qf_proj_post_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    qf_proj_post_norm_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    qf_proj_img_pos: ?*llama.impl.llama_c.ggml_tensor = null, // Vision only
     qf_proj_layers: std.ArrayList(Layer) = .empty,
 };
 
@@ -497,18 +498,18 @@ pub const QfBlock = struct {
 pub const Seanet = struct {
     /// Ports `stage` (mtmd-model.h:514 @b1b770d90), a member of `mtmd_seanet`.
     pub const Stage = struct {
-        res_conv1_w: ?*mod.impl.c.ggml_tensor = null,
-        res_conv1_b: ?*mod.impl.c.ggml_tensor = null,
-        res_conv2_w: ?*mod.impl.c.ggml_tensor = null,
-        res_conv2_b: ?*mod.impl.c.ggml_tensor = null,
-        scale_conv_w: ?*mod.impl.c.ggml_tensor = null, // strided conv (encoder) or convtr (decoder)
-        scale_conv_b: ?*mod.impl.c.ggml_tensor = null,
+        res_conv1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        res_conv1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        res_conv2_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        res_conv2_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        scale_conv_w: ?*llama.impl.llama_c.ggml_tensor = null, // strided conv (encoder) or convtr (decoder)
+        scale_conv_b: ?*llama.impl.llama_c.ggml_tensor = null,
     };
 
-    conv_in_w: ?*mod.impl.c.ggml_tensor = null,
-    conv_in_b: ?*mod.impl.c.ggml_tensor = null,
-    conv_out_w: ?*mod.impl.c.ggml_tensor = null,
-    conv_out_b: ?*mod.impl.c.ggml_tensor = null,
+    conv_in_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    conv_in_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    conv_out_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    conv_out_b: ?*llama.impl.llama_c.ggml_tensor = null,
     stages: std.ArrayList(Stage) = .empty,
 };
 
@@ -517,34 +518,34 @@ pub const Seanet = struct {
 pub const FlowNet = struct {
     /// Ports `block` (mtmd-model.h:533 @b1b770d90), a member of `mtmd_flow_net`.
     pub const Block = struct {
-        norm_w: ?*mod.impl.c.ggml_tensor = null,
-        norm_b: ?*mod.impl.c.ggml_tensor = null,
-        up_w: ?*mod.impl.c.ggml_tensor = null,
-        up_b: ?*mod.impl.c.ggml_tensor = null,
-        down_w: ?*mod.impl.c.ggml_tensor = null,
-        down_b: ?*mod.impl.c.ggml_tensor = null,
-        ada_w: ?*mod.impl.c.ggml_tensor = null, // -> shift, scale, gate
-        ada_b: ?*mod.impl.c.ggml_tensor = null,
+        norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        norm_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        up_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        up_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        down_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        down_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        ada_w: ?*llama.impl.llama_c.ggml_tensor = null, // -> shift, scale, gate
+        ada_b: ?*llama.impl.llama_c.ggml_tensor = null,
     };
 
     /// Ports `time_embd` (mtmd-model.h:545 @b1b770d90), a member of `mtmd_flow_net`.
     pub const TimeEmbd = struct {
-        freqs: ?*mod.impl.c.ggml_tensor = null,
-        up_w: ?*mod.impl.c.ggml_tensor = null,
-        up_b: ?*mod.impl.c.ggml_tensor = null,
-        down_w: ?*mod.impl.c.ggml_tensor = null,
-        down_b: ?*mod.impl.c.ggml_tensor = null,
-        norm: ?*mod.impl.c.ggml_tensor = null, // RMSNorm alpha
+        freqs: ?*llama.impl.llama_c.ggml_tensor = null,
+        up_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        up_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        down_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        down_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        norm: ?*llama.impl.llama_c.ggml_tensor = null, // RMSNorm alpha
     };
 
-    input_proj_w: ?*mod.impl.c.ggml_tensor = null,
-    input_proj_b: ?*mod.impl.c.ggml_tensor = null,
-    cond_embd_w: ?*mod.impl.c.ggml_tensor = null,
-    cond_embd_b: ?*mod.impl.c.ggml_tensor = null,
-    final_ada_w: ?*mod.impl.c.ggml_tensor = null, // -> shift, scale
-    final_ada_b: ?*mod.impl.c.ggml_tensor = null,
-    final_proj_w: ?*mod.impl.c.ggml_tensor = null,
-    final_proj_b: ?*mod.impl.c.ggml_tensor = null,
+    input_proj_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    input_proj_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    cond_embd_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    cond_embd_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    final_ada_w: ?*llama.impl.llama_c.ggml_tensor = null, // -> shift, scale
+    final_ada_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    final_proj_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    final_proj_b: ?*llama.impl.llama_c.ggml_tensor = null,
     time: std.ArrayList(TimeEmbd) = .empty,
     blocks: std.ArrayList(Block) = .empty,
 };
@@ -554,68 +555,68 @@ pub const FlowNet = struct {
 pub const Code2Wav = struct {
     /// Ports `upsample_block` (mtmd-model.h:569 @b1b770d90), a member of `mtmd_code2wav`.
     pub const UpsampleBlock = struct {
-        conv_w: ?*mod.impl.c.ggml_tensor = null, // causal ConvTranspose1d, 2x
-        conv_b: ?*mod.impl.c.ggml_tensor = null,
-        dwconv_w: ?*mod.impl.c.ggml_tensor = null, // depthwise causal conv, k=7
-        dwconv_b: ?*mod.impl.c.ggml_tensor = null,
-        norm_w: ?*mod.impl.c.ggml_tensor = null, // LayerNorm
-        norm_b: ?*mod.impl.c.ggml_tensor = null,
-        pw1_w: ?*mod.impl.c.ggml_tensor = null, // pointwise expand
-        pw1_b: ?*mod.impl.c.ggml_tensor = null,
-        pw2_w: ?*mod.impl.c.ggml_tensor = null, // pointwise project
-        pw2_b: ?*mod.impl.c.ggml_tensor = null,
-        gamma: ?*mod.impl.c.ggml_tensor = null, // layer scale
+        conv_w: ?*llama.impl.llama_c.ggml_tensor = null, // causal ConvTranspose1d, 2x
+        conv_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        dwconv_w: ?*llama.impl.llama_c.ggml_tensor = null, // depthwise causal conv, k=7
+        dwconv_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        norm_w: ?*llama.impl.llama_c.ggml_tensor = null, // LayerNorm
+        norm_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        pw1_w: ?*llama.impl.llama_c.ggml_tensor = null, // pointwise expand
+        pw1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        pw2_w: ?*llama.impl.llama_c.ggml_tensor = null, // pointwise project
+        pw2_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        gamma: ?*llama.impl.llama_c.ggml_tensor = null, // layer scale
     };
 
     /// Ports `dac_res` (mtmd-model.h:584 @b1b770d90), a member of `mtmd_code2wav`.
     pub const DacRes = struct {
-        act1_alpha: ?*mod.impl.c.ggml_tensor = null,
-        act1_beta: ?*mod.impl.c.ggml_tensor = null,
-        conv1_w: ?*mod.impl.c.ggml_tensor = null,
-        conv1_b: ?*mod.impl.c.ggml_tensor = null,
-        act2_alpha: ?*mod.impl.c.ggml_tensor = null,
-        act2_beta: ?*mod.impl.c.ggml_tensor = null,
-        conv2_w: ?*mod.impl.c.ggml_tensor = null,
-        conv2_b: ?*mod.impl.c.ggml_tensor = null,
+        act1_alpha: ?*llama.impl.llama_c.ggml_tensor = null,
+        act1_beta: ?*llama.impl.llama_c.ggml_tensor = null,
+        conv1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        conv1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        act2_alpha: ?*llama.impl.llama_c.ggml_tensor = null,
+        act2_beta: ?*llama.impl.llama_c.ggml_tensor = null,
+        conv2_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        conv2_b: ?*llama.impl.llama_c.ggml_tensor = null,
     };
 
     /// Ports `dac_block` (mtmd-model.h:596 @b1b770d90), a member of `mtmd_code2wav`.
     pub const DacBlock = struct {
-        snake_alpha: ?*mod.impl.c.ggml_tensor = null,
-        snake_beta: ?*mod.impl.c.ggml_tensor = null,
-        conv_w: ?*mod.impl.c.ggml_tensor = null, // causal ConvTranspose1d
-        conv_b: ?*mod.impl.c.ggml_tensor = null,
+        snake_alpha: ?*llama.impl.llama_c.ggml_tensor = null,
+        snake_beta: ?*llama.impl.llama_c.ggml_tensor = null,
+        conv_w: ?*llama.impl.llama_c.ggml_tensor = null, // causal ConvTranspose1d
+        conv_b: ?*llama.impl.llama_c.ggml_tensor = null,
         res: std.ArrayList(DacRes) = .empty,
     };
 
     // quantizer: RVQ codebook decode
-    quant_first_in_w: ?*mod.impl.c.ggml_tensor = null, // semantic RVQ, in_proj (1x1 conv, loaded as 2D)
-    quant_first_out_w: ?*mod.impl.c.ggml_tensor = null,
-    quant_first_out_b: ?*mod.impl.c.ggml_tensor = null,
-    quant_first_cb_w: ?*mod.impl.c.ggml_tensor = null, // codebook (1 layer)
-    quant_rest_in_w: ?*mod.impl.c.ggml_tensor = null, // acoustic RVQ
-    quant_rest_out_w: ?*mod.impl.c.ggml_tensor = null,
-    quant_rest_cb_w: ?*mod.impl.c.ggml_tensor = null, // codebooks, merged 3D [15, vocab, dim]
+    quant_first_in_w: ?*llama.impl.llama_c.ggml_tensor = null, // semantic RVQ, in_proj (1x1 conv, loaded as 2D)
+    quant_first_out_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    quant_first_out_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    quant_first_cb_w: ?*llama.impl.llama_c.ggml_tensor = null, // codebook (1 layer)
+    quant_rest_in_w: ?*llama.impl.llama_c.ggml_tensor = null, // acoustic RVQ
+    quant_rest_out_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    quant_rest_cb_w: ?*llama.impl.llama_c.ggml_tensor = null, // codebooks, merged 3D [15, vocab, dim]
 
-    pre_conv_w: ?*mod.impl.c.ggml_tensor = null,
-    pre_conv_b: ?*mod.impl.c.ggml_tensor = null,
+    pre_conv_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    pre_conv_b: ?*llama.impl.llama_c.ggml_tensor = null,
 
-    tfm_in_proj_w: ?*mod.impl.c.ggml_tensor = null,
-    tfm_in_proj_b: ?*mod.impl.c.ggml_tensor = null,
-    tfm_out_proj_w: ?*mod.impl.c.ggml_tensor = null,
-    tfm_out_proj_b: ?*mod.impl.c.ggml_tensor = null,
-    tfm_output_norm_w: ?*mod.impl.c.ggml_tensor = null,
+    tfm_in_proj_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    tfm_in_proj_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    tfm_out_proj_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    tfm_out_proj_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    tfm_output_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
     tfm_layers: std.ArrayList(Layer) = .empty, // reuses the generic block fields
 
     upsample: std.ArrayList(UpsampleBlock) = .empty,
 
-    dac_entry_w: ?*mod.impl.c.ggml_tensor = null,
-    dac_entry_b: ?*mod.impl.c.ggml_tensor = null,
+    dac_entry_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    dac_entry_b: ?*llama.impl.llama_c.ggml_tensor = null,
     dac: std.ArrayList(DacBlock) = .empty,
-    dac_post_snake_alpha: ?*mod.impl.c.ggml_tensor = null,
-    dac_post_snake_beta: ?*mod.impl.c.ggml_tensor = null,
-    dac_post_conv_w: ?*mod.impl.c.ggml_tensor = null,
-    dac_post_conv_b: ?*mod.impl.c.ggml_tensor = null,
+    dac_post_snake_alpha: ?*llama.impl.llama_c.ggml_tensor = null,
+    dac_post_snake_beta: ?*llama.impl.llama_c.ggml_tensor = null,
+    dac_post_conv_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    dac_post_conv_b: ?*llama.impl.llama_c.ggml_tensor = null,
 };
 
 /// Ports `mtmd_chatterbox` (mtmd-model.h:634 @b1b770d90): chatterbox's
@@ -625,34 +626,34 @@ pub const Chatterbox = struct {
     /// Ports `enc_layer` (mtmd-model.h:636 @b1b770d90), a member of `mtmd_chatterbox`:
     /// an espnet rel-pos conformer layer of the flow encoder.
     pub const EncLayer = struct {
-        norm_mha_w: ?*mod.impl.c.ggml_tensor = null,
-        norm_mha_b: ?*mod.impl.c.ggml_tensor = null,
-        attn_q_w: ?*mod.impl.c.ggml_tensor = null,
-        attn_q_b: ?*mod.impl.c.ggml_tensor = null,
-        attn_k_w: ?*mod.impl.c.ggml_tensor = null,
-        attn_k_b: ?*mod.impl.c.ggml_tensor = null,
-        attn_v_w: ?*mod.impl.c.ggml_tensor = null,
-        attn_v_b: ?*mod.impl.c.ggml_tensor = null,
-        attn_pos_w: ?*mod.impl.c.ggml_tensor = null, // linear_pos, no bias
-        attn_pos_bias_u: ?*mod.impl.c.ggml_tensor = null,
-        attn_pos_bias_v: ?*mod.impl.c.ggml_tensor = null,
-        attn_out_w: ?*mod.impl.c.ggml_tensor = null,
-        attn_out_b: ?*mod.impl.c.ggml_tensor = null,
-        norm_ff_w: ?*mod.impl.c.ggml_tensor = null,
-        norm_ff_b: ?*mod.impl.c.ggml_tensor = null,
-        ffn_1_w: ?*mod.impl.c.ggml_tensor = null,
-        ffn_1_b: ?*mod.impl.c.ggml_tensor = null,
-        ffn_2_w: ?*mod.impl.c.ggml_tensor = null,
-        ffn_2_b: ?*mod.impl.c.ggml_tensor = null,
+        norm_mha_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        norm_mha_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        attn_q_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        attn_q_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        attn_k_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        attn_k_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        attn_v_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        attn_v_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        attn_pos_w: ?*llama.impl.llama_c.ggml_tensor = null, // linear_pos, no bias
+        attn_pos_bias_u: ?*llama.impl.llama_c.ggml_tensor = null,
+        attn_pos_bias_v: ?*llama.impl.llama_c.ggml_tensor = null,
+        attn_out_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        attn_out_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        norm_ff_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        norm_ff_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        ffn_1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        ffn_1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        ffn_2_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        ffn_2_b: ?*llama.impl.llama_c.ggml_tensor = null,
     };
 
     /// Ports `causal_block` (mtmd-model.h:659 @b1b770d90), a member of `mtmd_chatterbox`:
     /// conv k3 left padded + layer norm.
     pub const CausalBlock = struct {
-        conv_w: ?*mod.impl.c.ggml_tensor = null,
-        conv_b: ?*mod.impl.c.ggml_tensor = null,
-        norm_w: ?*mod.impl.c.ggml_tensor = null,
-        norm_b: ?*mod.impl.c.ggml_tensor = null,
+        conv_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        conv_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        norm_b: ?*llama.impl.llama_c.ggml_tensor = null,
     };
 
     /// Ports `resnet` (mtmd-model.h:667 @b1b770d90), a member of `mtmd_chatterbox`:
@@ -660,28 +661,28 @@ pub const Chatterbox = struct {
     pub const Resnet = struct {
         block1: CausalBlock = .{},
         block2: CausalBlock = .{},
-        mlp_w: ?*mod.impl.c.ggml_tensor = null, // time projection (mlp.1)
-        mlp_b: ?*mod.impl.c.ggml_tensor = null,
-        res_conv_w: ?*mod.impl.c.ggml_tensor = null,
-        res_conv_b: ?*mod.impl.c.ggml_tensor = null,
+        mlp_w: ?*llama.impl.llama_c.ggml_tensor = null, // time projection (mlp.1)
+        mlp_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        res_conv_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        res_conv_b: ?*llama.impl.llama_c.ggml_tensor = null,
     };
 
     /// Ports `tfm_block` (mtmd-model.h:677 @b1b770d90), a member of `mtmd_chatterbox`:
     /// a diffusers style transformer block of the estimator.
     pub const TfmBlock = struct {
-        norm1_w: ?*mod.impl.c.ggml_tensor = null,
-        norm1_b: ?*mod.impl.c.ggml_tensor = null,
-        attn_q_w: ?*mod.impl.c.ggml_tensor = null, // no bias on qkv
-        attn_k_w: ?*mod.impl.c.ggml_tensor = null,
-        attn_v_w: ?*mod.impl.c.ggml_tensor = null,
-        attn_out_w: ?*mod.impl.c.ggml_tensor = null, // to_out.0
-        attn_out_b: ?*mod.impl.c.ggml_tensor = null,
-        norm3_w: ?*mod.impl.c.ggml_tensor = null,
-        norm3_b: ?*mod.impl.c.ggml_tensor = null,
-        ff_in_w: ?*mod.impl.c.ggml_tensor = null, // ff.net.0.proj
-        ff_in_b: ?*mod.impl.c.ggml_tensor = null,
-        ff_out_w: ?*mod.impl.c.ggml_tensor = null, // ff.net.2
-        ff_out_b: ?*mod.impl.c.ggml_tensor = null,
+        norm1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        norm1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        attn_q_w: ?*llama.impl.llama_c.ggml_tensor = null, // no bias on qkv
+        attn_k_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        attn_v_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        attn_out_w: ?*llama.impl.llama_c.ggml_tensor = null, // to_out.0
+        attn_out_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        norm3_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        norm3_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        ff_in_w: ?*llama.impl.llama_c.ggml_tensor = null, // ff.net.0.proj
+        ff_in_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        ff_out_w: ?*llama.impl.llama_c.ggml_tensor = null, // ff.net.2
+        ff_out_b: ?*llama.impl.llama_c.ggml_tensor = null,
     };
 
     /// Ports `est_stage` (mtmd-model.h:694 @b1b770d90), a member of `mtmd_chatterbox`:
@@ -689,19 +690,19 @@ pub const Chatterbox = struct {
     pub const EstStage = struct {
         res: Resnet = .{},
         tfm: std.ArrayList(TfmBlock) = .empty,
-        conv_w: ?*mod.impl.c.ggml_tensor = null,
-        conv_b: ?*mod.impl.c.ggml_tensor = null,
+        conv_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        conv_b: ?*llama.impl.llama_c.ggml_tensor = null,
     };
 
     /// Ports `hift_res_unit` (mtmd-model.h:702 @b1b770d90), a member of `mtmd_chatterbox`:
     /// a snake resblock unit of the hift vocoder.
     pub const HiftResUnit = struct {
-        act1_alpha: ?*mod.impl.c.ggml_tensor = null,
-        act2_alpha: ?*mod.impl.c.ggml_tensor = null,
-        conv1_w: ?*mod.impl.c.ggml_tensor = null,
-        conv1_b: ?*mod.impl.c.ggml_tensor = null,
-        conv2_w: ?*mod.impl.c.ggml_tensor = null,
-        conv2_b: ?*mod.impl.c.ggml_tensor = null,
+        act1_alpha: ?*llama.impl.llama_c.ggml_tensor = null,
+        act2_alpha: ?*llama.impl.llama_c.ggml_tensor = null,
+        conv1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        conv1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        conv2_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        conv2_b: ?*llama.impl.llama_c.ggml_tensor = null,
     };
 
     /// Ports `hift_res` (mtmd-model.h:710 @b1b770d90), a member of `mtmd_chatterbox`.
@@ -712,10 +713,10 @@ pub const Chatterbox = struct {
     /// Ports `hift_up` (mtmd-model.h:715 @b1b770d90), a member of `mtmd_chatterbox`:
     /// conv transpose, source injection, 3 resblocks.
     pub const HiftUp = struct {
-        up_w: ?*mod.impl.c.ggml_tensor = null,
-        up_b: ?*mod.impl.c.ggml_tensor = null,
-        source_down_w: ?*mod.impl.c.ggml_tensor = null,
-        source_down_b: ?*mod.impl.c.ggml_tensor = null,
+        up_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        up_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        source_down_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        source_down_b: ?*llama.impl.llama_c.ggml_tensor = null,
         source_res: HiftRes = .{},
         res_0: HiftRes = .{},
         res_1: HiftRes = .{},
@@ -724,156 +725,156 @@ pub const Chatterbox = struct {
 
     /// Ports `f0_conv` (mtmd-model.h:727 @b1b770d90), a member of `mtmd_chatterbox`.
     pub const F0Conv = struct {
-        w: ?*mod.impl.c.ggml_tensor = null,
-        b: ?*mod.impl.c.ggml_tensor = null,
+        w: ?*llama.impl.llama_c.ggml_tensor = null,
+        b: ?*llama.impl.llama_c.ggml_tensor = null,
     };
 
     /// Ports `s3tok_block` (mtmd-model.h:733 @b1b770d90), a member of `mtmd_chatterbox`:
     /// neox rope on q/k, fsmn memory on v.
     pub const S3tokBlock = struct {
-        attn_ln_w: ?*mod.impl.c.ggml_tensor = null,
-        attn_ln_b: ?*mod.impl.c.ggml_tensor = null,
-        attn_q_w: ?*mod.impl.c.ggml_tensor = null,
-        attn_q_b: ?*mod.impl.c.ggml_tensor = null,
-        attn_k_w: ?*mod.impl.c.ggml_tensor = null, // no bias
-        attn_v_w: ?*mod.impl.c.ggml_tensor = null,
-        attn_v_b: ?*mod.impl.c.ggml_tensor = null,
-        fsmn_w: ?*mod.impl.c.ggml_tensor = null,
-        attn_out_w: ?*mod.impl.c.ggml_tensor = null,
-        attn_out_b: ?*mod.impl.c.ggml_tensor = null,
-        mlp_ln_w: ?*mod.impl.c.ggml_tensor = null,
-        mlp_ln_b: ?*mod.impl.c.ggml_tensor = null,
-        mlp_in_w: ?*mod.impl.c.ggml_tensor = null,
-        mlp_in_b: ?*mod.impl.c.ggml_tensor = null,
-        mlp_out_w: ?*mod.impl.c.ggml_tensor = null,
-        mlp_out_b: ?*mod.impl.c.ggml_tensor = null,
+        attn_ln_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        attn_ln_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        attn_q_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        attn_q_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        attn_k_w: ?*llama.impl.llama_c.ggml_tensor = null, // no bias
+        attn_v_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        attn_v_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        fsmn_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        attn_out_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        attn_out_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        mlp_ln_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        mlp_ln_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        mlp_in_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        mlp_in_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        mlp_out_w: ?*llama.impl.llama_c.ggml_tensor = null,
+        mlp_out_b: ?*llama.impl.llama_c.ggml_tensor = null,
     };
 
     /// Ports `bn` (mtmd-model.h:753 @b1b770d90), a member of `mtmd_chatterbox`: a folded
     /// batchnorm (w/b stay null on the affine free variant).
     pub const Bn = struct {
-        mean: ?*mod.impl.c.ggml_tensor = null,
-        @"var": ?*mod.impl.c.ggml_tensor = null,
-        w: ?*mod.impl.c.ggml_tensor = null,
-        b: ?*mod.impl.c.ggml_tensor = null,
+        mean: ?*llama.impl.llama_c.ggml_tensor = null,
+        @"var": ?*llama.impl.llama_c.ggml_tensor = null,
+        w: ?*llama.impl.llama_c.ggml_tensor = null,
+        b: ?*llama.impl.llama_c.ggml_tensor = null,
     };
 
     /// Ports `spk_res2d` (mtmd-model.h:761 @b1b770d90), a member of `mtmd_chatterbox`: the
     /// shortcut is null on stride 1 blocks.
     pub const SpkRes2d = struct {
-        conv1_w: ?*mod.impl.c.ggml_tensor = null,
+        conv1_w: ?*llama.impl.llama_c.ggml_tensor = null,
         bn1: Bn = .{},
-        conv2_w: ?*mod.impl.c.ggml_tensor = null,
+        conv2_w: ?*llama.impl.llama_c.ggml_tensor = null,
         bn2: Bn = .{},
-        shortcut_w: ?*mod.impl.c.ggml_tensor = null,
+        shortcut_w: ?*llama.impl.llama_c.ggml_tensor = null,
         shortcut_bn: Bn = .{},
     };
 
     /// Ports `spk_cam_layer` (mtmd-model.h:771 @b1b770d90), a member of `mtmd_chatterbox`.
     pub const SpkCamLayer = struct {
         nl1_bn: Bn = .{},
-        linear1_w: ?*mod.impl.c.ggml_tensor = null,
+        linear1_w: ?*llama.impl.llama_c.ggml_tensor = null,
         nl2_bn: Bn = .{},
-        local_w: ?*mod.impl.c.ggml_tensor = null, // cam_layer.linear_local
-        ctx1_w: ?*mod.impl.c.ggml_tensor = null, // cam_layer.linear1
-        ctx1_b: ?*mod.impl.c.ggml_tensor = null,
-        ctx2_w: ?*mod.impl.c.ggml_tensor = null, // cam_layer.linear2
-        ctx2_b: ?*mod.impl.c.ggml_tensor = null,
+        local_w: ?*llama.impl.llama_c.ggml_tensor = null, // cam_layer.linear_local
+        ctx1_w: ?*llama.impl.llama_c.ggml_tensor = null, // cam_layer.linear1
+        ctx1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+        ctx2_w: ?*llama.impl.llama_c.ggml_tensor = null, // cam_layer.linear2
+        ctx2_b: ?*llama.impl.llama_c.ggml_tensor = null,
     };
 
     /// Ports `spk_cam_block` (mtmd-model.h:781 @b1b770d90), a member of `mtmd_chatterbox`.
     pub const SpkCamBlock = struct {
         layers: std.ArrayList(SpkCamLayer) = .empty,
         transit_bn: Bn = .{},
-        transit_w: ?*mod.impl.c.ggml_tensor = null,
+        transit_w: ?*llama.impl.llama_c.ggml_tensor = null,
     };
 
     // flow encoder
-    input_embedding_w: ?*mod.impl.c.ggml_tensor = null, // flow.input_embedding
-    embed_linear_w: ?*mod.impl.c.ggml_tensor = null, // fenc.embed.out.0
-    embed_linear_b: ?*mod.impl.c.ggml_tensor = null,
-    embed_norm_w: ?*mod.impl.c.ggml_tensor = null, // fenc.embed.out.1
-    embed_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    pre_conv1_w: ?*mod.impl.c.ggml_tensor = null, // pre_lookahead_layer
-    pre_conv1_b: ?*mod.impl.c.ggml_tensor = null,
-    pre_conv2_w: ?*mod.impl.c.ggml_tensor = null,
-    pre_conv2_b: ?*mod.impl.c.ggml_tensor = null,
+    input_embedding_w: ?*llama.impl.llama_c.ggml_tensor = null, // flow.input_embedding
+    embed_linear_w: ?*llama.impl.llama_c.ggml_tensor = null, // fenc.embed.out.0
+    embed_linear_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    embed_norm_w: ?*llama.impl.llama_c.ggml_tensor = null, // fenc.embed.out.1
+    embed_norm_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    pre_conv1_w: ?*llama.impl.llama_c.ggml_tensor = null, // pre_lookahead_layer
+    pre_conv1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    pre_conv2_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    pre_conv2_b: ?*llama.impl.llama_c.ggml_tensor = null,
     enc: std.ArrayList(EncLayer) = .empty,
-    up_conv_w: ?*mod.impl.c.ggml_tensor = null, // fenc.up_layer.conv
-    up_conv_b: ?*mod.impl.c.ggml_tensor = null,
-    up_embed_linear_w: ?*mod.impl.c.ggml_tensor = null, // fenc.up_embed.out.0
-    up_embed_linear_b: ?*mod.impl.c.ggml_tensor = null,
-    up_embed_norm_w: ?*mod.impl.c.ggml_tensor = null, // fenc.up_embed.out.1
-    up_embed_norm_b: ?*mod.impl.c.ggml_tensor = null,
+    up_conv_w: ?*llama.impl.llama_c.ggml_tensor = null, // fenc.up_layer.conv
+    up_conv_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    up_embed_linear_w: ?*llama.impl.llama_c.ggml_tensor = null, // fenc.up_embed.out.0
+    up_embed_linear_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    up_embed_norm_w: ?*llama.impl.llama_c.ggml_tensor = null, // fenc.up_embed.out.1
+    up_embed_norm_b: ?*llama.impl.llama_c.ggml_tensor = null,
     up_enc: std.ArrayList(EncLayer) = .empty,
-    after_norm_w: ?*mod.impl.c.ggml_tensor = null,
-    after_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    encoder_proj_w: ?*mod.impl.c.ggml_tensor = null, // flow.encoder_proj
-    encoder_proj_b: ?*mod.impl.c.ggml_tensor = null,
+    after_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    after_norm_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    encoder_proj_w: ?*llama.impl.llama_c.ggml_tensor = null, // flow.encoder_proj
+    encoder_proj_b: ?*llama.impl.llama_c.ggml_tensor = null,
 
     // cfm estimator
-    time_mlp_1_w: ?*mod.impl.c.ggml_tensor = null,
-    time_mlp_1_b: ?*mod.impl.c.ggml_tensor = null,
-    time_mlp_2_w: ?*mod.impl.c.ggml_tensor = null,
-    time_mlp_2_b: ?*mod.impl.c.ggml_tensor = null,
-    time_embed_mixer_w: ?*mod.impl.c.ggml_tensor = null, // meanflow variant only
+    time_mlp_1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    time_mlp_1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    time_mlp_2_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    time_mlp_2_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    time_embed_mixer_w: ?*llama.impl.llama_c.ggml_tensor = null, // meanflow variant only
     est_down: EstStage = .{},
     est_mid: std.ArrayList(EstStage) = .empty,
     est_up: EstStage = .{},
     est_final_block: CausalBlock = .{},
-    est_final_proj_w: ?*mod.impl.c.ggml_tensor = null,
-    est_final_proj_b: ?*mod.impl.c.ggml_tensor = null,
+    est_final_proj_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    est_final_proj_b: ?*llama.impl.llama_c.ggml_tensor = null,
 
     // hift vocoder
-    hift_pre_w: ?*mod.impl.c.ggml_tensor = null,
-    hift_pre_b: ?*mod.impl.c.ggml_tensor = null,
+    hift_pre_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    hift_pre_b: ?*llama.impl.llama_c.ggml_tensor = null,
     hift_ups: std.ArrayList(HiftUp) = .empty,
-    hift_post_w: ?*mod.impl.c.ggml_tensor = null,
-    hift_post_b: ?*mod.impl.c.ggml_tensor = null,
+    hift_post_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    hift_post_b: ?*llama.impl.llama_c.ggml_tensor = null,
     f0_condnet: std.ArrayList(F0Conv) = .empty,
-    f0_classifier_w: ?*mod.impl.c.ggml_tensor = null,
-    f0_classifier_b: ?*mod.impl.c.ggml_tensor = null,
+    f0_classifier_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    f0_classifier_b: ?*llama.impl.llama_c.ggml_tensor = null,
 
     // s3 tokenizer
-    s3tok_conv1_w: ?*mod.impl.c.ggml_tensor = null,
-    s3tok_conv1_b: ?*mod.impl.c.ggml_tensor = null,
-    s3tok_conv2_w: ?*mod.impl.c.ggml_tensor = null,
-    s3tok_conv2_b: ?*mod.impl.c.ggml_tensor = null,
+    s3tok_conv1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    s3tok_conv1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    s3tok_conv2_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    s3tok_conv2_b: ?*llama.impl.llama_c.ggml_tensor = null,
     s3tok_blocks: std.ArrayList(S3tokBlock) = .empty,
-    s3tok_down_w: ?*mod.impl.c.ggml_tensor = null, // quantizer._codebook.project_down
-    s3tok_down_b: ?*mod.impl.c.ggml_tensor = null,
+    s3tok_down_w: ?*llama.impl.llama_c.ggml_tensor = null, // quantizer._codebook.project_down
+    s3tok_down_b: ?*llama.impl.llama_c.ggml_tensor = null,
 
     // CAMPPlus speaker encoder
-    spk_conv1_w: ?*mod.impl.c.ggml_tensor = null,
+    spk_conv1_w: ?*llama.impl.llama_c.ggml_tensor = null,
     spk_bn1: Bn = .{},
     spk_layer1_0: SpkRes2d = .{},
     spk_layer1_1: SpkRes2d = .{},
     spk_layer2_0: SpkRes2d = .{},
     spk_layer2_1: SpkRes2d = .{},
-    spk_conv2_w: ?*mod.impl.c.ggml_tensor = null,
+    spk_conv2_w: ?*llama.impl.llama_c.ggml_tensor = null,
     spk_bn2: Bn = .{},
-    spk_tdnn_w: ?*mod.impl.c.ggml_tensor = null,
+    spk_tdnn_w: ?*llama.impl.llama_c.ggml_tensor = null,
     spk_tdnn_bn: Bn = .{},
     spk_block1: SpkCamBlock = .{},
     spk_block2: SpkCamBlock = .{},
     spk_block3: SpkCamBlock = .{},
     spk_out_bn: Bn = .{},
-    spk_dense_w: ?*mod.impl.c.ggml_tensor = null,
+    spk_dense_w: ?*llama.impl.llama_c.ggml_tensor = null,
     spk_dense_bn: Bn = .{},
-    spk_affine_w: ?*mod.impl.c.ggml_tensor = null,
-    spk_affine_b: ?*mod.impl.c.ggml_tensor = null,
+    spk_affine_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    spk_affine_b: ?*llama.impl.llama_c.ggml_tensor = null,
 };
 
 /// Ports `mtmd_vocos` (mtmd-model.h:872 @b1b770d90): soprano's Vocos decoder.
 pub const Vocos = struct {
-    input_w: ?*mod.impl.c.ggml_tensor = null,
-    input_b: ?*mod.impl.c.ggml_tensor = null,
-    norm_w: ?*mod.impl.c.ggml_tensor = null,
-    norm_b: ?*mod.impl.c.ggml_tensor = null,
-    output_norm_w: ?*mod.impl.c.ggml_tensor = null,
-    output_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    output_w: ?*mod.impl.c.ggml_tensor = null,
-    output_b: ?*mod.impl.c.ggml_tensor = null,
+    input_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    input_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    norm_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    output_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    output_norm_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    output_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    output_b: ?*llama.impl.llama_c.ggml_tensor = null,
     blocks: std.ArrayList(Code2Wav.UpsampleBlock) = .empty,
 };
 
@@ -889,16 +890,16 @@ pub const ClampInfo = struct {
 /// Ports `audio_patch` (mtmd-model.h:923 @b1b770d90), a member of `mtmd_model`:
 /// one patch embedder per audio pyramid stage (muse-spark).
 pub const AudioPatch = struct {
-    proj_w: ?*mod.impl.c.ggml_tensor = null,
-    proj_b: ?*mod.impl.c.ggml_tensor = null,
-    norm_w: ?*mod.impl.c.ggml_tensor = null,
+    proj_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    proj_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
 };
 
 /// A `std::map<ggml_backend_dev_t, size_t>`: by device pointer, ascending.
 pub const DevSizeMap = struct {
-    items: std.ArrayList(struct { dev: mod.impl.c.ggml_backend_dev_t, size: usize }) = .empty,
+    items: std.ArrayList(struct { dev: llama.impl.llama_c.ggml_backend_dev_t, size: usize }) = .empty,
 
-    pub fn add(self: *DevSizeMap, dev: mod.impl.c.ggml_backend_dev_t, n: usize) !void {
+    pub fn add(self: *DevSizeMap, dev: llama.impl.llama_c.ggml_backend_dev_t, n: usize) !void {
         const key = @intFromPtr(dev);
         var i: usize = 0;
         while (i < self.items.items.len) : (i += 1) {
@@ -924,11 +925,11 @@ pub const DevSizeMap = struct {
 /// Ports `mtmd_drama3_layer` (mtmd-model.h:864 @b1b770d90): the drama3
 /// tower's extra tensors around the generic block.
 pub const Drama3Layer = struct {
-    enorm_w: ?*mod.impl.c.ggml_tensor = null,
-    hnorm_w: ?*mod.impl.c.ggml_tensor = null,
-    eh_proj_w: ?*mod.impl.c.ggml_tensor = null, // [code embd; hidden] -> hidden
-    embd_w: ?*mod.impl.c.ggml_tensor = null,
-    out_norm_w: ?*mod.impl.c.ggml_tensor = null,
+    enorm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    hnorm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    eh_proj_w: ?*llama.impl.llama_c.ggml_tensor = null, // [code embd; hidden] -> hidden
+    embd_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    out_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
 };
 
 /// Ports `mtmd_model` (mtmd-model.h:885 @b1b770d90): the weights and hparams
@@ -944,8 +945,8 @@ pub const Model = struct {
     flash_attn_auto: bool = true, // false: MTMD_FLASH_ATTN_TYPE_AUTO resolves to disabled
 
     // weights
-    ctx_data: ?*mod.impl.c.ggml_context = null,
-    buf: mod.impl.c.ggml_backend_buffer_t = null,
+    ctx_data: ?*llama.impl.llama_c.ggml_context = null,
+    buf: llama.impl.llama_c.ggml_backend_buffer_t = null,
     mem_weights: DevSizeMap = .{},
 
     layers: std.ArrayList(Layer) = .empty,
@@ -973,7 +974,7 @@ pub const Model = struct {
     cbx: Chatterbox = .{},
 
     // chatterbox tensors read on the host, see cbx_read_tensor(); keys owned
-    cbx_tensors: std.StringHashMapUnmanaged(?*mod.impl.c.ggml_tensor) = .empty,
+    cbx_tensors: std.StringHashMapUnmanaged(?*llama.impl.llama_c.ggml_tensor) = .empty,
     // predefined voices, no rows if the voice is named in the prompt (lfm3a)
     gen_voices: mod.impl.GenVoiceMap = .{},
     // soprano: Vocos decoder, hidden states -> STFT coefficients
@@ -984,312 +985,312 @@ pub const Model = struct {
 
     // nemotron transcribe: speaker expert, Sortformer head, fusion
     spk_layers: std.ArrayList(Layer) = .empty,
-    spk_inp_proj_w: ?*mod.impl.c.ggml_tensor = null,
-    spk_pre_ln_w: ?*mod.impl.c.ggml_tensor = null,
-    spk_pre_ln_b: ?*mod.impl.c.ggml_tensor = null,
-    spk_post_ln_w: ?*mod.impl.c.ggml_tensor = null,
-    spk_post_ln_b: ?*mod.impl.c.ggml_tensor = null,
-    spk_head_proj_w: ?*mod.impl.c.ggml_tensor = null,
-    spk_head_proj_b: ?*mod.impl.c.ggml_tensor = null,
-    spk_head_up_w: ?*mod.impl.c.ggml_tensor = null,
-    spk_head_up_b: ?*mod.impl.c.ggml_tensor = null,
-    spk_head_fc1_w: ?*mod.impl.c.ggml_tensor = null,
-    spk_head_fc1_b: ?*mod.impl.c.ggml_tensor = null,
-    spk_head_fc2_w: ?*mod.impl.c.ggml_tensor = null,
-    spk_head_fc2_b: ?*mod.impl.c.ggml_tensor = null,
-    fusion_asr_norm_w: ?*mod.impl.c.ggml_tensor = null,
-    fusion_asr_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    fusion_spk_norm_w: ?*mod.impl.c.ggml_tensor = null,
-    fusion_spk_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    fusion_spk_kernel: ?*mod.impl.c.ggml_tensor = null,
+    spk_inp_proj_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    spk_pre_ln_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    spk_pre_ln_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    spk_post_ln_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    spk_post_ln_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    spk_head_proj_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    spk_head_proj_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    spk_head_up_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    spk_head_up_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    spk_head_fc1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    spk_head_fc1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    spk_head_fc2_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    spk_head_fc2_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    fusion_asr_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    fusion_asr_norm_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    fusion_spk_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    fusion_spk_norm_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    fusion_spk_kernel: ?*llama.impl.llama_c.ggml_tensor = null,
     spk_sil_emb: std.ArrayList(f32) = .empty,
 
     // lfm2 audio
-    pre_encode_conv_X_w: [7]?*mod.impl.c.ggml_tensor = @splat(null),
-    pre_encode_conv_X_b: [7]?*mod.impl.c.ggml_tensor = @splat(null),
+    pre_encode_conv_X_w: [7]?*llama.impl.llama_c.ggml_tensor = @splat(null),
+    pre_encode_conv_X_b: [7]?*llama.impl.llama_c.ggml_tensor = @splat(null),
 
     // gemma4 Gemma4ClippableLinear, by tensor name
     clamp_info_map: std.StringHashMapUnmanaged(ClampInfo) = .empty,
 
     // gemma4 audio conformer
-    sscp_conv_w: [2]?*mod.impl.c.ggml_tensor = @splat(null),
-    sscp_conv_b: [2]?*mod.impl.c.ggml_tensor = @splat(null),
-    sscp_norm_w: [2]?*mod.impl.c.ggml_tensor = @splat(null),
+    sscp_conv_w: [2]?*llama.impl.llama_c.ggml_tensor = @splat(null),
+    sscp_conv_b: [2]?*llama.impl.llama_c.ggml_tensor = @splat(null),
+    sscp_norm_w: [2]?*llama.impl.llama_c.ggml_tensor = @splat(null),
 
     // qformer projector(s)
     qf_proj_blocks: std.ArrayList(QfBlock) = .empty,
 
     // embeddings
-    class_embedding: ?*mod.impl.c.ggml_tensor = null,
-    patch_embeddings_0: ?*mod.impl.c.ggml_tensor = null,
-    patch_embeddings_1: ?*mod.impl.c.ggml_tensor = null, // additional patch kernel; interpretation is model-specific (Qwen2VL, Nemotron Omni)
-    patch_bias: ?*mod.impl.c.ggml_tensor = null,
-    position_embeddings: ?*mod.impl.c.ggml_tensor = null,
-    rope_freqs: ?*mod.impl.c.ggml_tensor = null,
-    norm_embd_w: ?*mod.impl.c.ggml_tensor = null,
-    norm_embd_b: ?*mod.impl.c.ggml_tensor = null,
+    class_embedding: ?*llama.impl.llama_c.ggml_tensor = null,
+    patch_embeddings_0: ?*llama.impl.llama_c.ggml_tensor = null,
+    patch_embeddings_1: ?*llama.impl.llama_c.ggml_tensor = null, // additional patch kernel; interpretation is model-specific (Qwen2VL, Nemotron Omni)
+    patch_bias: ?*llama.impl.llama_c.ggml_tensor = null,
+    position_embeddings: ?*llama.impl.llama_c.ggml_tensor = null,
+    rope_freqs: ?*llama.impl.llama_c.ggml_tensor = null,
+    norm_embd_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    norm_embd_b: ?*llama.impl.llama_c.ggml_tensor = null,
     // "indexed" patch embedding norms
-    patch_norm_1_w: ?*mod.impl.c.ggml_tensor = null,
-    patch_norm_1_b: ?*mod.impl.c.ggml_tensor = null,
-    patch_norm_2_w: ?*mod.impl.c.ggml_tensor = null,
-    patch_norm_2_b: ?*mod.impl.c.ggml_tensor = null,
-    patch_norm_3_w: ?*mod.impl.c.ggml_tensor = null,
-    patch_norm_3_b: ?*mod.impl.c.ggml_tensor = null,
-    pre_ln_w: ?*mod.impl.c.ggml_tensor = null,
-    pre_ln_b: ?*mod.impl.c.ggml_tensor = null,
-    post_ln_w: ?*mod.impl.c.ggml_tensor = null,
-    post_ln_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_fc_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_fc_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_ffn_up_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_ffn_up_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_ffn_gate_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_ffn_gate_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_ffn_down_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_ffn_down_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_post_norm_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_post_norm_b: ?*mod.impl.c.ggml_tensor = null,
+    patch_norm_1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    patch_norm_1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    patch_norm_2_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    patch_norm_2_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    patch_norm_3_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    patch_norm_3_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    pre_ln_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    pre_ln_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    post_ln_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    post_ln_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_fc_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_fc_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_ffn_up_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_ffn_up_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_ffn_gate_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_ffn_gate_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_ffn_down_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_ffn_down_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_post_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_post_norm_b: ?*llama.impl.llama_c.ggml_tensor = null,
     // LLaVA projection
-    mm_input_norm_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_input_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_0_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_0_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_2_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_2_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_merger_fc1_w: ?*mod.impl.c.ggml_tensor = null, // minimax-m3
-    mm_merger_fc1_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_merger_fc2_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_merger_fc2_b: ?*mod.impl.c.ggml_tensor = null,
-    image_newline: ?*mod.impl.c.ggml_tensor = null,
-    view_seperator: ?*mod.impl.c.ggml_tensor = null,
-    tok_embd_sep: ?*mod.impl.c.ggml_tensor = null, // [n_embd_text, n_sep] rows of the text model tok_embd (MiniCPM-V 4.7)
+    mm_input_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_input_norm_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_0_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_0_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_2_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_2_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_merger_fc1_w: ?*llama.impl.llama_c.ggml_tensor = null, // minimax-m3
+    mm_merger_fc1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_merger_fc2_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_merger_fc2_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    image_newline: ?*llama.impl.llama_c.ggml_tensor = null,
+    view_seperator: ?*llama.impl.llama_c.ggml_tensor = null,
+    tok_embd_sep: ?*llama.impl.llama_c.ggml_tensor = null, // [n_embd_text, n_sep] rows of the text model tok_embd (MiniCPM-V 4.7)
     // Yi type models with mlp+normalization projection
-    mm_1_w: ?*mod.impl.c.ggml_tensor = null, // Yi type models have 0, 1, 3, 4
-    mm_1_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_3_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_3_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_4_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_4_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_5_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_5_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_6_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_6_b: ?*mod.impl.c.ggml_tensor = null,
+    mm_1_w: ?*llama.impl.llama_c.ggml_tensor = null, // Yi type models have 0, 1, 3, 4
+    mm_1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_3_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_3_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_4_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_4_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_5_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_5_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_6_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_6_b: ?*llama.impl.llama_c.ggml_tensor = null,
     // GLMV-Edge projection
-    mm_model_adapter_conv_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_adapter_conv_b: ?*mod.impl.c.ggml_tensor = null,
+    mm_model_adapter_conv_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_adapter_conv_b: ?*llama.impl.llama_c.ggml_tensor = null,
     // MobileVLM projection
-    mm_model_mlp_1_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_mlp_1_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_mlp_3_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_mlp_3_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_block_1_block_0_0_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_block_1_block_0_1_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_block_1_block_0_1_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_block_1_block_1_fc1_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_block_1_block_1_fc1_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_block_1_block_1_fc2_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_block_1_block_1_fc2_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_block_1_block_2_0_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_block_1_block_2_1_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_block_1_block_2_1_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_block_2_block_0_0_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_block_2_block_0_1_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_block_2_block_0_1_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_block_2_block_1_fc1_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_block_2_block_1_fc1_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_block_2_block_1_fc2_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_block_2_block_1_fc2_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_block_2_block_2_0_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_block_2_block_2_1_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_block_2_block_2_1_b: ?*mod.impl.c.ggml_tensor = null,
+    mm_model_mlp_1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_mlp_1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_mlp_3_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_mlp_3_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_block_1_block_0_0_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_block_1_block_0_1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_block_1_block_0_1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_block_1_block_1_fc1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_block_1_block_1_fc1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_block_1_block_1_fc2_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_block_1_block_1_fc2_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_block_1_block_2_0_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_block_1_block_2_1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_block_1_block_2_1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_block_2_block_0_0_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_block_2_block_0_1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_block_2_block_0_1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_block_2_block_1_fc1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_block_2_block_1_fc1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_block_2_block_1_fc2_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_block_2_block_1_fc2_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_block_2_block_2_0_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_block_2_block_2_1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_block_2_block_2_1_b: ?*llama.impl.llama_c.ggml_tensor = null,
     // MobileVLM_V2 projection
-    mm_model_mlp_0_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_mlp_0_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_mlp_2_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_mlp_2_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_peg_0_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_peg_0_b: ?*mod.impl.c.ggml_tensor = null,
+    mm_model_mlp_0_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_mlp_0_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_mlp_2_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_mlp_2_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_peg_0_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_peg_0_b: ?*llama.impl.llama_c.ggml_tensor = null,
     // MINICPMV projection
-    mm_model_pos_embed_k: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_query: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_proj: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_proj_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_kv_proj: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_attn_q_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_attn_q_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_attn_k_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_attn_k_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_attn_v_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_attn_v_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_attn_o_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_attn_o_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_ln_q_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_ln_q_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_ln_kv_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_ln_kv_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_ln_post_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_model_ln_post_b: ?*mod.impl.c.ggml_tensor = null,
+    mm_model_pos_embed_k: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_query: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_proj: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_proj_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_kv_proj: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_attn_q_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_attn_q_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_attn_k_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_attn_k_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_attn_v_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_attn_v_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_attn_o_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_attn_o_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_ln_q_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_ln_q_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_ln_kv_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_ln_kv_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_ln_post_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_model_ln_post_b: ?*llama.impl.llama_c.ggml_tensor = null,
     // MiniCPM-V 4.6 ViT merger (window self-attention + ViT MLP downsample)
-    vit_merger_ln1_w: ?*mod.impl.c.ggml_tensor = null,
-    vit_merger_ln1_b: ?*mod.impl.c.ggml_tensor = null,
-    vit_merger_attn_q_w: ?*mod.impl.c.ggml_tensor = null,
-    vit_merger_attn_q_b: ?*mod.impl.c.ggml_tensor = null,
-    vit_merger_attn_k_w: ?*mod.impl.c.ggml_tensor = null,
-    vit_merger_attn_k_b: ?*mod.impl.c.ggml_tensor = null,
-    vit_merger_attn_v_w: ?*mod.impl.c.ggml_tensor = null,
-    vit_merger_attn_v_b: ?*mod.impl.c.ggml_tensor = null,
-    vit_merger_attn_o_w: ?*mod.impl.c.ggml_tensor = null,
-    vit_merger_attn_o_b: ?*mod.impl.c.ggml_tensor = null,
-    vit_merger_ds_ln_w: ?*mod.impl.c.ggml_tensor = null,
-    vit_merger_ds_ln_b: ?*mod.impl.c.ggml_tensor = null,
-    vit_merger_ds_up_w: ?*mod.impl.c.ggml_tensor = null,
-    vit_merger_ds_up_b: ?*mod.impl.c.ggml_tensor = null,
-    vit_merger_ds_down_w: ?*mod.impl.c.ggml_tensor = null,
-    vit_merger_ds_down_b: ?*mod.impl.c.ggml_tensor = null,
+    vit_merger_ln1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    vit_merger_ln1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    vit_merger_attn_q_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    vit_merger_attn_q_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    vit_merger_attn_k_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    vit_merger_attn_k_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    vit_merger_attn_v_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    vit_merger_attn_v_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    vit_merger_attn_o_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    vit_merger_attn_o_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    vit_merger_ds_ln_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    vit_merger_ds_ln_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    vit_merger_ds_up_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    vit_merger_ds_up_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    vit_merger_ds_down_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    vit_merger_ds_down_b: ?*llama.impl.llama_c.ggml_tensor = null,
     // gemma3
-    mm_input_proj_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_soft_emb_norm_w: ?*mod.impl.c.ggml_tensor = null,
+    mm_input_proj_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_soft_emb_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
     // mobilenetv5 for gemma3n
-    mobilenet_stem_conv_w: ?*mod.impl.c.ggml_tensor = null,
-    mobilenet_stem_conv_b: ?*mod.impl.c.ggml_tensor = null,
-    mobilenet_stem_norm_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_post_proj_norm_w: ?*mod.impl.c.ggml_tensor = null,
+    mobilenet_stem_conv_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mobilenet_stem_conv_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mobilenet_stem_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_post_proj_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
     // Multi-Scale Fusion Adapter (MSFA) components
-    msfa_concat_conv_w: ?*mod.impl.c.ggml_tensor = null,
-    msfa_concat_norm_w: ?*mod.impl.c.ggml_tensor = null,
-    msfa_ffn_expand_w: ?*mod.impl.c.ggml_tensor = null,
-    msfa_ffn_project_w: ?*mod.impl.c.ggml_tensor = null,
-    msfa_ffn_expand_bn: ?*mod.impl.c.ggml_tensor = null,
-    msfa_ffn_project_bn: ?*mod.impl.c.ggml_tensor = null,
+    msfa_concat_conv_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    msfa_concat_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    msfa_ffn_expand_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    msfa_ffn_project_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    msfa_ffn_expand_bn: ?*llama.impl.llama_c.ggml_tensor = null,
+    msfa_ffn_project_bn: ?*llama.impl.llama_c.ggml_tensor = null,
     // yasa2
-    yasa_patch_w: ?*mod.impl.c.ggml_tensor = null,
-    yasa_patch_b: ?*mod.impl.c.ggml_tensor = null,
-    yasa_patch_ln_w: ?*mod.impl.c.ggml_tensor = null,
-    yasa_patch_ln_b: ?*mod.impl.c.ggml_tensor = null,
-    yasa_backbone_ln_w: ?*mod.impl.c.ggml_tensor = null,
-    yasa_backbone_ln_b: ?*mod.impl.c.ggml_tensor = null,
-    yasa_vision_pos_embed: ?*mod.impl.c.ggml_tensor = null,
+    yasa_patch_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    yasa_patch_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    yasa_patch_ln_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    yasa_patch_ln_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    yasa_backbone_ln_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    yasa_backbone_ln_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    yasa_vision_pos_embed: ?*llama.impl.llama_c.ggml_tensor = null,
     // lfm3vl
-    lfm3vl_embedding_norm_w: ?*mod.impl.c.ggml_tensor = null,
+    lfm3vl_embedding_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
     // pixtral, glm4v
-    token_embd_img_break: ?*mod.impl.c.ggml_tensor = null,
+    token_embd_img_break: ?*llama.impl.llama_c.ggml_tensor = null,
 
     // deepseek4v sentinel embeddings (image_newline is reused for IMAGE_NEW_LINE)
-    token_embd_img_start: ?*mod.impl.c.ggml_tensor = null,
-    token_embd_img_end: ?*mod.impl.c.ggml_tensor = null,
-    token_embd_img_pad: ?*mod.impl.c.ggml_tensor = null,
-    mm_patch_merger_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_patch_merger_b: ?*mod.impl.c.ggml_tensor = null,
+    token_embd_img_start: ?*llama.impl.llama_c.ggml_tensor = null,
+    token_embd_img_end: ?*llama.impl.llama_c.ggml_tensor = null,
+    token_embd_img_pad: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_patch_merger_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_patch_merger_b: ?*llama.impl.llama_c.ggml_tensor = null,
     // ultravox / whisper encoder
-    conv1d_1_w: ?*mod.impl.c.ggml_tensor = null,
-    conv1d_1_b: ?*mod.impl.c.ggml_tensor = null,
-    conv1d_2_w: ?*mod.impl.c.ggml_tensor = null,
-    conv1d_2_b: ?*mod.impl.c.ggml_tensor = null,
-    conv_out_w: ?*mod.impl.c.ggml_tensor = null,
-    conv_out_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_norm_pre_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_norm_pre_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_norm_mid_w: ?*mod.impl.c.ggml_tensor = null,
+    conv1d_1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    conv1d_1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    conv1d_2_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    conv1d_2_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    conv_out_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    conv_out_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_norm_pre_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_norm_pre_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_norm_mid_w: ?*llama.impl.llama_c.ggml_tensor = null,
     // mimo-audio-tokenizer: post-transformer downsample + RVQ codebook
-    downsample_conv_w: ?*mod.impl.c.ggml_tensor = null, // no bias
-    downsample_norm_w: ?*mod.impl.c.ggml_tensor = null,
-    downsample_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    rvq_codebook: ?*mod.impl.c.ggml_tensor = null, // merged 3D [n_q, max_bins, dim]
+    downsample_conv_w: ?*llama.impl.llama_c.ggml_tensor = null, // no bias
+    downsample_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    downsample_norm_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    rvq_codebook: ?*llama.impl.llama_c.ggml_tensor = null, // merged 3D [n_q, max_bins, dim]
     // mimo-v2.5: text-side RVQ code embedding ("text codebook")
-    mm_a_code_embd: ?*mod.impl.c.ggml_tensor = null, // merged 3D [n_channels, vocab, dim]
+    mm_a_code_embd: ?*llama.impl.llama_c.ggml_tensor = null, // merged 3D [n_channels, vocab, dim]
     // mimo-v2.5: LLM-side connector (input_local_transformer, separate from the
     // audio_tokenizer's own encoder `layers`)
-    mm_a_local_norm_w: ?*mod.impl.c.ggml_tensor = null,
+    mm_a_local_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
     // qwen3a
-    conv2d_1_w: ?*mod.impl.c.ggml_tensor = null,
-    conv2d_1_b: ?*mod.impl.c.ggml_tensor = null,
-    conv2d_2_w: ?*mod.impl.c.ggml_tensor = null,
-    conv2d_2_b: ?*mod.impl.c.ggml_tensor = null,
-    conv2d_3_w: ?*mod.impl.c.ggml_tensor = null,
-    conv2d_3_b: ?*mod.impl.c.ggml_tensor = null,
+    conv2d_1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    conv2d_1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    conv2d_2_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    conv2d_2_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    conv2d_3_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    conv2d_3_b: ?*llama.impl.llama_c.ggml_tensor = null,
     // qwen3tts speaker encoder (ECAPA-TDNN)
     // reused tensors: stem conv is conv1d_1_w/b, feature aggregation is conv_out_w/b, output proj is mm_fc_w/b
-    spk_asp_attn_w: ?*mod.impl.c.ggml_tensor = null,
-    spk_asp_attn_b: ?*mod.impl.c.ggml_tensor = null,
-    spk_asp_tdnn_w: ?*mod.impl.c.ggml_tensor = null,
-    spk_asp_tdnn_b: ?*mod.impl.c.ggml_tensor = null,
+    spk_asp_attn_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    spk_asp_attn_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    spk_asp_tdnn_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    spk_asp_tdnn_b: ?*llama.impl.llama_c.ggml_tensor = null,
     // qwen3tts code_predictor
-    gen_code_proj_in_w: ?*mod.impl.c.ggml_tensor = null, // small_to_mtp_projection
-    gen_code_proj_in_b: ?*mod.impl.c.ggml_tensor = null,
-    gen_code_embd_w: ?*mod.impl.c.ggml_tensor = null, // per-codebook embedding, merged 3D
-    gen_code_head_w: ?*mod.impl.c.ggml_tensor = null, // per-codebook output head, merged 3D
-    gen_code_out_embd_w: ?*mod.impl.c.ggml_tensor = null, // codebook-0 embedding, fed back into the talker
-    gen_code_norm_w: ?*mod.impl.c.ggml_tensor = null, // final norm
+    gen_code_proj_in_w: ?*llama.impl.llama_c.ggml_tensor = null, // small_to_mtp_projection
+    gen_code_proj_in_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    gen_code_embd_w: ?*llama.impl.llama_c.ggml_tensor = null, // per-codebook embedding, merged 3D
+    gen_code_head_w: ?*llama.impl.llama_c.ggml_tensor = null, // per-codebook output head, merged 3D
+    gen_code_out_embd_w: ?*llama.impl.llama_c.ggml_tensor = null, // codebook-0 embedding, fed back into the talker
+    gen_code_norm_w: ?*llama.impl.llama_c.ggml_tensor = null, // final norm
     // lfm3a depthformer (MaskGIT)
-    gen_code_head_norm_w: ?*mod.impl.c.ggml_tensor = null, // per-codebook norm before the tied head, merged 2D
-    gen_code_mask_embd: ?*mod.impl.c.ggml_tensor = null,
+    gen_code_head_norm_w: ?*llama.impl.llama_c.ggml_tensor = null, // per-codebook norm before the tied head, merged 2D
+    gen_code_mask_embd: ?*llama.impl.llama_c.ggml_tensor = null,
     // qwen3tts code2wav: RVQ codes -> raw PCM
     // pocket-tts: SEANet stack, shared by the encoder (speaker path) and the decoder (gen path)
     // pocket-tts: voice latent -> backbone embd (speaker path)
-    spk_proj_w: ?*mod.impl.c.ggml_tensor = null,
-    downsample_w: ?*mod.impl.c.ggml_tensor = null,
+    spk_proj_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    downsample_w: ?*llama.impl.llama_c.ggml_tensor = null,
     // pocket-tts: flow-matching decoder, backbone hidden state -> next latent
-    gen_out_eos_w: ?*mod.impl.c.ggml_tensor = null,
-    gen_out_eos_b: ?*mod.impl.c.ggml_tensor = null,
-    gen_input_lin_w: ?*mod.impl.c.ggml_tensor = null, // latent -> backbone embd
-    gen_emb_mean: ?*mod.impl.c.ggml_tensor = null,
-    gen_emb_std: ?*mod.impl.c.ggml_tensor = null,
-    gen_quant_out_w: ?*mod.impl.c.ggml_tensor = null, // latent -> decoder dim
-    gen_upsample_w: ?*mod.impl.c.ggml_tensor = null, // depthwise convtr, frame rate -> encoder frame rate
+    gen_out_eos_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    gen_out_eos_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    gen_input_lin_w: ?*llama.impl.llama_c.ggml_tensor = null, // latent -> backbone embd
+    gen_emb_mean: ?*llama.impl.llama_c.ggml_tensor = null,
+    gen_emb_std: ?*llama.impl.llama_c.ggml_tensor = null,
+    gen_quant_out_w: ?*llama.impl.llama_c.ggml_tensor = null, // latent -> decoder dim
+    gen_upsample_w: ?*llama.impl.llama_c.ggml_tensor = null, // depthwise convtr, frame rate -> encoder frame rate
     // cogvlm
-    mm_post_fc_norm_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_post_fc_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    mm_h_to_4h_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_gate_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_4h_to_h_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_boi: ?*mod.impl.c.ggml_tensor = null,
-    mm_eoi: ?*mod.impl.c.ggml_tensor = null,
+    mm_post_fc_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_post_fc_norm_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_h_to_4h_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_gate_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_4h_to_h_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_boi: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_eoi: ?*llama.impl.llama_c.ggml_tensor = null,
     // hunyuanvl perceiver
-    mm_pre_norm_w: ?*mod.impl.c.ggml_tensor = null,
-    mm_img_begin: ?*mod.impl.c.ggml_tensor = null,
-    mm_img_end: ?*mod.impl.c.ggml_tensor = null,
+    mm_pre_norm_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_img_begin: ?*llama.impl.llama_c.ggml_tensor = null,
+    mm_img_end: ?*llama.impl.llama_c.ggml_tensor = null,
     // deepseek ocr sam
-    patch_embed_proj_w: ?*mod.impl.c.ggml_tensor = null,
-    patch_embed_proj_b: ?*mod.impl.c.ggml_tensor = null,
-    pos_embed: ?*mod.impl.c.ggml_tensor = null,
-    neck_0_w: ?*mod.impl.c.ggml_tensor = null,
-    neck_1_w: ?*mod.impl.c.ggml_tensor = null,
-    neck_1_b: ?*mod.impl.c.ggml_tensor = null,
-    neck_2_w: ?*mod.impl.c.ggml_tensor = null,
-    neck_3_w: ?*mod.impl.c.ggml_tensor = null,
-    neck_3_b: ?*mod.impl.c.ggml_tensor = null,
-    net_2: ?*mod.impl.c.ggml_tensor = null,
-    net_3: ?*mod.impl.c.ggml_tensor = null,
+    patch_embed_proj_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    patch_embed_proj_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    pos_embed: ?*llama.impl.llama_c.ggml_tensor = null,
+    neck_0_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    neck_1_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    neck_1_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    neck_2_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    neck_3_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    neck_3_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    net_2: ?*llama.impl.llama_c.ggml_tensor = null,
+    net_3: ?*llama.impl.llama_c.ggml_tensor = null,
     // deepseek-ocr-2
-    resample_query_768: ?*mod.impl.c.ggml_tensor = null,
-    resample_query_1024: ?*mod.impl.c.ggml_tensor = null,
+    resample_query_768: ?*llama.impl.llama_c.ggml_tensor = null,
+    resample_query_1024: ?*llama.impl.llama_c.ggml_tensor = null,
     // lfm2 audio
-    pre_encode_out_w: ?*mod.impl.c.ggml_tensor = null,
-    pre_encode_out_b: ?*mod.impl.c.ggml_tensor = null,
+    pre_encode_out_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    pre_encode_out_b: ?*llama.impl.llama_c.ggml_tensor = null,
     // gemma4
-    std_bias: ?*mod.impl.c.ggml_tensor = null,
-    std_scale: ?*mod.impl.c.ggml_tensor = null,
+    std_bias: ?*llama.impl.llama_c.ggml_tensor = null,
+    std_scale: ?*llama.impl.llama_c.ggml_tensor = null,
     // Gemma4ClippableLinear
     // gemma4 audio conformer
-    sscp_inp_proj_w: ?*mod.impl.c.ggml_tensor = null,
-    sscp_inp_proj_b: ?*mod.impl.c.ggml_tensor = null,
-    audio_out_proj_w: ?*mod.impl.c.ggml_tensor = null,
-    audio_out_proj_b: ?*mod.impl.c.ggml_tensor = null,
+    sscp_inp_proj_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    sscp_inp_proj_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    audio_out_proj_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    audio_out_proj_b: ?*llama.impl.llama_c.ggml_tensor = null,
     // granite_speech encoder
-    inp_proj_w: ?*mod.impl.c.ggml_tensor = null,
-    inp_proj_b: ?*mod.impl.c.ggml_tensor = null,
-    ctc_out_w: ?*mod.impl.c.ggml_tensor = null,
-    ctc_out_b: ?*mod.impl.c.ggml_tensor = null,
-    ctc_out_mid_w: ?*mod.impl.c.ggml_tensor = null,
-    ctc_out_mid_b: ?*mod.impl.c.ggml_tensor = null,
+    inp_proj_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    inp_proj_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    ctc_out_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    ctc_out_b: ?*llama.impl.llama_c.ggml_tensor = null,
+    ctc_out_mid_w: ?*llama.impl.llama_c.ggml_tensor = null,
+    ctc_out_mid_b: ?*llama.impl.llama_c.ggml_tensor = null,
     // qformer projector(s)
 
     /// The C++'s destructor, as far as the port owns heap memory: the weights
     /// buffer before its context, then the maps and lists.
     pub fn deinit(self: *Model) void {
-        if (self.buf != null) mod.impl.c.ggml_backend_buffer_free(self.buf);
+        if (self.buf != null) llama.impl.llama_c.ggml_backend_buffer_free(self.buf);
         self.buf = null;
-        if (self.ctx_data != null) mod.impl.c.ggml_free(self.ctx_data);
+        if (self.ctx_data != null) llama.impl.llama_c.ggml_free(self.ctx_data);
         self.ctx_data = null;
         self.mem_weights.deinit();
         self.hparams.deinit();

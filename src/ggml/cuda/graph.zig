@@ -29,135 +29,135 @@ const stdlib = @import("stdlib");
 
 /// Ports `ggml_cuda_compute_forward` (ggml-cuda.cu:2708 @b1b770d90). ggml has no
 /// `GGML_OP_ADD1` or `GGML_OP_DIAG_MASK_INF`.
-fn computeForward(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) bool {
+fn computeForward(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) bool {
     switch (dst.op) {
-        ggml.impl.c.GGML_OP_REPEAT => ggml.cuda.binbcast.opRepeat(ctx, dst),
-        ggml.impl.c.GGML_OP_REPEAT_BACK => ggml.cuda.binbcast.opRepeatBack(ctx, dst),
-        ggml.impl.c.GGML_OP_ADD => ggml.cuda.binbcast.opBinary(.add, ctx, dst),
-        ggml.impl.c.GGML_OP_SUB => ggml.cuda.binbcast.opBinary(.sub, ctx, dst),
-        ggml.impl.c.GGML_OP_MUL => ggml.cuda.binbcast.opBinary(.mul, ctx, dst),
-        ggml.impl.c.GGML_OP_DIV => ggml.cuda.binbcast.opBinary(.div, ctx, dst),
-        ggml.impl.c.GGML_OP_MUL_MAT => ggml.cuda.mulmat.mulMat(ctx, ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]), ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]), dst),
-        ggml.impl.c.GGML_OP_MUL_MAT_ID => ggml.cuda.mulmat.mulMatId(ctx, dst),
-        ggml.impl.c.GGML_OP_LIGHTNING_INDEXER => ggml.cuda.lightning_indexer.opLightningIndexer(ctx, dst),
-        ggml.impl.c.GGML_OP_TOP_K_MASK => ggml.cuda.top_k_mask.opTopKMask(ctx, dst),
-        ggml.impl.c.GGML_OP_FLASH_ATTN_EXT => ggml.cuda.fattn.flashAttnExt(ctx, dst),
-        ggml.impl.c.GGML_OP_SCALE => ggml.cuda.scale.opScale(ctx, dst),
-        ggml.impl.c.GGML_OP_NONE, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_PERMUTE, ggml.impl.c.GGML_OP_TRANSPOSE => {},
+        ggml.impl.ggml_c.GGML_OP_REPEAT => ggml.cuda.binbcast.opRepeat(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_REPEAT_BACK => ggml.cuda.binbcast.opRepeatBack(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_ADD => ggml.cuda.binbcast.opBinary(.add, ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_SUB => ggml.cuda.binbcast.opBinary(.sub, ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_MUL => ggml.cuda.binbcast.opBinary(.mul, ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_DIV => ggml.cuda.binbcast.opBinary(.div, ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_MUL_MAT => ggml.cuda.mulmat.mulMat(ctx, ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]), ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]), dst),
+        ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID => ggml.cuda.mulmat.mulMatId(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_LIGHTNING_INDEXER => ggml.cuda.lightning_indexer.opLightningIndexer(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_TOP_K_MASK => ggml.cuda.top_k_mask.opTopKMask(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_FLASH_ATTN_EXT => ggml.cuda.fattn.flashAttnExt(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_SCALE => ggml.cuda.scale.opScale(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_NONE, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_VIEW, ggml.impl.ggml_c.GGML_OP_PERMUTE, ggml.impl.ggml_c.GGML_OP_TRANSPOSE => {},
         // Elementwise and small reductions, in the C's switch order.
-        ggml.impl.c.GGML_OP_ARGMAX => ggml.cuda.argmax.opArgmax(ctx, dst),
-        ggml.impl.c.GGML_OP_COUNT_EQUAL => ggml.cuda.count_equal.opCountEqual(ctx, dst),
-        ggml.impl.c.GGML_OP_ADD_ID => ggml.cuda.add_id.opAddId(ctx, dst),
-        ggml.impl.c.GGML_OP_ACC => ggml.cuda.acc.opAcc(ctx, dst),
-        ggml.impl.c.GGML_OP_UNARY => switch (ggml.impl.c.ggml_get_unary_op(dst)) {
-            ggml.impl.c.GGML_UNARY_OP_ABS => ggml.cuda.unary.opUnary(.abs, ctx, dst),
-            ggml.impl.c.GGML_UNARY_OP_SGN => ggml.cuda.unary.opUnary(.sgn, ctx, dst),
-            ggml.impl.c.GGML_UNARY_OP_NEG => ggml.cuda.unary.opUnary(.neg, ctx, dst),
-            ggml.impl.c.GGML_UNARY_OP_STEP => ggml.cuda.unary.opUnary(.step, ctx, dst),
-            ggml.impl.c.GGML_UNARY_OP_GELU => ggml.cuda.unary.opUnary(.gelu, ctx, dst),
-            ggml.impl.c.GGML_UNARY_OP_SILU => ggml.cuda.unary.opUnary(.silu, ctx, dst),
-            ggml.impl.c.GGML_UNARY_OP_GELU_ERF => ggml.cuda.unary.opUnary(.gelu_erf, ctx, dst),
-            ggml.impl.c.GGML_UNARY_OP_GELU_QUICK => ggml.cuda.unary.opUnary(.gelu_quick, ctx, dst),
-            ggml.impl.c.GGML_UNARY_OP_TANH => ggml.cuda.unary.opUnary(.tanh, ctx, dst),
-            ggml.impl.c.GGML_UNARY_OP_RELU => ggml.cuda.unary.opUnary(.relu, ctx, dst),
-            ggml.impl.c.GGML_UNARY_OP_SIGMOID => ggml.cuda.unary.opUnary(.sigmoid, ctx, dst),
-            ggml.impl.c.GGML_UNARY_OP_HARDSIGMOID => ggml.cuda.unary.opUnary(.hardsigmoid, ctx, dst),
-            ggml.impl.c.GGML_UNARY_OP_HARDSWISH => ggml.cuda.unary.opUnary(.hardswish, ctx, dst),
-            ggml.impl.c.GGML_UNARY_OP_EXP => ggml.cuda.unary.opUnary(.exp, ctx, dst),
-            ggml.impl.c.GGML_UNARY_OP_ELU => ggml.cuda.unary.opUnary(.elu, ctx, dst),
-            ggml.impl.c.GGML_UNARY_OP_XIELU => ggml.cuda.unary.opXielu(ctx, dst),
-            ggml.impl.c.GGML_UNARY_OP_FLOOR => ggml.cuda.unary.opUnary(.floor, ctx, dst),
-            ggml.impl.c.GGML_UNARY_OP_CEIL => ggml.cuda.unary.opUnary(.ceil, ctx, dst),
-            ggml.impl.c.GGML_UNARY_OP_ROUND => ggml.cuda.unary.opUnary(.round, ctx, dst),
-            ggml.impl.c.GGML_UNARY_OP_TRUNC => ggml.cuda.unary.opUnary(.trunc, ctx, dst),
-            ggml.impl.c.GGML_UNARY_OP_EXPM1 => ggml.cuda.unary.opUnary(.expm1, ctx, dst),
-            ggml.impl.c.GGML_UNARY_OP_SOFTPLUS => ggml.cuda.unary.opUnary(.softplus, ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_ARGMAX => ggml.cuda.argmax.opArgmax(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_COUNT_EQUAL => ggml.cuda.count_equal.opCountEqual(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_ADD_ID => ggml.cuda.add_id.opAddId(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_ACC => ggml.cuda.acc.opAcc(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_UNARY => switch (ggml.impl.ggml_c.ggml_get_unary_op(dst)) {
+            ggml.impl.ggml_c.GGML_UNARY_OP_ABS => ggml.cuda.unary.opUnary(.abs, ctx, dst),
+            ggml.impl.ggml_c.GGML_UNARY_OP_SGN => ggml.cuda.unary.opUnary(.sgn, ctx, dst),
+            ggml.impl.ggml_c.GGML_UNARY_OP_NEG => ggml.cuda.unary.opUnary(.neg, ctx, dst),
+            ggml.impl.ggml_c.GGML_UNARY_OP_STEP => ggml.cuda.unary.opUnary(.step, ctx, dst),
+            ggml.impl.ggml_c.GGML_UNARY_OP_GELU => ggml.cuda.unary.opUnary(.gelu, ctx, dst),
+            ggml.impl.ggml_c.GGML_UNARY_OP_SILU => ggml.cuda.unary.opUnary(.silu, ctx, dst),
+            ggml.impl.ggml_c.GGML_UNARY_OP_GELU_ERF => ggml.cuda.unary.opUnary(.gelu_erf, ctx, dst),
+            ggml.impl.ggml_c.GGML_UNARY_OP_GELU_QUICK => ggml.cuda.unary.opUnary(.gelu_quick, ctx, dst),
+            ggml.impl.ggml_c.GGML_UNARY_OP_TANH => ggml.cuda.unary.opUnary(.tanh, ctx, dst),
+            ggml.impl.ggml_c.GGML_UNARY_OP_RELU => ggml.cuda.unary.opUnary(.relu, ctx, dst),
+            ggml.impl.ggml_c.GGML_UNARY_OP_SIGMOID => ggml.cuda.unary.opUnary(.sigmoid, ctx, dst),
+            ggml.impl.ggml_c.GGML_UNARY_OP_HARDSIGMOID => ggml.cuda.unary.opUnary(.hardsigmoid, ctx, dst),
+            ggml.impl.ggml_c.GGML_UNARY_OP_HARDSWISH => ggml.cuda.unary.opUnary(.hardswish, ctx, dst),
+            ggml.impl.ggml_c.GGML_UNARY_OP_EXP => ggml.cuda.unary.opUnary(.exp, ctx, dst),
+            ggml.impl.ggml_c.GGML_UNARY_OP_ELU => ggml.cuda.unary.opUnary(.elu, ctx, dst),
+            ggml.impl.ggml_c.GGML_UNARY_OP_XIELU => ggml.cuda.unary.opXielu(ctx, dst),
+            ggml.impl.ggml_c.GGML_UNARY_OP_FLOOR => ggml.cuda.unary.opUnary(.floor, ctx, dst),
+            ggml.impl.ggml_c.GGML_UNARY_OP_CEIL => ggml.cuda.unary.opUnary(.ceil, ctx, dst),
+            ggml.impl.ggml_c.GGML_UNARY_OP_ROUND => ggml.cuda.unary.opUnary(.round, ctx, dst),
+            ggml.impl.ggml_c.GGML_UNARY_OP_TRUNC => ggml.cuda.unary.opUnary(.trunc, ctx, dst),
+            ggml.impl.ggml_c.GGML_UNARY_OP_EXPM1 => ggml.cuda.unary.opUnary(.expm1, ctx, dst),
+            ggml.impl.ggml_c.GGML_UNARY_OP_SOFTPLUS => ggml.cuda.unary.opUnary(.softplus, ctx, dst),
             else => return false,
         },
-        ggml.impl.c.GGML_OP_GLU => switch (ggml.impl.c.ggml_get_glu_op(dst)) {
-            ggml.impl.c.GGML_GLU_OP_REGLU => ggml.cuda.unary.opGated(.relu, ctx, dst),
-            ggml.impl.c.GGML_GLU_OP_GEGLU => ggml.cuda.unary.opGated(.gelu, ctx, dst),
-            ggml.impl.c.GGML_GLU_OP_SWIGLU => ggml.cuda.unary.opGated(.silu, ctx, dst),
-            ggml.impl.c.GGML_GLU_OP_SWIGLU_OAI => ggml.cuda.unary.opSwigluOai(ctx, dst),
-            ggml.impl.c.GGML_GLU_OP_GEGLU_ERF => ggml.cuda.unary.opGated(.gelu_erf, ctx, dst),
-            ggml.impl.c.GGML_GLU_OP_GEGLU_QUICK => ggml.cuda.unary.opGated(.gelu_quick, ctx, dst),
-            ggml.impl.c.GGML_GLU_OP_SWIGLU_CLAMP => ggml.cuda.unary.opSwigluClamp(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_GLU => switch (ggml.impl.ggml_c.ggml_get_glu_op(dst)) {
+            ggml.impl.ggml_c.GGML_GLU_OP_REGLU => ggml.cuda.unary.opGated(.relu, ctx, dst),
+            ggml.impl.ggml_c.GGML_GLU_OP_GEGLU => ggml.cuda.unary.opGated(.gelu, ctx, dst),
+            ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU => ggml.cuda.unary.opGated(.silu, ctx, dst),
+            ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU_OAI => ggml.cuda.unary.opSwigluOai(ctx, dst),
+            ggml.impl.ggml_c.GGML_GLU_OP_GEGLU_ERF => ggml.cuda.unary.opGated(.gelu_erf, ctx, dst),
+            ggml.impl.ggml_c.GGML_GLU_OP_GEGLU_QUICK => ggml.cuda.unary.opGated(.gelu_quick, ctx, dst),
+            ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU_CLAMP => ggml.cuda.unary.opSwigluClamp(ctx, dst),
             else => return false,
         },
-        ggml.impl.c.GGML_OP_UPSCALE => ggml.cuda.upscale.opUpscale(ctx, dst),
-        ggml.impl.c.GGML_OP_PAD => ggml.cuda.pad.opPad(ctx, dst),
-        ggml.impl.c.GGML_OP_PAD_REFLECT_1D => ggml.cuda.pad_reflect_1d.opPadReflect1d(ctx, dst),
-        ggml.impl.c.GGML_OP_ARANGE => ggml.cuda.arange.opArange(ctx, dst),
-        ggml.impl.c.GGML_OP_TIMESTEP_EMBEDDING => ggml.cuda.tsembd.opTimestepEmbedding(ctx, dst),
-        ggml.impl.c.GGML_OP_LEAKY_RELU => ggml.cuda.unary.opLeakyRelu(ctx, dst),
-        ggml.impl.c.GGML_OP_SILU_BACK => ggml.cuda.unary.opSiluBack(ctx, dst),
-        ggml.impl.c.GGML_OP_SQR => ggml.cuda.unary.opUnary(.sqr, ctx, dst),
-        ggml.impl.c.GGML_OP_SQRT => ggml.cuda.unary.opUnary(.sqrt, ctx, dst),
-        ggml.impl.c.GGML_OP_SIN => ggml.cuda.unary.opUnary(.sin, ctx, dst),
-        ggml.impl.c.GGML_OP_COS => ggml.cuda.unary.opUnary(.cos, ctx, dst),
-        ggml.impl.c.GGML_OP_CLAMP => ggml.cuda.clamp.opClamp(ctx, dst),
-        ggml.impl.c.GGML_OP_LOG => ggml.cuda.unary.opUnary(.log, ctx, dst),
-        ggml.impl.c.GGML_OP_DIAG => ggml.cuda.diag.opDiag(ctx, dst),
-        ggml.impl.c.GGML_OP_ROLL => ggml.cuda.roll.opRoll(ctx, dst),
-        ggml.impl.c.GGML_OP_SUM_ROWS => ggml.cuda.sumrows.opSumRows(ctx, dst),
-        ggml.impl.c.GGML_OP_MEAN => ggml.cuda.mean.opMean(ctx, dst),
-        ggml.impl.c.GGML_OP_SUM => ggml.cuda.sum.opSum(ctx, dst),
-        ggml.impl.c.GGML_OP_TRI => ggml.cuda.tri.opTri(ctx, dst),
-        ggml.impl.c.GGML_OP_FILL => ggml.cuda.fill.opFill(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_UPSCALE => ggml.cuda.upscale.opUpscale(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_PAD => ggml.cuda.pad.opPad(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_PAD_REFLECT_1D => ggml.cuda.pad_reflect_1d.opPadReflect1d(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_ARANGE => ggml.cuda.arange.opArange(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_TIMESTEP_EMBEDDING => ggml.cuda.tsembd.opTimestepEmbedding(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_LEAKY_RELU => ggml.cuda.unary.opLeakyRelu(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_SILU_BACK => ggml.cuda.unary.opSiluBack(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_SQR => ggml.cuda.unary.opUnary(.sqr, ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_SQRT => ggml.cuda.unary.opUnary(.sqrt, ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_SIN => ggml.cuda.unary.opUnary(.sin, ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_COS => ggml.cuda.unary.opUnary(.cos, ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_CLAMP => ggml.cuda.clamp.opClamp(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_LOG => ggml.cuda.unary.opUnary(.log, ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_DIAG => ggml.cuda.diag.opDiag(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_ROLL => ggml.cuda.roll.opRoll(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_SUM_ROWS => ggml.cuda.sumrows.opSumRows(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_MEAN => ggml.cuda.mean.opMean(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_SUM => ggml.cuda.sum.opSum(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_TRI => ggml.cuda.tri.opTri(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_FILL => ggml.cuda.fill.opFill(ctx, dst),
         // Normalisation, softmax, rope and the training ops.
-        ggml.impl.c.GGML_OP_NORM => ggml.cuda.norm.opNorm(ctx, dst),
-        ggml.impl.c.GGML_OP_GROUP_NORM => ggml.cuda.norm.opGroupNorm(ctx, dst),
-        ggml.impl.c.GGML_OP_L2_NORM => ggml.cuda.norm.opL2Norm(ctx, dst),
-        ggml.impl.c.GGML_OP_RMS_NORM => ggml.cuda.norm.opRmsNorm(ctx, dst),
-        ggml.impl.c.GGML_OP_RMS_NORM_BACK => ggml.cuda.norm.opRmsNormBack(ctx, dst),
-        ggml.impl.c.GGML_OP_SOFT_MAX => ggml.cuda.softmax.opSoftMax(ctx, dst),
-        ggml.impl.c.GGML_OP_SOFT_MAX_BACK => ggml.cuda.softmax.opSoftMaxBack(ctx, dst),
-        ggml.impl.c.GGML_OP_ROPE => ggml.cuda.rope.opRope(ctx, dst),
-        ggml.impl.c.GGML_OP_ROPE_BACK => ggml.cuda.rope.opRopeBack(ctx, dst),
-        ggml.impl.c.GGML_OP_CROSS_ENTROPY_LOSS => ggml.cuda.cross_entropy_loss.opCrossEntropyLoss(ctx, dst),
-        ggml.impl.c.GGML_OP_CROSS_ENTROPY_LOSS_BACK => ggml.cuda.cross_entropy_loss.opCrossEntropyLossBack(ctx, dst),
-        ggml.impl.c.GGML_OP_OPT_STEP_ADAMW => ggml.cuda.opt_step_adamw.opOptStepAdamw(ctx, dst),
-        ggml.impl.c.GGML_OP_OPT_STEP_SGD => ggml.cuda.opt_step_sgd.opOptStepSgd(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_NORM => ggml.cuda.norm.opNorm(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_GROUP_NORM => ggml.cuda.norm.opGroupNorm(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_L2_NORM => ggml.cuda.norm.opL2Norm(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_RMS_NORM => ggml.cuda.norm.opRmsNorm(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_RMS_NORM_BACK => ggml.cuda.norm.opRmsNormBack(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_SOFT_MAX => ggml.cuda.softmax.opSoftMax(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_SOFT_MAX_BACK => ggml.cuda.softmax.opSoftMaxBack(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_ROPE => ggml.cuda.rope.opRope(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_ROPE_BACK => ggml.cuda.rope.opRopeBack(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_CROSS_ENTROPY_LOSS => ggml.cuda.cross_entropy_loss.opCrossEntropyLoss(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_CROSS_ENTROPY_LOSS_BACK => ggml.cuda.cross_entropy_loss.opCrossEntropyLossBack(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_OPT_STEP_ADAMW => ggml.cuda.opt_step_adamw.opOptStepAdamw(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_OPT_STEP_SGD => ggml.cuda.opt_step_sgd.opOptStepSgd(ctx, dst),
         // Recurrent-state ops and convolutions.
-        ggml.impl.c.GGML_OP_OUT_PROD => ggml.cuda.out_prod.outProd(ctx, dst),
-        ggml.impl.c.GGML_OP_IM2COL => ggml.cuda.im2col.opIm2col(ctx, dst),
-        ggml.impl.c.GGML_OP_IM2COL_3D => ggml.cuda.im2col.opIm2col3d(ctx, dst),
-        ggml.impl.c.GGML_OP_CONV_2D => ggml.cuda.conv2d.opConv2d(ctx, dst),
-        ggml.impl.c.GGML_OP_CONV_3D => ggml.cuda.conv3d.opConv3d(ctx, dst),
-        ggml.impl.c.GGML_OP_CONV_2D_DW => ggml.cuda.conv2d_dw.opConv2dDw(ctx, dst),
-        ggml.impl.c.GGML_OP_CONV_TRANSPOSE_2D => ggml.cuda.conv2d_transpose.conv2dTransposeP0(ctx, dst),
-        ggml.impl.c.GGML_OP_CONV_TRANSPOSE_1D => ggml.cuda.conv_transpose_1d.opConvTranspose1d(ctx, dst),
-        ggml.impl.c.GGML_OP_COL2IM_1D => ggml.cuda.col2im_1d.opCol2im1d(ctx, dst),
-        ggml.impl.c.GGML_OP_POOL_2D => ggml.cuda.pool2d.opPool2d(ctx, dst),
-        ggml.impl.c.GGML_OP_POOL_1D => ggml.cuda.pool1d.opPool1d(ctx, dst),
-        ggml.impl.c.GGML_OP_SSM_CONV => ggml.cuda.ssm_conv.opSsmConv(ctx, dst, null, null),
-        ggml.impl.c.GGML_OP_SSM_SCAN => ggml.cuda.ssm_scan.opSsmScan(ctx, dst),
-        ggml.impl.c.GGML_OP_RWKV_WKV6 => ggml.cuda.wkv.opRwkvWkv6(ctx, dst),
-        ggml.impl.c.GGML_OP_GATED_LINEAR_ATTN => ggml.cuda.gla.opGatedLinearAttn(ctx, dst),
-        ggml.impl.c.GGML_OP_GATED_DELTA_NET => ggml.cuda.gated_delta_net.opGatedDeltaNet(ctx, dst),
-        ggml.impl.c.GGML_OP_DSV4_HC_COMB => ggml.cuda.dsv4_hc.opDsv4HcComb(ctx, dst),
-        ggml.impl.c.GGML_OP_DSV4_HC_PRE => ggml.cuda.dsv4_hc.opDsv4HcPre(ctx, dst),
-        ggml.impl.c.GGML_OP_DSV4_HC_POST => ggml.cuda.dsv4_hc.opDsv4HcPost(ctx, dst, null, null),
-        ggml.impl.c.GGML_OP_RWKV_WKV7 => ggml.cuda.wkv.opRwkvWkv7(ctx, dst),
-        ggml.impl.c.GGML_OP_SOLVE_TRI => ggml.cuda.solve_tri.opSolveTri(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_OUT_PROD => ggml.cuda.out_prod.outProd(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_IM2COL => ggml.cuda.im2col.opIm2col(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_IM2COL_3D => ggml.cuda.im2col.opIm2col3d(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_CONV_2D => ggml.cuda.conv2d.opConv2d(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_CONV_3D => ggml.cuda.conv3d.opConv3d(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_CONV_2D_DW => ggml.cuda.conv2d_dw.opConv2dDw(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_CONV_TRANSPOSE_2D => ggml.cuda.conv2d_transpose.conv2dTransposeP0(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_CONV_TRANSPOSE_1D => ggml.cuda.conv_transpose_1d.opConvTranspose1d(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_COL2IM_1D => ggml.cuda.col2im_1d.opCol2im1d(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_POOL_2D => ggml.cuda.pool2d.opPool2d(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_POOL_1D => ggml.cuda.pool1d.opPool1d(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_SSM_CONV => ggml.cuda.ssm_conv.opSsmConv(ctx, dst, null, null),
+        ggml.impl.ggml_c.GGML_OP_SSM_SCAN => ggml.cuda.ssm_scan.opSsmScan(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_RWKV_WKV6 => ggml.cuda.wkv.opRwkvWkv6(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_GATED_LINEAR_ATTN => ggml.cuda.gla.opGatedLinearAttn(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_GATED_DELTA_NET => ggml.cuda.gated_delta_net.opGatedDeltaNet(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_DSV4_HC_COMB => ggml.cuda.dsv4_hc.opDsv4HcComb(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_DSV4_HC_PRE => ggml.cuda.dsv4_hc.opDsv4HcPre(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_DSV4_HC_POST => ggml.cuda.dsv4_hc.opDsv4HcPost(ctx, dst, null, null),
+        ggml.impl.ggml_c.GGML_OP_RWKV_WKV7 => ggml.cuda.wkv.opRwkvWkv7(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_SOLVE_TRI => ggml.cuda.solve_tri.opSolveTri(ctx, dst),
         // Data movement, indexing and sorting.
-        ggml.impl.c.GGML_OP_GET_ROWS => ggml.cuda.getrows.opGetRows(ctx, dst),
-        ggml.impl.c.GGML_OP_GET_ROWS_BACK => ggml.cuda.getrows.opGetRowsBack(ctx, dst),
-        ggml.impl.c.GGML_OP_SET_ROWS => ggml.cuda.set_rows.opSetRows(ctx, dst),
-        ggml.impl.c.GGML_OP_SET => ggml.cuda.set.opSet(ctx, dst),
-        ggml.impl.c.GGML_OP_DUP => ggml.cuda.cpy.dup(ctx, dst),
-        ggml.impl.c.GGML_OP_CPY => ggml.cuda.cpy.cpy(ctx, ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]), ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1])),
-        ggml.impl.c.GGML_OP_CONT => ggml.cuda.cpy.dup(ctx, dst),
-        ggml.impl.c.GGML_OP_CONCAT => ggml.cuda.concat.opConcat(ctx, dst),
-        ggml.impl.c.GGML_OP_CUMSUM => ggml.cuda.cumsum.opCumsum(ctx, dst),
-        ggml.impl.c.GGML_OP_TOP_K => ggml.cuda.top_k.opTopK(ctx, dst),
-        ggml.impl.c.GGML_OP_ARGSORT => ggml.cuda.argsort.opArgsort(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_GET_ROWS => ggml.cuda.getrows.opGetRows(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_GET_ROWS_BACK => ggml.cuda.getrows.opGetRowsBack(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_SET_ROWS => ggml.cuda.set_rows.opSetRows(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_SET => ggml.cuda.set.opSet(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_DUP => ggml.cuda.cpy.dup(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_CPY => ggml.cuda.cpy.cpy(ctx, ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]), ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1])),
+        ggml.impl.ggml_c.GGML_OP_CONT => ggml.cuda.cpy.dup(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_CONCAT => ggml.cuda.concat.opConcat(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_CUMSUM => ggml.cuda.cumsum.opCumsum(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_TOP_K => ggml.cuda.top_k.opTopK(ctx, dst),
+        ggml.impl.ggml_c.GGML_OP_ARGSORT => ggml.cuda.argsort.opArgsort(ctx, dst),
         else => return false,
     }
 
     const err = ggml.cuda.common.cu.cudaGetLastError();
     if (err != ggml.cuda.common.cu.cudaSuccess) {
-        ggml.impl.logError("%s: %s failed\n", .{ "ggml_cuda_compute_forward", ggml.impl.c.ggml_op_desc(dst) });
+        ggml.impl.logError("%s: %s failed\n", .{ "ggml_cuda_compute_forward", ggml.impl.ggml_c.ggml_op_desc(dst) });
         ggml.cuda.common.cudaCheck(err, "err", @src());
     }
     return true;
@@ -170,12 +170,12 @@ fn computeForward(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor)
 // CUDA graphs
 
 /// Ports `ggml_cuda_is_view_or_noop` (ggml-cuda.cu:3195 @b1b770d90).
-fn isViewOrNoop(t: *const ggml.impl.c.ggml_tensor) bool {
-    return ggml.impl.c.ggml_is_empty(t) or t.op == ggml.impl.c.GGML_OP_RESHAPE or t.op == ggml.impl.c.GGML_OP_TRANSPOSE or
-        t.op == ggml.impl.c.GGML_OP_VIEW or t.op == ggml.impl.c.GGML_OP_PERMUTE or t.op == ggml.impl.c.GGML_OP_NONE;
+fn isViewOrNoop(t: *const ggml.impl.ggml_c.ggml_tensor) bool {
+    return ggml.impl.ggml_c.ggml_is_empty(t) or t.op == ggml.impl.ggml_c.GGML_OP_RESHAPE or t.op == ggml.impl.ggml_c.GGML_OP_TRANSPOSE or
+        t.op == ggml.impl.ggml_c.GGML_OP_VIEW or t.op == ggml.impl.ggml_c.GGML_OP_PERMUTE or t.op == ggml.impl.ggml_c.GGML_OP_NONE;
 }
 
-fn nodes(cgraph: *ggml.impl.CGraph) []*ggml.impl.c.ggml_tensor {
+fn nodes(cgraph: *ggml.impl.CGraph) []*ggml.impl.ggml_c.ggml_tensor {
     return @ptrCast(cgraph.nodes[0..@intCast(cgraph.n_nodes)]);
 }
 
@@ -187,7 +187,7 @@ fn graphCheckCompatibility(cgraph: *ggml.impl.CGraph) bool {
         if (isViewOrNoop(node)) continue;
 
         // [TAG_MUL_MAT_ID_CUDA_GRAPHS]
-        if (node.op == ggml.impl.c.GGML_OP_MUL_MAT_ID) {
+        if (node.op == ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID) {
             const x = ggml.cuda.common.info().devices[@intCast(ggml.cuda.common.getDevice())].cc;
             if (ggml.cuda.mulmat.mulMatIdNeedsSync(node, x)) {
                 // the mul_mat_id fallback path synchronizes the stream, so
@@ -231,7 +231,7 @@ fn graphUpdateRequired(cuda_ctx: *ggml.cuda.common.Context, cgraph: *ggml.impl.C
         res = true;
         // `resize` value-initialises the new elements.
         const old = graph.node_props.items.len;
-        graph.node_props.resize(ggml.cuda.common.allocator, n) catch ggml.impl.abort("ggml-cuda: out of memory");
+        graph.node_props.resize(std.heap.c_allocator, n) catch ggml.impl.abort("ggml-cuda: out of memory");
         if (n > old) @memset(std.mem.sliceAsBytes(graph.node_props.items[old..]), 0);
     }
 
@@ -239,7 +239,7 @@ fn graphUpdateRequired(cuda_ctx: *ggml.cuda.common.Context, cgraph: *ggml.impl.C
         var prop: ggml.cuda.common.NodeProperties = std.mem.zeroes(ggml.cuda.common.NodeProperties);
         prop.node = node.*;
 
-        for (0..ggml.impl.c.GGML_MAX_SRC) |j| {
+        for (0..ggml.impl.ggml_c.GGML_MAX_SRC) |j| {
             if (node.src[j]) |s| {
                 prop.node_src_data_ptrs[j] = s.*.data;
                 prop.node_src_ne[j] = s.*.ne;
@@ -280,8 +280,8 @@ fn graphGetClusters(cuda_graph: ggml.cuda.common.cu.cudaGraph_t, device: c_int) 
     }
     var n_nodes: usize = 0;
     ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGraphGetNodes(cuda_graph, null, &n_nodes), "cudaGraphGetNodes(cuda_graph, nullptr, &n_nodes)", @src());
-    const graph_nodes = ggml.cuda.common.allocator.alloc(ggml.cuda.common.cu.cudaGraphNode_t, n_nodes) catch ggml.impl.abort("ggml-cuda: out of memory");
-    defer ggml.cuda.common.allocator.free(graph_nodes);
+    const graph_nodes = std.heap.c_allocator.alloc(ggml.cuda.common.cu.cudaGraphNode_t, n_nodes) catch ggml.impl.abort("ggml-cuda: out of memory");
+    defer std.heap.c_allocator.free(graph_nodes);
     // An empty `std::vector`'s `data()` is null; a zero-length Zig slice's
     // pointer is not, and the runtime refuses it.
     const nodes_ptr: ?[*]ggml.cuda.common.cu.cudaGraphNode_t = if (n_nodes == 0) null else graph_nodes.ptr;
@@ -294,7 +294,7 @@ fn graphGetClusters(cuda_graph: ggml.cuda.common.cu.cudaGraph_t, device: c_int) 
         ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGraphKernelNodeGetAttribute(graph_nodes[i], ggml.cuda.common.cu.cudaLaunchAttributeClusterDimension, &val), "cudaGraphKernelNodeGetAttribute(nodes[i], cudaLaunchAttributeClusterDimension, &val)", @src());
         const d = val.clusterDim;
         if (d.x *% d.y *% d.z > 1) {
-            clusters.append(ggml.cuda.common.allocator, .{ .node = i, .x = d.x, .y = d.y, .z = d.z }) catch ggml.impl.abort("ggml-cuda: out of memory");
+            clusters.append(std.heap.c_allocator, .{ .node = i, .x = d.x, .y = d.y, .z = d.z }) catch ggml.impl.abort("ggml-cuda: out of memory");
         }
     }
     return clusters;
@@ -313,11 +313,11 @@ fn graphUpdateExecutable(instance: *ggml.cuda.common.GraphInstance, cuda_graph: 
             }
             ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGraphExecDestroy(instance.handle), "cudaGraphExecDestroy(instance)", @src());
             ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGraphInstantiate(&instance.handle, cuda_graph, 0), "cudaGraphInstantiate(&instance.handle, cuda_graph, nullptr, nullptr, 0)", @src());
-            instance.clusters.deinit(ggml.cuda.common.allocator);
+            instance.clusters.deinit(std.heap.c_allocator);
             instance.clusters = clusters;
             return;
         }
-        clusters.deinit(ggml.cuda.common.allocator);
+        clusters.deinit(std.heap.c_allocator);
     }
 
     var result_info: ggml.cuda.common.cu.cudaGraphExecUpdateResultInfo = undefined;
@@ -366,7 +366,7 @@ fn graphLaunchChunk(cuda_ctx: *ggml.cuda.common.Context, graph: *ggml.cuda.commo
         graphUpdateExecutable(&graph.instances.items[idx], cuda_graph, cuda_ctx.device);
     } else {
         ggml.impl.assert(idx == graph.instances.items.len, "idx == graph->instances.size()");
-        graph.instances.append(ggml.cuda.common.allocator, .{}) catch ggml.impl.abort("ggml-cuda: out of memory");
+        graph.instances.append(std.heap.c_allocator, .{}) catch ggml.impl.abort("ggml-cuda: out of memory");
         ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGraphInstantiate(&graph.instances.items[idx].handle, cuda_graph, 0), "cudaGraphInstantiate(&graph->instances[idx].handle, cuda_graph, nullptr, nullptr, 0)", @src());
         graph.instances.items[idx].clusters = graphGetClusters(cuda_graph, cuda_ctx.device);
     }
@@ -400,7 +400,7 @@ const Concurrency = struct {
     is_active: bool = false,
     event: ?*ggml.cuda.common.ConcurrentEvent = null,
 
-    fn tryLaunch(self: *Concurrency, node: *const ggml.impl.c.ggml_tensor) void {
+    fn tryLaunch(self: *Concurrency, node: *const ggml.impl.ggml_c.ggml_tensor) void {
         const stream_ctx = &self.cuda_ctx.concurrent_stream_context;
         const ev = stream_ctx.concurrent_events.getPtr(node) orelse return;
         self.event = ev;
@@ -490,7 +490,7 @@ fn graphEvaluateAndCapture(cuda_ctx: *ggml.cuda.common.Context, cgraph: *ggml.im
                     conc.tryLaunch(ns[i - 1]);
                     if (conc.is_active) {
                         // `stream_mapping[node]` inserts 0 when absent.
-                        const gop = conc.event.?.stream_mapping.getOrPut(ggml.cuda.common.allocator, node) catch ggml.impl.abort("ggml-cuda: out of memory");
+                        const gop = conc.event.?.stream_mapping.getOrPut(std.heap.c_allocator, node) catch ggml.impl.abort("ggml-cuda: out of memory");
                         if (!gop.found_existing) gop.value_ptr.* = 0;
                         cuda_ctx.curr_stream_no = gop.value_ptr.*;
                         ggml.impl.logDebug("Setting stream no to %d for node %s\n", .{ cuda_ctx.curr_stream_no, @as([*:0]const u8, @ptrCast(&node.name)) });
@@ -500,7 +500,7 @@ fn graphEvaluateAndCapture(cuda_ctx: *ggml.cuda.common.Context, cgraph: *ggml.im
                 prev_i = i;
 
                 if (isViewOrNoop(node)) continue;
-                if ((node.flags & ggml.impl.c.GGML_TENSOR_FLAG_COMPUTE) == 0) continue;
+                if ((node.flags & ggml.impl.ggml_c.GGML_TENSOR_FLAG_COMPUTE) == 0) continue;
 
                 const nodes_to_skip = ggml.cuda.fusion.tryFuse(cuda_ctx, cgraph, @intCast(i));
                 if (nodes_to_skip != 0) {
@@ -510,7 +510,7 @@ fn graphEvaluateAndCapture(cuda_ctx: *ggml.cuda.common.Context, cgraph: *ggml.im
 
                 const ok = computeForward(cuda_ctx, node);
                 if (!ok) {
-                    ggml.impl.logError("%s: op not supported %s (%s)\n", .{ "ggml_cuda_graph_evaluate_and_capture", @as([*:0]const u8, @ptrCast(&node.name)), ggml.impl.c.ggml_op_name(node.op) });
+                    ggml.impl.logError("%s: op not supported %s (%s)\n", .{ "ggml_cuda_graph_evaluate_and_capture", @as([*:0]const u8, @ptrCast(&node.name)), ggml.impl.ggml_c.ggml_op_name(node.op) });
                 }
                 ggml.impl.assert(ok, "ok");
 
@@ -529,7 +529,7 @@ fn graphEvaluateAndCapture(cuda_ctx: *ggml.cuda.common.Context, cgraph: *ggml.im
                 ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGraphExecDestroy(g.instances.items[i].handle), "cudaGraphExecDestroy(graph->instances[i])", @src());
                 g.instances.items[i].deinit();
             }
-            g.instances.resize(ggml.cuda.common.allocator, n_chunks) catch ggml.impl.abort("ggml-cuda: out of memory");
+            g.instances.resize(std.heap.c_allocator, n_chunks) catch ggml.impl.abort("ggml-cuda: out of memory");
             graph_evaluated_or_captured = true; // CUDA graph has been captured
 
             ggml.cuda.common.lock.release();
@@ -549,19 +549,19 @@ fn graphEvaluateAndCapture(cuda_ctx: *ggml.cuda.common.Context, cgraph: *ggml.im
 /// The C's "restore original node order within each concurrent region"
 /// block in `ggml_cuda_graph_evaluate_and_capture` (ggml-cuda.cu:5172 @b1b770d90).
 fn restoreOriginalOrder(cuda_ctx: *ggml.cuda.common.Context, cgraph: *ggml.impl.CGraph) void {
-    var node_to_idx: std.AutoHashMapUnmanaged(*const ggml.impl.c.ggml_tensor, usize) = .empty;
-    defer node_to_idx.deinit(ggml.cuda.common.allocator);
+    var node_to_idx: std.AutoHashMapUnmanaged(*const ggml.impl.ggml_c.ggml_tensor, usize) = .empty;
+    defer node_to_idx.deinit(std.heap.c_allocator);
     const ns = nodes(cgraph);
-    for (ns, 0..) |node, i| node_to_idx.put(ggml.cuda.common.allocator, node, i) catch ggml.impl.abort("ggml-cuda: out of memory");
+    for (ns, 0..) |node, i| node_to_idx.put(std.heap.c_allocator, node, i) catch ggml.impl.abort("ggml-cuda: out of memory");
 
     for (cuda_ctx.concurrent_stream_context.concurrent_events.values()) |*ev| {
         var positions: std.ArrayList(usize) = .empty;
-        defer positions.deinit(ggml.cuda.common.allocator);
+        defer positions.deinit(std.heap.c_allocator);
 
         var all_found = true;
         for (ev.original_order.items) |orig| {
             if (node_to_idx.get(orig)) |idx| {
-                positions.append(ggml.cuda.common.allocator, idx) catch ggml.impl.abort("ggml-cuda: out of memory");
+                positions.append(std.heap.c_allocator, idx) catch ggml.impl.abort("ggml-cuda: out of memory");
             } else {
                 all_found = false;
                 break;
@@ -588,7 +588,7 @@ fn restoreOriginalOrder(cuda_ctx: *ggml.cuda.common.Context, cgraph: *ggml.impl.
 /// Ports `ggml_backend_cuda_graph_compute` (ggml-cuda.cu:5418 @b1b770d90).
 /// A graph reused under the same `uid` skips the compatibility
 /// check: `graph->uid` is set only for a compatible graph.
-pub fn graphCompute(backend_c: ggml.impl.c.ggml_backend_t, cgraph_c: ?*ggml.impl.c.struct_ggml_cgraph) callconv(.c) ggml.impl.c.enum_ggml_status {
+pub fn graphCompute(backend_c: ggml.impl.ggml_c.ggml_backend_t, cgraph_c: ?*ggml.impl.ggml_c.struct_ggml_cgraph) callconv(.c) ggml.impl.ggml_c.enum_ggml_status {
     const cuda_ctx = ggml.cuda.backend.backendCtx(backend_c);
     const cgraph: *ggml.impl.CGraph = @ptrCast(@alignCast(cgraph_c));
 
@@ -643,35 +643,35 @@ pub fn graphCompute(backend_c: ggml.impl.c.ggml_backend_t, cgraph_c: ?*ggml.impl
 
     graphEvaluateAndCapture(cuda_ctx, cgraph, use_cuda_graph, cuda_graph_update_required, graph_key);
 
-    return ggml.impl.c.GGML_STATUS_SUCCESS;
+    return ggml.impl.ggml_c.GGML_STATUS_SUCCESS;
 }
 
 // -----------------------------------------------------------------------------
 // Graph optimisation
 
-fn isNoop(node: *const ggml.impl.c.ggml_tensor) bool {
-    return ggml.impl.c.ggml_is_empty(node) or node.op == ggml.impl.c.GGML_OP_NONE or node.op == ggml.impl.c.GGML_OP_RESHAPE or
-        node.op == ggml.impl.c.GGML_OP_TRANSPOSE or node.op == ggml.impl.c.GGML_OP_VIEW or node.op == ggml.impl.c.GGML_OP_PERMUTE;
+fn isNoop(node: *const ggml.impl.ggml_c.ggml_tensor) bool {
+    return ggml.impl.ggml_c.ggml_is_empty(node) or node.op == ggml.impl.ggml_c.GGML_OP_NONE or node.op == ggml.impl.ggml_c.GGML_OP_RESHAPE or
+        node.op == ggml.impl.ggml_c.GGML_OP_TRANSPOSE or node.op == ggml.impl.ggml_c.GGML_OP_VIEW or node.op == ggml.impl.ggml_c.GGML_OP_PERMUTE;
 }
 
-fn dependsOn(dst: *const ggml.impl.c.ggml_tensor, src: *const ggml.impl.c.ggml_tensor) bool {
+fn dependsOn(dst: *const ggml.impl.ggml_c.ggml_tensor, src: *const ggml.impl.ggml_c.ggml_tensor) bool {
     for (dst.src) |s| {
         if (s == src) return true;
     }
     // implicit dependency if they view the same tensor
-    const dst2: *const ggml.impl.c.ggml_tensor = if (dst.view_src) |v| v else dst;
-    const src2: *const ggml.impl.c.ggml_tensor = if (src.view_src) |v| v else src;
+    const dst2: *const ggml.impl.ggml_c.ggml_tensor = if (dst.view_src) |v| v else dst;
+    const src2: *const ggml.impl.ggml_c.ggml_tensor = if (src.view_src) |v| v else src;
     return dst2 == src2;
 }
 
-fn belongsToBranch(node: *const ggml.impl.c.ggml_tensor, branch: []const *const ggml.impl.c.ggml_tensor) bool {
+fn belongsToBranch(node: *const ggml.impl.ggml_c.ggml_tensor, branch: []const *const ggml.impl.ggml_c.ggml_tensor) bool {
     for (branch) |n| {
         if (dependsOn(node, n)) return true;
     }
     return false;
 }
 
-fn appendOps(buf: *[16]ggml.impl.c.enum_ggml_op, n: *usize, items: []const ggml.impl.c.enum_ggml_op) void {
+fn appendOps(buf: *[16]ggml.impl.ggml_c.enum_ggml_op, n: *usize, items: []const ggml.impl.ggml_c.enum_ggml_op) void {
     for (items) |x| {
         buf[n.*] = x;
         n.* += 1;
@@ -683,7 +683,7 @@ fn appendOps(buf: *[16]ggml.impl.c.enum_ggml_op, n: *usize, items: []const ggml.
 /// until `nodes[last_node]`.
 fn addAllocDeps(
     cgraph: *const ggml.impl.CGraph,
-    params: *const ggml.impl.c.struct_ggml_backend_graph_optimize_params,
+    params: *const ggml.impl.ggml_c.struct_ggml_backend_graph_optimize_params,
     start: usize,
     last_node: usize,
 ) void {
@@ -741,13 +741,13 @@ const GraphOpt = struct {
 /// order affects only which region a skipped overlap would have kept --
 /// and overlapping ranges cannot occur, since each fork's range ends at its
 /// own join.
-pub fn graphOptimize(backend_c: ggml.impl.c.ggml_backend_t, cgraph_c: ?*ggml.impl.c.struct_ggml_cgraph, params_c: ?*ggml.impl.c.struct_ggml_backend_graph_optimize_params) callconv(.c) void {
+pub fn graphOptimize(backend_c: ggml.impl.ggml_c.ggml_backend_t, cgraph_c: ?*ggml.impl.ggml_c.struct_ggml_cgraph, params_c: ?*ggml.impl.ggml_c.struct_ggml_backend_graph_optimize_params) callconv(.c) void {
     const cuda_ctx = ggml.cuda.backend.backendCtx(backend_c);
     const cgraph: *ggml.impl.CGraph = @ptrCast(@alignCast(cgraph_c));
 
     const disable_fusion = ggml.cuda.common.fusionDisabled();
     if (!disable_fusion) {
-        const params = ggml.impl.one(ggml.impl.c.struct_ggml_backend_graph_optimize_params, params_c);
+        const params = ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend_graph_optimize_params, params_c);
         const add_alloc_dep = params.add_alloc_dep.?;
         // add alloc deps for performance positive fusions. This may increase the overall compute buffer size.
         // TODO: consolidate fusion paths in graph_optimize and graph_compute
@@ -755,20 +755,20 @@ pub fn graphOptimize(backend_c: ggml.impl.c.ggml_backend_t, cgraph_c: ?*ggml.imp
         {
             var r: c_int = 0;
             while (r + 5 < cgraph.n_nodes) : (r += 1) {
-                if (cgraph.nodes[@intCast(r)].?.op != ggml.impl.c.GGML_OP_MUL_MAT_ID) {
+                if (cgraph.nodes[@intCast(r)].?.op != ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID) {
                     continue;
                 }
                 var j: c_int = r + 3;
                 while (j + 2 < cgraph.n_nodes) : (j += 1) {
-                    if (cgraph.nodes[@intCast(j)].?.op == ggml.impl.c.GGML_OP_MUL_MAT_ID and cgraph.nodes[@intCast(j + 1)].?.op == ggml.impl.c.GGML_OP_MUL_MAT_ID) {
+                    if (cgraph.nodes[@intCast(j)].?.op == ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID and cgraph.nodes[@intCast(j + 1)].?.op == ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID) {
                         break;
                     }
-                    if (cgraph.nodes[@intCast(j)].?.op != ggml.impl.c.GGML_OP_MUL_MAT or !ggml.cuda.fusion.matchSharedExpert(cgraph, r, j)) {
+                    if (cgraph.nodes[@intCast(j)].?.op != ggml.impl.ggml_c.GGML_OP_MUL_MAT or !ggml.cuda.fusion.matchSharedExpert(cgraph, r, j)) {
                         continue;
                     }
                     // Group both outputs before allocation so the shared result cannot alias intervening nodes.
-                    std.mem.rotate(?*ggml.impl.c.ggml_tensor, cgraph.nodes[@intCast(r + 3)..@intCast(j + 3)], @intCast(j - (r + 3)));
-                    const up = ggml.impl.one(ggml.impl.c.ggml_tensor, cgraph.nodes[@intCast(r + 2)].?.src[1]);
+                    std.mem.rotate(?*ggml.impl.ggml_c.ggml_tensor, cgraph.nodes[@intCast(r + 3)..@intCast(j + 3)], @intCast(j - (r + 3)));
+                    const up = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, cgraph.nodes[@intCast(r + 2)].?.src[1]);
                     add_alloc_dep(params.user_data, up.src[1], cgraph.nodes[@intCast(r + 5)]);
                     add_alloc_dep(params.user_data, up.src[2], cgraph.nodes[@intCast(r + 5)]);
                     r += 5;
@@ -779,12 +779,12 @@ pub fn graphOptimize(backend_c: ggml.impl.c.ggml_backend_t, cgraph_c: ?*ggml.imp
         var i: c_int = 0;
         while (i < cgraph.n_nodes) : (i += 1) {
             // Keep the inputs of the fused gate/up/GLU MMQ kernel alive until the GLU so that they cannot alias its output (under op offload the weights are buffer copies).
-            if (i + 2 < cgraph.n_nodes and cgraph.nodes[@intCast(i + 2)].?.op == ggml.impl.c.GGML_OP_GLU) {
+            if (i + 2 < cgraph.n_nodes and cgraph.nodes[@intCast(i + 2)].?.op == ggml.impl.ggml_c.GGML_OP_GLU) {
                 const glu = cgraph.nodes[@intCast(i + 2)].?;
-                const gate: ?*const ggml.impl.c.ggml_tensor = glu.src[0];
-                const up: ?*const ggml.impl.c.ggml_tensor = glu.src[1];
-                const n0: ?*const ggml.impl.c.ggml_tensor = cgraph.nodes[@intCast(i)];
-                const n1: ?*const ggml.impl.c.ggml_tensor = cgraph.nodes[@intCast(i + 1)];
+                const gate: ?*const ggml.impl.ggml_c.ggml_tensor = glu.src[0];
+                const up: ?*const ggml.impl.ggml_c.ggml_tensor = glu.src[1];
+                const n0: ?*const ggml.impl.ggml_c.ggml_tensor = cgraph.nodes[@intCast(i)];
+                const n1: ?*const ggml.impl.ggml_c.ggml_tensor = cgraph.nodes[@intCast(i + 1)];
                 const ok = (gate == n0 and up == n1) or (gate == n1 and up == n0);
                 if (ok and ggml.cuda.mulmat.mulMatQFusionMatches(up.?, gate.?, glu, cuda_ctx.device, null, null)) {
                     addAllocDeps(cgraph, params, @intCast(i), @intCast(i + 2));
@@ -793,7 +793,7 @@ pub fn graphOptimize(backend_c: ggml.impl.c.ggml_backend_t, cgraph_c: ?*ggml.imp
                 }
             }
             // Same with the NVFP4 scales: MUL_MAT(gate), MUL(gate scale), MUL_MAT(up), MUL(up scale), GLU.
-            if (i + 4 < cgraph.n_nodes and cgraph.nodes[@intCast(i + 4)].?.op == ggml.impl.c.GGML_OP_GLU) {
+            if (i + 4 < cgraph.n_nodes and cgraph.nodes[@intCast(i + 4)].?.op == ggml.impl.ggml_c.GGML_OP_GLU) {
                 const glu = cgraph.nodes[@intCast(i + 4)].?;
                 const gate_scale = cgraph.nodes[@intCast(i + 1)].?;
                 const up_scale = cgraph.nodes[@intCast(i + 3)].?;
@@ -809,12 +809,12 @@ pub fn graphOptimize(backend_c: ggml.impl.c.ggml_backend_t, cgraph_c: ?*ggml.imp
                 }
             }
             // Same with per-expert NVFP4 scales: MUL_MAT_ID, RESHAPE, REPEAT, GET_ROWS, MUL for gate and for up, GLU.
-            if (i + 10 < cgraph.n_nodes and cgraph.nodes[@intCast(i + 10)].?.op == ggml.impl.c.GGML_OP_GLU) {
+            if (i + 10 < cgraph.n_nodes and cgraph.nodes[@intCast(i + 10)].?.op == ggml.impl.ggml_c.GGML_OP_GLU) {
                 const glu = cgraph.nodes[@intCast(i + 10)].?;
                 const gate_scale = cgraph.nodes[@intCast(i + 4)].?;
                 const up_scale = cgraph.nodes[@intCast(i + 9)].?;
                 const at = struct {
-                    fn f(g: *ggml.impl.CGraph, k: c_int) *ggml.impl.c.ggml_tensor {
+                    fn f(g: *ggml.impl.CGraph, k: c_int) *ggml.impl.ggml_c.ggml_tensor {
                         return g.nodes[@intCast(k)].?;
                     }
                 }.f;
@@ -840,39 +840,39 @@ pub fn graphOptimize(backend_c: ggml.impl.c.ggml_backend_t, cgraph_c: ?*ggml.imp
             }
 
             const nd = cgraph.nodes[@intCast(i)].?;
-            if (nd.op == ggml.impl.c.GGML_OP_UNARY or nd.op == ggml.impl.c.GGML_OP_SOFT_MAX or nd.op == ggml.impl.c.GGML_OP_ARGSORT) {
+            if (nd.op == ggml.impl.ggml_c.GGML_OP_UNARY or nd.op == ggml.impl.ggml_c.GGML_OP_SOFT_MAX or nd.op == ggml.impl.ggml_c.GGML_OP_ARGSORT) {
                 var args: ggml.cuda.topk_moe.Args = .{};
                 const can_fuse = ggml.cuda.fusion.topkMoeFusion(cgraph, i, &args);
-                var ops_buf: [16]ggml.impl.c.enum_ggml_op = undefined;
+                var ops_buf: [16]ggml.impl.ggml_c.enum_ggml_op = undefined;
                 var n_ops: usize = 0;
 
                 if (can_fuse and !args.delayed_softmax) {
-                    const logits = ggml.impl.one(ggml.impl.c.ggml_tensor, nd.src[0]);
+                    const logits = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, nd.src[0]);
                     var out_nodes: [2]c_int = undefined; // nodes which can't be elided
 
                     if (args.sigmoid) {
-                        appendOps(&ops_buf, &n_ops, &.{ggml.impl.c.GGML_OP_UNARY});
+                        appendOps(&ops_buf, &n_ops, &.{ggml.impl.ggml_c.GGML_OP_UNARY});
                     } else if (args.sqrt_softplus) {
-                        appendOps(&ops_buf, &n_ops, &.{ ggml.impl.c.GGML_OP_UNARY, ggml.impl.c.GGML_OP_SQRT });
+                        appendOps(&ops_buf, &n_ops, &.{ ggml.impl.ggml_c.GGML_OP_UNARY, ggml.impl.ggml_c.GGML_OP_SQRT });
                     } else {
-                        appendOps(&ops_buf, &n_ops, &.{ggml.impl.c.GGML_OP_SOFT_MAX});
+                        appendOps(&ops_buf, &n_ops, &.{ggml.impl.ggml_c.GGML_OP_SOFT_MAX});
                     }
                     const i_probs = i + @as(c_int, @intCast(n_ops)) - 1; // last node of the gating activation
 
                     if (args.prob_bias) {
-                        appendOps(&ops_buf, &n_ops, &.{ ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_ADD, ggml.impl.c.GGML_OP_ARGSORT, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_GET_ROWS });
+                        appendOps(&ops_buf, &n_ops, &.{ ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_ADD, ggml.impl.ggml_c.GGML_OP_ARGSORT, ggml.impl.ggml_c.GGML_OP_VIEW, ggml.impl.ggml_c.GGML_OP_GET_ROWS });
                         out_nodes[0] = i_probs + 4;
                     } else {
-                        appendOps(&ops_buf, &n_ops, &.{ ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_ARGSORT, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_GET_ROWS });
+                        appendOps(&ops_buf, &n_ops, &.{ ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_ARGSORT, ggml.impl.ggml_c.GGML_OP_VIEW, ggml.impl.ggml_c.GGML_OP_GET_ROWS });
                         out_nodes[0] = i_probs + 3;
                     }
                     const ids = cgraph.nodes[@intCast(out_nodes[0])].?;
 
                     if (args.norm) {
-                        appendOps(&ops_buf, &n_ops, &.{ ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_SUM_ROWS, ggml.impl.c.GGML_OP_CLAMP, ggml.impl.c.GGML_OP_DIV, ggml.impl.c.GGML_OP_RESHAPE });
+                        appendOps(&ops_buf, &n_ops, &.{ ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_SUM_ROWS, ggml.impl.ggml_c.GGML_OP_CLAMP, ggml.impl.ggml_c.GGML_OP_DIV, ggml.impl.ggml_c.GGML_OP_RESHAPE });
                     }
                     if (args.scale) {
-                        appendOps(&ops_buf, &n_ops, &.{ggml.impl.c.GGML_OP_SCALE});
+                        appendOps(&ops_buf, &n_ops, &.{ggml.impl.ggml_c.GGML_OP_SCALE});
                     }
 
                     const n: c_int = @intCast(n_ops);
@@ -904,20 +904,20 @@ pub fn graphOptimize(backend_c: ggml.impl.c.ggml_backend_t, cgraph_c: ?*ggml.imp
     ggml.cuda.common.setDevice(cuda_ctx.device);
 
     // number of out-degrees for a particular node
-    var fan_out: std.AutoArrayHashMapUnmanaged(?*const ggml.impl.c.ggml_tensor, c_int) = .empty;
-    defer fan_out.deinit(ggml.cuda.common.allocator);
+    var fan_out: std.AutoArrayHashMapUnmanaged(?*const ggml.impl.ggml_c.ggml_tensor, c_int) = .empty;
+    defer fan_out.deinit(std.heap.c_allocator);
     // reverse mapping of node to index in the cgraph
-    var node_indices: std.AutoHashMapUnmanaged(*const ggml.impl.c.ggml_tensor, usize) = .empty;
-    defer node_indices.deinit(ggml.cuda.common.allocator);
+    var node_indices: std.AutoHashMapUnmanaged(*const ggml.impl.ggml_c.ggml_tensor, usize) = .empty;
+    defer node_indices.deinit(std.heap.c_allocator);
 
     const ns = nodes(cgraph);
     for (ns, 0..) |node, node_idx| {
-        node_indices.put(ggml.cuda.common.allocator, node, node_idx) catch ggml.impl.abort("ggml-cuda: out of memory");
+        node_indices.put(std.heap.c_allocator, node, node_idx) catch ggml.impl.abort("ggml-cuda: out of memory");
         if (isNoop(node)) continue;
         for (node.src) |src| {
             //TODO: check why nrows > 1 fails
-            if (!isNoop(node) and ggml.impl.c.ggml_nrows(node) <= 1) {
-                const gop = fan_out.getOrPut(ggml.cuda.common.allocator, src) catch ggml.impl.abort("ggml-cuda: out of memory");
+            if (!isNoop(node) and ggml.impl.ggml_c.ggml_nrows(node) <= 1) {
+                const gop = fan_out.getOrPut(std.heap.c_allocator, src) catch ggml.impl.abort("ggml-cuda: out of memory");
                 if (!gop.found_existing) gop.value_ptr.* = 0;
                 gop.value_ptr.* += 1;
             }
@@ -929,7 +929,7 @@ pub fn graphOptimize(backend_c: ggml.impl.c.ggml_backend_t, cgraph_c: ?*ggml.imp
 
     // store {fork_idx, join_idx}
     var concurrent_node_ranges: std.ArrayList([2]usize) = .empty;
-    defer concurrent_node_ranges.deinit(ggml.cuda.common.allocator);
+    defer concurrent_node_ranges.deinit(std.heap.c_allocator);
 
     var it = fan_out.iterator();
     while (it.next()) |kv| {
@@ -947,23 +947,23 @@ pub fn graphOptimize(backend_c: ggml.impl.c.ggml_backend_t, cgraph_c: ?*ggml.imp
         }
         if (is_part_of_event) continue;
 
-        var nodes_per_branch: std.ArrayList(std.ArrayList(*const ggml.impl.c.ggml_tensor)) = .empty;
+        var nodes_per_branch: std.ArrayList(std.ArrayList(*const ggml.impl.ggml_c.ggml_tensor)) = .empty;
         defer {
-            for (nodes_per_branch.items) |*b| b.deinit(ggml.cuda.common.allocator);
-            nodes_per_branch.deinit(ggml.cuda.common.allocator);
+            for (nodes_per_branch.items) |*b| b.deinit(std.heap.c_allocator);
+            nodes_per_branch.deinit(std.heap.c_allocator);
         }
         for (ns[root_node_idx + 1 ..]) |node| {
             if (!isNoop(node) and dependsOn(node, root_node)) {
-                var branch: std.ArrayList(*const ggml.impl.c.ggml_tensor) = .empty;
-                branch.append(ggml.cuda.common.allocator, node) catch ggml.impl.abort("ggml-cuda: out of memory");
-                nodes_per_branch.append(ggml.cuda.common.allocator, branch) catch ggml.impl.abort("ggml-cuda: out of memory");
+                var branch: std.ArrayList(*const ggml.impl.ggml_c.ggml_tensor) = .empty;
+                branch.append(std.heap.c_allocator, node) catch ggml.impl.abort("ggml-cuda: out of memory");
+                nodes_per_branch.append(std.heap.c_allocator, branch) catch ggml.impl.abort("ggml-cuda: out of memory");
             }
         }
 
         ggml.impl.assert(nodes_per_branch.items.len == @as(usize, @intCast(count)), "nodes_per_branch.size() == (size_t) count");
 
         //find the join point
-        var join_node: ?*const ggml.impl.c.ggml_tensor = null;
+        var join_node: ?*const ggml.impl.ggml_c.ggml_tensor = null;
         for (ns[root_node_idx + 1 ..]) |curr_node| {
             var num_joins: usize = 0;
             for (nodes_per_branch.items) |b| {
@@ -978,8 +978,8 @@ pub fn graphOptimize(backend_c: ggml.impl.c.ggml_backend_t, cgraph_c: ?*ggml.imp
             for (nodes_per_branch.items) |*b| {
                 if (belongsToBranch(curr_node, b.items)) {
                     //continue accumulating
-                    if (std.mem.indexOfScalar(*const ggml.impl.c.ggml_tensor, b.items, curr_node) == null) {
-                        b.append(ggml.cuda.common.allocator, curr_node) catch ggml.impl.abort("ggml-cuda: out of memory");
+                    if (std.mem.indexOfScalar(*const ggml.impl.ggml_c.ggml_tensor, b.items, curr_node) == null) {
+                        b.append(std.heap.c_allocator, curr_node) catch ggml.impl.abort("ggml-cuda: out of memory");
                     }
                     found_branch = true;
                 }
@@ -987,7 +987,7 @@ pub fn graphOptimize(backend_c: ggml.impl.c.ggml_backend_t, cgraph_c: ?*ggml.imp
 
             if (!found_branch and isNoop(curr_node)) {
                 // we can put it in any branch because it will be ignored
-                nodes_per_branch.items[0].append(ggml.cuda.common.allocator, curr_node) catch ggml.impl.abort("ggml-cuda: out of memory");
+                nodes_per_branch.items[0].append(std.heap.c_allocator, curr_node) catch ggml.impl.abort("ggml-cuda: out of memory");
             }
         }
 
@@ -999,7 +999,7 @@ pub fn graphOptimize(backend_c: ggml.impl.c.ggml_backend_t, cgraph_c: ?*ggml.imp
         event.join_node = join;
 
         for (nodes_per_branch.items, 0..) |b, branch_idx| {
-            for (b.items) |n| event.stream_mapping.put(ggml.cuda.common.allocator, n, @intCast(branch_idx + 1)) catch ggml.impl.abort("ggml-cuda: out of memory");
+            for (b.items) |n| event.stream_mapping.put(std.heap.c_allocator, n, @intCast(branch_idx + 1)) catch ggml.impl.abort("ggml-cuda: out of memory");
         }
 
         const fork_node_idx = node_indices.get(root_node).?;
@@ -1020,20 +1020,20 @@ pub fn graphOptimize(backend_c: ggml.impl.c.ggml_backend_t, cgraph_c: ?*ggml.imp
         }
 
         // Save the original order of nodes in this region before interleaving
-        for (ns[fork_node_idx + 1 .. join_node_idx]) |n| event.original_order.append(ggml.cuda.common.allocator, n) catch ggml.impl.abort("ggml-cuda: out of memory");
+        for (ns[fork_node_idx + 1 .. join_node_idx]) |n| event.original_order.append(std.heap.c_allocator, n) catch ggml.impl.abort("ggml-cuda: out of memory");
 
         const concurrent_events = &stream_context.concurrent_events;
         ggml.impl.assert(!concurrent_events.contains(root_node), "concurrent_events.find(root_node) == concurrent_events.end()");
-        concurrent_events.put(ggml.cuda.common.allocator, root_node, event) catch ggml.impl.abort("ggml-cuda: out of memory");
+        concurrent_events.put(std.heap.c_allocator, root_node, event) catch ggml.impl.abort("ggml-cuda: out of memory");
         keep = true;
         ggml.impl.logDebug("Adding stream at node %s %p\n", .{ @as([*:0]const u8, @ptrCast(&root_node.name)), root_node });
-        concurrent_node_ranges.append(ggml.cuda.common.allocator, .{ fork_node_idx, join_node_idx }) catch ggml.impl.abort("ggml-cuda: out of memory");
+        concurrent_node_ranges.append(std.heap.c_allocator, .{ fork_node_idx, join_node_idx }) catch ggml.impl.abort("ggml-cuda: out of memory");
 
         // interleave tensors to extend lifetimes so that ggml graph doesn't
         // recycle them
         var fronts: std.ArrayList(usize) = .empty;
-        defer fronts.deinit(ggml.cuda.common.allocator);
-        fronts.appendNTimes(ggml.cuda.common.allocator, 0, n_branches) catch ggml.impl.abort("ggml-cuda: out of memory");
+        defer fronts.deinit(std.heap.c_allocator);
+        fronts.appendNTimes(std.heap.c_allocator, 0, n_branches) catch ggml.impl.abort("ggml-cuda: out of memory");
         while (current_node_idx < join_node_idx) {
             const branch = nodes_per_branch.items[current_branch_idx].items;
             const front = &fronts.items[current_branch_idx];

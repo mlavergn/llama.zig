@@ -7,6 +7,7 @@
 //! Ports `llama.cpp/tools/mtmd/models/mobilenetv5.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
+const llama = @import("llama");
 const mtmd = @import("../module.zig");
 const stdlib = @import("stdlib");
 
@@ -19,14 +20,14 @@ fn neInt(t: mtmd.graph.T, i: usize) c_int {
 /// position of a [W, H, C, B] tensor. `eps` defaults to 1e-6 in the C++.
 pub fn rmsNorm2d(g: *mtmd.graph.Graph, inp: mtmd.graph.T, weight: mtmd.graph.T, eps: f32) mtmd.graph.T {
     const ctx0 = g.ctx0;
-    var cur = mtmd.impl.c.ggml_permute(ctx0, inp, 2, 1, 0, 3);
-    cur = mtmd.impl.c.ggml_cont(ctx0, cur);
-    cur = mtmd.impl.c.ggml_rms_norm(ctx0, cur, eps);
+    var cur = llama.impl.llama_c.ggml_permute(ctx0, inp, 2, 1, 0, 3);
+    cur = llama.impl.llama_c.ggml_cont(ctx0, cur);
+    cur = llama.impl.llama_c.ggml_rms_norm(ctx0, cur, eps);
 
-    if (weight != null) cur = mtmd.impl.c.ggml_mul(ctx0, cur, weight);
+    if (weight != null) cur = llama.impl.llama_c.ggml_mul(ctx0, cur, weight);
 
-    cur = mtmd.impl.c.ggml_permute(ctx0, cur, 2, 1, 0, 3);
-    cur = mtmd.impl.c.ggml_cont(ctx0, cur);
+    cur = llama.impl.llama_c.ggml_permute(ctx0, cur, 2, 1, 0, 3);
+    cur = llama.impl.llama_c.ggml_cont(ctx0, cur);
 
     return cur;
 }
@@ -55,7 +56,7 @@ pub fn padSame2d(g: *mtmd.graph.Graph, inp_in: mtmd.graph.T, kernel_h: c_int, ke
 
     // For [W, H, C, B]: p0=width, p1=height, p2=channels, p3=batch
     if (pad_h > 0 or pad_w > 0) {
-        inp = mtmd.impl.c.ggml_pad_ext(g.ctx0, inp, pad_w_left, pad_w_right, pad_h_top, pad_h_bottom, 0, 0, 0, 0);
+        inp = llama.impl.llama_c.ggml_pad_ext(g.ctx0, inp, pad_w_left, pad_w_right, pad_h_top, pad_h_bottom, 0, 0, 0, 0);
     }
 
     return inp;
@@ -71,23 +72,23 @@ pub fn buildEdgeResidual(g: *mtmd.graph.Graph, inp: mtmd.graph.T, block: *const 
     if (stride == 2) {
         // Downsampling (Block 0): Conv2dSame(kernel=3, stride=2)
         cur = padSame2d(g, cur, 3, 3, stride, stride, 1, 1);
-        cur = mtmd.impl.c.ggml_conv_2d_direct(ctx0, block.s0_conv_exp_w, cur, stride, stride, 0, 0, 1, 1);
+        cur = llama.impl.llama_c.ggml_conv_2d_direct(ctx0, block.s0_conv_exp_w, cur, stride, stride, 0, 0, 1, 1);
     } else {
         // Normal 3x3 Block (Block 1, 2): Conv2d(kernel=3, stride=1, padding=1)
-        cur = mtmd.impl.c.ggml_conv_2d_direct(ctx0, block.s0_conv_exp_w, cur, stride, stride, 1, 1, 1, 1);
+        cur = llama.impl.llama_c.ggml_conv_2d_direct(ctx0, block.s0_conv_exp_w, cur, stride, stride, 1, 1, 1, 1);
     }
 
     // BN + Activation
     if (block.s0_bn1_w != null) cur = rmsNorm2d(g, cur, block.s0_bn1_w, 1e-6);
-    cur = mtmd.impl.c.ggml_gelu(ctx0, cur);
+    cur = llama.impl.llama_c.ggml_gelu(ctx0, cur);
 
     // 2. Pointwise Linear Conv (1x1)
-    cur = mtmd.impl.c.ggml_conv_2d_direct(ctx0, block.s0_conv_pwl_w, cur, 1, 1, 0, 0, 1, 1);
+    cur = llama.impl.llama_c.ggml_conv_2d_direct(ctx0, block.s0_conv_pwl_w, cur, 1, 1, 0, 0, 1, 1);
     if (block.s0_bn2_w != null) cur = rmsNorm2d(g, cur, block.s0_bn2_w, 1e-6);
 
     // 3. Residual Connection, only where spatial dimensions and channels match (stride 1)
     if (stride == 1 and mtmd.graph.ne(inp, 2) == mtmd.graph.ne(cur, 2) and mtmd.graph.ne(inp, 0) == mtmd.graph.ne(cur, 0)) {
-        cur = mtmd.impl.c.ggml_add(ctx0, cur, inp);
+        cur = llama.impl.llama_c.ggml_add(ctx0, cur, inp);
     }
 
     return cur;
@@ -104,15 +105,15 @@ pub fn buildInvertedResidual(g: *mtmd.graph.Graph, inp: mtmd.graph.T, block: *co
     if (block.dw_start_w != null) {
         const k = neInt(block.dw_start_w, 0); // 3 or 5
         const p = @divTrunc(k, 2);
-        cur = mtmd.impl.c.ggml_conv_2d_dw(ctx0, block.dw_start_w, cur, 1, 1, p, p, 1, 1);
+        cur = llama.impl.llama_c.ggml_conv_2d_dw(ctx0, block.dw_start_w, cur, 1, 1, p, p, 1, 1);
         if (block.dw_start_bn_w != null) cur = rmsNorm2d(g, cur, block.dw_start_bn_w, 1e-6);
     }
 
     // 2. Pointwise Expansion (1x1)
     if (block.pw_exp_w != null) {
-        cur = mtmd.impl.c.ggml_conv_2d_direct(ctx0, block.pw_exp_w, cur, 1, 1, 0, 0, 1, 1);
+        cur = llama.impl.llama_c.ggml_conv_2d_direct(ctx0, block.pw_exp_w, cur, 1, 1, 0, 0, 1, 1);
         if (block.pw_exp_bn_w != null) cur = rmsNorm2d(g, cur, block.pw_exp_bn_w, 1e-6);
-        cur = mtmd.impl.c.ggml_gelu(ctx0, cur);
+        cur = llama.impl.llama_c.ggml_gelu(ctx0, cur);
     }
 
     // 3. Depthwise Mid (Optional), where downsampling happens
@@ -122,30 +123,30 @@ pub fn buildInvertedResidual(g: *mtmd.graph.Graph, inp: mtmd.graph.T, block: *co
         if (stride > 1) {
             // Stride 2 (Downsample) -> Asymmetric "Same" Padding
             cur = padSame2d(g, cur, k, k, stride, stride, 1, 1);
-            cur = mtmd.impl.c.ggml_conv_2d_dw(ctx0, block.dw_mid_w, cur, stride, stride, 0, 0, 1, 1); // pad=0
+            cur = llama.impl.llama_c.ggml_conv_2d_dw(ctx0, block.dw_mid_w, cur, stride, stride, 0, 0, 1, 1); // pad=0
         } else {
             // Stride 1 -> Standard Symmetric Padding
             const p = @divTrunc(k, 2);
-            cur = mtmd.impl.c.ggml_conv_2d_dw(ctx0, block.dw_mid_w, cur, stride, stride, p, p, 1, 1);
+            cur = llama.impl.llama_c.ggml_conv_2d_dw(ctx0, block.dw_mid_w, cur, stride, stride, p, p, 1, 1);
         }
 
         if (block.dw_mid_bn_w != null) cur = rmsNorm2d(g, cur, block.dw_mid_bn_w, 1e-6);
-        cur = mtmd.impl.c.ggml_gelu(ctx0, cur);
+        cur = llama.impl.llama_c.ggml_gelu(ctx0, cur);
     }
 
     // 4. Pointwise Projection (1x1)
     if (block.pw_proj_w != null) {
-        cur = mtmd.impl.c.ggml_conv_2d_direct(ctx0, block.pw_proj_w, cur, 1, 1, 0, 0, 1, 1);
+        cur = llama.impl.llama_c.ggml_conv_2d_direct(ctx0, block.pw_proj_w, cur, 1, 1, 0, 0, 1, 1);
         if (block.pw_proj_bn_w != null) cur = rmsNorm2d(g, cur, block.pw_proj_bn_w, 1e-6);
     }
 
     // Apply Layer Scaling if present
-    if (block.layer_scale_w != null) cur = mtmd.impl.c.ggml_mul(ctx0, cur, block.layer_scale_w);
+    if (block.layer_scale_w != null) cur = llama.impl.llama_c.ggml_mul(ctx0, cur, block.layer_scale_w);
 
     // 5. Residual Connection
     const same_spatial = (mtmd.graph.ne(inp, 0) == mtmd.graph.ne(cur, 0)) and (mtmd.graph.ne(inp, 1) == mtmd.graph.ne(cur, 1));
     const same_channel = (mtmd.graph.ne(inp, 2) == mtmd.graph.ne(cur, 2));
-    if (same_spatial and same_channel) cur = mtmd.impl.c.ggml_add(ctx0, cur, inp);
+    if (same_spatial and same_channel) cur = llama.impl.llama_c.ggml_add(ctx0, cur, inp);
 
     return cur;
 }
@@ -161,27 +162,27 @@ pub fn buildMobilenetAttn(g: *mtmd.graph.Graph, inp: mtmd.graph.T, block: *const
     if (block.attn_norm_w != null) cur = rmsNorm2d(g, cur, block.attn_norm_w, 1e-6);
 
     // 1. Q Calculation
-    var q = mtmd.impl.c.ggml_conv_2d_direct(ctx0, block.attn_q_w, cur, 1, 1, 0, 0, 1, 1);
+    var q = llama.impl.llama_c.ggml_conv_2d_direct(ctx0, block.attn_q_w, cur, 1, 1, 0, 0, 1, 1);
 
     // 2. K Calculation (Downsampled), Conv2dSame(kernel 3, stride 2, depthwise)
     var k_inp = cur;
     if (block.attn_k_dw_w != null) {
         const k_size = neInt(block.attn_k_dw_w, 0); // Usually 3
         k_inp = padSame2d(g, cur, k_size, k_size, 2, 2, 1, 1); // Apply SAME padding
-        k_inp = mtmd.impl.c.ggml_conv_2d_dw(ctx0, block.attn_k_dw_w, k_inp, 2, 2, 0, 0, 1, 1); // padding=0
+        k_inp = llama.impl.llama_c.ggml_conv_2d_dw(ctx0, block.attn_k_dw_w, k_inp, 2, 2, 0, 0, 1, 1); // padding=0
         if (block.attn_k_norm_w != null) k_inp = rmsNorm2d(g, k_inp, block.attn_k_norm_w, 1e-6);
     }
-    var k = mtmd.impl.c.ggml_conv_2d_direct(ctx0, block.attn_k_w, k_inp, 1, 1, 0, 0, 1, 1);
+    var k = llama.impl.llama_c.ggml_conv_2d_direct(ctx0, block.attn_k_w, k_inp, 1, 1, 0, 0, 1, 1);
 
     // 3. V Calculation (Downsampled), Conv2dSame(kernel 3, stride 2, depthwise)
     var v_inp = cur;
     if (block.attn_v_dw_w != null) {
         const v_size = neInt(block.attn_v_dw_w, 0); // Usually 3
         v_inp = padSame2d(g, cur, v_size, v_size, 2, 2, 1, 1); // Apply SAME padding
-        v_inp = mtmd.impl.c.ggml_conv_2d_dw(ctx0, block.attn_v_dw_w, v_inp, 2, 2, 0, 0, 1, 1); // padding=0
+        v_inp = llama.impl.llama_c.ggml_conv_2d_dw(ctx0, block.attn_v_dw_w, v_inp, 2, 2, 0, 0, 1, 1); // padding=0
         if (block.attn_v_norm_w != null) v_inp = rmsNorm2d(g, v_inp, block.attn_v_norm_w, 1e-6);
     }
-    var v = mtmd.impl.c.ggml_conv_2d_direct(ctx0, block.attn_v_w, v_inp, 1, 1, 0, 0, 1, 1);
+    var v = llama.impl.llama_c.ggml_conv_2d_direct(ctx0, block.attn_v_w, v_inp, 1, 1, 0, 0, 1, 1);
 
     const W = neInt(cur, 0);
     const H = neInt(cur, 1);
@@ -191,52 +192,52 @@ pub fn buildMobilenetAttn(g: *mtmd.graph.Graph, inp: mtmd.graph.T, block: *const
     const N = W * H;
 
     // Process Q: [W, H, D*n_head, B] -> [D, N, n_head, B]
-    q = mtmd.impl.c.ggml_reshape_3d(ctx0, q, N, D * n_head, B);
-    q = mtmd.impl.c.ggml_reshape_4d(ctx0, q, N, D, n_head, B);
-    q = mtmd.impl.c.ggml_permute(ctx0, q, 1, 0, 2, 3); // [D, N, n_head, B]
-    q = mtmd.impl.c.ggml_cont(ctx0, q);
+    q = llama.impl.llama_c.ggml_reshape_3d(ctx0, q, N, D * n_head, B);
+    q = llama.impl.llama_c.ggml_reshape_4d(ctx0, q, N, D, n_head, B);
+    q = llama.impl.llama_c.ggml_permute(ctx0, q, 1, 0, 2, 3); // [D, N, n_head, B]
+    q = llama.impl.llama_c.ggml_cont(ctx0, q);
 
     const Wk = neInt(k, 0);
     const Hk = neInt(k, 1);
     const M = Wk * Hk;
 
     // Process K: [Wk, Hk, D, B] -> [D, M, 1, B]
-    k = mtmd.impl.c.ggml_reshape_3d(ctx0, k, M, D, B);
-    k = mtmd.impl.c.ggml_reshape_4d(ctx0, k, M, D, 1, B);
-    k = mtmd.impl.c.ggml_permute(ctx0, k, 1, 0, 2, 3); // [D, M, 1, B]
-    k = mtmd.impl.c.ggml_cont(ctx0, k);
+    k = llama.impl.llama_c.ggml_reshape_3d(ctx0, k, M, D, B);
+    k = llama.impl.llama_c.ggml_reshape_4d(ctx0, k, M, D, 1, B);
+    k = llama.impl.llama_c.ggml_permute(ctx0, k, 1, 0, 2, 3); // [D, M, 1, B]
+    k = llama.impl.llama_c.ggml_cont(ctx0, k);
 
     // Process V: [Wk, Hk, D, B] -> [M, D, 1, B]
-    v = mtmd.impl.c.ggml_reshape_3d(ctx0, v, M, D, B);
-    v = mtmd.impl.c.ggml_reshape_4d(ctx0, v, M, D, 1, B);
-    v = mtmd.impl.c.ggml_cont(ctx0, v); // [M, D, 1, B]
+    v = llama.impl.llama_c.ggml_reshape_3d(ctx0, v, M, D, B);
+    v = llama.impl.llama_c.ggml_reshape_4d(ctx0, v, M, D, 1, B);
+    v = llama.impl.llama_c.ggml_cont(ctx0, v); // [M, D, 1, B]
 
     // Multi-Query Attention
     const scale: f32 = 1.0 / stdlib.libm.sqrtfInt(D);
 
     // Step 1: Compute Q @ K.T
-    var scores = mtmd.impl.c.ggml_mul_mat(ctx0, k, q);
+    var scores = llama.impl.llama_c.ggml_mul_mat(ctx0, k, q);
 
-    scores = mtmd.impl.c.ggml_scale(ctx0, scores, scale);
+    scores = llama.impl.llama_c.ggml_scale(ctx0, scores, scale);
 
-    scores = mtmd.impl.c.ggml_soft_max(ctx0, scores);
+    scores = llama.impl.llama_c.ggml_soft_max(ctx0, scores);
 
-    var kqv = mtmd.impl.c.ggml_mul_mat(ctx0, v, scores);
+    var kqv = llama.impl.llama_c.ggml_mul_mat(ctx0, v, scores);
 
-    kqv = mtmd.impl.c.ggml_permute(ctx0, kqv, 1, 0, 2, 3);
-    kqv = mtmd.impl.c.ggml_cont(ctx0, kqv);
+    kqv = llama.impl.llama_c.ggml_permute(ctx0, kqv, 1, 0, 2, 3);
+    kqv = llama.impl.llama_c.ggml_cont(ctx0, kqv);
 
-    kqv = mtmd.impl.c.ggml_reshape_3d(ctx0, kqv, N, D * n_head, B);
-    kqv = mtmd.impl.c.ggml_reshape_4d(ctx0, kqv, W, H, D * n_head, B);
-    kqv = mtmd.impl.c.ggml_cont(ctx0, kqv);
+    kqv = llama.impl.llama_c.ggml_reshape_3d(ctx0, kqv, N, D * n_head, B);
+    kqv = llama.impl.llama_c.ggml_reshape_4d(ctx0, kqv, W, H, D * n_head, B);
+    kqv = llama.impl.llama_c.ggml_cont(ctx0, kqv);
 
     // Output projection
-    cur = mtmd.impl.c.ggml_conv_2d_direct(ctx0, block.attn_o_w, kqv, 1, 1, 0, 0, 1, 1);
+    cur = llama.impl.llama_c.ggml_conv_2d_direct(ctx0, block.attn_o_w, kqv, 1, 1, 0, 0, 1, 1);
 
     // Residual & Layer Scale
     if (mtmd.graph.ne(inp, 0) == mtmd.graph.ne(cur, 0) and mtmd.graph.ne(inp, 2) == mtmd.graph.ne(cur, 2)) {
-        if (block.layer_scale_w != null) cur = mtmd.impl.c.ggml_mul(ctx0, cur, block.layer_scale_w);
-        cur = mtmd.impl.c.ggml_add(ctx0, cur, inp);
+        if (block.layer_scale_w != null) cur = llama.impl.llama_c.ggml_mul(ctx0, cur, block.layer_scale_w);
+        cur = llama.impl.llama_c.ggml_add(ctx0, cur, inp);
     }
 
     return cur;
@@ -264,7 +265,7 @@ fn isFusionPoint(model: *const mtmd.model.Model, i: c_int, total_blocks: c_int) 
 }
 
 /// Ports `build` (mobilenetv5.cpp:248 @b1b770d90), a member of `mtmd_graph_mobilenetv5`.
-pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*llama.impl.llama_c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
     const model = g.model;
@@ -275,10 +276,10 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     // 1. Stem - Conv2dSame(3, 64, kernel_size=(3, 3), stride=(2, 2))
     var cur = padSame2d(g, inp, 3, 3, 2, 2, 1, 1); // Apply SAME padding
 
-    cur = mtmd.impl.c.ggml_conv_2d_direct(ctx0, model.mobilenet_stem_conv_w, cur, 2, 2, 0, 0, 1, 1); // padding=0
-    if (model.mobilenet_stem_conv_b != null) cur = mtmd.impl.c.ggml_add(ctx0, cur, model.mobilenet_stem_conv_b);
+    cur = llama.impl.llama_c.ggml_conv_2d_direct(ctx0, model.mobilenet_stem_conv_w, cur, 2, 2, 0, 0, 1, 1); // padding=0
+    if (model.mobilenet_stem_conv_b != null) cur = llama.impl.llama_c.ggml_add(ctx0, cur, model.mobilenet_stem_conv_b);
     if (model.mobilenet_stem_norm_w != null) cur = rmsNorm2d(g, cur, model.mobilenet_stem_norm_w, 1e-6);
-    cur = mtmd.impl.c.ggml_gelu(ctx0, cur);
+    cur = llama.impl.llama_c.ggml_gelu(ctx0, cur);
 
     // 2. Blocks
     var intermediate_features: std.ArrayList(mtmd.graph.T) = .empty;
@@ -326,14 +327,14 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
                 mtmd.impl.ggmlAssert(@rem(high_res_w, feat_w) == 0, "mobilenetv5.cpp", 325, "high_res_w % feat_w == 0");
 
                 // Upsample (Nearest Neighbor)
-                feat = mtmd.impl.c.ggml_upscale(ctx0, feat, scale_w, mtmd.impl.c.GGML_SCALE_MODE_NEAREST);
+                feat = llama.impl.llama_c.ggml_upscale(ctx0, feat, scale_w, llama.impl.llama_c.GGML_SCALE_MODE_NEAREST);
             }
             try resized_feats.append(std.heap.c_allocator, feat);
         }
 
         // C. Concatenate at High Resolution (Channel Dim = 2 in ggml)
         cur = resized_feats.items[0];
-        for (resized_feats.items[1..]) |feat| cur = mtmd.impl.c.ggml_concat(ctx0, cur, feat, 2);
+        for (resized_feats.items[1..]) |feat| cur = llama.impl.llama_c.ggml_concat(ctx0, cur, feat, 2);
 
         // D. FFN (UniversalInvertedResidual):
         // Expand Conv -> Norm -> GELU -> Project Conv -> Norm
@@ -341,17 +342,17 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
         // 1. Expansion
         if (model.msfa_ffn_expand_w != null) {
             // 1x1 Conv
-            cur = mtmd.impl.c.ggml_conv_2d_direct(ctx0, model.msfa_ffn_expand_w, cur, 1, 1, 0, 0, 1, 1);
+            cur = llama.impl.llama_c.ggml_conv_2d_direct(ctx0, model.msfa_ffn_expand_w, cur, 1, 1, 0, 0, 1, 1);
 
             if (model.msfa_ffn_expand_bn != null) cur = rmsNorm2d(g, cur, model.msfa_ffn_expand_bn, 1e-6);
 
-            cur = mtmd.impl.c.ggml_gelu(ctx0, cur);
+            cur = llama.impl.llama_c.ggml_gelu(ctx0, cur);
         }
 
         // 2. Projection (No DW because kernel_size=0)
         if (model.msfa_ffn_project_w != null) {
             // 1x1 Conv
-            cur = mtmd.impl.c.ggml_conv_2d_direct(ctx0, model.msfa_ffn_project_w, cur, 1, 1, 0, 0, 1, 1);
+            cur = llama.impl.llama_c.ggml_conv_2d_direct(ctx0, model.msfa_ffn_project_w, cur, 1, 1, 0, 0, 1, 1);
 
             // UniversalInvertedResidual typically has a norm after projection
             if (model.msfa_ffn_project_bn != null) cur = rmsNorm2d(g, cur, model.msfa_ffn_project_bn, 1e-6);
@@ -367,7 +368,7 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
             mtmd.impl.ggmlAssert(@rem(current_w, target_out_res) == 0, "mobilenetv5.cpp", 376, "current_w % target_out_res == 0");
 
             // Avg Pool: Kernel=s, Stride=s
-            cur = mtmd.impl.c.ggml_pool_2d(ctx0, cur, mtmd.impl.c.GGML_OP_POOL_AVG, s, s, s, s, 0, 0);
+            cur = llama.impl.llama_c.ggml_pool_2d(ctx0, cur, llama.impl.llama_c.GGML_OP_POOL_AVG, s, s, s, s, 0, 0);
         }
 
         // F. Final Norm
@@ -384,25 +385,25 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     mtmd.impl.ggmlAssert(C == hparams.n_embd, "mobilenetv5.cpp", 397, "C == hparams.n_embd");
 
     // 1. Permute and Flatten to [Channels, Tokens, Batch]
-    cur = mtmd.impl.c.ggml_permute(ctx0, cur, 2, 1, 0, 3); // -> [C, H, W, B]
-    cur = mtmd.impl.c.ggml_permute(ctx0, cur, 0, 2, 1, 3); // -> [C, W, H, B]
-    cur = mtmd.impl.c.ggml_cont(ctx0, cur);
-    cur = mtmd.impl.c.ggml_reshape_3d(ctx0, cur, C, W * H, B);
-    cur = mtmd.impl.c.ggml_cont(ctx0, cur);
+    cur = llama.impl.llama_c.ggml_permute(ctx0, cur, 2, 1, 0, 3); // -> [C, H, W, B]
+    cur = llama.impl.llama_c.ggml_permute(ctx0, cur, 0, 2, 1, 3); // -> [C, W, H, B]
+    cur = llama.impl.llama_c.ggml_cont(ctx0, cur);
+    cur = llama.impl.llama_c.ggml_reshape_3d(ctx0, cur, C, W * H, B);
+    cur = llama.impl.llama_c.ggml_cont(ctx0, cur);
 
     // 2. FEATURE SCALING
     // PyTorch: vision_outputs *= self.config.vision_config.hidden_size**0.5
     const scale_factor = stdlib.libm.sqrtfInt(C);
-    cur = mtmd.impl.c.ggml_scale(ctx0, cur, scale_factor);
+    cur = llama.impl.llama_c.ggml_scale(ctx0, cur, scale_factor);
 
     // 3. SOFT EMBEDDING NORM
     // PyTorch: self._norm(x) * self.weight
     {
         const eps: f32 = 1e-6; // Gemma3n uses 1e-6
-        cur = mtmd.impl.c.ggml_rms_norm(ctx0, cur, eps);
+        cur = llama.impl.llama_c.ggml_rms_norm(ctx0, cur, eps);
 
         // Weight shape is (2048,) -> Element-wise broadcast multiply
-        if (model.mm_soft_emb_norm_w != null) cur = mtmd.impl.c.ggml_mul(ctx0, cur, model.mm_soft_emb_norm_w);
+        if (model.mm_soft_emb_norm_w != null) cur = llama.impl.llama_c.ggml_mul(ctx0, cur, model.mm_soft_emb_norm_w);
     }
 
     // 4. PROJECTION
@@ -413,13 +414,13 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     // Gemma3nRMSNorm(..., with_scale=False): output = rms_norm(x) * 1.0
     {
         const eps: f32 = 1e-6;
-        cur = mtmd.impl.c.ggml_rms_norm(ctx0, cur, eps);
+        cur = llama.impl.llama_c.ggml_rms_norm(ctx0, cur, eps);
 
         // If weight is loaded, multiply (should be ~1.0 anyway)
-        if (model.mm_post_proj_norm_w != null) cur = mtmd.impl.c.ggml_mul(ctx0, cur, model.mm_post_proj_norm_w);
+        if (model.mm_post_proj_norm_w != null) cur = llama.impl.llama_c.ggml_mul(ctx0, cur, model.mm_post_proj_norm_w);
     }
 
-    mtmd.impl.c.ggml_build_forward_expand(g.gf, cur);
+    llama.impl.llama_c.ggml_build_forward_expand(g.gf, cur);
     return g.gf;
 }
 

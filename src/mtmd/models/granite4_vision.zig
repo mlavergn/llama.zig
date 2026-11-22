@@ -11,6 +11,7 @@
 //! declaration names the C++ it replaces and the line it began at.
 
 const std = @import("std");
+const llama = @import("llama");
 const mtmd = @import("../module.zig");
 
 /// Ports `mtmd_graph_granite4_vision` (tools/mtmd/models/models.h:601 @b1b770d90): the
@@ -32,15 +33,15 @@ const Granite4Vision = struct {
 
         if (self.n_tiles > 1) {
             const px = g.img.nx();
-            inp_raw = mtmd.impl.c.ggml_reshape_4d(ctx0, inp_raw, px * px, self.n_tiles, 3, 1);
-            inp_raw = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, inp_raw, 0, 2, 1, 3));
-            inp_raw = mtmd.impl.c.ggml_reshape_4d(ctx0, inp_raw, px, px, 3, self.n_tiles);
+            inp_raw = llama.impl.llama_c.ggml_reshape_4d(ctx0, inp_raw, px * px, self.n_tiles, 3, 1);
+            inp_raw = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_permute(ctx0, inp_raw, 0, 2, 1, 3));
+            inp_raw = llama.impl.llama_c.ggml_reshape_4d(ctx0, inp_raw, px, px, 3, self.n_tiles);
         }
 
-        var inp = mtmd.impl.c.ggml_conv_2d(ctx0, g.model.patch_embeddings_0, inp_raw, g.patch_size, g.patch_size, 0, 0, 1, 1);
-        inp = mtmd.impl.c.ggml_reshape_3d(ctx0, inp, self.tile_side * self.tile_side, g.n_embd, self.n_tiles);
-        inp = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, inp));
-        if (g.model.patch_bias != null) inp = mtmd.impl.c.ggml_add(ctx0, inp, g.model.patch_bias);
+        var inp = llama.impl.llama_c.ggml_conv_2d(ctx0, g.model.patch_embeddings_0, inp_raw, g.patch_size, g.patch_size, 0, 0, 1, 1);
+        inp = llama.impl.llama_c.ggml_reshape_3d(ctx0, inp, self.tile_side * self.tile_side, g.n_embd, self.n_tiles);
+        inp = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, inp));
+        if (g.model.patch_bias != null) inp = llama.impl.llama_c.ggml_add(ctx0, inp, g.model.patch_bias);
         return inp;
     }
 
@@ -48,41 +49,41 @@ const Granite4Vision = struct {
     fn gather(self: *const Granite4Vision, src: mtmd.graph.T, name: [*:0]const u8, idx_len: c_int) mtmd.graph.T {
         const ctx0 = self.g.ctx0;
         // one index row per tile, all rows hold the same permutation
-        const idx = mtmd.impl.c.ggml_new_tensor_2d(ctx0, mtmd.impl.c.GGML_TYPE_I32, idx_len, self.n_tiles);
-        _ = mtmd.impl.c.ggml_set_name(idx, name);
-        mtmd.impl.c.ggml_set_input(idx);
-        return mtmd.impl.c.ggml_get_rows(ctx0, src, idx);
+        const idx = llama.impl.llama_c.ggml_new_tensor_2d(ctx0, llama.impl.llama_c.GGML_TYPE_I32, idx_len, self.n_tiles);
+        _ = llama.impl.llama_c.ggml_set_name(idx, name);
+        llama.impl.llama_c.ggml_set_input(idx);
+        return llama.impl.llama_c.ggml_get_rows(ctx0, src, idx);
     }
 
     /// Ports `interp_down` (granite4-vision.cpp:55 @b1b770d90).
     fn interpDown(self: *const Granite4Vision, src: mtmd.graph.T, side: c_int, new_side: c_int) mtmd.graph.T {
         const ctx0 = self.g.ctx0;
         const n_embd: c_int = @truncate(mtmd.graph.ne(src, 0));
-        var t = mtmd.impl.c.ggml_reshape_4d(ctx0, src, n_embd, side, side, self.n_tiles);
-        t = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, t, 2, 0, 1, 3));
+        var t = llama.impl.llama_c.ggml_reshape_4d(ctx0, src, n_embd, side, side, self.n_tiles);
+        t = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_permute(ctx0, t, 2, 0, 1, 3));
         // fold the tile axis into the channel axis, ggml_pool_2d only pools the first two axes
-        t = mtmd.impl.c.ggml_reshape_3d(ctx0, t, side, side, n_embd * self.n_tiles);
+        t = llama.impl.llama_c.ggml_reshape_3d(ctx0, t, side, side, n_embd * self.n_tiles);
         const kernel = @divTrunc(side, new_side);
-        t = mtmd.impl.c.ggml_pool_2d(ctx0, t, mtmd.impl.c.GGML_OP_POOL_AVG, kernel, kernel, kernel, kernel, 0, 0);
-        t = mtmd.impl.c.ggml_reshape_4d(ctx0, t, new_side, new_side, n_embd, self.n_tiles);
-        t = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, t, 1, 2, 0, 3));
-        return mtmd.impl.c.ggml_reshape_3d(ctx0, t, n_embd, new_side * new_side, self.n_tiles);
+        t = llama.impl.llama_c.ggml_pool_2d(ctx0, t, llama.impl.llama_c.GGML_OP_POOL_AVG, kernel, kernel, kernel, kernel, 0, 0);
+        t = llama.impl.llama_c.ggml_reshape_4d(ctx0, t, new_side, new_side, n_embd, self.n_tiles);
+        t = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_permute(ctx0, t, 1, 2, 0, 3));
+        return llama.impl.llama_c.ggml_reshape_3d(ctx0, t, n_embd, new_side * new_side, self.n_tiles);
     }
 
     /// The `cbx` lambda (granite4-vision.cpp:94 @b1b770d90) of `build_block`.
     fn cbx(t: mtmd.graph.T, bid: c_int, step: []const u8) void {
         var buf: [256]u8 = undefined;
         const name = std.fmt.bufPrintSentinel(&buf, "g4v_blk{d}_{s}", .{ bid, step }, 0) catch unreachable;
-        _ = mtmd.impl.c.ggml_set_name(t, name.ptr);
+        _ = llama.impl.llama_c.ggml_set_name(t, name.ptr);
     }
 
     /// The `linear` lambda (granite4-vision.cpp:145 @b1b770d90) of
     /// `build_block`: a projection with the windows batched.
     fn linear(self: *const Granite4Vision, x: mtmd.graph.T, w: mtmd.graph.T, b: mtmd.graph.T) mtmd.graph.T {
         const ctx0 = self.g.ctx0;
-        var t = mtmd.impl.c.ggml_reshape_2d(ctx0, x, mtmd.graph.ne(x, 0), mtmd.graph.ne(x, 1) * mtmd.graph.ne(x, 2));
+        var t = llama.impl.llama_c.ggml_reshape_2d(ctx0, x, mtmd.graph.ne(x, 0), mtmd.graph.ne(x, 1) * mtmd.graph.ne(x, 2));
         t = self.g.buildMm(w, t);
-        if (b != null) t = mtmd.impl.c.ggml_add(ctx0, t, b);
+        if (b != null) t = llama.impl.llama_c.ggml_add(ctx0, t, b);
         return t;
     }
 
@@ -112,7 +113,7 @@ const Granite4Vision = struct {
         var enc: mtmd.graph.T = undefined;
         {
             const enc_flat = self.gather(x, std.fmt.bufPrintSentinel(&name_buf, "g4v_blk{d}_win_idx", .{bid}, 0) catch unreachable, image_side * image_side);
-            enc = mtmd.impl.c.ggml_reshape_3d(ctx0, enc_flat, n_embd, enc_len, n_win_all);
+            enc = llama.impl.llama_c.ggml_reshape_3d(ctx0, enc_flat, n_embd, enc_len, n_win_all);
         }
         cbx(enc, bid, "enc");
 
@@ -129,13 +130,13 @@ const Granite4Vision = struct {
         var q_in: mtmd.graph.T = undefined;
         {
             const dw_flat = self.gather(d, std.fmt.bufPrintSentinel(&name_buf, "g4v_blk{d}_qwin_idx", .{bid}, 0) catch unreachable, new_side * new_side);
-            const dw = mtmd.impl.c.ggml_reshape_3d(ctx0, dw_flat, n_embd, query_len, n_win_all);
-            q_in = mtmd.impl.c.ggml_add(ctx0, dw, blk.qf_proj_query);
+            const dw = llama.impl.llama_c.ggml_reshape_3d(ctx0, dw_flat, n_embd, query_len, n_win_all);
+            q_in = llama.impl.llama_c.ggml_add(ctx0, dw, blk.qf_proj_query);
         }
         cbx(q_in, bid, "query_embeds");
 
         // 5. encoder_embeds = enc + image_positions → (C, enc_len, n_windows)
-        const e_in = mtmd.impl.c.ggml_add(ctx0, enc, blk.qf_proj_img_pos);
+        const e_in = llama.impl.llama_c.ggml_add(ctx0, enc, blk.qf_proj_img_pos);
         cbx(e_in, bid, "encoder_embeds");
 
         // 6. Qformer forward.
@@ -157,14 +158,14 @@ const Granite4Vision = struct {
             var K = self.linear(q, pl.k_w, pl.k_b);
             var V = self.linear(q, pl.v_w, pl.v_b);
 
-            Q = mtmd.impl.c.ggml_reshape_4d(ctx0, Q, d_h, n_head, nq, n_win_all);
-            K = mtmd.impl.c.ggml_reshape_4d(ctx0, K, d_h, n_head, nq, n_win_all);
-            V = mtmd.impl.c.ggml_reshape_4d(ctx0, V, d_h, n_head, nq, n_win_all);
+            Q = llama.impl.llama_c.ggml_reshape_4d(ctx0, Q, d_h, n_head, nq, n_win_all);
+            K = llama.impl.llama_c.ggml_reshape_4d(ctx0, K, d_h, n_head, nq, n_win_all);
+            V = llama.impl.llama_c.ggml_reshape_4d(ctx0, V, d_h, n_head, nq, n_win_all);
 
             sa_out = g.buildAttn(pl.o_w, pl.o_b, Q, K, V, null, scale, bid, null);
-            sa_out = mtmd.impl.c.ggml_reshape_3d(ctx0, sa_out, n_embd, nq, n_win_all);
+            sa_out = llama.impl.llama_c.ggml_reshape_3d(ctx0, sa_out, n_embd, nq, n_win_all);
 
-            sa_out = mtmd.impl.c.ggml_add(ctx0, sa_out, q);
+            sa_out = llama.impl.llama_c.ggml_add(ctx0, sa_out, q);
             sa_out = g.buildNorm(sa_out, pl.ln_1_w, pl.ln_1_b, .normal, qformer_eps, bid);
         }
         cbx(sa_out, bid, "sa_out");
@@ -182,14 +183,14 @@ const Granite4Vision = struct {
             var K = self.linear(e_in, pl.cross_attn_k_w, pl.cross_attn_k_b);
             var V = self.linear(e_in, pl.cross_attn_v_w, pl.cross_attn_v_b);
 
-            Q = mtmd.impl.c.ggml_reshape_4d(ctx0, Q, d_h, n_head, nq, n_win_all);
-            K = mtmd.impl.c.ggml_reshape_4d(ctx0, K, d_h, n_head, nkv, n_win_all);
-            V = mtmd.impl.c.ggml_reshape_4d(ctx0, V, d_h, n_head, nkv, n_win_all);
+            Q = llama.impl.llama_c.ggml_reshape_4d(ctx0, Q, d_h, n_head, nq, n_win_all);
+            K = llama.impl.llama_c.ggml_reshape_4d(ctx0, K, d_h, n_head, nkv, n_win_all);
+            V = llama.impl.llama_c.ggml_reshape_4d(ctx0, V, d_h, n_head, nkv, n_win_all);
 
             ca_out = g.buildAttn(pl.cross_attn_o_w, pl.cross_attn_o_b, Q, K, V, null, scale, bid, null);
-            ca_out = mtmd.impl.c.ggml_reshape_3d(ctx0, ca_out, n_embd, nq, n_win_all);
+            ca_out = llama.impl.llama_c.ggml_reshape_3d(ctx0, ca_out, n_embd, nq, n_win_all);
 
-            ca_out = mtmd.impl.c.ggml_add(ctx0, ca_out, sa_out);
+            ca_out = llama.impl.llama_c.ggml_add(ctx0, ca_out, sa_out);
             ca_out = g.buildNorm(ca_out, pl.cross_attn_norm_w, pl.cross_attn_norm_b, .normal, qformer_eps, bid);
         }
         cbx(ca_out, bid, "ca_out");
@@ -197,14 +198,14 @@ const Granite4Vision = struct {
         // 6c. FFN
         var ffn: mtmd.graph.T = undefined;
         {
-            var t = mtmd.impl.c.ggml_reshape_2d(ctx0, ca_out, n_embd, query_len * n_win_all);
+            var t = llama.impl.llama_c.ggml_reshape_2d(ctx0, ca_out, n_embd, query_len * n_win_all);
             t = g.buildMm(pl.ff_up_w, t);
-            if (pl.ff_up_b != null) t = mtmd.impl.c.ggml_add(ctx0, t, pl.ff_up_b);
-            t = mtmd.impl.c.ggml_gelu_erf(ctx0, t);
+            if (pl.ff_up_b != null) t = llama.impl.llama_c.ggml_add(ctx0, t, pl.ff_up_b);
+            t = llama.impl.llama_c.ggml_gelu_erf(ctx0, t);
             t = g.buildMm(pl.ff_down_w, t);
-            if (pl.ff_down_b != null) t = mtmd.impl.c.ggml_add(ctx0, t, pl.ff_down_b);
-            t = mtmd.impl.c.ggml_reshape_3d(ctx0, t, n_embd, query_len, n_win_all);
-            ffn = mtmd.impl.c.ggml_add(ctx0, t, ca_out);
+            if (pl.ff_down_b != null) t = llama.impl.llama_c.ggml_add(ctx0, t, pl.ff_down_b);
+            t = llama.impl.llama_c.ggml_reshape_3d(ctx0, t, n_embd, query_len, n_win_all);
+            ffn = llama.impl.llama_c.ggml_add(ctx0, t, ca_out);
             ffn = g.buildNorm(ffn, pl.ln_2_w, pl.ln_2_b, .normal, qformer_eps, bid);
         }
         cbx(ffn, bid, "qformer_out");
@@ -212,14 +213,14 @@ const Granite4Vision = struct {
         // 7. _unwin back to raster
         var unwinned: mtmd.graph.T = undefined;
         {
-            const flat = mtmd.impl.c.ggml_reshape_3d(ctx0, ffn, n_embd, query_len * n_windows, n_tiles);
+            const flat = llama.impl.llama_c.ggml_reshape_3d(ctx0, ffn, n_embd, query_len * n_windows, n_tiles);
             unwinned = self.gather(flat, std.fmt.bufPrintSentinel(&name_buf, "g4v_blk{d}_unwin_idx", .{bid}, 0) catch unreachable, new_side * new_side);
         }
         cbx(unwinned, bid, "unwin");
 
         // 8. out_linear
         var out = g.buildMm(blk.qf_proj_linear_w, unwinned);
-        if (blk.qf_proj_linear_b != null) out = mtmd.impl.c.ggml_add(ctx0, out, blk.qf_proj_linear_b);
+        if (blk.qf_proj_linear_b != null) out = llama.impl.llama_c.ggml_add(ctx0, out, blk.qf_proj_linear_b);
         cbx(out, bid, "out");
 
         return out;
@@ -227,7 +228,7 @@ const Granite4Vision = struct {
 
     /// Ports `build_newline_row` (granite4-vision.cpp:247 @b1b770d90): the
     /// K-tiled newline row, shape (n_mmproj_embd, 1).
-    fn buildNewlineRow(self: *const Granite4Vision, ctx0: ?*mtmd.impl.c.ggml_context) mtmd.graph.T {
+    fn buildNewlineRow(self: *const Granite4Vision, ctx0: ?*llama.impl.llama_c.ggml_context) mtmd.graph.T {
         const g = self.g;
         const model = g.model;
         const K: c_int = @intCast(model.qf_proj_blocks.items.len);
@@ -235,22 +236,22 @@ const Granite4Vision = struct {
         mtmd.impl.ggmlAssert(@rem(g.n_mmproj_embd, K) == 0, "granite4-vision.cpp", 250, "n_mmproj_embd % K == 0");
         const projection_dim = @divTrunc(g.n_mmproj_embd, K);
         mtmd.impl.ggmlAssert(model.image_newline != null, "granite4-vision.cpp", 252, "model.image_newline != nullptr");
-        mtmd.impl.ggmlAssert(mtmd.impl.c.ggml_nelements(model.image_newline) == projection_dim, "granite4-vision.cpp", 253, "ggml_nelements(model.image_newline) == projection_dim");
+        mtmd.impl.ggmlAssert(llama.impl.llama_c.ggml_nelements(model.image_newline) == projection_dim, "granite4-vision.cpp", 253, "ggml_nelements(model.image_newline) == projection_dim");
 
         // Build newline_row[k*projection_dim + d] = nl[d] * (k == 0 ? base : 1.0)
         const nl = model.image_newline; // (projection_dim,)
-        const nl_first_2d = mtmd.impl.c.ggml_reshape_2d(ctx0, nl, projection_dim, 1);
+        const nl_first_2d = llama.impl.llama_c.ggml_reshape_2d(ctx0, nl, projection_dim, 1);
         var nl_row_2d: mtmd.graph.T = undefined;
         if (K == 1) {
             nl_row_2d = nl_first_2d;
         } else {
-            const nl_2d = mtmd.impl.c.ggml_reshape_2d(ctx0, nl, projection_dim, 1);
-            const rest_template = mtmd.impl.c.ggml_new_tensor_2d(ctx0, mtmd.impl.c.GGML_TYPE_F32, projection_dim, K - 1);
-            const nl_rest = mtmd.impl.c.ggml_repeat(ctx0, nl_2d, rest_template);
-            nl_row_2d = mtmd.impl.c.ggml_concat(ctx0, nl_first_2d, nl_rest, 1); // (projection_dim, K)
+            const nl_2d = llama.impl.llama_c.ggml_reshape_2d(ctx0, nl, projection_dim, 1);
+            const rest_template = llama.impl.llama_c.ggml_new_tensor_2d(ctx0, llama.impl.llama_c.GGML_TYPE_F32, projection_dim, K - 1);
+            const nl_rest = llama.impl.llama_c.ggml_repeat(ctx0, nl_2d, rest_template);
+            nl_row_2d = llama.impl.llama_c.ggml_concat(ctx0, nl_first_2d, nl_rest, 1); // (projection_dim, K)
         }
-        nl_row_2d = mtmd.impl.c.ggml_cont(ctx0, nl_row_2d);
-        return mtmd.impl.c.ggml_reshape_2d(ctx0, nl_row_2d, g.n_mmproj_embd, 1);
+        nl_row_2d = llama.impl.llama_c.ggml_cont(ctx0, nl_row_2d);
+        return llama.impl.llama_c.ggml_reshape_2d(ctx0, nl_row_2d, g.n_mmproj_embd, 1);
     }
 
     /// Ports `build_anyres_assembly` (granite4-vision.cpp:275 @b1b770d90):
@@ -266,14 +267,14 @@ const Granite4Vision = struct {
         mtmd.impl.ggmlAssert(mtmd.graph.ne(cur, 1) == out_side * out_side, "granite4-vision.cpp", 281, "cur->ne[1] == out_side * out_side");
         mtmd.impl.ggmlAssert(mtmd.graph.ne(cur, 2) == 1 + grid_x * grid_y, "granite4-vision.cpp", 282, "cur->ne[2] == 1 + grid_x * grid_y");
 
-        const base = mtmd.impl.c.ggml_view_2d(ctx0, cur, n_dim, out_side * out_side, mtmd.graph.nb(cur, 1), 0);
+        const base = llama.impl.llama_c.ggml_view_2d(ctx0, cur, n_dim, out_side * out_side, mtmd.graph.nb(cur, 1), 0);
 
-        var tiles = mtmd.impl.c.ggml_view_3d(ctx0, cur, n_dim, out_side * out_side, grid_x * grid_y, mtmd.graph.nb(cur, 1), mtmd.graph.nb(cur, 2), mtmd.graph.nb(cur, 2));
+        var tiles = llama.impl.llama_c.ggml_view_3d(ctx0, cur, n_dim, out_side * out_side, grid_x * grid_y, mtmd.graph.nb(cur, 1), mtmd.graph.nb(cur, 2), mtmd.graph.nb(cur, 2));
 
         // (n_dim*out_side, out_side, grid_x, grid_y) -> interleave the tiles of a grid row
-        tiles = mtmd.impl.c.ggml_reshape_4d(ctx0, tiles, n_dim * out_side, out_side, grid_x, grid_y);
-        tiles = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, tiles, 0, 2, 1, 3));
-        tiles = mtmd.impl.c.ggml_reshape_3d(ctx0, tiles, n_dim, cur_w, cur_h);
+        tiles = llama.impl.llama_c.ggml_reshape_4d(ctx0, tiles, n_dim * out_side, out_side, grid_x, grid_y);
+        tiles = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_permute(ctx0, tiles, 0, 2, 1, 3));
+        tiles = llama.impl.llama_c.ggml_reshape_3d(ctx0, tiles, n_dim, cur_w, cur_h);
 
         // drop the tokens that only cover the padding added when resizing to the grid
         const up = mtmd.impl.anyresUnpad(cur_w, cur_h, self.anyres.orig_nx, self.anyres.orig_ny);
@@ -282,19 +283,19 @@ const Granite4Vision = struct {
         const w = up.out_w;
         const h = up.out_h;
         if (w != cur_w or h != cur_h) {
-            tiles = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_view_3d(ctx0, tiles, n_dim, w, h, mtmd.graph.nb(tiles, 1), mtmd.graph.nb(tiles, 2), @as(usize, @intCast(off_x)) * mtmd.graph.nb(tiles, 1) + @as(usize, @intCast(off_y)) * mtmd.graph.nb(tiles, 2)));
+            tiles = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_view_3d(ctx0, tiles, n_dim, w, h, mtmd.graph.nb(tiles, 1), mtmd.graph.nb(tiles, 2), @as(usize, @intCast(off_x)) * mtmd.graph.nb(tiles, 1) + @as(usize, @intCast(off_y)) * mtmd.graph.nb(tiles, 2)));
         }
 
-        const nl = mtmd.impl.c.ggml_repeat_4d(ctx0, self.buildNewlineRow(ctx0), n_dim, 1, h, 1);
-        tiles = mtmd.impl.c.ggml_concat(ctx0, tiles, nl, 1);
-        tiles = mtmd.impl.c.ggml_reshape_2d(ctx0, tiles, n_dim, (w + 1) * h);
+        const nl = llama.impl.llama_c.ggml_repeat_4d(ctx0, self.buildNewlineRow(ctx0), n_dim, 1, h, 1);
+        tiles = llama.impl.llama_c.ggml_concat(ctx0, tiles, nl, 1);
+        tiles = llama.impl.llama_c.ggml_reshape_2d(ctx0, tiles, n_dim, (w + 1) * h);
 
-        return mtmd.impl.c.ggml_concat(ctx0, base, tiles, 1);
+        return llama.impl.llama_c.ggml_concat(ctx0, base, tiles, 1);
     }
 };
 
 /// Ports `build` (granite4-vision.cpp:310 @b1b770d90), a member of `mtmd_graph_granite4_vision`.
-pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*llama.impl.llama_c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
     const model = g.model;
@@ -316,7 +317,7 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
 
     // --- Stage 1a: SigLIP encoder producing intermediate hidden states ---
     var inp = self.buildTileInp();
-    inp = mtmd.impl.c.ggml_add(ctx0, inp, model.position_embeddings);
+    inp = llama.impl.llama_c.ggml_add(ctx0, inp, model.position_embeddings);
     g.cb(inp, "pos_embed", -1);
 
     const tile_n_patches = tile_side * tile_side;
@@ -335,25 +336,25 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
 
         // Self-attention
         var Qcur = g.buildMm(layer.q_w, cur);
-        if (layer.q_b != null) Qcur = mtmd.impl.c.ggml_add(ctx0, Qcur, layer.q_b);
+        if (layer.q_b != null) Qcur = llama.impl.llama_c.ggml_add(ctx0, Qcur, layer.q_b);
         var Kcur = g.buildMm(layer.k_w, cur);
-        if (layer.k_b != null) Kcur = mtmd.impl.c.ggml_add(ctx0, Kcur, layer.k_b);
+        if (layer.k_b != null) Kcur = llama.impl.llama_c.ggml_add(ctx0, Kcur, layer.k_b);
         var Vcur = g.buildMm(layer.v_w, cur);
-        if (layer.v_b != null) Vcur = mtmd.impl.c.ggml_add(ctx0, Vcur, layer.v_b);
+        if (layer.v_b != null) Vcur = llama.impl.llama_c.ggml_add(ctx0, Vcur, layer.v_b);
 
-        Qcur = mtmd.impl.c.ggml_reshape_4d(ctx0, Qcur, g.d_head, g.n_head, tile_n_patches, n_tiles);
-        Kcur = mtmd.impl.c.ggml_reshape_4d(ctx0, Kcur, g.d_head, g.n_head, tile_n_patches, n_tiles);
-        Vcur = mtmd.impl.c.ggml_reshape_4d(ctx0, Vcur, g.d_head, g.n_head, tile_n_patches, n_tiles);
+        Qcur = llama.impl.llama_c.ggml_reshape_4d(ctx0, Qcur, g.d_head, g.n_head, tile_n_patches, n_tiles);
+        Kcur = llama.impl.llama_c.ggml_reshape_4d(ctx0, Kcur, g.d_head, g.n_head, tile_n_patches, n_tiles);
+        Vcur = llama.impl.llama_c.ggml_reshape_4d(ctx0, Vcur, g.d_head, g.n_head, tile_n_patches, n_tiles);
 
         cur = g.buildAttn(layer.o_w, layer.o_b, Qcur, Kcur, Vcur, null, g.kq_scale, il, null);
-        cur = mtmd.impl.c.ggml_reshape_3d(ctx0, cur, g.n_embd, tile_n_patches, n_tiles);
+        cur = llama.impl.llama_c.ggml_reshape_3d(ctx0, cur, g.n_embd, tile_n_patches, n_tiles);
 
-        cur = mtmd.impl.c.ggml_add(ctx0, cur, inpL);
+        cur = llama.impl.llama_c.ggml_add(ctx0, cur, inpL);
         inpL = cur;
 
         cur = g.buildNorm(cur, layer.ln_2_w, layer.ln_2_b, .normal, g.eps, il);
         cur = g.buildFfn(cur, layer.ff_up_w, layer.ff_up_b, layer.ff_gate_w, layer.ff_gate_b, layer.ff_down_w, layer.ff_down_b, hparams.ffn_op, il);
-        cur = mtmd.impl.c.ggml_add(ctx0, inpL, cur);
+        cur = llama.impl.llama_c.ggml_add(ctx0, inpL, cur);
         g.cb(cur, "layer_out", il);
         layer_outs[@intCast(il)] = cur;
         inpL = cur;
@@ -375,18 +376,18 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
         const stream = self.buildBlock(blk, h, bid, hparams.proj_spatial_offsets.items[@intCast(bid)], tile_side, hparams.downsample_window_side, hparams.downsample_query_side, qformer_eps);
         var name_buf: [256]u8 = undefined;
         g.cb(stream, std.fmt.bufPrintSentinel(&name_buf, "proj_{d}_v_out", .{bid}, 0) catch unreachable, vlayer);
-        mmproj = if (mmproj != null) mtmd.impl.c.ggml_concat(ctx0, mmproj, stream, 0) else stream;
+        mmproj = if (mmproj != null) llama.impl.llama_c.ggml_concat(ctx0, mmproj, stream, 0) else stream;
     }
 
     // --- Stage 1d: assemble the tiles and weave in the newline tokens ---
     if (self.anyres.isTiled()) {
         const out_side = @divTrunc(tile_side, hparams.downsample_window_side) * hparams.downsample_query_side;
         mmproj = self.buildAnyresAssembly(mmproj, out_side);
-        _ = mtmd.impl.c.ggml_set_name(mmproj, "g4v_mmproj_out_anyres");
+        _ = llama.impl.llama_c.ggml_set_name(mmproj, "g4v_mmproj_out_anyres");
     } else {
-        _ = mtmd.impl.c.ggml_set_name(mmproj, "g4v_mmproj_out");
+        _ = llama.impl.llama_c.ggml_set_name(mmproj, "g4v_mmproj_out");
     }
-    mtmd.impl.c.ggml_build_forward_expand(g.gf, mmproj);
+    llama.impl.llama_c.ggml_build_forward_expand(g.gf, mmproj);
 
     return g.gf;
 }

@@ -15,18 +15,3 @@ pub const q5_k = @import("q5_k.zig");
 pub const q6_k = @import("q6_k.zig");
 pub const q8_0 = @import("q8_0.zig");
 pub const quantize = @import("quantize.zig");
-
-comptime {
-    _ = fallback;
-    _ = kscales;
-    _ = mmla;
-    _ = nibble4;
-    _ = q1_0;
-    _ = q4_0;
-    _ = q4_0_gemm;
-    _ = q4_k;
-    _ = q5_k;
-    _ = q6_k;
-    _ = q8_0;
-    _ = quantize;
-}

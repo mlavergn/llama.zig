@@ -18,7 +18,7 @@ fn int(x: i64) c_int {
 }
 
 /// Ports `ggml_cuda_op_gated_linear_attn` (gla.cu:64 @b1b770d90).
-pub fn opGatedLinearAttn(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+pub fn opGatedLinearAttn(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const k_d: ?*const anyopaque = dst.src[0].*.data;
     const v_d: ?*const anyopaque = dst.src[1].*.data;
     const r_d: ?*const anyopaque = dst.src[2].*.data;
@@ -36,7 +36,7 @@ pub fn opGatedLinearAttn(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_
 
     const stream = ctx.stream();
 
-    ggml.impl.assert(dst.src[4].*.type == ggml.impl.c.GGML_TYPE_F32, "dst->src[4]->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.src[4].*.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->src[4]->type == GGML_TYPE_F32");
     ggml.impl.assert(@rem(C, H) == 0, "C % H == 0");
     ggml.impl.assert(@divTrunc(C, H) == 64 or @divTrunc(C, H) == 128, "C / H == 64 || C / H == 128");
 

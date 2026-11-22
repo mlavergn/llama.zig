@@ -97,7 +97,7 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
     const head_dim_q: i64 = hp.nEmbdHeadK(0);
     const head_dim_v: i64 = hp.nEmbdHeadV(0);
 
-    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.llama_c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
     const inp_pos = b.buildInpPos();
 
     const inp_attn = if (iswa) b.buildAttnInpKvIswa() else b.buildAttnInpKv();
@@ -123,10 +123,10 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
         const k_offset: i64 = head_dim_q * n_head;
         const v_offset: i64 = k_offset + head_dim_q * n_head_kv;
 
-        const elt: usize = llama.impl.c.ggml_element_size(qkv);
-        var Qcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, qkv, head_dim_q, n_head, b.n_tokens, @as(usize, @intCast(head_dim_q)) * @sizeOf(f32), qkv.nb[1], @as(usize, @intCast(q_offset)) * elt);
-        var Kcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, qkv, head_dim_q, n_head_kv, b.n_tokens, @as(usize, @intCast(head_dim_q)) * @sizeOf(f32), qkv.nb[1], @as(usize, @intCast(k_offset)) * elt);
-        const Vcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, qkv, head_dim_v, n_head_kv, b.n_tokens, @as(usize, @intCast(head_dim_v)) * @sizeOf(f32), qkv.nb[1], @as(usize, @intCast(v_offset)) * elt);
+        const elt: usize = llama.impl.llama_c.ggml_element_size(qkv);
+        var Qcur: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, qkv, head_dim_q, n_head, b.n_tokens, @as(usize, @intCast(head_dim_q)) * @sizeOf(f32), qkv.nb[1], @as(usize, @intCast(q_offset)) * elt);
+        var Kcur: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, qkv, head_dim_q, n_head_kv, b.n_tokens, @as(usize, @intCast(head_dim_q)) * @sizeOf(f32), qkv.nb[1], @as(usize, @intCast(k_offset)) * elt);
+        const Vcur: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, qkv, head_dim_v, n_head_kv, b.n_tokens, @as(usize, @intCast(head_dim_v)) * @sizeOf(f32), qkv.nb[1], @as(usize, @intCast(v_offset)) * elt);
 
         b.cb(Qcur, "Qcur", il);
         b.cb(Kcur, "Kcur", il);
@@ -146,14 +146,14 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
         b.cb(cur, "attn_out", il);
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            residual = llama.impl.c.ggml_get_rows(ctx, residual, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            residual = llama.impl.llama_c.ggml_get_rows(ctx, residual, inp_out_ids);
         }
 
         cur = b.buildNorm(cur, layer.attn_post_norm, null, .rms, il);
         b.cb(cur, "attn_post_norm", il);
 
-        cur = llama.impl.c.ggml_add(ctx, cur, residual);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, residual);
         b.cb(cur, "attn_residual", il);
 
         residual = cur;
@@ -167,7 +167,7 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
         cur = b.buildNorm(cur, layer.ffn_post_norm, null, .rms, il);
         b.cb(cur, "ffn_post_norm", il);
 
-        cur = llama.impl.c.ggml_add(ctx, cur, residual);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, residual);
         b.cb(cur, "ffn_residual", il);
 
         cur = b.buildCvec(cur, il);

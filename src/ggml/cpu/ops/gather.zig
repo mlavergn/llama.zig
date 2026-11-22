@@ -37,26 +37,26 @@ const RowKind = enum { q, f16, bf16, f32 };
 /// The four are the same loop with a different row conversion, so they are
 /// one function over a comptime kind. The `f32` variant also serves `I32`
 /// tables: it copies four-byte elements without interpreting them.
-fn getRows(comptime kind: RowKind, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+fn getRows(comptime kind: RowKind, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
     const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
     const nc = l.ne00;
-    const nr: i64 = ggml.impl.c.ggml_nelements(src1);
+    const nr: i64 = ggml.impl.ggml_c.ggml_nelements(src1);
 
     std.debug.assert(l.ne0 == nc);
     std.debug.assert(l.ne02 == l.ne11);
     std.debug.assert(l.nb00 == switch (kind) {
-        .q => ggml.impl.c.ggml_type_size(src0.type),
-        .f16 => @sizeOf(ggml.impl.c.ggml_fp16_t),
-        .bf16 => @sizeOf(ggml.impl.c.ggml_bf16_t),
+        .q => ggml.impl.ggml_c.ggml_type_size(src0.type),
+        .f16 => @sizeOf(ggml.impl.ggml_c.ggml_fp16_t),
+        .bf16 => @sizeOf(ggml.impl.ggml_c.ggml_bf16_t),
         .f32 => @sizeOf(f32),
     });
-    std.debug.assert(ggml.impl.c.ggml_nrows(dst) == nr);
+    std.debug.assert(ggml.impl.ggml_c.ggml_nrows(dst) == nr);
 
-    const dequantize_row_q = if (kind == .q) ggml.impl.c.ggml_get_type_traits(src0.type).*.to_float.? else {};
+    const dequantize_row_q = if (kind == .q) ggml.impl.ggml_c.ggml_get_type_traits(src0.type).*.to_float.? else {};
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
@@ -82,49 +82,49 @@ fn getRows(comptime kind: RowKind, params: *const ggml.cpu.defs.ComputeParams, d
 
         switch (kind) {
             .q => dequantize_row_q(ggml.cpu.ops.common.ptr(u8, src0.data, src_off), dst_row, nc),
-            .f16 => ggml.impl.c.ggml_cpu_fp16_to_fp32(ggml.cpu.ops.common.ptr(ggml.impl.c.ggml_fp16_t, src0.data, src_off), dst_row, nc),
-            .bf16 => ggml.impl.c.ggml_cpu_bf16_to_fp32(ggml.cpu.ops.common.ptr(ggml.impl.c.ggml_bf16_t, src0.data, src_off), dst_row, nc),
+            .f16 => ggml.impl.ggml_c.ggml_cpu_fp16_to_fp32(ggml.cpu.ops.common.ptr(ggml.impl.ggml_c.ggml_fp16_t, src0.data, src_off), dst_row, nc),
+            .bf16 => ggml.impl.ggml_c.ggml_cpu_bf16_to_fp32(ggml.cpu.ops.common.ptr(ggml.impl.ggml_c.ggml_bf16_t, src0.data, src_off), dst_row, nc),
             .f32 => ggml.cpu.ops.vecinline.cpy_f32(nc, dst_row, ggml.cpu.ops.common.ptr(f32, src0.data, src_off)),
         }
     }
 }
 
 /// Ports `ggml_compute_forward_get_rows` (ops.cpp:5354 @b1b770d90).
-pub export fn ggml_compute_forward_get_rows(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_get_rows(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_Q1_0,
-        ggml.impl.c.GGML_TYPE_Q2_0,
-        ggml.impl.c.GGML_TYPE_Q4_0,
-        ggml.impl.c.GGML_TYPE_Q4_1,
-        ggml.impl.c.GGML_TYPE_Q5_0,
-        ggml.impl.c.GGML_TYPE_Q5_1,
-        ggml.impl.c.GGML_TYPE_Q8_0,
-        ggml.impl.c.GGML_TYPE_Q8_1,
-        ggml.impl.c.GGML_TYPE_MXFP4,
-        ggml.impl.c.GGML_TYPE_NVFP4,
-        ggml.impl.c.GGML_TYPE_F8_E4M3,
-        ggml.impl.c.GGML_TYPE_Q2_K,
-        ggml.impl.c.GGML_TYPE_Q3_K,
-        ggml.impl.c.GGML_TYPE_Q4_K,
-        ggml.impl.c.GGML_TYPE_Q5_K,
-        ggml.impl.c.GGML_TYPE_Q6_K,
-        ggml.impl.c.GGML_TYPE_TQ1_0,
-        ggml.impl.c.GGML_TYPE_TQ2_0,
-        ggml.impl.c.GGML_TYPE_IQ2_XXS,
-        ggml.impl.c.GGML_TYPE_IQ2_XS,
-        ggml.impl.c.GGML_TYPE_IQ3_XXS,
-        ggml.impl.c.GGML_TYPE_IQ1_S,
-        ggml.impl.c.GGML_TYPE_IQ1_M,
-        ggml.impl.c.GGML_TYPE_IQ4_NL,
-        ggml.impl.c.GGML_TYPE_IQ4_XS,
-        ggml.impl.c.GGML_TYPE_IQ3_S,
-        ggml.impl.c.GGML_TYPE_IQ2_S,
+        ggml.impl.ggml_c.GGML_TYPE_Q1_0,
+        ggml.impl.ggml_c.GGML_TYPE_Q2_0,
+        ggml.impl.ggml_c.GGML_TYPE_Q4_0,
+        ggml.impl.ggml_c.GGML_TYPE_Q4_1,
+        ggml.impl.ggml_c.GGML_TYPE_Q5_0,
+        ggml.impl.ggml_c.GGML_TYPE_Q5_1,
+        ggml.impl.ggml_c.GGML_TYPE_Q8_0,
+        ggml.impl.ggml_c.GGML_TYPE_Q8_1,
+        ggml.impl.ggml_c.GGML_TYPE_MXFP4,
+        ggml.impl.ggml_c.GGML_TYPE_NVFP4,
+        ggml.impl.ggml_c.GGML_TYPE_F8_E4M3,
+        ggml.impl.ggml_c.GGML_TYPE_Q2_K,
+        ggml.impl.ggml_c.GGML_TYPE_Q3_K,
+        ggml.impl.ggml_c.GGML_TYPE_Q4_K,
+        ggml.impl.ggml_c.GGML_TYPE_Q5_K,
+        ggml.impl.ggml_c.GGML_TYPE_Q6_K,
+        ggml.impl.ggml_c.GGML_TYPE_TQ1_0,
+        ggml.impl.ggml_c.GGML_TYPE_TQ2_0,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XS,
+        ggml.impl.ggml_c.GGML_TYPE_IQ3_XXS,
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_S,
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_M,
+        ggml.impl.ggml_c.GGML_TYPE_IQ4_NL,
+        ggml.impl.ggml_c.GGML_TYPE_IQ4_XS,
+        ggml.impl.ggml_c.GGML_TYPE_IQ3_S,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_S,
         => getRows(.q, params, dst),
-        ggml.impl.c.GGML_TYPE_F16 => getRows(.f16, params, dst),
-        ggml.impl.c.GGML_TYPE_BF16 => getRows(.bf16, params, dst),
-        ggml.impl.c.GGML_TYPE_F32, ggml.impl.c.GGML_TYPE_I32 => getRows(.f32, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => getRows(.f16, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_BF16 => getRows(.bf16, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32, ggml.impl.ggml_c.GGML_TYPE_I32 => getRows(.f32, params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -137,9 +137,9 @@ pub export fn ggml_compute_forward_get_rows(params: *const ggml.cpu.defs.Compute
 /// Parameters:
 /// - `SrcT`: `f32` or `ggml_fp16_t`, the source row type.
 /// - `IdxT`: `i64` or `i32`, the index type in `src1`.
-fn setRowsImpl(comptime SrcT: type, comptime IdxT: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+fn setRowsImpl(comptime SrcT: type, comptime IdxT: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
     const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
@@ -149,7 +149,7 @@ fn setRowsImpl(comptime SrcT: type, comptime IdxT: type, params: *const ggml.cpu
     std.debug.assert(l.ne0 == nc);
     std.debug.assert(l.ne2 == l.ne02);
     std.debug.assert(l.ne3 == l.ne03);
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32 or src0.type == ggml.impl.c.GGML_TYPE_F16, "src0->type == GGML_TYPE_F32 || src0->type == GGML_TYPE_F16");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32 or src0.type == ggml.impl.ggml_c.GGML_TYPE_F16, "src0->type == GGML_TYPE_F32 || src0->type == GGML_TYPE_F16");
     std.debug.assert(@rem(l.ne02, l.ne11) == 0);
     std.debug.assert(@rem(l.ne03, l.ne12) == 0);
 
@@ -163,9 +163,9 @@ fn setRowsImpl(comptime SrcT: type, comptime IdxT: type, params: *const ggml.cpu
     const ir0 = dr * ith;
     const ir1 = @min(ir0 + dr, nr);
 
-    const rs = ggml.impl.c.ggml_row_size(src0.type, nc);
+    const rs = ggml.impl.ggml_c.ggml_row_size(src0.type, nc);
 
-    const from_float = ggml.impl.c.ggml_get_type_traits_cpu(dst.type).*.from_float;
+    const from_float = ggml.impl.ggml_c.ggml_get_type_traits_cpu(dst.type).*.from_float;
 
     var j03: i64 = 0;
     while (j03 < l.ne03) : (j03 += 1) {
@@ -186,13 +186,13 @@ fn setRowsImpl(comptime SrcT: type, comptime IdxT: type, params: *const ggml.cpu
 
                 if (SrcT == f32) {
                     from_float.?(ggml.cpu.ops.common.ptr(f32, src0.data, src_off), dst_row, nc);
-                } else if (SrcT == ggml.impl.c.ggml_fp16_t) {
-                    if (dst.type == ggml.impl.c.GGML_TYPE_F16) {
+                } else if (SrcT == ggml.impl.ggml_c.ggml_fp16_t) {
+                    if (dst.type == ggml.impl.ggml_c.GGML_TYPE_F16) {
                         @memcpy(dst_row[0..rs], ggml.cpu.ops.common.ptr(u8, src0.data, src_off)[0..rs]);
                     } else {
                         const wbase: [*]f32 = @ptrCast(@alignCast(params.wdata.?));
                         const wdata = wbase + (@as(usize, @intCast(nc)) + ggml.cpu.ops.common.cache_line_size_f32) * @as(usize, @intCast(ith));
-                        ggml.impl.c.ggml_fp16_to_fp32_row(ggml.cpu.ops.common.ptr(ggml.impl.c.ggml_fp16_t, src0.data, src_off), wdata, nc);
+                        ggml.impl.ggml_c.ggml_fp16_to_fp32_row(ggml.cpu.ops.common.ptr(ggml.impl.ggml_c.ggml_fp16_t, src0.data, src_off), wdata, nc);
                         from_float.?(wdata, dst_row, nc);
                     }
                 } else {
@@ -204,25 +204,25 @@ fn setRowsImpl(comptime SrcT: type, comptime IdxT: type, params: *const ggml.cpu
 }
 
 /// Ports `ggml_compute_forward_set_rows` (ops.cpp:5500 @b1b770d90).
-pub export fn ggml_compute_forward_set_rows(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+pub fn ggml_compute_forward_set_rows(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => {
-            if (src1.type == ggml.impl.c.GGML_TYPE_I64) {
+        ggml.impl.ggml_c.GGML_TYPE_F32 => {
+            if (src1.type == ggml.impl.ggml_c.GGML_TYPE_I64) {
                 setRowsImpl(f32, i64, params, dst);
-            } else if (src1.type == ggml.impl.c.GGML_TYPE_I32) {
+            } else if (src1.type == ggml.impl.ggml_c.GGML_TYPE_I32) {
                 setRowsImpl(f32, i32, params, dst);
             } else {
                 ggml.impl.abort("src1->type not supported");
             }
         },
-        ggml.impl.c.GGML_TYPE_F16 => {
-            if (src1.type == ggml.impl.c.GGML_TYPE_I64) {
-                setRowsImpl(ggml.impl.c.ggml_fp16_t, i64, params, dst);
-            } else if (src1.type == ggml.impl.c.GGML_TYPE_I32) {
-                setRowsImpl(ggml.impl.c.ggml_fp16_t, i32, params, dst);
+        ggml.impl.ggml_c.GGML_TYPE_F16 => {
+            if (src1.type == ggml.impl.ggml_c.GGML_TYPE_I64) {
+                setRowsImpl(ggml.impl.ggml_c.ggml_fp16_t, i64, params, dst);
+            } else if (src1.type == ggml.impl.ggml_c.GGML_TYPE_I32) {
+                setRowsImpl(ggml.impl.ggml_c.ggml_fp16_t, i32, params, dst);
             } else {
                 ggml.impl.abort("src1->type not supported");
             }
@@ -235,23 +235,23 @@ pub export fn ggml_compute_forward_set_rows(params: *const ggml.cpu.defs.Compute
 // get_rows_back
 
 /// Ports `ggml_compute_forward_get_rows_back_f32_f16` (ops.cpp:5537 @b1b770d90).
-fn getRowsBackF32F16(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+fn getRowsBackF32F16(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
     if (params.ith != 0) return;
 
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
 
     // ggml_compute_forward_dup_same_cont(params, opt0, dst);
 
-    @memset(ggml.cpu.ops.common.ptr(u8, dst.data, 0)[0..ggml.impl.c.ggml_nbytes(dst)], 0);
+    @memset(ggml.cpu.ops.common.ptr(u8, dst.data, 0)[0..ggml.impl.ggml_c.ggml_nbytes(dst)], 0);
 
     const nc: i64 = src0.ne[0];
-    const nr: i64 = ggml.impl.c.ggml_nelements(src1);
+    const nr: i64 = ggml.impl.ggml_c.ggml_nelements(src1);
 
     ggml.impl.assert(dst.ne[0] == nc, "dst->ne[0] == nc");
-    ggml.impl.assert(src0.nb[0] == @sizeOf(ggml.impl.c.ggml_fp16_t), "src0->nb[0] == sizeof(ggml_fp16_t)");
+    ggml.impl.assert(src0.nb[0] == @sizeOf(ggml.impl.ggml_c.ggml_fp16_t), "src0->nb[0] == sizeof(ggml_fp16_t)");
 
     const idx = ggml.cpu.ops.common.ptr(i32, src1.data, 0);
 
@@ -261,7 +261,7 @@ fn getRowsBackF32F16(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl
 
         ggml.impl.assert(r >= 0 and r < dst.ne[1], "r >= 0 && r < dst->ne[1]");
 
-        const srow = ggml.cpu.ops.common.ptr(ggml.impl.c.ggml_fp16_t, src0.data, i * ggml.cpu.ops.common.sz(src0.nb[1]));
+        const srow = ggml.cpu.ops.common.ptr(ggml.impl.ggml_c.ggml_fp16_t, src0.data, i * ggml.cpu.ops.common.sz(src0.nb[1]));
         const drow = ggml.cpu.ops.common.ptr(f32, dst.data, r * ggml.cpu.ops.common.sz(dst.nb[1]));
 
         var j: usize = 0;
@@ -272,20 +272,20 @@ fn getRowsBackF32F16(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl
 }
 
 /// Ports `ggml_compute_forward_get_rows_back_f32` (ops.cpp:5572 @b1b770d90).
-fn getRowsBackF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+fn getRowsBackF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
     if (params.ith != 0) return;
 
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
 
     // ggml_compute_forward_dup_same_cont(params, opt0, dst);
 
-    @memset(ggml.cpu.ops.common.ptr(u8, dst.data, 0)[0..ggml.impl.c.ggml_nbytes(dst)], 0);
+    @memset(ggml.cpu.ops.common.ptr(u8, dst.data, 0)[0..ggml.impl.ggml_c.ggml_nbytes(dst)], 0);
 
     const nc: i64 = src0.ne[0];
-    const nr: i64 = ggml.impl.c.ggml_nelements(src1);
+    const nr: i64 = ggml.impl.ggml_c.ggml_nelements(src1);
 
     ggml.impl.assert(dst.ne[0] == nc, "dst->ne[0] == nc");
     ggml.impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
@@ -304,12 +304,12 @@ fn getRowsBackF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.
 }
 
 /// Ports `ggml_compute_forward_get_rows_back` (ops.cpp:5607 @b1b770d90).
-pub export fn ggml_compute_forward_get_rows_back(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_get_rows_back(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F16 => getRowsBackF32F16(params, dst),
-        ggml.impl.c.GGML_TYPE_F32 => getRowsBackF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => getRowsBackF32F16(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => getRowsBackF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -318,8 +318,8 @@ pub export fn ggml_compute_forward_get_rows_back(params: *const ggml.cpu.defs.Co
 // diag
 
 /// Ports `ggml_compute_forward_diag_f32` (ops.cpp:5649 @b1b770d90).
-fn diagF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+fn diagF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     if (params.ith != 0) return;
 
@@ -356,11 +356,11 @@ fn diagF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_te
 }
 
 /// Ports `ggml_compute_forward_diag` (ops.cpp:5689 @b1b770d90).
-pub export fn ggml_compute_forward_diag(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_diag(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => diagF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => diagF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }

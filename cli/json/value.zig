@@ -1077,41 +1077,39 @@ test {
     std.testing.refAllDecls(@This());
 }
 
-const testing = std.testing;
-
 test "operator[] and set keep the first position and the last value" {
-    const a = testing.allocator;
+    const a = std.testing.allocator;
     var v: Value = .null;
     defer v.deinit(a);
     try v.set(a, "b", try Value.from(a, 1));
     try v.set(a, "a", try Value.from(a, "x"));
     try v.set(a, "b", try Value.from(a, @as(u64, 7)));
-    try testing.expectEqual(@as(usize, 2), v.size());
-    try testing.expectEqualStrings("b", v.object.members.items[0].key);
-    try testing.expectEqual(@as(u64, 7), v.object.members.items[0].value.number_unsigned);
-    try testing.expectError(error.JsonError, v.atIndex(0));
-    try testing.expectEqualStrings("[json.exception.type_error.304] cannot use at() with object", mod.errors.what());
-    try testing.expectError(error.JsonError, v.at("zz"));
-    try testing.expectEqualStrings("[json.exception.out_of_range.403] key 'zz' not found", mod.errors.what());
+    try std.testing.expectEqual(@as(usize, 2), v.size());
+    try std.testing.expectEqualStrings("b", v.object.members.items[0].key);
+    try std.testing.expectEqual(@as(u64, 7), v.object.members.items[0].value.number_unsigned);
+    try std.testing.expectError(error.JsonError, v.atIndex(0));
+    try std.testing.expectEqualStrings("[json.exception.type_error.304] cannot use at() with object", mod.errors.what());
+    try std.testing.expectError(error.JsonError, v.at("zz"));
+    try std.testing.expectEqualStrings("[json.exception.out_of_range.403] key 'zz' not found", mod.errors.what());
     try v.erase(a, "b");
-    try testing.expectEqual(@as(usize, 1), v.size());
+    try std.testing.expectEqual(@as(usize, 1), v.size());
 }
 
 test "get follows from_json's two numeric overloads" {
     const t: Value = .{ .boolean = true };
-    try testing.expectEqual(@as(i32, 1), try t.get(i32));
-    try testing.expectError(error.JsonError, t.get(i64));
-    try testing.expectEqualStrings("[json.exception.type_error.302] type must be number, but is boolean", mod.errors.what());
+    try std.testing.expectEqual(@as(i32, 1), try t.get(i32));
+    try std.testing.expectError(error.JsonError, t.get(i64));
+    try std.testing.expectEqualStrings("[json.exception.type_error.302] type must be number, but is boolean", mod.errors.what());
     const f: Value = .{ .number_float = 3.0e10 };
-    try testing.expectEqual(@as(i32, std.math.maxInt(i32)), try f.get(i32));
-    try testing.expectEqual(@as(i64, 30000000000), try f.get(i64));
+    try std.testing.expectEqual(@as(i32, std.math.maxInt(i32)), try f.get(i32));
+    try std.testing.expectEqual(@as(i64, 30000000000), try f.get(i64));
     const u: Value = .{ .number_unsigned = std.math.maxInt(u64) };
-    try testing.expectEqual(@as(i64, -1), try u.get(i64));
-    try testing.expect(u.eql(&.{ .number_integer = -1 }));
+    try std.testing.expectEqual(@as(i64, -1), try u.get(i64));
+    try std.testing.expect(u.eql(&.{ .number_integer = -1 }));
 }
 
 test "insert copies an array, refuses itself, and ignores a non-array" {
-    const a = testing.allocator;
+    const a = std.testing.allocator;
     var x = Value.emptyArray();
     defer x.deinit(a);
     var y = Value.emptyArray();
@@ -1119,14 +1117,14 @@ test "insert copies an array, refuses itself, and ignores a non-array" {
     try y.pushBack(a, try Value.from(a, "s"));
     try x.insert(a, &y);
     try x.insert(a, &y);
-    try testing.expectEqual(@as(usize, 2), x.size());
-    try testing.expectError(error.JsonError, x.insert(a, &x));
+    try std.testing.expectEqual(@as(usize, 2), x.size());
+    try std.testing.expectError(error.JsonError, x.insert(a, &x));
     const o = Value.emptyObject();
     try x.insert(a, &o);
-    try testing.expectEqual(@as(usize, 2), x.size());
+    try std.testing.expectEqual(@as(usize, 2), x.size());
     var c = try x.clone(a);
     defer c.deinit(a);
-    try testing.expect(c.eql(&x));
+    try std.testing.expect(c.eql(&x));
 }
 
 /// `depth` containers, alternating array and object (key "k"), around `leaf`.
@@ -1142,29 +1140,29 @@ fn testNest(a: std.mem.Allocator, depth: usize, leaf: Value) !Value {
 }
 
 test "copy, compare and destroy a value nested past any call stack" {
-    const a = testing.allocator;
+    const a = std.testing.allocator;
     var x = try testNest(a, 100_000, try Value.from(a, "leaf"));
     defer x.deinit(a);
     var y = try x.clone(a);
     defer y.deinit(a);
-    try testing.expect(x.eql(&y));
+    try std.testing.expect(x.eql(&y));
 
     // the leaf, 100,000 levels down, is what differs
     var p = &y;
     while (p.* != .string) p = if (p.* == .array) &p.array.items[0] else &p.object.members.items[0].value;
     p.string[0] = 'L';
-    try testing.expect(!x.eql(&y));
+    try std.testing.expect(!x.eql(&y));
     p.string[0] = 'l';
-    try testing.expect(x.eql(&y));
+    try std.testing.expect(x.eql(&y));
 
     // a key, an extra element and a shorter container, each past the limit
     var q = &y;
     for (0..1001) |_| q = if (q.* == .array) &q.array.items[0] else &q.object.members.items[0].value;
     try q.pushBack(a, .null);
-    try testing.expect(!x.eql(&y));
+    try std.testing.expect(!x.eql(&y));
     _ = q.array.pop();
-    try testing.expect(x.eql(&y));
+    try std.testing.expect(x.eql(&y));
     q = &q.array.items[0];
     q.object.members.items[0].key[0] = 'j';
-    try testing.expect(!x.eql(&y));
+    try std.testing.expect(!x.eql(&y));
 }

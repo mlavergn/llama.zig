@@ -52,9 +52,9 @@ inline fn zeroWork(params: *const ggml.cpu.defs.ComputeParams) void {
 }
 
 /// Zeroes `dst`, the C's `memset(dst->data, 0, ggml_nbytes(dst))`.
-inline fn zeroDst(dst: *ggml.impl.c.ggml_tensor) void {
+inline fn zeroDst(dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const d: [*]u8 = @ptrCast(dst.data.?);
-    @memset(d[0..ggml.impl.c.ggml_nbytes(dst)], 0);
+    @memset(d[0..ggml.impl.ggml_c.ggml_nbytes(dst)], 0);
 }
 
 // -----------------------------------------------------------------------------
@@ -69,17 +69,17 @@ inline fn zeroDst(dst: *ggml.impl.c.ggml_tensor) void {
 /// `ggml_vec_dot_f16_f32` (kernel, then source); the `f32` variant keeps
 /// the kernel first and the source after it, and dots source against kernel.
 /// One function over a comptime `T`, with the layout chosen on it.
-fn convTranspose1d(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+fn convTranspose1d(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    if (T == ggml.impl.c.ggml_fp16_t) {
-        ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F16, "src0->type == GGML_TYPE_F16");
+    if (T == ggml.impl.ggml_c.ggml_fp16_t) {
+        ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F16, "src0->type == GGML_TYPE_F16");
     } else {
-        ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+        ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
     }
-    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
 
     const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
@@ -94,11 +94,11 @@ fn convTranspose1d(comptime T: type, params: *const ggml.cpu.defs.ComputeParams,
     const wbytes: [*]u8 = @ptrCast(params.wdata.?);
     // `f16`: source (f32) at 0, kernel (f16) after `ne10*ne11` floats.
     // `f32`: kernel at 0, source after `nk` floats.
-    const wkernel: [*]T = if (T == ggml.impl.c.ggml_fp16_t)
+    const wkernel: [*]T = if (T == ggml.impl.ggml_c.ggml_fp16_t)
         @ptrCast(@alignCast(wbytes + uz(l.ne10 * l.ne11) * @sizeOf(f32)))
     else
         @ptrCast(@alignCast(wbytes));
-    const wsrc: [*]f32 = if (T == ggml.impl.c.ggml_fp16_t)
+    const wsrc: [*]f32 = if (T == ggml.impl.ggml_c.ggml_fp16_t)
         @ptrCast(@alignCast(wbytes))
     else
         @as([*]f32, @ptrCast(@alignCast(wbytes))) + uz(nk);
@@ -106,7 +106,7 @@ fn convTranspose1d(comptime T: type, params: *const ggml.cpu.defs.ComputeParams,
     if (ith == 0) {
         zeroWork(params);
 
-        if (T == ggml.impl.c.ggml_fp16_t) permuteSrc1d(&l, src1, wsrc);
+        if (T == ggml.impl.ggml_c.ggml_fp16_t) permuteSrc1d(&l, src1, wsrc);
 
         // permute kernel data (src0) from (K x Cout x Cin) to (Cin x K x Cout)
         {
@@ -126,7 +126,7 @@ fn convTranspose1d(comptime T: type, params: *const ggml.cpu.defs.ComputeParams,
             }
         }
 
-        if (T != ggml.impl.c.ggml_fp16_t) permuteSrc1d(&l, src1, wsrc);
+        if (T != ggml.impl.ggml_c.ggml_fp16_t) permuteSrc1d(&l, src1, wsrc);
 
         // need to zero dst since we are accumulating into it
         zeroDst(dst);
@@ -157,7 +157,7 @@ fn convTranspose1d(comptime T: type, params: *const ggml.cpu.defs.ComputeParams,
             var j00: i64 = 0;
             while (j00 < l.ne00) : (j00 += 1) {
                 var v: f32 = 0;
-                if (T == ggml.impl.c.ggml_fp16_t) {
+                if (T == ggml.impl.ggml_c.ggml_fp16_t) {
                     ggml.cpu.vec.ggml_vec_dot_f16_f32(@intCast(l.ne02), &v, 0, wdata_kernel + uz(j00 * l.ne02), 0, wsrc + uz(j1n), 0, 1);
                 } else {
                     ggml.cpu.vec.ggml_vec_dot_f32(@intCast(l.ne02), &v, 0, wsrc + uz(j1n), 0, wdata_kernel + uz(j00 * l.ne02), 0, 1);
@@ -170,7 +170,7 @@ fn convTranspose1d(comptime T: type, params: *const ggml.cpu.defs.ComputeParams,
 
 /// The source permutation both `conv_transpose_1d` variants share: (L x Cin)
 /// to (Cin x L), in `f32`.
-fn permuteSrc1d(l: *const ggml.cpu.defs.BinaryLocals, src1: *ggml.impl.c.ggml_tensor, dst_data: [*]f32) void {
+fn permuteSrc1d(l: *const ggml.cpu.defs.BinaryLocals, src1: *ggml.impl.ggml_c.ggml_tensor, dst_data: [*]f32) void {
     const s1: [*]const u8 = @ptrCast(src1.data.?);
 
     var j11: i64 = 0;
@@ -184,12 +184,12 @@ fn permuteSrc1d(l: *const ggml.cpu.defs.BinaryLocals, src1: *ggml.impl.c.ggml_te
 }
 
 /// Ports `ggml_compute_forward_conv_transpose_1d` (ops.cpp:6587 @b1b770d90).
-pub export fn ggml_compute_forward_conv_transpose_1d(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_conv_transpose_1d(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F16 => convTranspose1d(ggml.impl.c.ggml_fp16_t, params, dst),
-        ggml.impl.c.GGML_TYPE_F32 => convTranspose1d(f32, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => convTranspose1d(ggml.impl.ggml_c.ggml_fp16_t, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => convTranspose1d(f32, params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -218,7 +218,7 @@ const Im2col = struct {
     ofs0: usize,
     ofs1: usize,
 
-    fn of(dst: *const ggml.impl.c.ggml_tensor, l: ggml.cpu.defs.BinaryLocals) Im2col {
+    fn of(dst: *const ggml.impl.ggml_c.ggml_tensor, l: ggml.cpu.defs.BinaryLocals) Im2col {
         const is_2D = dst.op_params[6] == 1;
         return .{
             .s0 = dst.op_params[0],
@@ -245,12 +245,12 @@ const Im2col = struct {
 ///
 /// src0: kernel [OC, IC, KH, KW]; src1: image [N, IC, IH, IW];
 /// dst: result [N, OH, OW, IC*KH*KW].
-fn im2colF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+fn im2colF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
 
     const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
     const g = Im2col.of(dst, l);
@@ -300,12 +300,12 @@ fn im2colF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_
 /// Ports `ggml_compute_forward_im2col_f16` (ops.cpp:6689 @b1b770d90).
 ///
 /// The same walk as `im2colF32`, writing `f16`, from an `f16` or `f32` image.
-fn im2colF16(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+fn im2colF16(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F16 or src1.type == ggml.impl.c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F16 || src1->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F16, "dst->type == GGML_TYPE_F16");
+    ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F16 or src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F16 || src1->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F16, "dst->type == GGML_TYPE_F16");
 
     const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
     const g = Im2col.of(dst, l);
@@ -313,12 +313,12 @@ fn im2colF16(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    ggml.impl.assert(l.nb10 == ggml.impl.c.ggml_type_size(src1.type), "nb10 == ggml_type_size(src1->type)");
+    ggml.impl.assert(l.nb10 == ggml.impl.ggml_c.ggml_type_size(src1.type), "nb10 == ggml_type_size(src1->type)");
 
     // im2col: [N, IC, IH, IW] => [N, OH, OW, IC*KH*KW]
-    const wdata: [*]ggml.impl.c.ggml_fp16_t = @ptrCast(@alignCast(dst.data.?));
+    const wdata: [*]ggml.impl.ggml_c.ggml_fp16_t = @ptrCast(@alignCast(dst.data.?));
     const s1: [*]const u8 = @ptrCast(src1.data.?);
-    const is_f32 = src1.type == ggml.impl.c.GGML_TYPE_F32;
+    const is_f32 = src1.type == ggml.impl.ggml_c.GGML_TYPE_F32;
 
     var in: i64 = 0;
     while (in < g.n) : (in += 1) {
@@ -332,7 +332,7 @@ fn im2colF16(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_
                     const dst_data = wdata + uz((in * g.oh * g.ow + ioh * g.ow + iow) * (g.ic * g.kh * g.kw)); // [IC, KH, KW]
                     const src_row = s1 + uz(in) * g.ofs0 + uz(iic) * g.ofs1; // [IH, IW]
                     const src_data_f32: [*]const f32 = @ptrCast(@alignCast(src_row));
-                    const src_data_f16: [*]const ggml.impl.c.ggml_fp16_t = @ptrCast(@alignCast(src_row));
+                    const src_data_f16: [*]const ggml.impl.ggml_c.ggml_fp16_t = @ptrCast(@alignCast(src_row));
 
                     var ikh: i64 = 0;
                     while (ikh < g.kh) : (ikh += 1) {
@@ -358,10 +358,10 @@ fn im2colF16(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_
 }
 
 /// Ports `ggml_compute_forward_im2col` (ops.cpp:6769 @b1b770d90).
-pub export fn ggml_compute_forward_im2col(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+pub fn ggml_compute_forward_im2col(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
     switch (dst.type) {
-        ggml.impl.c.GGML_TYPE_F16 => im2colF16(params, dst),
-        ggml.impl.c.GGML_TYPE_F32 => im2colF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => im2colF16(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => im2colF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -371,13 +371,13 @@ pub export fn ggml_compute_forward_im2col(params: *const ggml.cpu.defs.ComputePa
 /// Note the roles swap against `im2col`: the image geometry comes from `dst`
 /// and the kernel's from `src1`. `%` and `/` on a negative offset truncate
 /// toward zero in the C, hence `@rem` and `@divTrunc`.
-pub export fn ggml_compute_forward_im2col_back_f32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]); // gradients of forward pass output
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]); // convolution kernel
+pub fn ggml_compute_forward_im2col_back_f32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]); // gradients of forward pass output
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]); // convolution kernel
 
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32 or src1.type == ggml.impl.c.GGML_TYPE_F16, "src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_F16");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32 or src1.type == ggml.impl.ggml_c.GGML_TYPE_F16, "src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_F16");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
 
     const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
@@ -468,15 +468,15 @@ pub export fn ggml_compute_forward_im2col_back_f32(params: *const ggml.cpu.defs.
 /// Identical but for the element they write, so one function over `T`. The
 /// `f32` variant's bounds test repeats `iid < 0 || iid >= ID` at its end; it
 /// is redundant and has no effect.
-fn im2col3d(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+fn im2col3d(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
-    if (T == ggml.impl.c.ggml_fp16_t) {
-        ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F16, "dst->type == GGML_TYPE_F16");
+    ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+    if (T == ggml.impl.ggml_c.ggml_fp16_t) {
+        ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F16, "dst->type == GGML_TYPE_F16");
     } else {
-        ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
+        ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
     }
 
     const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
@@ -560,10 +560,10 @@ fn im2col3d(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *
 }
 
 /// Ports `ggml_compute_forward_im2col_3d` (ops.cpp:7066 @b1b770d90).
-pub export fn ggml_compute_forward_im2col_3d(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+pub fn ggml_compute_forward_im2col_3d(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
     switch (dst.type) {
-        ggml.impl.c.GGML_TYPE_F16 => im2col3d(ggml.impl.c.ggml_fp16_t, params, dst),
-        ggml.impl.c.GGML_TYPE_F32 => im2col3d(f32, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => im2col3d(ggml.impl.ggml_c.ggml_fp16_t, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => im2col3d(f32, params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -579,11 +579,11 @@ pub export fn ggml_compute_forward_im2col_3d(params: *const ggml.cpu.defs.Comput
 /// receives `[m, n]` as `f32`. Every field not set is zero, as the C's `= {}`
 /// leaves it. The two types are separate (#31854): the
 /// convolutions keep their patches in `f32` whatever the kernel is.
-fn callMulMat(src0_type: ggml.impl.c.ggml_type, src1_type: ggml.impl.c.ggml_type, params: *const ggml.cpu.defs.ComputeParams, m: i64, n: i64, k: i64, a: *anyopaque, b: *anyopaque, out: [*]f32) void {
-    const ts0 = ggml.impl.c.ggml_get_type_traits(src0_type).*.type_size;
-    const ts1 = ggml.impl.c.ggml_get_type_traits(src1_type).*.type_size;
+fn callMulMat(src0_type: ggml.impl.ggml_c.ggml_type, src1_type: ggml.impl.ggml_c.ggml_type, params: *const ggml.cpu.defs.ComputeParams, m: i64, n: i64, k: i64, a: *anyopaque, b: *anyopaque, out: [*]f32) void {
+    const ts0 = ggml.impl.ggml_c.ggml_get_type_traits(src0_type).*.type_size;
+    const ts1 = ggml.impl.ggml_c.ggml_get_type_traits(src1_type).*.type_size;
 
-    var src1 = std.mem.zeroes(ggml.impl.c.ggml_tensor);
+    var src1 = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
     src1.type = src1_type;
     src1.ne = .{ k, m, 1, 1 };
     src1.nb[0] = ts1;
@@ -592,7 +592,7 @@ fn callMulMat(src0_type: ggml.impl.c.ggml_type, src1_type: ggml.impl.c.ggml_type
     src1.nb[3] = src1.nb[2];
     src1.data = a;
 
-    var src0 = std.mem.zeroes(ggml.impl.c.ggml_tensor);
+    var src0 = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
     src0.type = src0_type;
     src0.ne = .{ k, n, 1, 1 };
     src0.nb[0] = ts0;
@@ -601,7 +601,7 @@ fn callMulMat(src0_type: ggml.impl.c.ggml_type, src1_type: ggml.impl.c.ggml_type
     src0.nb[3] = src0.nb[2];
     src0.data = b;
 
-    var dst = std.mem.zeroes(ggml.impl.c.ggml_tensor);
+    var dst = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
     dst.ne = .{ n, m, 1, 1 };
     dst.nb[0] = @sizeOf(f32);
     dst.nb[1] = uz(n) * @sizeOf(f32);
@@ -623,11 +623,11 @@ fn callMulMat(src0_type: ggml.impl.c.ggml_type, src1_type: ggml.impl.c.ggml_type
 /// T_out = (T_in - 1)*s + K - 2*p, done as a gather: each output reads
 /// ceil(K/s) inputs. Parallelised over the time axis so the split stays
 /// balanced whatever OC is. Accumulates in `f32` whatever `T` is.
-fn col2im1d(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]); // [K*OC, T_in]
+fn col2im1d(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]); // [K*OC, T_in]
 
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(src), "ggml_is_contiguous(src)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src), "ggml_is_contiguous(src)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
 
     const s0: i64 = dst.op_params[0];
     const OC: i64 = dst.op_params[1];
@@ -680,11 +680,11 @@ fn col2im1d(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *
 ///
 /// The C's abort message carries the type number through a format string;
 /// `impl.abort` takes a literal, so the number is dropped.
-pub export fn ggml_compute_forward_col2im_1d(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    switch (ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]).type) {
-        ggml.impl.c.GGML_TYPE_F32 => col2im1d(f32, params, dst),
-        ggml.impl.c.GGML_TYPE_F16 => col2im1d(ggml.impl.c.ggml_fp16_t, params, dst),
-        ggml.impl.c.GGML_TYPE_BF16 => col2im1d(ggml.impl.c.ggml_bf16_t, params, dst),
+pub fn ggml_compute_forward_col2im_1d(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    switch (ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]).type) {
+        ggml.impl.ggml_c.GGML_TYPE_F32 => col2im1d(f32, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => col2im1d(ggml.impl.ggml_c.ggml_fp16_t, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_BF16 => col2im1d(ggml.impl.ggml_c.ggml_bf16_t, params, dst),
         else => ggml.impl.abort("col2im_1d: unsupported type"),
     }
 }
@@ -697,9 +697,9 @@ pub export fn ggml_compute_forward_col2im_1d(params: *const ggml.cpu.defs.Comput
 /// kernel [KW, KH, IC, OC], src [W, H, C, N], dst [OW, OH, OC, N]. Patches
 /// are im2col'd into the work buffer in batches sized to fit it, multiplied
 /// against the kernel, and permuted back into `dst`.
-fn conv2dImpl(params: *const ggml.cpu.defs.ComputeParams, kernel: *const ggml.impl.c.ggml_tensor, src: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor, kernel_type: ggml.impl.c.ggml_type) void {
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(kernel), "ggml_is_contiguous(kernel)");
-    ggml.impl.assert(kernel_type == ggml.impl.c.GGML_TYPE_F16 or kernel_type == ggml.impl.c.GGML_TYPE_F32, "kernel_type == GGML_TYPE_F16 || kernel_type == GGML_TYPE_F32");
+fn conv2dImpl(params: *const ggml.cpu.defs.ComputeParams, kernel: *const ggml.impl.ggml_c.ggml_tensor, src: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor, kernel_type: ggml.impl.ggml_c.ggml_type) void {
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(kernel), "ggml_is_contiguous(kernel)");
+    ggml.impl.assert(kernel_type == ggml.impl.ggml_c.GGML_TYPE_F16 or kernel_type == ggml.impl.ggml_c.GGML_TYPE_F32, "kernel_type == GGML_TYPE_F16 || kernel_type == GGML_TYPE_F32");
     ggml.impl.assert(kernel.type == kernel_type, "kernel->type == kernel_type");
 
     const stride_x: i64 = dst.op_params[0];
@@ -793,7 +793,7 @@ fn conv2dImpl(params: *const ggml.cpu.defs.ComputeParams, kernel: *const ggml.im
         ggml.impl.assert(@intFromPtr(gemm_output + uz(patch_n * c_out)) <= @intFromPtr(@as([*]f32, @ptrCast(@alignCast(tmp))) + params.wsize), "gemm_output + patch_n * c_out <= (float*)tmp + params->wsize");
 
         // GEMM: patches[patch_n, knl_n] × kernel[knl_n, c_out] = output[patch_n, c_out]
-        callMulMat(kernel_type, ggml.impl.c.GGML_TYPE_F32, params, patch_n, c_out, knl_n, tmp, knl_data, gemm_output);
+        callMulMat(kernel_type, ggml.impl.ggml_c.GGML_TYPE_F32, params, patch_n, c_out, knl_n, tmp, knl_data, gemm_output);
 
         ggml.cpu.ops.common.barrier(params);
 
@@ -820,9 +820,9 @@ fn conv2dImpl(params: *const ggml.cpu.defs.ComputeParams, kernel: *const ggml.im
 }
 
 /// Ports `ggml_compute_forward_conv_2d` (ops.cpp:7326 @b1b770d90).
-pub export fn ggml_compute_forward_conv_2d(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+pub fn ggml_compute_forward_conv_2d(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
     conv2dImpl(params, src0, src1, dst, src0.type);
 }
@@ -834,9 +834,9 @@ pub export fn ggml_compute_forward_conv_2d(params: *const ggml.cpu.defs.ComputeP
 ///
 /// The `conv_2d` scheme with a depth axis. Channels and batch arrive in
 /// `op_params` rather than the shapes, since both are folded into `ne[3]`.
-fn conv3dImpl(params: *const ggml.cpu.defs.ComputeParams, kernel: *const ggml.impl.c.ggml_tensor, src: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor, kernel_type: ggml.impl.c.ggml_type) void {
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(kernel), "ggml_is_contiguous(kernel)");
-    ggml.impl.assert(kernel_type == ggml.impl.c.GGML_TYPE_F16 or kernel_type == ggml.impl.c.GGML_TYPE_F32, "kernel_type == GGML_TYPE_F16 || kernel_type == GGML_TYPE_F32");
+fn conv3dImpl(params: *const ggml.cpu.defs.ComputeParams, kernel: *const ggml.impl.ggml_c.ggml_tensor, src: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor, kernel_type: ggml.impl.ggml_c.ggml_type) void {
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(kernel), "ggml_is_contiguous(kernel)");
+    ggml.impl.assert(kernel_type == ggml.impl.ggml_c.GGML_TYPE_F16 or kernel_type == ggml.impl.ggml_c.GGML_TYPE_F32, "kernel_type == GGML_TYPE_F16 || kernel_type == GGML_TYPE_F32");
     ggml.impl.assert(kernel.type == kernel_type, "kernel->type == kernel_type");
 
     const s0: i64 = dst.op_params[0];
@@ -935,7 +935,7 @@ fn conv3dImpl(params: *const ggml.cpu.defs.ComputeParams, kernel: *const ggml.im
         ggml.cpu.ops.common.barrier(params);
 
         const gemm_output: [*]f32 = @ptrCast(@alignCast(tmp + uz(patches_per_batch * knl_n_total) * @sizeOf(f32)));
-        callMulMat(kernel_type, ggml.impl.c.GGML_TYPE_F32, params, patch_n_in_batch, oc, knl_n_total, tmp, knl_data, gemm_output);
+        callMulMat(kernel_type, ggml.impl.ggml_c.GGML_TYPE_F32, params, patch_n_in_batch, oc, knl_n_total, tmp, knl_data, gemm_output);
 
         ggml.cpu.ops.common.barrier(params);
 
@@ -965,9 +965,9 @@ fn conv3dImpl(params: *const ggml.cpu.defs.ComputeParams, kernel: *const ggml.im
 }
 
 /// Ports `ggml_compute_forward_conv_3d` (ops.cpp:7463 @b1b770d90).
-pub export fn ggml_compute_forward_conv_3d(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+pub fn ggml_compute_forward_conv_3d(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
     conv3dImpl(params, src0, src1, dst, src0.type);
 }
 
@@ -979,13 +979,13 @@ pub export fn ggml_compute_forward_conv_3d(params: *const ggml.cpu.defs.ComputeP
 /// Batched over `src1`'s `ne[3]`: each image is permuted into its own slice
 /// of the work buffer, and every thread's output channels are computed for
 /// every image.
-fn convTranspose2d(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+fn convTranspose2d(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F16 or src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F16 || src0->type == GGML_TYPE_F32");
-    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F16 or src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F16 || src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
 
     const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
@@ -994,7 +994,7 @@ fn convTranspose2d(comptime T: type, params: *const ggml.cpu.defs.ComputeParams,
 
     const nsrc = l.ne10 * l.ne11 * l.ne12 * l.ne13;
 
-    ggml.impl.assert(l.nb00 == ggml.impl.c.ggml_type_size(src0.type), "nb00 == ggml_type_size(src0->type)");
+    ggml.impl.assert(l.nb00 == ggml.impl.ggml_c.ggml_type_size(src0.type), "nb00 == ggml_type_size(src0->type)");
     ggml.impl.assert(l.nb10 == @sizeOf(f32), "nb10 == sizeof(float)");
 
     // The permuted source comes first (#31854), in `f32`, and
@@ -1086,7 +1086,7 @@ fn convTranspose2d(comptime T: type, params: *const ggml.cpu.defs.ComputeParams,
                         while (j00 < l.ne00) : (j00 += 1) {
                             var v: f32 = 0;
                             const kp = wdata_kernel_c + uz(j01 * l.ne00 * l.ne03 + j00 * l.ne03);
-                            if (T == ggml.impl.c.ggml_fp16_t) {
+                            if (T == ggml.impl.ggml_c.ggml_fp16_t) {
                                 ggml.cpu.vec.ggml_vec_dot_f16_f32(@intCast(l.ne03), &v, 0, kp, 0, wdata_src_b + uz(j1n), 0, 1);
                             } else {
                                 ggml.cpu.vec.ggml_vec_dot_f32(@intCast(l.ne03), &v, 0, kp, 0, wdata_src_b + uz(j1n), 0, 1);
@@ -1101,12 +1101,12 @@ fn convTranspose2d(comptime T: type, params: *const ggml.cpu.defs.ComputeParams,
 }
 
 /// Ports `ggml_compute_forward_conv_transpose_2d` (ops.cpp:7578 @b1b770d90).
-pub export fn ggml_compute_forward_conv_transpose_2d(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_conv_transpose_2d(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F16 => convTranspose2d(ggml.impl.c.ggml_fp16_t, params, dst),
-        ggml.impl.c.GGML_TYPE_F32 => convTranspose2d(f32, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => convTranspose2d(ggml.impl.ggml_c.ggml_fp16_t, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => convTranspose2d(f32, params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -1137,9 +1137,9 @@ const Conv2dDwParams = struct {
 
 /// Ports `ggml_conv_2d_dw_knl_f32` (ops.cpp:7619 @b1b770d90): one kernel
 /// element, widened if the kernel is `f16`.
-inline fn conv2dDwKnlF32(data: [*]const u8, i: i64, @"type": ggml.impl.c.ggml_type) f32 {
-    if (@"type" == ggml.impl.c.GGML_TYPE_F16) {
-        return ggml.impl.fp16ToFp32(@as([*]const ggml.impl.c.ggml_fp16_t, @ptrCast(@alignCast(data)))[uz(i)]);
+inline fn conv2dDwKnlF32(data: [*]const u8, i: i64, @"type": ggml.impl.ggml_c.ggml_type) f32 {
+    if (@"type" == ggml.impl.ggml_c.GGML_TYPE_F16) {
+        return ggml.impl.fp16ToFp32(@as([*]const ggml.impl.ggml_c.ggml_fp16_t, @ptrCast(@alignCast(data)))[uz(i)]);
     }
     return @as([*]const f32, @ptrCast(@alignCast(data)))[uz(i)];
 }
@@ -1151,7 +1151,7 @@ inline fn conv2dDwKnlF32(data: [*]const u8, i: i64, @"type": ggml.impl.c.ggml_ty
 /// through `vfmaq_f32(sum, k, s)` and the remainder through `sum += k * s`;
 /// both are a fused multiply-add per channel over the same window order, so
 /// one fused loop covers every channel. See the file header.
-fn conv2dDwCwhn(params: *const ggml.cpu.defs.ComputeParams, src: *const ggml.impl.c.ggml_tensor, kernel: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor, p: Conv2dDwParams) void {
+fn conv2dDwCwhn(params: *const ggml.cpu.defs.ComputeParams, src: *const ggml.impl.ggml_c.ggml_tensor, kernel: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor, p: Conv2dDwParams) void {
     const cc = p.channels;
     const knl_data: [*]const u8 = @ptrCast(kernel.data.?);
     const knl_type = kernel.type;
@@ -1206,7 +1206,7 @@ fn conv2dDwCwhn(params: *const ggml.cpu.defs.ComputeParams, src: *const ggml.imp
 /// Ports `ggml_compute_forward_conv_2d_dw_whcn` (ops.cpp:7709 @b1b770d90).
 ///
 /// Channels-first, scalar. `sum += k * s` is one expression, so it fuses.
-fn conv2dDwWhcn(params: *const ggml.cpu.defs.ComputeParams, src: *const ggml.impl.c.ggml_tensor, kernel: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor, p: Conv2dDwParams) void {
+fn conv2dDwWhcn(params: *const ggml.cpu.defs.ComputeParams, src: *const ggml.impl.ggml_c.ggml_tensor, kernel: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor, p: Conv2dDwParams) void {
     const n = p.channels * p.batch;
     const nth: i64 = params.nth;
     const ith: i64 = params.ith;
@@ -1254,9 +1254,9 @@ fn conv2dDwWhcn(params: *const ggml.cpu.defs.ComputeParams, src: *const ggml.imp
 }
 
 /// Ports `ggml_compute_forward_conv_2d_dw` (ops.cpp:7752 @b1b770d90).
-pub export fn ggml_compute_forward_conv_2d_dw(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const kernel = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+pub fn ggml_compute_forward_conv_2d_dw(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const kernel = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
     const p: Conv2dDwParams = .{
         .channels = src.ne[2],
         .batch = src.ne[3],
@@ -1274,13 +1274,13 @@ pub export fn ggml_compute_forward_conv_2d_dw(params: *const ggml.cpu.defs.Compu
         .dilation_y = dst.op_params[5],
     };
 
-    ggml.impl.assert(kernel.type == ggml.impl.c.GGML_TYPE_F32 or kernel.type == ggml.impl.c.GGML_TYPE_F16, "kernel->type == GGML_TYPE_F32 || kernel->type == GGML_TYPE_F16");
+    ggml.impl.assert(kernel.type == ggml.impl.ggml_c.GGML_TYPE_F32 or kernel.type == ggml.impl.ggml_c.GGML_TYPE_F16, "kernel->type == GGML_TYPE_F32 || kernel->type == GGML_TYPE_F16");
     ggml.impl.assert(kernel.ne[3] == p.channels, "kernel->ne[3] == p.channels");
     ggml.impl.assert(dst.ne[3] == p.batch, "dst->ne[3] == p.batch");
 
-    if (ggml.impl.c.ggml_is_contiguous(src)) {
+    if (ggml.impl.ggml_c.ggml_is_contiguous(src)) {
         conv2dDwWhcn(params, src, kernel, dst, p);
-    } else if (ggml.impl.c.ggml_is_contiguous_channels(src)) {
+    } else if (ggml.impl.ggml_c.ggml_is_contiguous_channels(src)) {
         ggml.impl.assert(kernel.nb[0] >= kernel.nb[2] and kernel.nb[1] >= kernel.nb[0], "kernel->nb[0] >= kernel->nb[2] && kernel->nb[1] >= kernel->nb[0]");
         conv2dDwCwhn(params, src, kernel, dst, p);
     } else {
@@ -1297,8 +1297,8 @@ test {
 
 test "conv_2d_dw reads an f16 kernel element widened, and an f32 one as is" {
     const k32 = [_]f32{ 1.5, -2.25 };
-    try std.testing.expectEqual(@as(f32, -2.25), conv2dDwKnlF32(@ptrCast(&k32), 1, ggml.impl.c.GGML_TYPE_F32));
+    try std.testing.expectEqual(@as(f32, -2.25), conv2dDwKnlF32(@ptrCast(&k32), 1, ggml.impl.ggml_c.GGML_TYPE_F32));
 
-    const k16 = [_]ggml.impl.c.ggml_fp16_t{ ggml.impl.fp32ToFp16(0.5), ggml.impl.fp32ToFp16(3.0) };
-    try std.testing.expectEqual(@as(f32, 3.0), conv2dDwKnlF32(@ptrCast(&k16), 1, ggml.impl.c.GGML_TYPE_F16));
+    const k16 = [_]ggml.impl.ggml_c.ggml_fp16_t{ ggml.impl.fp32ToFp16(0.5), ggml.impl.fp32ToFp16(3.0) };
+    try std.testing.expectEqual(@as(f32, 3.0), conv2dDwKnlF32(@ptrCast(&k16), 1, ggml.impl.ggml_c.GGML_TYPE_F16));
 }

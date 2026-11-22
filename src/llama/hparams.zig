@@ -312,7 +312,7 @@ pub const Hparams = extern struct {
     const Self = @This();
 
     fn outOfBounds(comptime line: c_int, comptime func: [:0]const u8, il: u32, n: u32, comptime what: [:0]const u8) noreturn {
-        mod.impl.c.ggml_abort("llama-hparams.cpp", line, "%s: il (%u) out of bounds (" ++ what ++ ": %u)\n", func.ptr, il, n);
+        mod.impl.llama_c.ggml_abort("llama-hparams.cpp", line, "%s: il (%u) out of bounds (" ++ what ++ ": %u)\n", func.ptr, il, n);
     }
 
     /// Ports `llama_hparams`'s `set_swa_pattern` (llama-hparams.cpp:8 @b1b770d90).
@@ -522,7 +522,7 @@ pub const Hparams = extern struct {
 
     /// Ports `llama_hparams`'s `n_pos_per_embd` (llama-hparams.cpp:285 @b1b770d90).
     pub fn nPosPerEmbd(self: *const Self) u32 {
-        return if (self.rope_type == mod.impl.c.LLAMA_ROPE_TYPE_MROPE or self.rope_type == mod.impl.c.LLAMA_ROPE_TYPE_IMROPE) 4 else 1;
+        return if (self.rope_type == mod.impl.llama_c.LLAMA_ROPE_TYPE_MROPE or self.rope_type == mod.impl.llama_c.LLAMA_ROPE_TYPE_IMROPE) 4 else 1;
     }
 
     /// Ports `llama_hparams`'s `is_swa` (llama-hparams.cpp:290 @b1b770d90).

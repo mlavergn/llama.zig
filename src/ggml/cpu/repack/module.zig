@@ -12,9 +12,6 @@
 //! is not a link error -- the linker picks one silently -- so a partial
 //! swap reads as success.
 
-const impl = @import("../../impl.zig");
-const c = impl.c;
-
 /// Whether the C++ dispatch layer of `repack.cpp` has been ported.
 ///
 /// **This exists because the symbol count lies for this file.** For
@@ -59,23 +56,6 @@ pub const quantize = @import("quantize.zig");
 /// @b1b770d90). Re-exported from `dispatch.zig` so `cpu_backend.zig` keeps
 /// reaching this directory through the barrel.
 pub const ggml_backend_cpu_repack_buffer_type = dispatch.ggml_backend_cpu_repack_buffer_type;
-
-comptime {
-    _ = arch;
-    _ = blocks;
-    _ = convert;
-    _ = dispatch;
-    _ = epilogue;
-    _ = nibble4;
-    _ = q1_0;
-    _ = q2_k;
-    _ = q4_0;
-    _ = q4_k;
-    _ = q5_k;
-    _ = q6_k;
-    _ = q8_0;
-    _ = quantize;
-}
 
 // -----------------------------------------------------------------------------
 // Unit Tests

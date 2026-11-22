@@ -18,7 +18,7 @@ const stdlib = @import("stdlib");
 /// `snprintf`: `%g` has no `std.fmt` equivalent.
 fn throwC(exc: *llama.impl.Exception, comptime fmt: [:0]const u8, args: anytype) llama.impl.Thrown {
     var buf: [512]u8 = undefined;
-    const n = @call(.auto, llama.impl.c.snprintf, .{ &buf, buf.len, fmt.ptr } ++ args);
+    const n = @call(.auto, llama.impl.llama_c.snprintf, .{ &buf, buf.len, fmt.ptr } ++ args);
     const len: usize = @min(@as(usize, @intCast(n)), buf.len - 1);
     return exc.throw(.runtime_error, "{s}", .{buf[0..len]});
 }
@@ -209,15 +209,15 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
             // per layer.
             var v_in = attn_in;
             if (layer.attn_vres_lambda) |lambda| {
-                const mix = llama.impl.c.ggml_sigmoid(ctx, lambda);
-                v_in = llama.impl.c.ggml_add(ctx, inp_vres, llama.impl.c.ggml_mul(ctx, llama.impl.c.ggml_sub(ctx, attn_in, inp_vres), mix));
+                const mix = llama.impl.llama_c.ggml_sigmoid(ctx, lambda);
+                v_in = llama.impl.llama_c.ggml_add(ctx, inp_vres, llama.impl.llama_c.ggml_mul(ctx, llama.impl.llama_c.ggml_sub(ctx, attn_in, inp_vres), mix));
                 b.cb(v_in, "vres_in", il);
             }
             var Vcur = b.buildLoraMm(layer.wv.?, v_in, layer.wv_s);
 
-            Qcur = llama.impl.c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
-            Kcur = llama.impl.c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, b.n_tokens);
-            Vcur = llama.impl.c.ggml_reshape_3d(ctx, Vcur, n_embd_head, b.n_head_kv, b.n_tokens);
+            Qcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
+            Kcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, b.n_tokens);
+            Vcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Vcur, n_embd_head, b.n_head_kv, b.n_tokens);
 
             Qcur = b.buildNorm(Qcur, layer.attn_q_norm, null, .rms, il);
             Kcur = b.buildNorm(Kcur, layer.attn_k_norm, null, .rms, il);
@@ -237,9 +237,9 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
 
             if (layer.wqkv_gate) |wg| {
                 var gate = b.buildLoraMm(wg, attn_in, layer.wqkv_gate_s);
-                gate = llama.impl.c.ggml_sigmoid(ctx, gate);
+                gate = llama.impl.llama_c.ggml_sigmoid(ctx, gate);
                 b.cb(gate, "attn_gate", il);
-                cur = llama.impl.c.ggml_mul(ctx, cur, gate);
+                cur = llama.impl.llama_c.ggml_mul(ctx, cur, gate);
                 b.cb(cur, "attn_gated", il);
             }
 
@@ -248,14 +248,14 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
 
         // `inp_out_ids` is never null here.
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
         cur = b.buildNorm(cur, layer.attn_post_norm, null, .rms, il);
         b.cb(cur, "attn_post_norm", il);
 
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -265,9 +265,9 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
             const gate = b.buildLoraMm(layer.ffn_gate.?, cur, layer.ffn_gate_s);
             const up = b.buildLoraMm(layer.ffn_up.?, cur, layer.ffn_up_s);
             cur = if (hp.swiglu_clamp[ilu] > 0.0)
-                llama.impl.c.ggml_swiglu_clamp(ctx, gate, up, hp.swiglu_clamp[ilu])
+                llama.impl.llama_c.ggml_swiglu_clamp(ctx, gate, up, hp.swiglu_clamp[ilu])
             else
-                llama.impl.c.ggml_swiglu_split(ctx, gate, up);
+                llama.impl.llama_c.ggml_swiglu_split(ctx, gate, up);
             b.cb(cur, "ffn_swiglu", il);
             cur = b.buildLoraMm(layer.ffn_down.?, cur, layer.ffn_down_s);
             b.cb(cur, "ffn_out", il);
@@ -276,7 +276,7 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
         cur = b.buildNorm(cur, layer.ffn_post_norm, null, .rms, il);
         b.cb(cur, "ffn_post_norm", il);
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
 

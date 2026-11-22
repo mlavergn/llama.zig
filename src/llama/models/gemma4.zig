@@ -186,9 +186,9 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
 
 /// Ports `gemma4_view_2d_slice` (models/gemma4.cpp:155 @b1b770d90): the 2D
 /// slice of a 3D tensor at `idx` along its third dimension.
-fn view2dSlice(ctx: *llama.impl.c.ggml_context, x: *llama.impl.c.ggml_tensor, idx: c_int) *llama.impl.c.ggml_tensor {
+fn view2dSlice(ctx: *llama.impl.llama_c.ggml_context, x: *llama.impl.llama_c.ggml_tensor, idx: c_int) *llama.impl.llama_c.ggml_tensor {
     llama.impl.assert(idx < @as(c_int, @intCast(x.ne[2])), "models/gemma4.cpp", 156, "idx < (int) x->ne[2]");
-    return llama.impl.c.ggml_view_2d(ctx, x, x.ne[0], x.ne[1], x.nb[1], @as(usize, @intCast(idx)) * x.nb[2]);
+    return llama.impl.llama_c.ggml_view_2d(ctx, x, x.ne[0], x.ne[1], x.nb[1], @as(usize, @intCast(idx)) * x.nb[2]);
 }
 
 /// Ports `llm_graph_input_gemma4_ple` (models/gemma4.cpp:467 @b1b770d90):
@@ -196,9 +196,9 @@ fn view2dSlice(ctx: *llama.impl.c.ggml_context, x: *llama.impl.c.ggml_tensor, id
 /// select when the per-layer table may be prefetched.
 const InpPle = struct {
     /// I32 `[n_tokens]`, or null on the multimodal path.
-    tokens: ?*llama.impl.c.ggml_tensor = null,
+    tokens: ?*llama.impl.llama_c.ggml_tensor = null,
     /// I32 `[1]`, the padding token's id on the multimodal path, or null.
-    token0: ?*llama.impl.c.ggml_tensor = null,
+    token0: ?*llama.impl.llama_c.ggml_tensor = null,
 
     model: *const llama.model.Model,
 
@@ -214,14 +214,14 @@ const InpPle = struct {
             if (prefetch) {
                 llama.impl.prefetchRows(ple, ubatch.token, ubatch.n_tokens);
             }
-            llama.impl.c.ggml_backend_tensor_set(self.tokens, ubatch.token, 0, ubatch.n_tokens * llama.impl.c.ggml_element_size(self.tokens));
+            llama.impl.llama_c.ggml_backend_tensor_set(self.tokens, ubatch.token, 0, ubatch.n_tokens * llama.impl.llama_c.ggml_element_size(self.tokens));
         } else {
             const padding: i32 = 0;
             if (prefetch) {
                 // [TAG_GEMMA4_IMG_PADDING]
                 llama.impl.prefetchRows(ple, @ptrCast(&padding), 1);
             }
-            llama.impl.c.ggml_backend_tensor_set(self.token0, &padding, 0, llama.impl.c.ggml_element_size(self.token0));
+            llama.impl.llama_c.ggml_backend_tensor_set(self.token0, &padding, 0, llama.impl.llama_c.ggml_element_size(self.token0));
         }
     }
 
@@ -254,16 +254,16 @@ const Graph = struct {
 
         // The PLE first, to guarantee it is done in the host buffer
         // (ref: https://github.com/ggml-org/llama.cpp/pull/30160).
-        var inp_per_layer: ?*llama.impl.c.ggml_tensor = null;
+        var inp_per_layer: ?*llama.impl.llama_c.ggml_tensor = null;
         if (model.per_layer_tok_embd != null) {
             const ipl = self.buildInpPerLayer();
-            llama.impl.c.ggml_build_forward_expand(b.gf, ipl);
+            llama.impl.llama_c.ggml_build_forward_expand(b.gf, ipl);
             inp_per_layer = ipl;
         }
 
         // Important: do not normalize weights for raw embeddings input (i.e.
         // encoded image embeddings): `build_inp_embd` scales the token rows only.
-        var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbdScaled(model.tok_embd.?, stdlib.libm.sqrtfInt(b.n_embd));
+        var inpL: *llama.impl.llama_c.ggml_tensor = b.buildInpEmbdScaled(model.tok_embd.?, stdlib.libm.sqrtfInt(b.n_embd));
         b.cb(inpL, "inp_scaled", -1);
 
         // The positions.
@@ -281,8 +281,8 @@ const Graph = struct {
             // is folded into tok_embd_scale.
             const tok_embd_scale = stdlib.libm.sqrtfInt(self.n_embd_per_layer) / @sqrt(@as(f32, 2.0));
 
-            var ipl: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_scale(ctx, ipl_, tok_embd_scale);
-            ipl = llama.impl.c.ggml_reshape_3d(ctx, ipl, self.n_embd_per_layer, b.n_layer, ipl.ne[1]);
+            var ipl: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_scale(ctx, ipl_, tok_embd_scale);
+            ipl = llama.impl.llama_c.ggml_reshape_3d(ctx, ipl, self.n_embd_per_layer, b.n_layer, ipl.ne[1]);
 
             // inp_per_layer has shape [n_embd_per_layer, n_tokens, n_layer].
             inp_per_layer = self.projectPerLayerInputs(inpL, ipl);
@@ -306,19 +306,19 @@ const Graph = struct {
         var il: c_int = 0;
         while (il < b.n_layer) : (il += 1) {
             if (prune_shared and il == hp.n_layer_kv_from_start) {
-                inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
-                inp_pos = llama.impl.c.ggml_reshape_1d(ctx, llama.impl.c.ggml_get_rows(ctx, llama.impl.c.ggml_reshape_2d(ctx, inp_pos, 1, n_tokens), inp_out_ids), b.n_outputs);
+                inpL = llama.impl.llama_c.ggml_get_rows(ctx, inpL, inp_out_ids);
+                inp_pos = llama.impl.llama_c.ggml_reshape_1d(ctx, llama.impl.llama_c.ggml_get_rows(ctx, llama.impl.llama_c.ggml_reshape_2d(ctx, inp_pos, 1, n_tokens), inp_out_ids), b.n_outputs);
 
                 // Upstream's TODO: instead of get_rows here, extend llm_attn_mask
                 // with an `out` mask built in set_input holding just the pruned
                 // output cells, which would allow pruning with more than one
                 // sequence, with unified and split KV caches alike
                 // (ref: https://github.com/ggml-org/llama.cpp/pull/31356#discussion_r4455286628).
-                inp_attn_prune.self_attn_mask.raw = llama.impl.c.ggml_get_rows(ctx, inp_attn_full.self_attn_mask.raw, inp_out_ids);
-                inp_attn_prune.self_attn_mask_swa.raw = llama.impl.c.ggml_get_rows(ctx, inp_attn_full.self_attn_mask_swa.raw, inp_out_ids);
+                inp_attn_prune.self_attn_mask.raw = llama.impl.llama_c.ggml_get_rows(ctx, inp_attn_full.self_attn_mask.raw, inp_out_ids);
+                inp_attn_prune.self_attn_mask_swa.raw = llama.impl.llama_c.ggml_get_rows(ctx, inp_attn_full.self_attn_mask_swa.raw, inp_out_ids);
 
-                inp_attn_prune.self_attn_mask.raw = llama.impl.c.ggml_cast(ctx, inp_attn_prune.self_attn_mask.raw, llama.impl.c.GGML_TYPE_F16);
-                inp_attn_prune.self_attn_mask_swa.raw = llama.impl.c.ggml_cast(ctx, inp_attn_prune.self_attn_mask_swa.raw, llama.impl.c.GGML_TYPE_F16);
+                inp_attn_prune.self_attn_mask.raw = llama.impl.llama_c.ggml_cast(ctx, inp_attn_prune.self_attn_mask.raw, llama.impl.llama_c.GGML_TYPE_F16);
+                inp_attn_prune.self_attn_mask_swa.raw = llama.impl.llama_c.ggml_cast(ctx, inp_attn_prune.self_attn_mask_swa.raw, llama.impl.llama_c.GGML_TYPE_F16);
 
                 n_rows = b.n_outputs;
 
@@ -341,21 +341,21 @@ const Graph = struct {
 
             // The Q projection, shared by the KV and the non-KV layers, to
             // mirror Gemma4Attention in the PyTorch code.
-            var qkv_fused: ?*llama.impl.c.ggml_tensor = null;
-            var Qcur: *llama.impl.c.ggml_tensor = undefined;
+            var qkv_fused: ?*llama.impl.llama_c.ggml_tensor = null;
+            var Qcur: *llama.impl.llama_c.ggml_tensor = undefined;
             if (layer.wqkv) |wqkv| {
                 const f = b.buildLoraMm(wqkv, cur, layer.wqkv_s);
                 qkv_fused = f;
                 b.cb(f, "wqkv", il);
                 const q_dim = n_embd_head * n_head;
-                Qcur = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_view_2d(ctx, f, q_dim, n_rows, f.nb[1], 0));
+                Qcur = llama.impl.llama_c.ggml_cont(ctx, llama.impl.llama_c.ggml_view_2d(ctx, f, q_dim, n_rows, f.nb[1], 0));
             } else {
                 Qcur = b.buildLoraMm(layer.wq.?, cur, layer.wq_s);
             }
             {
                 b.cb(Qcur, "Qcur", il);
 
-                Qcur = llama.impl.c.ggml_reshape_3d(ctx, Qcur, n_embd_head, n_head, n_rows);
+                Qcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Qcur, n_embd_head, n_head, n_rows);
 
                 Qcur = b.buildNorm(Qcur, layer.attn_q_norm, null, .rms, il);
                 b.cb(Qcur, "Qcur_normed", il);
@@ -366,15 +366,15 @@ const Graph = struct {
 
             // Self-attention.
             if (hp.hasKv(ilu)) {
-                var Kcur: *llama.impl.c.ggml_tensor = undefined;
-                var Vcur: *llama.impl.c.ggml_tensor = undefined;
+                var Kcur: *llama.impl.llama_c.ggml_tensor = undefined;
+                var Vcur: *llama.impl.llama_c.ggml_tensor = undefined;
                 if (qkv_fused) |f| {
                     const q_dim = n_embd_head * n_head;
                     const k_dim = n_embd_head * n_head_kv;
                     const v_dim = n_embd_head * n_head_kv;
-                    const esize = llama.impl.c.ggml_element_size(f);
-                    Kcur = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_view_2d(ctx, f, k_dim, n_tokens, f.nb[1], @as(usize, @intCast(q_dim)) * esize));
-                    Vcur = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_view_2d(ctx, f, v_dim, n_tokens, f.nb[1], @as(usize, @intCast(q_dim + k_dim)) * esize));
+                    const esize = llama.impl.llama_c.ggml_element_size(f);
+                    Kcur = llama.impl.llama_c.ggml_cont(ctx, llama.impl.llama_c.ggml_view_2d(ctx, f, k_dim, n_tokens, f.nb[1], @as(usize, @intCast(q_dim)) * esize));
+                    Vcur = llama.impl.llama_c.ggml_cont(ctx, llama.impl.llama_c.ggml_view_2d(ctx, f, v_dim, n_tokens, f.nb[1], @as(usize, @intCast(q_dim + k_dim)) * esize));
                 } else {
                     Kcur = b.buildLoraMm(layer.wk.?, cur, layer.wk_s);
                     // Without a v_proj, Kcur is Vcur.
@@ -383,11 +383,11 @@ const Graph = struct {
                 b.cb(Kcur, "Kcur", il);
                 b.cb(Vcur, "Vcur", il);
 
-                Kcur = llama.impl.c.ggml_reshape_3d(ctx, Kcur, n_embd_head, n_head_kv, n_tokens);
-                Vcur = llama.impl.c.ggml_reshape_3d(ctx, Vcur, n_embd_head, n_head_kv, n_tokens);
+                Kcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Kcur, n_embd_head, n_head_kv, n_tokens);
+                Vcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Vcur, n_embd_head, n_head_kv, n_tokens);
 
                 Kcur = b.buildNorm(Kcur, layer.attn_k_norm, null, .rms, il);
-                Vcur = llama.impl.c.ggml_rms_norm(ctx, Vcur, hp.f_norm_rms_eps);
+                Vcur = llama.impl.llama_c.ggml_rms_norm(ctx, Vcur, hp.f_norm_rms_eps);
 
                 b.cb(Kcur, "Kcur_normed", il);
                 b.cb(Vcur, "Vcur_normed", il);
@@ -405,13 +405,13 @@ const Graph = struct {
             // Keep all rows when extracting unmasked nextn embeddings: the
             // MTP target needs the hidden state for every token.
             if (!prune_shared and il == b.n_layer - 1 and b.cropBeforeNextn(inp_out_ids)) {
-                cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-                inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
+                cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+                inpL = llama.impl.llama_c.ggml_get_rows(ctx, inpL, inp_out_ids);
             }
             cur = b.buildNorm(cur, layer.attn_post_norm, null, .rms, il);
             b.cb(cur, "attn_post_norm", il);
 
-            const attn_out: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpL);
+            const attn_out: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpL);
             b.cb(attn_out, "attn_out", il);
 
             // The feed-forward network.
@@ -430,9 +430,9 @@ const Graph = struct {
                 b.cb(cur_moe, "ffn_norm_2", il);
 
                 // Custom MoE logits: the router works on attn_out, not cur.
-                var tmp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_rms_norm(ctx, attn_out, hp.f_norm_rms_eps);
-                tmp = llama.impl.c.ggml_scale(ctx, tmp, 1.0 / stdlib.libm.sqrtfInt(b.n_embd));
-                tmp = llama.impl.c.ggml_mul(ctx, tmp, layer.ffn_gate_inp_s);
+                var tmp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_rms_norm(ctx, attn_out, hp.f_norm_rms_eps);
+                tmp = llama.impl.llama_c.ggml_scale(ctx, tmp, 1.0 / stdlib.libm.sqrtfInt(b.n_embd));
+                tmp = llama.impl.llama_c.ggml_mul(ctx, tmp, layer.ffn_gate_inp_s);
                 const logits = b.buildLoraMm(layer.ffn_gate_inp.?, tmp, null); // [n_expert, n_rows]
                 b.cb(logits, "ffn_moe_logits", il);
 
@@ -457,7 +457,7 @@ const Graph = struct {
                 cur_moe = b.buildNorm(cur_moe, layer.ffn_post_norm_2, null, .rms, il);
                 b.cb(cur_moe, "ffn_moe", il);
 
-                cur = llama.impl.c.ggml_add(ctx, cur_mlp, cur_moe);
+                cur = llama.impl.llama_c.ggml_add(ctx, cur_mlp, cur_moe);
                 b.cb(cur, "ffn_moe_combined", il);
             } else {
                 cur = b.buildNorm(attn_out, layer.ffn_norm, null, .rms, il);
@@ -470,7 +470,7 @@ const Graph = struct {
             b.cb(cur, "ffn_post_norm", il);
 
             // The residual connection.
-            cur = llama.impl.c.ggml_add(ctx, cur, attn_out);
+            cur = llama.impl.llama_c.ggml_add(ctx, cur, attn_out);
 
             // The per-layer embedding.
             if (inp_per_layer) |ipl| {
@@ -478,26 +478,26 @@ const Graph = struct {
                 b.cb(cur, "pe_in", il);
 
                 cur = b.buildLoraMm(layer.per_layer_inp_gate.?, cur, null); // [n_embd_per_layer, n_rows]
-                cur = llama.impl.c.ggml_gelu(ctx, cur);
+                cur = llama.impl.llama_c.ggml_gelu(ctx, cur);
 
                 var inp_this_layer = view2dSlice(ctx, ipl, il); // [n_embd_per_layer, n_tokens]
 
                 if ((prune_shared and !hp.hasKv(ilu)) or (il == b.n_layer - 1 and b.cropBeforeNextn(inp_out_ids))) {
-                    inp_this_layer = llama.impl.c.ggml_get_rows(ctx, inp_this_layer, inp_out_ids);
+                    inp_this_layer = llama.impl.llama_c.ggml_get_rows(ctx, inp_this_layer, inp_out_ids);
                 }
 
-                cur = llama.impl.c.ggml_mul(ctx, cur, inp_this_layer);
+                cur = llama.impl.llama_c.ggml_mul(ctx, cur, inp_this_layer);
                 cur = b.buildLoraMm(layer.per_layer_proj.?, cur, null); // [n_embd, n_rows]
                 cur = b.buildNorm(cur, layer.per_layer_post_norm, null, .rms, il);
                 b.cb(cur, "per_layer_embd_out", il);
 
                 // The residual connection.
-                cur = llama.impl.c.ggml_add(ctx, pe_in, cur);
+                cur = llama.impl.llama_c.ggml_add(ctx, pe_in, cur);
             }
 
             // layer_scalar
             if (layer.out_scale) |s| {
-                cur = llama.impl.c.ggml_mul(ctx, cur, s);
+                cur = llama.impl.llama_c.ggml_mul(ctx, cur, s);
                 b.cb(cur, "out_scaled", il);
             }
 
@@ -520,7 +520,7 @@ const Graph = struct {
         b.res.t_h_nextn = cur;
 
         if (b.cropAfterNextn(inp_out_ids)) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
         }
 
         b.cb(cur, "result_norm", -1);
@@ -530,9 +530,9 @@ const Graph = struct {
         cur = b.buildLoraMm(model.output.?, cur, model.output_s);
 
         if (hp.f_final_logit_softcapping != 0.0) {
-            cur = llama.impl.c.ggml_scale(ctx, cur, 1.0 / hp.f_final_logit_softcapping);
-            cur = llama.impl.c.ggml_tanh(ctx, cur);
-            cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_final_logit_softcapping);
+            cur = llama.impl.llama_c.ggml_scale(ctx, cur, 1.0 / hp.f_final_logit_softcapping);
+            cur = llama.impl.llama_c.ggml_tanh(ctx, cur);
+            cur = llama.impl.llama_c.ggml_scale(ctx, cur, hp.f_final_logit_softcapping);
         }
 
         b.cb(cur, "result_output", -1);
@@ -546,7 +546,7 @@ const Graph = struct {
     ///
     /// Return: `[n_embd_per_layer * n_layer, n_tokens]` (one row on the
     /// multimodal path), which the graph scales and reshapes.
-    fn buildInpPerLayer(self: *const Graph) *llama.impl.c.ggml_tensor {
+    fn buildInpPerLayer(self: *const Graph) *llama.impl.llama_c.ggml_tensor {
         const b = self.b;
         const ctx = b.ctx0;
         const model = self.model;
@@ -554,16 +554,16 @@ const Graph = struct {
         const inp = std.heap.c_allocator.create(InpPle) catch llama.impl.abort("models/gemma4.cpp", 504, "out of memory");
         inp.* = .{ .model = model };
 
-        var inp_per_layer: *llama.impl.c.ggml_tensor = undefined;
+        var inp_per_layer: *llama.impl.llama_c.ggml_tensor = undefined;
         // A mixed ubatch's embedding rows have token id 0, the same padding
         // row as below.
         // TODO: use ggml_build_forward_select
         if (b.ubatch.token != null) {
-            inp.tokens = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_I32, b.ubatch.n_tokens);
-            llama.impl.c.ggml_set_input(inp.tokens);
+            inp.tokens = llama.impl.llama_c.ggml_new_tensor_1d(ctx, llama.impl.llama_c.GGML_TYPE_I32, b.ubatch.n_tokens);
+            llama.impl.llama_c.ggml_set_input(inp.tokens);
             b.res.t_inp_tokens = inp.tokens;
 
-            inp_per_layer = llama.impl.c.ggml_get_rows(ctx, model.per_layer_tok_embd, inp.tokens);
+            inp_per_layer = llama.impl.llama_c.ggml_get_rows(ctx, model.per_layer_tok_embd, inp.tokens);
             b.cb(inp_per_layer, "inp_per_layer_selected", -1);
         } else {
             // The multimodal embedding path uses the padding token's (ID 0)
@@ -572,11 +572,11 @@ const Graph = struct {
             // implementation.
 
             // [TAG_GEMMA4_IMG_PADDING]
-            inp.token0 = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_I32, 1);
-            llama.impl.c.ggml_set_input(inp.token0);
+            inp.token0 = llama.impl.llama_c.ggml_new_tensor_1d(ctx, llama.impl.llama_c.GGML_TYPE_I32, 1);
+            llama.impl.llama_c.ggml_set_input(inp.token0);
             b.res.t_inp_tokens = inp.token0;
 
-            inp_per_layer = llama.impl.c.ggml_get_rows(ctx, model.per_layer_tok_embd, inp.token0);
+            inp_per_layer = llama.impl.llama_c.ggml_get_rows(ctx, model.per_layer_tok_embd, inp.token0);
             b.cb(inp_per_layer, "inp_per_layer_multimodal", -1);
         }
         _ = b.res.addInput(InpPle, inp);
@@ -590,7 +590,7 @@ const Graph = struct {
     /// `build_inp_per_layer`'s `[n_embd_per_layer, n_layer, n_tokens]`.
     ///
     /// Return: `[n_embd_per_layer, n_tokens, n_layer]`.
-    fn projectPerLayerInputs(self: *const Graph, inp_batch: *llama.impl.c.ggml_tensor, inp_per_layer_: *llama.impl.c.ggml_tensor) *llama.impl.c.ggml_tensor {
+    fn projectPerLayerInputs(self: *const Graph, inp_batch: *llama.impl.llama_c.ggml_tensor, inp_per_layer_: *llama.impl.llama_c.ggml_tensor) *llama.impl.llama_c.ggml_tensor {
         const b = self.b;
         const ctx = b.ctx0;
         const per_layer_projection_scale = 1.0 / stdlib.libm.sqrtfInt(b.n_embd);
@@ -599,22 +599,22 @@ const Graph = struct {
         // This product is computed in the input layer, i.e. on the CPU.
         // per_layer_input_scale is folded into proj_norm_w, and
         // per_layer_projection_scale into proj_eps.
-        const proj_norm_w: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_scale(ctx, self.model.per_layer_proj_norm, per_layer_input_scale);
-        llama.impl.c.ggml_build_forward_expand(b.gf, proj_norm_w);
+        const proj_norm_w: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_scale(ctx, self.model.per_layer_proj_norm, per_layer_input_scale);
+        llama.impl.llama_c.ggml_build_forward_expand(b.gf, proj_norm_w);
 
-        var per_layer_proj: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, self.model.per_layer_model_proj, inp_batch);
-        per_layer_proj = llama.impl.c.ggml_reshape_3d(ctx, per_layer_proj, self.n_embd_per_layer, b.n_layer, b.n_tokens);
+        var per_layer_proj: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_mul_mat(ctx, self.model.per_layer_model_proj, inp_batch);
+        per_layer_proj = llama.impl.llama_c.ggml_reshape_3d(ctx, per_layer_proj, self.n_embd_per_layer, b.n_layer, b.n_tokens);
 
         const proj_eps = b.hparams.f_norm_rms_eps / (per_layer_projection_scale * per_layer_projection_scale);
-        per_layer_proj = llama.impl.c.ggml_rms_norm(ctx, per_layer_proj, proj_eps);
-        per_layer_proj = llama.impl.c.ggml_mul(ctx, per_layer_proj, proj_norm_w);
+        per_layer_proj = llama.impl.llama_c.ggml_rms_norm(ctx, per_layer_proj, proj_eps);
+        per_layer_proj = llama.impl.llama_c.ggml_mul(ctx, per_layer_proj, proj_norm_w);
         b.cb(per_layer_proj, "per_layer_proj", -1);
 
-        var inp_per_layer: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, per_layer_proj, inp_per_layer_);
+        var inp_per_layer: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, per_layer_proj, inp_per_layer_);
         b.cb(inp_per_layer, "inp_per_layer", -1);
 
         // Permute to [n_embd_per_layer, n_tokens, n_layer].
-        inp_per_layer = llama.impl.c.ggml_permute(ctx, inp_per_layer, 0, 2, 1, 3);
+        inp_per_layer = llama.impl.llama_c.ggml_permute(ctx, inp_per_layer, 0, 2, 1, 3);
         return inp_per_layer;
     }
 };

@@ -46,7 +46,7 @@ const sizeof_half = 2;
 /// group is partial.
 /// It is in this translation unit whichever instance file's `launch_fattn`
 /// asks for it, since the C's function is not a template.
-pub fn compactMask(mask: *const ggml.impl.c.ggml_tensor, indices: ?[*]i32, counts: ?[*]i32, n_queries: i32, ncols1: i32, n_kv_max: i32, stream: ggml.cuda.common.cu.cudaStream_t) void {
+pub fn compactMask(mask: *const ggml.impl.ggml_c.ggml_tensor, indices: ?[*]i32, counts: ?[*]i32, n_queries: i32, ncols1: i32, n_kv_max: i32, stream: ggml.cuda.common.cu.cudaStream_t) void {
     const s31: i64 = @bitCast(mask.nb[1] / sizeof_half);
     const s33: i64 = @bitCast(mask.nb[3] / sizeof_half);
     // `dim3`'s members are `unsigned int`.
@@ -81,11 +81,11 @@ pub fn compactMask(mask: *const ggml.impl.c.ggml_tensor, indices: ?[*]i32, count
 /// handles up to `64/ncols2` queries per K/V pass. Never with
 /// `kv_rows` (`src[5]`), and CDNA takes it for DKQ 576; the CDNA arms are
 /// false on a CUDA device.
-pub fn mmaF16ShallUseSparse(cc: c_int, dst: *const ggml.impl.c.ggml_tensor, ncols1: c_int, ncols2: c_int) bool {
-    const Q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const K = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const V = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
-    const mask_opt: ?*const ggml.impl.c.ggml_tensor = dst.src[3];
+pub fn mmaF16ShallUseSparse(cc: c_int, dst: *const ggml.impl.ggml_c.ggml_tensor, ncols1: c_int, ncols2: c_int) bool {
+    const Q = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const K = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const V = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]);
+    const mask_opt: ?*const ggml.impl.ggml_c.ggml_tensor = dst.src[3];
 
     const max_bias = ggml.impl.getOpParamsF32(dst, 1);
     const logit_softcap = ggml.impl.getOpParamsF32(dst, 2);
@@ -111,9 +111,9 @@ pub fn mmaF16ShallUseSparse(cc: c_int, dst: *const ggml.impl.c.ggml_tensor, ncol
 
 /// Ports `ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1` (fattn.cu:172 @b1b770d90).
 /// The sparse arm is under `!GGML_USE_MUSA` (HIP too).
-fn mmaF16SwitchNcols1(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols2: comptime_int, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+fn mmaF16SwitchNcols1(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols2: comptime_int, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const cc = ggml.cuda.common.info().devices[@intCast(ggml.cuda.common.getDevice())].cc;
-    const Q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const Q = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     if (comptime ggml.cuda.fattn_mma.mayUseSparse(DKQ, DV, 1, ncols2)) {
         // a sparse variant at the full tile width gathers the union of its queries once, prefer it for large batches
@@ -152,14 +152,14 @@ fn mmaF16SwitchNcols1(comptime DKQ: comptime_int, comptime DV: comptime_int, com
 /// `ggml_cuda_get_best_fattn_kernel` both compute it: no GQA optimization
 /// for a node with no mask, ALiBi, an unpadded K/V, or a non-quantized
 /// operand with a row stride not a multiple of 16 bytes.
-fn gqaOpt(base: bool, Q: *const ggml.impl.c.ggml_tensor, K: *const ggml.impl.c.ggml_tensor, V: *const ggml.impl.c.ggml_tensor, mask: ?*const ggml.impl.c.ggml_tensor) bool {
+fn gqaOpt(base: bool, Q: *const ggml.impl.ggml_c.ggml_tensor, K: *const ggml.impl.ggml_c.ggml_tensor, V: *const ggml.impl.ggml_c.ggml_tensor, mask: ?*const ggml.impl.ggml_c.ggml_tensor) bool {
     var use_gqa_opt = base;
-    for ([_]?*const ggml.impl.c.ggml_tensor{ Q, K, V, mask }) |t_opt| {
+    for ([_]?*const ggml.impl.ggml_c.ggml_tensor{ Q, K, V, mask }) |t_opt| {
         const t = t_opt orelse continue;
-        if (ggml.impl.c.ggml_is_quantized(t.type)) {
+        if (ggml.impl.ggml_c.ggml_is_quantized(t.type)) {
             continue;
         }
-        for (1..ggml.impl.c.GGML_MAX_DIMS) |i| {
+        for (1..ggml.impl.ggml_c.GGML_MAX_DIMS) |i| {
             if (t.nb[i] % 16 != 0) {
                 use_gqa_opt = false;
                 break;
@@ -171,16 +171,16 @@ fn gqaOpt(base: bool, Q: *const ggml.impl.c.ggml_tensor, K: *const ggml.impl.c.g
 
 /// Ports `ggml_cuda_flash_attn_ext_mma_f16_switch_ncols2` (fattn.cu:211 @b1b770d90).
 /// Under `kv_rows` the K/V length is the mask's column count.
-fn mmaF16SwitchNcols2(comptime DKQ: comptime_int, comptime DV: comptime_int, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+fn mmaF16SwitchNcols2(comptime DKQ: comptime_int, comptime DV: comptime_int, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const cc = ggml.cuda.common.info().devices[@intCast(ggml.cuda.common.getDevice())].cc;
     const KQV = dst;
-    const Q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const K = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const V = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
-    const mask: ?*const ggml.impl.c.ggml_tensor = dst.src[3];
+    const Q = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const K = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const V = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]);
+    const mask: ?*const ggml.impl.ggml_c.ggml_tensor = dst.src[3];
 
     // with kv_rows the kernel iterates over the mask columns
-    const kv_rows: ?*const ggml.impl.c.ggml_tensor = dst.src[5];
+    const kv_rows: ?*const ggml.impl.ggml_c.ggml_tensor = dst.src[5];
     const n_kv: i64 = if (kv_rows) |r| r.ne[0] else K.ne[1];
 
     const max_bias = ggml.impl.getOpParamsF32(KQV, 1);
@@ -259,13 +259,13 @@ fn mmaF16SwitchNcols2(comptime DKQ: comptime_int, comptime DV: comptime_int, ctx
 
 /// Ports `ggml_cuda_flash_attn_ext_mma_f16` (fattn.cu:308 @b1b770d90). Head
 /// sizes 40 and 72 are taken (#30285).
-fn mmaF16(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+fn mmaF16(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const cc = ggml.cuda.common.info().devices[@intCast(ggml.cuda.common.getDevice())].cc;
     const KQV = dst;
-    const Q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const K = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const V = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
-    const mask: ?*const ggml.impl.c.ggml_tensor = dst.src[3];
+    const Q = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const K = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const V = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]);
+    const mask: ?*const ggml.impl.ggml_c.ggml_tensor = dst.src[3];
 
     switch (Q.ne[0]) {
         40 => {
@@ -397,29 +397,29 @@ fn mmaF16(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
 
 /// The K/V types `ggml_cuda_get_fattn_vec_case` tries, in its order:
 /// every V type outermost, every K type within.
-const vec_types = [_]ggml.impl.c.enum_ggml_type{
-    ggml.impl.c.GGML_TYPE_F16,
-    ggml.impl.c.GGML_TYPE_Q4_0,
-    ggml.impl.c.GGML_TYPE_Q4_1,
-    ggml.impl.c.GGML_TYPE_Q5_0,
-    ggml.impl.c.GGML_TYPE_Q5_1,
-    ggml.impl.c.GGML_TYPE_Q8_0,
-    ggml.impl.c.GGML_TYPE_BF16,
-    ggml.impl.c.GGML_TYPE_F8_E4M3,
+const vec_types = [_]ggml.impl.ggml_c.enum_ggml_type{
+    ggml.impl.ggml_c.GGML_TYPE_F16,
+    ggml.impl.ggml_c.GGML_TYPE_Q4_0,
+    ggml.impl.ggml_c.GGML_TYPE_Q4_1,
+    ggml.impl.ggml_c.GGML_TYPE_Q5_0,
+    ggml.impl.ggml_c.GGML_TYPE_Q5_1,
+    ggml.impl.ggml_c.GGML_TYPE_Q8_0,
+    ggml.impl.ggml_c.GGML_TYPE_BF16,
+    ggml.impl.ggml_c.GGML_TYPE_F8_E4M3,
 };
 
 /// The spelling `GGML_CUDA_FA_QUANTS` and the instance files give a K or V
 /// type: `ggml_type_name`'s.
-fn faTypeName(comptime t: ggml.impl.c.enum_ggml_type) []const u8 {
+fn faTypeName(comptime t: ggml.impl.ggml_c.enum_ggml_type) []const u8 {
     return switch (t) {
-        ggml.impl.c.GGML_TYPE_F16 => "f16",
-        ggml.impl.c.GGML_TYPE_Q4_0 => "q4_0",
-        ggml.impl.c.GGML_TYPE_Q4_1 => "q4_1",
-        ggml.impl.c.GGML_TYPE_Q5_0 => "q5_0",
-        ggml.impl.c.GGML_TYPE_Q5_1 => "q5_1",
-        ggml.impl.c.GGML_TYPE_Q8_0 => "q8_0",
-        ggml.impl.c.GGML_TYPE_BF16 => "bf16",
-        ggml.impl.c.GGML_TYPE_F8_E4M3 => "f8_e4m3",
+        ggml.impl.ggml_c.GGML_TYPE_F16 => "f16",
+        ggml.impl.ggml_c.GGML_TYPE_Q4_0 => "q4_0",
+        ggml.impl.ggml_c.GGML_TYPE_Q4_1 => "q4_1",
+        ggml.impl.ggml_c.GGML_TYPE_Q5_0 => "q5_0",
+        ggml.impl.ggml_c.GGML_TYPE_Q5_1 => "q5_1",
+        ggml.impl.ggml_c.GGML_TYPE_Q8_0 => "q8_0",
+        ggml.impl.ggml_c.GGML_TYPE_BF16 => "bf16",
+        ggml.impl.ggml_c.GGML_TYPE_F8_E4M3 => "f8_e4m3",
         else => @compileError("not a FlashAttention vector-kernel type"),
     };
 }
@@ -430,7 +430,7 @@ fn faTypeName(comptime t: ggml.impl.c.enum_ggml_type) []const u8 {
 /// `type_V` was compiled. Its instantiations are only referenced when it
 /// was, as the C's `if constexpr` arranges, because the kernel table has
 /// no entry for one that was not.
-fn faCompiled(comptime type_K: ggml.impl.c.enum_ggml_type, comptime type_V: ggml.impl.c.enum_ggml_type) bool {
+fn faCompiled(comptime type_K: ggml.impl.ggml_c.enum_ggml_type, comptime type_V: ggml.impl.ggml_c.enum_ggml_type) bool {
     @setEvalBranchQuota(100_000);
     const name = faTypeName(type_K) ++ "-" ++ faTypeName(type_V);
     for (config.cuda_fa_combinations) |combination| {
@@ -440,13 +440,13 @@ fn faCompiled(comptime type_K: ggml.impl.c.enum_ggml_type, comptime type_V: ggml
 }
 
 /// Ports `fattn_vec_case_t` (fattn.cu:460 @b1b770d90).
-const VecCase = *const fn (ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void;
+const VecCase = *const fn (ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void;
 
 /// `ggml_cuda_flash_attn_ext_vec_case<D, type_K, type_V>` as a function
 /// pointer, which the C takes by naming the template.
-fn vecCaseFn(comptime D: comptime_int, comptime type_K: ggml.impl.c.enum_ggml_type, comptime type_V: ggml.impl.c.enum_ggml_type) VecCase {
+fn vecCaseFn(comptime D: comptime_int, comptime type_K: ggml.impl.ggml_c.enum_ggml_type, comptime type_V: ggml.impl.ggml_c.enum_ggml_type) VecCase {
     return &struct {
-        fn f(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+        fn f(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
             ggml.cuda.fattn_vec.vecCase(D, type_K, type_V, ctx, dst);
         }
     }.f;
@@ -459,9 +459,9 @@ fn vecCaseFn(comptime D: comptime_int, comptime type_K: ggml.impl.c.enum_ggml_ty
 /// F32 K or V takes the F16 kernel; that is said once, here.
 /// The `F8_E4M3` pairs are included; the C lists the pairs in a different
 /// order, and at most one matches.
-fn getFattnVecCase(head_size: i64, type_K_in: ggml.impl.c.enum_ggml_type, type_V_in: ggml.impl.c.enum_ggml_type) ?VecCase {
-    const type_K: ggml.impl.c.enum_ggml_type = if (type_K_in == ggml.impl.c.GGML_TYPE_F32) ggml.impl.c.GGML_TYPE_F16 else type_K_in;
-    const type_V: ggml.impl.c.enum_ggml_type = if (type_V_in == ggml.impl.c.GGML_TYPE_F32) ggml.impl.c.GGML_TYPE_F16 else type_V_in;
+fn getFattnVecCase(head_size: i64, type_K_in: ggml.impl.ggml_c.enum_ggml_type, type_V_in: ggml.impl.ggml_c.enum_ggml_type) ?VecCase {
+    const type_K: ggml.impl.ggml_c.enum_ggml_type = if (type_K_in == ggml.impl.ggml_c.GGML_TYPE_F32) ggml.impl.ggml_c.GGML_TYPE_F16 else type_K_in;
+    const type_V: ggml.impl.ggml_c.enum_ggml_type = if (type_V_in == ggml.impl.ggml_c.GGML_TYPE_F32) ggml.impl.ggml_c.GGML_TYPE_F16 else type_V_in;
     inline for (vec_types) |type_V_case| {
         inline for (vec_types) |type_K_case| {
             if (comptime faCompiled(type_K_case, type_V_case)) {
@@ -481,19 +481,19 @@ fn getFattnVecCase(head_size: i64, type_K_in: ggml.impl.c.enum_ggml_type, type_V
 var vec_warned = false;
 
 /// Ports `ggml_cuda_flash_attn_ext_vec` (fattn.cu:541 @b1b770d90).
-fn vec(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const Q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const K = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const V = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
+fn vec(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const Q = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const K = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const V = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]);
 
     var vec_case = getFattnVecCase(Q.ne[0], K.type, V.type);
     if (vec_case == null) {
         if (!vec_warned) {
             ggml.impl.logWarn("%s: no FlashAttention vector kernel compiled for K/V types %s-%s, converting K and V to f16 instead (slow). " ++
-                "Add \"%s-%s\" to GGML_CUDA_FA_QUANTS to compile it.\n", .{ "ggml_cuda_flash_attn_ext_vec", ggml.impl.c.ggml_type_name(K.type), ggml.impl.c.ggml_type_name(V.type), ggml.impl.c.ggml_type_name(K.type), ggml.impl.c.ggml_type_name(V.type) });
+                "Add \"%s-%s\" to GGML_CUDA_FA_QUANTS to compile it.\n", .{ "ggml_cuda_flash_attn_ext_vec", ggml.impl.ggml_c.ggml_type_name(K.type), ggml.impl.ggml_c.ggml_type_name(V.type), ggml.impl.ggml_c.ggml_type_name(K.type), ggml.impl.ggml_c.ggml_type_name(V.type) });
             vec_warned = true;
         }
-        vec_case = getFattnVecCase(Q.ne[0], ggml.impl.c.GGML_TYPE_F16, ggml.impl.c.GGML_TYPE_F16);
+        vec_case = getFattnVecCase(Q.ne[0], ggml.impl.ggml_c.GGML_TYPE_F16, ggml.impl.ggml_c.GGML_TYPE_F16);
     }
     ggml.impl.assert(vec_case != null, "vec_case != nullptr");
     vec_case.?(ctx, dst);
@@ -511,17 +511,17 @@ const BestKernel = enum(c_int) {
 /// Ports `ggml_cuda_fattn_kv_type_supported` (fattn.cu:570 @b1b770d90):
 /// the K/V types for which there is a vector kernel template instance;
 /// other kernels convert these to f16.
-fn kvTypeSupported(t: ggml.impl.c.enum_ggml_type) bool {
+fn kvTypeSupported(t: ggml.impl.ggml_c.enum_ggml_type) bool {
     return switch (t) {
-        ggml.impl.c.GGML_TYPE_F32,
-        ggml.impl.c.GGML_TYPE_F16,
-        ggml.impl.c.GGML_TYPE_BF16,
-        ggml.impl.c.GGML_TYPE_Q4_0,
-        ggml.impl.c.GGML_TYPE_Q4_1,
-        ggml.impl.c.GGML_TYPE_Q5_0,
-        ggml.impl.c.GGML_TYPE_Q5_1,
-        ggml.impl.c.GGML_TYPE_Q8_0,
-        ggml.impl.c.GGML_TYPE_F8_E4M3,
+        ggml.impl.ggml_c.GGML_TYPE_F32,
+        ggml.impl.ggml_c.GGML_TYPE_F16,
+        ggml.impl.ggml_c.GGML_TYPE_BF16,
+        ggml.impl.ggml_c.GGML_TYPE_Q4_0,
+        ggml.impl.ggml_c.GGML_TYPE_Q4_1,
+        ggml.impl.ggml_c.GGML_TYPE_Q5_0,
+        ggml.impl.ggml_c.GGML_TYPE_Q5_1,
+        ggml.impl.ggml_c.GGML_TYPE_Q8_0,
+        ggml.impl.ggml_c.GGML_TYPE_F8_E4M3,
         => true,
         else => false,
     };
@@ -530,13 +530,13 @@ fn kvTypeSupported(t: ggml.impl.c.enum_ggml_type) bool {
 /// Ports `ggml_cuda_get_best_fattn_kernel` (fattn.cu:587 @b1b770d90). A node
 /// with `kv_rows` (`src[5]`, `ggml_flash_attn_ext_rows`) takes
 /// the MMA kernel or none.
-fn getBestKernel(device: c_int, dst: *const ggml.impl.c.ggml_tensor) BestKernel {
+fn getBestKernel(device: c_int, dst: *const ggml.impl.ggml_c.ggml_tensor) BestKernel {
     const KQV = dst;
-    const Q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const K = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const V = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
-    const mask: ?*const ggml.impl.c.ggml_tensor = dst.src[3];
-    const kv_rows: ?*const ggml.impl.c.ggml_tensor = dst.src[5];
+    const Q = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const K = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const V = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]);
+    const mask: ?*const ggml.impl.ggml_c.ggml_tensor = dst.src[3];
+    const kv_rows: ?*const ggml.impl.ggml_c.ggml_tensor = dst.src[5];
 
     // with kv_rows the kernel iterates over the mask columns
     const n_kv: i64 = if (kv_rows) |r| r.ne[0] else K.ne[1];
@@ -616,7 +616,7 @@ fn getBestKernel(device: c_int, dst: *const ggml.impl.c.ggml_tensor) BestKernel 
     // If Turing tensor cores are available, use them (for head sizes 40 and 72 too):
     if (ggml.cuda.common.turingMmaAvailable(cc)) {
         if (can_use_vector_kernel) {
-            if (!ggml.impl.c.ggml_is_quantized(K.type) and !ggml.impl.c.ggml_is_quantized(V.type)) {
+            if (!ggml.impl.ggml_c.ggml_is_quantized(K.type) and !ggml.impl.ggml_c.ggml_is_quantized(V.type)) {
                 // the sparse gather exists only in the MMA kernel: (DKQ, DV, 1, 8) with GQA > 4
                 const sparse_decode = gqa_opt_applies and gqa_ratio > 4 and
                     ggml.cuda.fattn_mma.mayUseSparse(@truncate(K.ne[0]), @truncate(V.ne[0]), 1, 8) and
@@ -690,7 +690,7 @@ fn getBestKernel(device: c_int, dst: *const ggml.impl.c.ggml_tensor) BestKernel 
 
     // If there are no tensor cores available, use the generic tile kernel:
     if (can_use_vector_kernel) {
-        if (!ggml.impl.c.ggml_is_quantized(K.type) and !ggml.impl.c.ggml_is_quantized(V.type)) {
+        if (!ggml.impl.ggml_c.ggml_is_quantized(K.type) and !ggml.impl.ggml_c.ggml_is_quantized(V.type)) {
             if (Q.ne[1] == 1) {
                 if (!gqa_opt_applies) {
                     return .vec;
@@ -714,12 +714,12 @@ fn getBestKernel(device: c_int, dst: *const ggml.impl.c.ggml_tensor) BestKernel 
 /// - `dst`: a `GGML_OP_FLASH_ATTN_EXT` node.
 ///
 /// Return: the allocation size in bytes.
-pub fn getAllocSize(device: c_int, dst: *const ggml.impl.c.ggml_tensor) usize {
-    ggml.impl.assert(dst.op == ggml.impl.c.GGML_OP_FLASH_ATTN_EXT, "dst->op == GGML_OP_FLASH_ATTN_EXT");
+pub fn getAllocSize(device: c_int, dst: *const ggml.impl.ggml_c.ggml_tensor) usize {
+    ggml.impl.assert(dst.op == ggml.impl.ggml_c.GGML_OP_FLASH_ATTN_EXT, "dst->op == GGML_OP_FLASH_ATTN_EXT");
 
-    const Q: ?*const ggml.impl.c.ggml_tensor = dst.src[0];
-    const K: ?*const ggml.impl.c.ggml_tensor = dst.src[1];
-    const V: ?*const ggml.impl.c.ggml_tensor = dst.src[2];
+    const Q: ?*const ggml.impl.ggml_c.ggml_tensor = dst.src[0];
+    const K: ?*const ggml.impl.ggml_c.ggml_tensor = dst.src[1];
+    const V: ?*const ggml.impl.ggml_c.ggml_tensor = dst.src[2];
 
     ggml.impl.assert(K != null, "K != nullptr");
     ggml.impl.assert(V != null, "V != nullptr");
@@ -736,8 +736,8 @@ pub fn getAllocSize(device: c_int, dst: *const ggml.impl.c.ggml_tensor) usize {
         },
         .vec => {
             const f16_fallback = getFattnVecCase(Q.?.ne[0], K.?.type, V.?.type) == null;
-            need_f16_K = K.?.type == ggml.impl.c.GGML_TYPE_F32 or f16_fallback;
-            need_f16_V = V.?.type == ggml.impl.c.GGML_TYPE_F32 or f16_fallback;
+            need_f16_K = K.?.type == ggml.impl.ggml_c.GGML_TYPE_F32 or f16_fallback;
+            need_f16_V = V.?.type == ggml.impl.ggml_c.GGML_TYPE_F32 or f16_fallback;
         },
         .none => {},
     }
@@ -748,7 +748,7 @@ pub fn getAllocSize(device: c_int, dst: *const ggml.impl.c.ggml_tensor) usize {
 }
 
 /// Ports `ggml_cuda_flash_attn_ext` (fattn.cu:819 @b1b770d90).
-pub fn flashAttnExt(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+pub fn flashAttnExt(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     ggml.cuda.common.setDevice(ctx.device);
     switch (getBestKernel(ggml.cuda.common.getDevice(), dst)) {
         .none => ggml.impl.abort("fatal error"),
@@ -759,6 +759,6 @@ pub fn flashAttnExt(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tenso
 }
 
 /// Ports `ggml_cuda_flash_attn_ext_supported` (fattn.cu:836 @b1b770d90).
-pub fn supported(device: c_int, dst: *const ggml.impl.c.ggml_tensor) bool {
+pub fn supported(device: c_int, dst: *const ggml.impl.ggml_c.ggml_tensor) bool {
     return getBestKernel(device, dst) != .none;
 }

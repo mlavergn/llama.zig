@@ -6,6 +6,7 @@
 //! Ports `llama.cpp/tools/mtmd/models/kimivl.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
+const llama = @import("llama");
 const mtmd = @import("../module.zig");
 
 /// The `add_pos` lambda of a 2D RoPE (kimivl.cpp:16 @b1b770d90):
@@ -25,20 +26,20 @@ pub const Rope2d = struct {
 };
 
 /// Ports `build` (kimivl.cpp:3 @b1b770d90), a member of `mtmd_graph_kimivl`.
-pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*llama.impl.llama_c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
     const model = g.model;
     const hparams = g.hparams;
 
     // 2D input positions
-    const pos_h = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, g.n_patches);
-    _ = mtmd.impl.c.ggml_set_name(pos_h, "pos_h");
-    mtmd.impl.c.ggml_set_input(pos_h);
+    const pos_h = llama.impl.llama_c.ggml_new_tensor_1d(ctx0, llama.impl.llama_c.GGML_TYPE_I32, g.n_patches);
+    _ = llama.impl.llama_c.ggml_set_name(pos_h, "pos_h");
+    llama.impl.llama_c.ggml_set_input(pos_h);
 
-    const pos_w = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, g.n_patches);
-    _ = mtmd.impl.c.ggml_set_name(pos_w, "pos_w");
-    mtmd.impl.c.ggml_set_input(pos_w);
+    const pos_w = llama.impl.llama_c.ggml_new_tensor_1d(ctx0, llama.impl.llama_c.GGML_TYPE_I32, g.n_patches);
+    _ = llama.impl.llama_c.ggml_set_name(pos_w, "pos_w");
+    llama.impl.llama_c.ggml_set_input(pos_w);
 
     const learned_pos_embd = g.resizePositionEmbeddings(mtmd.graph.default_interpolation_mode);
 
@@ -57,11 +58,11 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
 
         // projection norm
         const proj_inp_dim: c_int = @intCast(mtmd.graph.ne(cur, 0));
-        cur = mtmd.impl.c.ggml_view_2d(ctx0, cur, g.n_embd, mtmd.graph.ne(cur, 1) * scale_factor * scale_factor, mtmd.impl.c.ggml_row_size(cur.?.type, g.n_embd), 0);
-        cur = mtmd.impl.c.ggml_norm(ctx0, cur, 1e-5); // default nn.LayerNorm
-        cur = mtmd.impl.c.ggml_mul(ctx0, cur, model.mm_input_norm_w);
-        cur = mtmd.impl.c.ggml_add(ctx0, cur, model.mm_input_norm_b);
-        cur = mtmd.impl.c.ggml_view_2d(ctx0, cur, proj_inp_dim, @divTrunc(@divTrunc(mtmd.graph.ne(cur, 1), scale_factor), scale_factor), mtmd.impl.c.ggml_row_size(cur.?.type, proj_inp_dim), 0);
+        cur = llama.impl.llama_c.ggml_view_2d(ctx0, cur, g.n_embd, mtmd.graph.ne(cur, 1) * scale_factor * scale_factor, llama.impl.llama_c.ggml_row_size(cur.?.type, g.n_embd), 0);
+        cur = llama.impl.llama_c.ggml_norm(ctx0, cur, 1e-5); // default nn.LayerNorm
+        cur = llama.impl.llama_c.ggml_mul(ctx0, cur, model.mm_input_norm_w);
+        cur = llama.impl.llama_c.ggml_add(ctx0, cur, model.mm_input_norm_b);
+        cur = llama.impl.llama_c.ggml_view_2d(ctx0, cur, proj_inp_dim, @divTrunc(@divTrunc(mtmd.graph.ne(cur, 1), scale_factor), scale_factor), llama.impl.llama_c.ggml_row_size(cur.?.type, proj_inp_dim), 0);
         g.cb(cur, "proj_inp_normed", -1);
 
         // projection mlp
@@ -70,7 +71,7 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     }
 
     // build the graph
-    mtmd.impl.c.ggml_build_forward_expand(g.gf, cur);
+    llama.impl.llama_c.ggml_build_forward_expand(g.gf, cur);
     return g.gf;
 }
 

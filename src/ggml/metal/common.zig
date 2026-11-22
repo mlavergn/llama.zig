@@ -37,8 +37,6 @@ const ggml = @import("../module.zig");
 /// The C `new`s and `delete`s this, and nothing hands it an allocator.
 /// libc's is what a C entry point can reach — the same reasoning as
 /// `backend_reg.zig`, `backend.zig` and `cpu_backend.zig`.
-const allocator = std.heap.c_allocator;
-
 /// Ports `enum ggml_mem_range_type` (ggml-metal-common.h:17 @b1b770d90).
 pub const RangeType = enum(c_int) {
     src = 0,
@@ -83,14 +81,14 @@ fn fwhtSupportedSize(n: i64, max_tg_mem: usize) bool {
 /// fall through reaches the generic path, which has no F32-by-F16 kernel.
 /// It takes the device's threadgroup memory, which decides
 /// the widths above 512.
-pub export fn ggml_metal_op_mul_mat_use_fwht(op: *const ggml.impl.c.ggml_tensor, max_tg_mem: usize) callconv(.c) bool {
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[1]);
-    return ggml.impl.getOpParamsI32(op, 1) == ggml.impl.c.GGML_HINT_SRC0_IS_HADAMARD and
-        op.type == ggml.impl.c.GGML_TYPE_F32 and
-        (src1.type == ggml.impl.c.GGML_TYPE_F32 or src1.type == ggml.impl.c.GGML_TYPE_F16) and
-        ggml.impl.c.ggml_is_contiguous(src1) and
-        ggml.impl.c.ggml_is_contiguous(op) and
-        ggml.impl.c.ggml_are_same_shape(src1, op) and
+pub fn ggml_metal_op_mul_mat_use_fwht(op: *const ggml.impl.ggml_c.ggml_tensor, max_tg_mem: usize) callconv(.c) bool {
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[1]);
+    return ggml.impl.getOpParamsI32(op, 1) == ggml.impl.ggml_c.GGML_HINT_SRC0_IS_HADAMARD and
+        op.type == ggml.impl.ggml_c.GGML_TYPE_F32 and
+        (src1.type == ggml.impl.ggml_c.GGML_TYPE_F32 or src1.type == ggml.impl.ggml_c.GGML_TYPE_F16) and
+        ggml.impl.ggml_c.ggml_is_contiguous(src1) and
+        ggml.impl.ggml_c.ggml_is_contiguous(op) and
+        ggml.impl.ggml_c.ggml_are_same_shape(src1, op) and
         fwhtSupportedSize(src1.ne[0], max_tg_mem);
 }
 
@@ -101,14 +99,14 @@ pub export fn ggml_metal_op_mul_mat_use_fwht(op: *const ggml.impl.c.ggml_tensor,
 /// `supports_op` must agree on, which is why it lives here and not in the
 /// encoder. The matrix-matrix kernel needs simdgroup matrices (A14/M1 and
 /// later). It takes `K` from 32 (#30982).
-pub export fn ggml_metal_op_mul_mat_use_mm(op: *const ggml.impl.c.ggml_tensor, has_simdgroup_mm: bool) callconv(.c) bool {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[1]);
+pub fn ggml_metal_op_mul_mat_use_mm(op: *const ggml.impl.ggml_c.ggml_tensor, has_simdgroup_mm: bool) callconv(.c) bool {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[1]);
     const ne00 = src0.ne[0];
     const ne11 = src1.ne[1];
 
-    return !ggml.impl.c.ggml_is_transposed(src0) and
-        !ggml.impl.c.ggml_is_transposed(src1) and
+    return !ggml.impl.ggml_c.ggml_is_transposed(src0) and
+        !ggml.impl.ggml_c.ggml_is_transposed(src1) and
         has_simdgroup_mm and ne11 > 8 and ne00 >= 32;
 }
 
@@ -118,10 +116,10 @@ pub export fn ggml_metal_op_mul_mat_use_mm(op: *const ggml.impl.c.ggml_tensor, h
 /// (`ne21`, rows of the expert ids) reaches 32 -- and only
 /// for at most 1024 experts, the most the id-map kernel's one threadgroup
 /// (a thread per expert) and its function constant take.
-pub export fn ggml_metal_op_mul_mat_id_use_mm(op: *const ggml.impl.c.ggml_tensor, has_simdgroup_mm: bool) callconv(.c) bool {
-    const ne00 = ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[0]).ne[0];
-    const ne02 = ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[0]).ne[2];
-    const ne21 = ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[2]).ne[1];
+pub fn ggml_metal_op_mul_mat_id_use_mm(op: *const ggml.impl.ggml_c.ggml_tensor, has_simdgroup_mm: bool) callconv(.c) bool {
+    const ne00 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[0]).ne[0];
+    const ne02 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[0]).ne[2];
+    const ne21 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[2]).ne[1];
 
     return has_simdgroup_mm and ne00 >= 64 and ne02 <= 1024 and ne21 >= 32;
 }
@@ -148,52 +146,52 @@ pub const MmaKind = enum(c_int) {
 };
 
 /// Ports `ggml_metal_mul_mv_mma_kind` (ggml-metal-common.cpp:61 @b1b770d90).
-pub export fn ggml_metal_mul_mv_mma_kind(@"type": ggml.impl.c.enum_ggml_type, rt: c_int) callconv(.c) MmaKind {
-    if (@"type" == ggml.impl.c.GGML_TYPE_Q4_0 or (@"type" == ggml.impl.c.GGML_TYPE_Q8_0 and rt == 1)) {
+pub fn ggml_metal_mul_mv_mma_kind(@"type": ggml.impl.ggml_c.enum_ggml_type, rt: c_int) callconv(.c) MmaKind {
+    if (@"type" == ggml.impl.ggml_c.GGML_TYPE_Q4_0 or (@"type" == ggml.impl.ggml_c.GGML_TYPE_Q8_0 and rt == 1)) {
         return .blk;
     }
-    return if (@"type" == ggml.impl.c.GGML_TYPE_Q5_K) .q5_k else .gen;
+    return if (@"type" == ggml.impl.ggml_c.GGML_TYPE_Q5_K) .q5_k else .gen;
 }
 
 /// Ports `ggml_metal_mul_mv_mma_rt` (ggml-metal-common.cpp:68 @b1b770d90):
 /// the `src1` tiles of the few-row MMA kernels -- one 8-row tile, or two
 /// above 8 rows.
-pub export fn ggml_metal_mul_mv_mma_rt(op: *const ggml.impl.c.ggml_tensor) callconv(.c) c_int {
-    return if (ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[1]).ne[1] > mma_tile_rows) 2 else 1;
+pub fn ggml_metal_mul_mv_mma_rt(op: *const ggml.impl.ggml_c.ggml_tensor) callconv(.c) c_int {
+    return if (ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[1]).ne[1] > mma_tile_rows) 2 else 1;
 }
 
 /// Ports `ggml_metal_mul_mv_mma_type_supported` (ggml-metal-common.cpp:72
 /// @b1b770d90). Every `src0` type `mul_mv_mma.metal`
 /// instantiates: BF16, the 1- and 2-bit types, MXFP4, the remaining
 /// k-quants, the i-quants and TQ2_0 join the first ten.
-fn mulMvMmaTypeSupported(@"type": ggml.impl.c.enum_ggml_type) bool {
+fn mulMvMmaTypeSupported(@"type": ggml.impl.ggml_c.enum_ggml_type) bool {
     return switch (@"type") {
-        ggml.impl.c.GGML_TYPE_F32,
-        ggml.impl.c.GGML_TYPE_F16,
-        ggml.impl.c.GGML_TYPE_Q4_0,
-        ggml.impl.c.GGML_TYPE_Q4_1,
-        ggml.impl.c.GGML_TYPE_Q5_0,
-        ggml.impl.c.GGML_TYPE_Q5_1,
-        ggml.impl.c.GGML_TYPE_Q8_0,
-        ggml.impl.c.GGML_TYPE_Q4_K,
-        ggml.impl.c.GGML_TYPE_Q5_K,
-        ggml.impl.c.GGML_TYPE_Q6_K,
-        ggml.impl.c.GGML_TYPE_BF16,
-        ggml.impl.c.GGML_TYPE_Q1_0,
-        ggml.impl.c.GGML_TYPE_Q2_0,
-        ggml.impl.c.GGML_TYPE_MXFP4,
-        ggml.impl.c.GGML_TYPE_Q2_K,
-        ggml.impl.c.GGML_TYPE_Q3_K,
-        ggml.impl.c.GGML_TYPE_IQ2_XXS,
-        ggml.impl.c.GGML_TYPE_IQ2_XS,
-        ggml.impl.c.GGML_TYPE_IQ2_S,
-        ggml.impl.c.GGML_TYPE_IQ3_XXS,
-        ggml.impl.c.GGML_TYPE_IQ3_S,
-        ggml.impl.c.GGML_TYPE_IQ1_S,
-        ggml.impl.c.GGML_TYPE_IQ1_M,
-        ggml.impl.c.GGML_TYPE_IQ4_NL,
-        ggml.impl.c.GGML_TYPE_IQ4_XS,
-        ggml.impl.c.GGML_TYPE_TQ2_0,
+        ggml.impl.ggml_c.GGML_TYPE_F32,
+        ggml.impl.ggml_c.GGML_TYPE_F16,
+        ggml.impl.ggml_c.GGML_TYPE_Q4_0,
+        ggml.impl.ggml_c.GGML_TYPE_Q4_1,
+        ggml.impl.ggml_c.GGML_TYPE_Q5_0,
+        ggml.impl.ggml_c.GGML_TYPE_Q5_1,
+        ggml.impl.ggml_c.GGML_TYPE_Q8_0,
+        ggml.impl.ggml_c.GGML_TYPE_Q4_K,
+        ggml.impl.ggml_c.GGML_TYPE_Q5_K,
+        ggml.impl.ggml_c.GGML_TYPE_Q6_K,
+        ggml.impl.ggml_c.GGML_TYPE_BF16,
+        ggml.impl.ggml_c.GGML_TYPE_Q1_0,
+        ggml.impl.ggml_c.GGML_TYPE_Q2_0,
+        ggml.impl.ggml_c.GGML_TYPE_MXFP4,
+        ggml.impl.ggml_c.GGML_TYPE_Q2_K,
+        ggml.impl.ggml_c.GGML_TYPE_Q3_K,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XS,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_S,
+        ggml.impl.ggml_c.GGML_TYPE_IQ3_XXS,
+        ggml.impl.ggml_c.GGML_TYPE_IQ3_S,
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_S,
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_M,
+        ggml.impl.ggml_c.GGML_TYPE_IQ4_NL,
+        ggml.impl.ggml_c.GGML_TYPE_IQ4_XS,
+        ggml.impl.ggml_c.GGML_TYPE_TQ2_0,
         => true,
         else => false,
     };
@@ -203,38 +201,38 @@ fn mulMvMmaTypeSupported(@"type": ggml.impl.c.enum_ggml_type) bool {
 /// @b1b770d90): the weights of K per simdgroup step of the few-row MMA
 /// kernel for a `src0` type and `rt` `src1` tiles, 0 if none takes the
 /// type.
-pub export fn ggml_metal_mul_mv_mma_k_step(@"type": ggml.impl.c.enum_ggml_type, rt: c_int) callconv(.c) i64 {
+pub fn ggml_metal_mul_mv_mma_k_step(@"type": ggml.impl.ggml_c.enum_ggml_type, rt: c_int) callconv(.c) i64 {
     if (!mulMvMmaTypeSupported(@"type")) {
         return 0;
     }
-    return if (ggml_metal_mul_mv_mma_kind(@"type", rt) == .blk) ggml.impl.c.ggml_blck_size(@"type") else mma_k_chunk;
+    return if (ggml_metal_mul_mv_mma_kind(@"type", rt) == .blk) ggml.impl.ggml_c.ggml_blck_size(@"type") else mma_k_chunk;
 }
 
 /// Ports `ggml_metal_mul_mat_mma_type_ok` (ggml-metal-common.cpp:113
 /// @b1b770d90).
-fn mulMatMmaTypeOk(op: *const ggml.impl.c.ggml_tensor) bool {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[0]);
+fn mulMatMmaTypeOk(op: *const ggml.impl.ggml_c.ggml_tensor) bool {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[0]);
     const step = ggml_metal_mul_mv_mma_k_step(src0.type, ggml_metal_mul_mv_mma_rt(op));
 
-    return step > 0 and @rem(src0.ne[0], step) == 0 and src0.nb[0] == ggml.impl.c.ggml_type_size(src0.type);
+    return step > 0 and @rem(src0.ne[0], step) == 0 and src0.nb[0] == ggml.impl.ggml_c.ggml_type_size(src0.type);
 }
 
 /// Ports `ggml_metal_mul_mv_mma_rows_min` (ggml-metal-common.cpp:121
 /// @b1b770d90): the fewest `src1` rows at which the few-row MMA kernels
 /// beat the mat-vec kernels (measured upstream, on an M3 Ultra).
-fn mulMvMmaRowsMin(@"type": ggml.impl.c.enum_ggml_type) i64 {
+fn mulMvMmaRowsMin(@"type": ggml.impl.ggml_c.enum_ggml_type) i64 {
     return switch (@"type") {
-        ggml.impl.c.GGML_TYPE_F32 => 6,
-        ggml.impl.c.GGML_TYPE_TQ2_0 => 5,
-        ggml.impl.c.GGML_TYPE_BF16 => 4,
-        ggml.impl.c.GGML_TYPE_F16,
-        ggml.impl.c.GGML_TYPE_Q2_0,
-        ggml.impl.c.GGML_TYPE_Q4_K,
-        ggml.impl.c.GGML_TYPE_Q5_0,
-        ggml.impl.c.GGML_TYPE_Q5_1,
-        ggml.impl.c.GGML_TYPE_Q2_K,
-        ggml.impl.c.GGML_TYPE_IQ4_NL,
-        ggml.impl.c.GGML_TYPE_MXFP4,
+        ggml.impl.ggml_c.GGML_TYPE_F32 => 6,
+        ggml.impl.ggml_c.GGML_TYPE_TQ2_0 => 5,
+        ggml.impl.ggml_c.GGML_TYPE_BF16 => 4,
+        ggml.impl.ggml_c.GGML_TYPE_F16,
+        ggml.impl.ggml_c.GGML_TYPE_Q2_0,
+        ggml.impl.ggml_c.GGML_TYPE_Q4_K,
+        ggml.impl.ggml_c.GGML_TYPE_Q5_0,
+        ggml.impl.ggml_c.GGML_TYPE_Q5_1,
+        ggml.impl.ggml_c.GGML_TYPE_Q2_K,
+        ggml.impl.ggml_c.GGML_TYPE_IQ4_NL,
+        ggml.impl.ggml_c.GGML_TYPE_MXFP4,
         => 3,
         else => 2,
     };
@@ -248,9 +246,9 @@ fn mulMvMmaRowsMin(@"type": ggml.impl.c.enum_ggml_type) i64 {
 /// is a whole number of K steps. Asked by the encoder and by the fusion
 /// table's `MUL_MAT + ADD` check, so the two agree on when the residual
 /// can be added in the kernel's store.
-pub export fn ggml_metal_op_mul_mat_use_mma(op: *const ggml.impl.c.ggml_tensor) callconv(.c) bool {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[1]);
+pub fn ggml_metal_op_mul_mat_use_mma(op: *const ggml.impl.ggml_c.ggml_tensor) callconv(.c) bool {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[1]);
 
     const int16_max = std.math.maxInt(i16);
 
@@ -259,17 +257,17 @@ pub export fn ggml_metal_op_mul_mat_use_mma(op: *const ggml.impl.c.ggml_tensor) 
         @divTrunc(src1.ne[3], src0.ne[3]) <= int16_max;
 
     return mulMatMmaTypeOk(op) and batch_ok and
-        src1.type == ggml.impl.c.GGML_TYPE_F32 and src1.ne[1] >= mulMvMmaRowsMin(src0.type) and src1.ne[1] <= mma_rows_max and
-        !ggml.impl.c.ggml_is_transposed(src0) and !ggml.impl.c.ggml_is_transposed(src1) and
+        src1.type == ggml.impl.ggml_c.GGML_TYPE_F32 and src1.ne[1] >= mulMvMmaRowsMin(src0.type) and src1.ne[1] <= mma_rows_max and
+        !ggml.impl.ggml_c.ggml_is_transposed(src0) and !ggml.impl.ggml_c.ggml_is_transposed(src1) and
         src1.nb[0] == @sizeOf(f32) and src1.nb[1] % 16 == 0 and src1.nb[2] % 16 == 0 and src1.nb[3] % 16 == 0;
 }
 
 /// Ports `ggml_metal_op_mul_mat_may_use_mma` (ggml-metal-common.cpp:156
 /// @b1b770d90): the graph-structure half of `use_mma`, which the graph
 /// optimizer can ask before the batch size is known.
-pub export fn ggml_metal_op_mul_mat_may_use_mma(op: *const ggml.impl.c.ggml_tensor) callconv(.c) bool {
-    return mulMvMmaTypeSupported(ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[0]).type) and
-        ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[1]).type == ggml.impl.c.GGML_TYPE_F32;
+pub fn ggml_metal_op_mul_mat_may_use_mma(op: *const ggml.impl.ggml_c.ggml_tensor) callconv(.c) bool {
+    return mulMvMmaTypeSupported(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[0]).type) and
+        ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[1]).type == ggml.impl.ggml_c.GGML_TYPE_F32;
 }
 
 /// Ports `struct ggml_mem_ranges` (ggml-metal-common.cpp:171 @b1b770d90).
@@ -288,26 +286,26 @@ pub const MemRanges = struct {
 ///
 /// Return: a new range set, owned by the caller and released with
 /// `ggml_mem_ranges_free`.
-pub export fn ggml_mem_ranges_init(debug: c_int) callconv(.c) ?*MemRanges {
+pub fn ggml_mem_ranges_init(debug: c_int) callconv(.c) ?*MemRanges {
     // `new` in the C, so a failure terminates rather than returning null.
-    const res = allocator.create(MemRanges) catch ggml.impl.abort("out of memory allocating a memory-range set");
+    const res = std.heap.c_allocator.create(MemRanges) catch ggml.impl.abort("out of memory allocating a memory-range set");
     res.* = .{ .ranges = .empty, .debug = debug };
     // The C's `reserve(256)`. A failure here alone is not fatal -- the
     // list grows on demand -- so unlike the rest of this file it is
     // allowed to pass.
-    res.ranges.ensureTotalCapacity(allocator, 256) catch {};
+    res.ranges.ensureTotalCapacity(std.heap.c_allocator, 256) catch {};
     return res;
 }
 
 /// Ports `ggml_mem_ranges_free` (ggml-metal-common.cpp:186 @b1b770d90).
-pub export fn ggml_mem_ranges_free(mrs: ?*MemRanges) callconv(.c) void {
+pub fn ggml_mem_ranges_free(mrs: ?*MemRanges) callconv(.c) void {
     const m = mrs orelse return;
-    m.ranges.deinit(allocator);
-    allocator.destroy(m);
+    m.ranges.deinit(std.heap.c_allocator);
+    std.heap.c_allocator.destroy(m);
 }
 
 /// Ports `ggml_mem_ranges_reset` (ggml-metal-common.cpp:190 @b1b770d90).
-pub export fn ggml_mem_ranges_reset(mrs: *MemRanges) callconv(.c) void {
+pub fn ggml_mem_ranges_reset(mrs: *MemRanges) callconv(.c) void {
     mrs.ranges.clearRetainingCapacity();
 }
 
@@ -323,16 +321,16 @@ pub export fn ggml_mem_ranges_reset(mrs: *MemRanges) callconv(.c) void {
 /// conflict found", which silently yields a *different graph order* and a
 /// gate that reports a porting bug.
 fn addRange(mrs: *MemRanges, mr: MemRange) bool {
-    mrs.ranges.append(allocator, mr) catch ggml.impl.abort("out of memory tracking a memory range");
+    mrs.ranges.append(std.heap.c_allocator, mr) catch ggml.impl.abort("out of memory tracking a memory range");
     return true;
 }
 
 /// Ports `ggml_mem_range_from_tensor` (ggml-metal-common.cpp:200
 /// @b1b770d90).
-fn rangeFromTensor(tensor_in: *const ggml.impl.c.ggml_tensor, pt: RangeType) MemRange {
+fn rangeFromTensor(tensor_in: *const ggml.impl.ggml_c.ggml_tensor, pt: RangeType) MemRange {
     // always use the base tensor
     const tensor = if (tensor_in.view_src != null)
-        ggml.impl.one(ggml.impl.c.ggml_tensor, tensor_in.view_src)
+        ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, tensor_in.view_src)
     else
         tensor_in;
 
@@ -364,18 +362,18 @@ fn rangeFromTensor(tensor_in: *const ggml.impl.c.ggml_tensor, pt: RangeType) Mem
 
 /// Ports `ggml_mem_range_from_tensor_src` (ggml-metal-common.cpp:234
 /// @b1b770d90).
-fn rangeFromTensorSrc(tensor: *const ggml.impl.c.ggml_tensor) MemRange {
+fn rangeFromTensorSrc(tensor: *const ggml.impl.ggml_c.ggml_tensor) MemRange {
     return rangeFromTensor(tensor, .src);
 }
 
 /// Ports `ggml_mem_range_from_tensor_dst` (ggml-metal-common.cpp:238
 /// @b1b770d90).
-fn rangeFromTensorDst(tensor: *const ggml.impl.c.ggml_tensor) MemRange {
+fn rangeFromTensorDst(tensor: *const ggml.impl.ggml_c.ggml_tensor) MemRange {
     return rangeFromTensor(tensor, .dst);
 }
 
 /// Ports `ggml_mem_ranges_add_src` (ggml-metal-common.cpp:242 @b1b770d90).
-fn addSrc(mrs: *MemRanges, tensor: *const ggml.impl.c.ggml_tensor) bool {
+fn addSrc(mrs: *MemRanges, tensor: *const ggml.impl.ggml_c.ggml_tensor) bool {
     const mr = rangeFromTensorSrc(tensor);
     if (mrs.debug > 2) {
         ggml.impl.logDebug("%s: add src range buf=%lld, [%lld, %lld)\n", .{
@@ -386,7 +384,7 @@ fn addSrc(mrs: *MemRanges, tensor: *const ggml.impl.c.ggml_tensor) bool {
 }
 
 /// Ports `ggml_mem_ranges_add_dst` (ggml-metal-common.cpp:254 @b1b770d90).
-fn addDst(mrs: *MemRanges, tensor: *const ggml.impl.c.ggml_tensor) bool {
+fn addDst(mrs: *MemRanges, tensor: *const ggml.impl.ggml_c.ggml_tensor) bool {
     const mr = rangeFromTensorDst(tensor);
     if (mrs.debug > 2) {
         ggml.impl.logDebug("%s: add dst range buf=%lld, [%lld, %lld)\n", .{
@@ -406,8 +404,8 @@ fn addDst(mrs: *MemRanges, tensor: *const ggml.impl.c.ggml_tensor) bool {
 ///
 /// Return: whether the destination range was added. The C ignores the
 /// sources' results here, and so does this.
-pub export fn ggml_mem_ranges_add(mrs: *MemRanges, tensor: *const ggml.impl.c.ggml_tensor) callconv(.c) bool {
-    for (0..ggml.impl.c.GGML_MAX_SRC) |i| {
+pub fn ggml_mem_ranges_add(mrs: *MemRanges, tensor: *const ggml.impl.ggml_c.ggml_tensor) callconv(.c) bool {
+    for (0..ggml.impl.ggml_c.GGML_MAX_SRC) |i| {
         if (tensor.src[i]) |src| _ = addSrc(mrs, src);
     }
     return addDst(mrs, tensor);
@@ -449,13 +447,13 @@ fn checkRange(mrs: *MemRanges, mr: MemRange) bool {
 
 /// Ports `ggml_mem_ranges_check_src` (ggml-metal-common.cpp:307
 /// @b1b770d90).
-fn checkSrc(mrs: *MemRanges, tensor: *const ggml.impl.c.ggml_tensor) bool {
+fn checkSrc(mrs: *MemRanges, tensor: *const ggml.impl.ggml_c.ggml_tensor) bool {
     return checkRange(mrs, rangeFromTensorSrc(tensor));
 }
 
 /// Ports `ggml_mem_ranges_check_dst` (ggml-metal-common.cpp:317
 /// @b1b770d90).
-fn checkDst(mrs: *MemRanges, tensor: *const ggml.impl.c.ggml_tensor) bool {
+fn checkDst(mrs: *MemRanges, tensor: *const ggml.impl.ggml_c.ggml_tensor) bool {
     return checkRange(mrs, rangeFromTensorDst(tensor));
 }
 
@@ -468,8 +466,8 @@ fn checkDst(mrs: *MemRanges, tensor: *const ggml.impl.c.ggml_tensor) bool {
 ///
 /// Return: false when a new source range overlaps an existing destination
 /// range, or a new destination range overlaps any existing range.
-pub export fn ggml_mem_ranges_check(mrs: *MemRanges, tensor: *const ggml.impl.c.ggml_tensor) callconv(.c) bool {
-    for (0..ggml.impl.c.GGML_MAX_SRC) |i| {
+pub fn ggml_mem_ranges_check(mrs: *MemRanges, tensor: *const ggml.impl.ggml_c.ggml_tensor) callconv(.c) bool {
+    for (0..ggml.impl.ggml_c.GGML_MAX_SRC) |i| {
         if (tensor.src[i]) |src| {
             if (!checkSrc(mrs, src)) return false;
         }
@@ -483,16 +481,16 @@ pub export fn ggml_mem_ranges_check(mrs: *MemRanges, tensor: *const ggml.impl.c.
 /// Ports `struct node_info` (ggml-metal-common.cpp:339 @b1b770d90): one
 /// graph node plus the nodes fused onto it.
 const NodeInfo = struct {
-    node: *ggml.impl.c.ggml_tensor,
-    fused: std.ArrayList(*ggml.impl.c.ggml_tensor) = .empty,
+    node: *ggml.impl.ggml_c.ggml_tensor,
+    fused: std.ArrayList(*ggml.impl.ggml_c.ggml_tensor) = .empty,
 
-    fn op(self: NodeInfo) ggml.impl.c.enum_ggml_op {
+    fn op(self: NodeInfo) ggml.impl.ggml_c.enum_ggml_op {
         return self.node.op;
     }
 
     /// The last fused tensor becomes the destination, because that is
     /// where a fused run actually writes.
-    fn dst(self: NodeInfo) *const ggml.impl.c.ggml_tensor {
+    fn dst(self: NodeInfo) *const ggml.impl.ggml_c.ggml_tensor {
         return if (self.fused.items.len == 0) self.node else self.fused.items[self.fused.items.len - 1];
     }
 
@@ -502,7 +500,7 @@ const NodeInfo = struct {
 
     /// Whether `t` is produced by this fused group: the node itself or
     /// any tensor fused onto it.
-    fn isOutput(self: NodeInfo, t: *const ggml.impl.c.ggml_tensor) bool {
+    fn isOutput(self: NodeInfo, t: *const ggml.impl.ggml_c.ggml_tensor) bool {
         if (t == self.node) return true;
         for (self.fused.items) |f| {
             if (t == f) return true;
@@ -517,7 +515,7 @@ const NodeInfo = struct {
 /// internal and are not ranges the group reads.
 fn hAdd(mrs: *MemRanges, node: NodeInfo) bool {
     // only external sources matter: sources produced by the fused group are internal
-    for (0..ggml.impl.c.GGML_MAX_SRC) |i| {
+    for (0..ggml.impl.ggml_c.GGML_MAX_SRC) |i| {
         if (node.node.src[i]) |src| {
             if (!node.isOutput(src)) {
                 if (!addSrc(mrs, src)) return false;
@@ -525,7 +523,7 @@ fn hAdd(mrs: *MemRanges, node: NodeInfo) bool {
         }
     }
     for (node.fused.items) |fused| {
-        for (0..ggml.impl.c.GGML_MAX_SRC) |i| {
+        for (0..ggml.impl.ggml_c.GGML_MAX_SRC) |i| {
             if (fused.src[i]) |src| {
                 if (!node.isOutput(src)) {
                     if (!addSrc(mrs, src)) return false;
@@ -543,7 +541,7 @@ fn hAdd(mrs: *MemRanges, node: NodeInfo) bool {
 
 /// Ports the `h_check` lambda (ggml-metal-common.cpp:411 @b1b770d90).
 fn hCheck(mrs: *MemRanges, node: NodeInfo) bool {
-    for (0..ggml.impl.c.GGML_MAX_SRC) |i| {
+    for (0..ggml.impl.ggml_c.GGML_MAX_SRC) |i| {
         if (node.node.src[i]) |src| {
             if (!node.isOutput(src)) {
                 if (!checkSrc(mrs, src)) return false;
@@ -551,7 +549,7 @@ fn hCheck(mrs: *MemRanges, node: NodeInfo) bool {
         }
     }
     for (node.fused.items) |fused| {
-        for (0..ggml.impl.c.GGML_MAX_SRC) |i| {
+        for (0..ggml.impl.ggml_c.GGML_MAX_SRC) |i| {
             if (fused.src[i]) |src| {
                 if (!node.isOutput(src)) {
                     if (!checkSrc(mrs, src)) return false;
@@ -569,34 +567,34 @@ fn hCheck(mrs: *MemRanges, node: NodeInfo) bool {
 /// Ports the `h_safe` lambda (ggml-metal-common.cpp:446 @b1b770d90): the
 /// ops a reorder may cross. The C's comment says it "can be expanded when
 /// needed", so this list is a policy and not a property.
-fn hSafe(op: ggml.impl.c.enum_ggml_op) bool {
+fn hSafe(op: ggml.impl.ggml_c.enum_ggml_op) bool {
     return switch (op) {
-        ggml.impl.c.GGML_OP_MUL_MAT,
-        ggml.impl.c.GGML_OP_MUL_MAT_ID,
-        ggml.impl.c.GGML_OP_ROPE,
-        ggml.impl.c.GGML_OP_NORM,
-        ggml.impl.c.GGML_OP_RMS_NORM,
-        ggml.impl.c.GGML_OP_GROUP_NORM,
-        ggml.impl.c.GGML_OP_L2_NORM,
-        ggml.impl.c.GGML_OP_SUM_ROWS,
-        ggml.impl.c.GGML_OP_SSM_CONV,
-        ggml.impl.c.GGML_OP_SSM_SCAN,
-        ggml.impl.c.GGML_OP_CLAMP,
-        ggml.impl.c.GGML_OP_TRI,
-        ggml.impl.c.GGML_OP_DIAG,
-        ggml.impl.c.GGML_OP_MUL,
-        ggml.impl.c.GGML_OP_ADD,
-        ggml.impl.c.GGML_OP_SUB,
-        ggml.impl.c.GGML_OP_DIV,
-        ggml.impl.c.GGML_OP_GLU,
-        ggml.impl.c.GGML_OP_SCALE,
-        ggml.impl.c.GGML_OP_UNARY,
-        ggml.impl.c.GGML_OP_GET_ROWS,
-        ggml.impl.c.GGML_OP_SET_ROWS,
-        ggml.impl.c.GGML_OP_SET,
-        ggml.impl.c.GGML_OP_CPY,
-        ggml.impl.c.GGML_OP_CONT,
-        ggml.impl.c.GGML_OP_REPEAT,
+        ggml.impl.ggml_c.GGML_OP_MUL_MAT,
+        ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID,
+        ggml.impl.ggml_c.GGML_OP_ROPE,
+        ggml.impl.ggml_c.GGML_OP_NORM,
+        ggml.impl.ggml_c.GGML_OP_RMS_NORM,
+        ggml.impl.ggml_c.GGML_OP_GROUP_NORM,
+        ggml.impl.ggml_c.GGML_OP_L2_NORM,
+        ggml.impl.ggml_c.GGML_OP_SUM_ROWS,
+        ggml.impl.ggml_c.GGML_OP_SSM_CONV,
+        ggml.impl.ggml_c.GGML_OP_SSM_SCAN,
+        ggml.impl.ggml_c.GGML_OP_CLAMP,
+        ggml.impl.ggml_c.GGML_OP_TRI,
+        ggml.impl.ggml_c.GGML_OP_DIAG,
+        ggml.impl.ggml_c.GGML_OP_MUL,
+        ggml.impl.ggml_c.GGML_OP_ADD,
+        ggml.impl.ggml_c.GGML_OP_SUB,
+        ggml.impl.ggml_c.GGML_OP_DIV,
+        ggml.impl.ggml_c.GGML_OP_GLU,
+        ggml.impl.ggml_c.GGML_OP_SCALE,
+        ggml.impl.ggml_c.GGML_OP_UNARY,
+        ggml.impl.ggml_c.GGML_OP_GET_ROWS,
+        ggml.impl.ggml_c.GGML_OP_SET_ROWS,
+        ggml.impl.ggml_c.GGML_OP_SET,
+        ggml.impl.ggml_c.GGML_OP_CPY,
+        ggml.impl.ggml_c.GGML_OP_CONT,
+        ggml.impl.ggml_c.GGML_OP_REPEAT,
         => true,
         else => ggml.impl.opIsEmpty(op),
     };
@@ -693,13 +691,13 @@ fn reorder(arena: std.mem.Allocator, nodes: []const NodeInfo) []const c_int {
 ///
 /// Parameters:
 /// - `gf`: the graph, reordered in place. `n_nodes` does not change.
-pub export fn ggml_graph_optimize(gf: *ggml.impl.CGraph) callconv(.c) void {
+pub fn ggml_graph_optimize(gf: *ggml.impl.CGraph) callconv(.c) void {
     const n = gf.n_nodes;
 
     // The C's `std::vector<node_info>` and its nested `fused` vectors, and
     // the permutation. All of it dies at the end of this call, so one
     // arena replaces four vectors' worth of individual frees.
-    var arena_state = std.heap.ArenaAllocator.init(allocator);
+    var arena_state = std.heap.ArenaAllocator.init(std.heap.c_allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
@@ -759,8 +757,8 @@ test "a range set starts empty and admits anything" {
     try std.testing.expectEqual(@as(usize, 0), mrs.ranges.items.len);
 
     // Two unallocated tensors get distinct ids, so they never conflict.
-    var a = std.mem.zeroes(ggml.impl.c.ggml_tensor);
-    var b = std.mem.zeroes(ggml.impl.c.ggml_tensor);
+    var a = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
+    var b = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
     try std.testing.expect(ggml_mem_ranges_check(mrs, &a));
     try std.testing.expect(ggml_mem_ranges_add(mrs, &a));
     try std.testing.expect(ggml_mem_ranges_check(mrs, &b));
@@ -770,8 +768,8 @@ test "a destination conflicts with itself, two sources do not" {
     const mrs = ggml_mem_ranges_init(0).?;
     defer ggml_mem_ranges_free(mrs);
 
-    var t = std.mem.zeroes(ggml.impl.c.ggml_tensor);
-    var user = std.mem.zeroes(ggml.impl.c.ggml_tensor);
+    var t = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
+    var user = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
     user.src[0] = &t;
 
     // `t` as a destination, then `t` as a source: dst-vs-src overlaps.
@@ -790,7 +788,7 @@ test "reset keeps the capacity the C reserved" {
     const cap = mrs.ranges.capacity;
     try std.testing.expect(cap >= 256);
 
-    var t = std.mem.zeroes(ggml.impl.c.ggml_tensor);
+    var t = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
     _ = addDst(mrs, &t);
     ggml_mem_ranges_reset(mrs);
     try std.testing.expectEqual(@as(usize, 0), mrs.ranges.items.len);

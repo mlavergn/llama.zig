@@ -98,15 +98,15 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
             cur = b.buildLoraMm(layer.wqkv.?, cur, null);
             b.cb(cur, "wqkv", il);
 
-            cur = llama.impl.c.ggml_reshape_3d(ctx, cur, b.n_embd_head_k, n_head_qkv, b.n_tokens);
+            cur = llama.impl.llama_c.ggml_reshape_3d(ctx, cur, b.n_embd_head_k, n_head_qkv, b.n_tokens);
 
-            var Qcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, cur, n_embd_head, n_head, b.n_tokens, cur.nb[1], cur.nb[2], 0);
+            var Qcur: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, cur, n_embd_head, n_head, b.n_tokens, cur.nb[1], cur.nb[2], 0);
             b.cb(Qcur, "Qcur", il);
 
-            var Kcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, cur, n_embd_head, n_head_kv, b.n_tokens, cur.nb[1], cur.nb[2], cur.nb[1] * @as(usize, @intCast(n_head)));
+            var Kcur: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, cur, n_embd_head, n_head_kv, b.n_tokens, cur.nb[1], cur.nb[2], cur.nb[1] * @as(usize, @intCast(n_head)));
             b.cb(Kcur, "Kcur", il);
 
-            const Vcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, cur, n_embd_head, n_head_kv, b.n_tokens, cur.nb[1], cur.nb[2], cur.nb[1] * @as(usize, @intCast(n_head + n_head_kv)));
+            const Vcur: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, cur, n_embd_head, n_head_kv, b.n_tokens, cur.nb[1], cur.nb[2], cur.nb[1] * @as(usize, @intCast(n_head + n_head_kv)));
             b.cb(Vcur, "Vcur", il);
 
             Qcur = b.buildNorm(Qcur, layer.attn_q_norm, null, .rms, il);
@@ -126,10 +126,10 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
             cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
         }
         if (il == b.n_layer - 1) {
-            residual = llama.impl.c.ggml_get_rows(ctx, residual, inp_out_ids);
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            residual = llama.impl.llama_c.ggml_get_rows(ctx, residual, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
         }
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, residual, cur);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, residual, cur);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The feed-forward network.
@@ -140,7 +140,7 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
             cur = b.buildFfn(cur, layer.ffn_up, null, null, layer.ffn_gate, null, null, layer.ffn_down, null, null, null, .silu, .par, il);
             b.cb(cur, "ffn_out", il);
         }
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

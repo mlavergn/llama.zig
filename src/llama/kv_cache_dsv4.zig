@@ -59,13 +59,13 @@ fn compSize(kv_size: u32, ratio: u32) u32 {
 
 /// Ports `dsv4_clear_tensor_stream` (llama-kv-cache-dsv4.cpp:32 @b1b770d90):
 /// zero one stream's plane of a contiguous 3-D tensor.
-fn clearTensorStream(tensor: *mod.impl.c.ggml_tensor, stream: u32) void {
-    mod.impl.assert(mod.impl.c.ggml_is_contiguous(tensor), file, 33, "ggml_is_contiguous(tensor)");
+fn clearTensorStream(tensor: *mod.impl.llama_c.ggml_tensor, stream: u32) void {
+    mod.impl.assert(mod.impl.llama_c.ggml_is_contiguous(tensor), file, 33, "ggml_is_contiguous(tensor)");
     mod.impl.assert(tensor.ne[3] == 1, file, 34, "tensor->ne[3] == 1");
     mod.impl.assert(stream < @as(u32, @truncate(@as(u64, @bitCast(tensor.ne[2])))), file, 35, "stream < (uint32_t) tensor->ne[2]");
 
     const stream_size = tensor.nb[2];
-    mod.impl.c.ggml_backend_tensor_memset(tensor, 0, stream * stream_size, stream_size);
+    mod.impl.llama_c.ggml_backend_tensor_memset(tensor, 0, stream * stream_size, stream_size);
 }
 
 /// Ports `dsv4_state_n_used_k_rows` (llama-kv-cache-dsv4.cpp:41 @b1b770d90):
@@ -208,7 +208,7 @@ fn buildRawWriteUbatches(ubatches: []const mod.batch.Ubatch) std.ArrayList(mod.b
 }
 
 /// Ports `dsv4_batch_has_coupled` (llama-kv-cache-dsv4.cpp:187 @b1b770d90).
-fn batchHasCoupled(b: *const mod.impl.c.llama_batch) bool {
+fn batchHasCoupled(b: *const mod.impl.llama_c.llama_batch) bool {
     if (b.n_seq_id == null) return false;
     var i: i32 = 0;
     while (i < b.n_tokens) : (i += 1) {
@@ -258,11 +258,11 @@ fn stateDstStreamRange(n_stream: u32, seq_id: i32, ns: u32, s0: *u32, exc: *mod.
 /// Ports `dsv4_state_write_tensor_streams` (llama-kv-cache-dsv4.cpp:254
 /// @b1b770d90): a tensor's metadata, then the first `n_rows` rows of each
 /// stream -- `stream_ids`' streams when given, else `ns` from `s0`.
-fn stateWriteTensorStreams(w: mod.io.Writer, tensor: *mod.impl.c.ggml_tensor, tensor_rows: u32, n_rows: u32, s0: u32, ns: u32, stream_ids: ?[]const u32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
+fn stateWriteTensorStreams(w: mod.io.Writer, tensor: *mod.impl.llama_c.ggml_tensor, tensor_rows: u32, n_rows: u32, s0: u32, ns: u32, stream_ids: ?[]const u32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
     const type_i: i32 = @intCast(tensor.type);
     const ne0: u64 = @bitCast(tensor.ne[0]);
     const rows: u64 = n_rows;
-    const row_size: u64 = mod.impl.c.ggml_row_size(tensor.type, tensor.ne[0]);
+    const row_size: u64 = mod.impl.llama_c.ggml_row_size(tensor.type, tensor.ne[0]);
 
     if (n_rows > tensor_rows) return exc.throw(.runtime_error, "DSV4 state tensor row count exceeds storage", .{});
 
@@ -288,7 +288,7 @@ fn stateWriteTensorStreams(w: mod.io.Writer, tensor: *mod.impl.c.ggml_tensor, te
 }
 
 /// Ports `dsv4_state_read_tensor_streams` (llama-kv-cache-dsv4.cpp:296 @b1b770d90).
-fn stateReadTensorStreams(r: mod.io.Reader, tensor: *mod.impl.c.ggml_tensor, tensor_rows: u32, n_rows: u32, s0: u32, ns: u32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
+fn stateReadTensorStreams(r: mod.io.Reader, tensor: *mod.impl.llama_c.ggml_tensor, tensor_rows: u32, n_rows: u32, s0: u32, ns: u32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
     const type_i_ref = try r.readValue(i32, exc);
     const ne0_ref = try r.readValue(u64, exc);
     const rows_ref = try r.readValue(u64, exc);
@@ -297,7 +297,7 @@ fn stateReadTensorStreams(r: mod.io.Reader, tensor: *mod.impl.c.ggml_tensor, ten
     const type_i: i32 = @intCast(tensor.type);
     const ne0: u64 = @bitCast(tensor.ne[0]);
     const rows: u64 = n_rows;
-    const row_size: u64 = mod.impl.c.ggml_row_size(tensor.type, tensor.ne[0]);
+    const row_size: u64 = mod.impl.llama_c.ggml_row_size(tensor.type, tensor.ne[0]);
 
     if (type_i != type_i_ref or ne0 != ne0_ref or rows != rows_ref or row_size != row_size_ref) {
         return exc.throw(.runtime_error, "DSV4 state tensor metadata mismatch", .{});
@@ -959,10 +959,10 @@ fn makeKOnly(hparams: *mod.hparams.Hparams) void {
 /// `llama_dsv4_comp_state`'s `layer` (llama-kv-cache-dsv4.h:55 @b1b770d90).
 const CompLayer = struct {
     il: u32,
-    kv: *mod.impl.c.ggml_tensor,
-    score: *mod.impl.c.ggml_tensor,
-    kv_stream: std.ArrayList(*mod.impl.c.ggml_tensor) = .empty,
-    score_stream: std.ArrayList(*mod.impl.c.ggml_tensor) = .empty,
+    kv: *mod.impl.llama_c.ggml_tensor,
+    score: *mod.impl.llama_c.ggml_tensor,
+    kv_stream: std.ArrayList(*mod.impl.llama_c.ggml_tensor) = .empty,
+    score_stream: std.ArrayList(*mod.impl.llama_c.ggml_tensor) = .empty,
 };
 
 /// Ports `llama_dsv4_comp_state` (llama-kv-cache-dsv4.h:11 @b1b770d90): a
@@ -1022,10 +1022,10 @@ pub const CompState = struct {
         errdefer self.destroy();
 
         // One context per buffer type, ordered by the buffer type's name.
-        var ctx_map: std.ArrayList(struct { buft: mod.impl.c.ggml_backend_buffer_type_t, ctx: *mod.impl.c.ggml_context }) = .empty;
+        var ctx_map: std.ArrayList(struct { buft: mod.impl.llama_c.ggml_backend_buffer_type_t, ctx: *mod.impl.llama_c.ggml_context }) = .empty;
         var n_moved: usize = 0;
         defer {
-            for (ctx_map.items[n_moved..]) |e| mod.impl.c.ggml_free(e.ctx);
+            for (ctx_map.items[n_moved..]) |e| mod.impl.llama_c.ggml_free(e.ctx);
             ctx_map.deinit(std.heap.c_allocator);
         }
 
@@ -1036,26 +1036,26 @@ pub const CompState = struct {
             if (filter.func != null and !filter.call(@intCast(il))) continue;
 
             var dev_name: [*:0]const u8 = "CPU";
-            var buft = mod.impl.c.ggml_backend_cpu_buffer_type();
+            var buft = mod.impl.llama_c.ggml_backend_cpu_buffer_type();
             if (offload) {
                 const dev = model.devLayer(il);
-                buft = mod.impl.c.ggml_backend_dev_buffer_type(dev);
-                dev_name = mod.impl.c.ggml_backend_dev_name(dev);
+                buft = mod.impl.llama_c.ggml_backend_dev_buffer_type(dev);
+                dev_name = mod.impl.llama_c.ggml_backend_dev_name(dev);
             }
 
             mod.impl.logDebug("%s: layer %3d: dev = %s\n", .{ func, il, dev_name });
 
             // The `ctx_for_buft` lambda.
-            const ctx: *mod.impl.c.ggml_context = blk: {
-                const bname = std.mem.span(mod.impl.c.ggml_backend_buft_name(buft));
+            const ctx: *mod.impl.llama_c.ggml_context = blk: {
+                const bname = std.mem.span(mod.impl.llama_c.ggml_backend_buft_name(buft));
                 var pos: usize = 0;
                 while (pos < ctx_map.items.len) : (pos += 1) {
-                    const order = std.mem.order(u8, std.mem.span(mod.impl.c.ggml_backend_buft_name(ctx_map.items[pos].buft)), bname);
+                    const order = std.mem.order(u8, std.mem.span(mod.impl.llama_c.ggml_backend_buft_name(ctx_map.items[pos].buft)), bname);
                     if (order == .eq) break :blk ctx_map.items[pos].ctx;
                     if (order == .gt) break;
                 }
-                const ctx = mod.impl.c.ggml_init(.{
-                    .mem_size = 2 * (1 + @as(usize, n_stream)) * hparams.nLayer() * mod.impl.c.ggml_tensor_overhead(),
+                const ctx = mod.impl.llama_c.ggml_init(.{
+                    .mem_size = 2 * (1 + @as(usize, n_stream)) * hparams.nLayer() * mod.impl.llama_c.ggml_tensor_overhead(),
                     .mem_buffer = null,
                     .no_alloc = true,
                 }) orelse return exc.throw(.runtime_error, "failed to create ggml context for DSV4 compressor state", .{});
@@ -1064,17 +1064,17 @@ pub const CompState = struct {
             };
 
             const n_planes: i64 = @as(i64, n_stream) * (1 + n_rs_seq);
-            const kv: *mod.impl.c.ggml_tensor = mod.impl.c.ggml_new_tensor_3d(ctx, mod.impl.c.GGML_TYPE_F32, n_embd_state, state_size, n_planes);
-            const score: *mod.impl.c.ggml_tensor = mod.impl.c.ggml_new_tensor_3d(ctx, mod.impl.c.GGML_TYPE_F32, n_embd_state, state_size, n_planes);
+            const kv: *mod.impl.llama_c.ggml_tensor = mod.impl.llama_c.ggml_new_tensor_3d(ctx, mod.impl.llama_c.GGML_TYPE_F32, n_embd_state, state_size, n_planes);
+            const score: *mod.impl.llama_c.ggml_tensor = mod.impl.llama_c.ggml_new_tensor_3d(ctx, mod.impl.llama_c.GGML_TYPE_F32, n_embd_state, state_size, n_planes);
 
-            _ = mod.impl.c.ggml_format_name(kv, "dsv4_%s_state_kv_l%d", name, @as(c_int, @intCast(il)));
-            _ = mod.impl.c.ggml_format_name(score, "dsv4_%s_state_score_l%d", name, @as(c_int, @intCast(il)));
+            _ = mod.impl.llama_c.ggml_format_name(kv, "dsv4_%s_state_kv_l%d", name, @as(c_int, @intCast(il)));
+            _ = mod.impl.llama_c.ggml_format_name(score, "dsv4_%s_state_score_l%d", name, @as(c_int, @intCast(il)));
 
             var layer: CompLayer = .{ .il = il, .kv = kv, .score = score };
             var s: u32 = 0;
             while (s < n_stream) : (s += 1) {
-                layer.kv_stream.append(std.heap.c_allocator, mod.impl.c.ggml_view_2d(ctx, kv, n_embd_state, state_size, kv.nb[1], s * kv.nb[2])) catch oom();
-                layer.score_stream.append(std.heap.c_allocator, mod.impl.c.ggml_view_2d(ctx, score, n_embd_state, state_size, score.nb[1], s * score.nb[2])) catch oom();
+                layer.kv_stream.append(std.heap.c_allocator, mod.impl.llama_c.ggml_view_2d(ctx, kv, n_embd_state, state_size, kv.nb[1], s * kv.nb[2])) catch oom();
+                layer.score_stream.append(std.heap.c_allocator, mod.impl.llama_c.ggml_view_2d(ctx, score, n_embd_state, state_size, score.nb[1], s * score.nb[2])) catch oom();
             }
 
             self.map_layer_ids.put(std.heap.c_allocator, @intCast(il), @intCast(self.layers.items.len)) catch oom();
@@ -1085,7 +1085,7 @@ pub const CompState = struct {
             const buf = try self.ctxs_bufs.emplace(e.ctx, e.buft, "DSV4 compressor state", exc);
             n_moved += 1;
 
-            mod.impl.logInfo("%s: %10s DSV4 %s state buffer size = %8.2f MiB\n", .{ func, mod.impl.c.ggml_backend_buffer_name(buf), name, @as(f64, @floatFromInt(mod.impl.c.ggml_backend_buffer_get_size(buf))) / 1024.0 / 1024.0 });
+            mod.impl.logInfo("%s: %10s DSV4 %s state buffer size = %8.2f MiB\n", .{ func, mod.impl.llama_c.ggml_backend_buffer_name(buf), name, @as(f64, @floatFromInt(mod.impl.llama_c.ggml_backend_buffer_get_size(buf))) / 1024.0 / 1024.0 });
         }
 
         mod.impl.logInfo("%s: %s ratio = %u, state = %u x %u, streams = %u, rs_seq = %u, layers = %zu, size = %7.2f MiB\n", .{ func, name, ratio, state_size, n_embd_state, n_stream, n_rs_seq, self.layers.items.len, @as(f64, @floatFromInt(self.totalSize())) / 1024.0 / 1024.0 });
@@ -1125,7 +1125,7 @@ pub const CompState = struct {
             return;
         }
 
-        for (self.ctxs_bufs.bufs.items) |e| mod.impl.c.ggml_backend_buffer_clear(e.buf, 0);
+        for (self.ctxs_bufs.bufs.items) |e| mod.impl.llama_c.ggml_backend_buffer_clear(e.buf, 0);
     }
 
     /// Ports `llama_dsv4_comp_state`'s `seq_cp` (llama-kv-cache-dsv4.cpp:1041
@@ -1147,8 +1147,8 @@ pub const CompState = struct {
     pub fn applyCopies(self: *const CompState, sc_info: *const mod.kv_cache.StreamCopyInfo) void {
         for (sc_info.ssrc.items, sc_info.sdst.items) |ssrc, sdst| {
             for (self.layers.items) |*layer| {
-                mod.impl.c.ggml_backend_tensor_copy(layer.kv_stream.items[ssrc], layer.kv_stream.items[sdst]);
-                mod.impl.c.ggml_backend_tensor_copy(layer.score_stream.items[ssrc], layer.score_stream.items[sdst]);
+                mod.impl.llama_c.ggml_backend_tensor_copy(layer.kv_stream.items[ssrc], layer.kv_stream.items[sdst]);
+                mod.impl.llama_c.ggml_backend_tensor_copy(layer.score_stream.items[ssrc], layer.score_stream.items[sdst]);
             }
         }
     }
@@ -1264,46 +1264,46 @@ pub const CompState = struct {
 
     /// Ports `llama_dsv4_comp_state`'s `get_kv_all` (llama-kv-cache-dsv4.cpp:1175
     /// @b1b770d90): every plane of every stream, as rows.
-    pub fn getKvAll(self: *const CompState, ctx: *mod.impl.c.ggml_context, il: i32) *mod.impl.c.ggml_tensor {
+    pub fn getKvAll(self: *const CompState, ctx: *mod.impl.llama_c.ggml_context, il: i32) *mod.impl.llama_c.ggml_tensor {
         const state = self.layerAt(il).kv;
-        return mod.impl.c.ggml_view_2d(ctx, state, state.ne[0], @as(i64, self.getNRows()) * (1 + self.n_rs_seq), state.nb[1], 0);
+        return mod.impl.llama_c.ggml_view_2d(ctx, state, state.ne[0], @as(i64, self.getNRows()) * (1 + self.n_rs_seq), state.nb[1], 0);
     }
 
     /// Ports `llama_dsv4_comp_state`'s `get_score_all` (llama-kv-cache-dsv4.cpp:1182 @b1b770d90).
-    pub fn getScoreAll(self: *const CompState, ctx: *mod.impl.c.ggml_context, il: i32) *mod.impl.c.ggml_tensor {
+    pub fn getScoreAll(self: *const CompState, ctx: *mod.impl.llama_c.ggml_context, il: i32) *mod.impl.llama_c.ggml_tensor {
         const state = self.layerAt(il).score;
-        return mod.impl.c.ggml_view_2d(ctx, state, state.ne[0], @as(i64, self.getNRows()) * (1 + self.n_rs_seq), state.nb[1], 0);
+        return mod.impl.llama_c.ggml_view_2d(ctx, state, state.ne[0], @as(i64, self.getNRows()) * (1 + self.n_rs_seq), state.nb[1], 0);
     }
 
     /// Ports `llama_dsv4_comp_state`'s `get_kv` (llama-kv-cache-dsv4.cpp:1189
     /// @b1b770d90): the current plane alone.
-    pub fn getKv(self: *const CompState, ctx: *mod.impl.c.ggml_context, il: i32) *mod.impl.c.ggml_tensor {
-        const state: *mod.impl.c.ggml_tensor = self.getKvAll(ctx, il);
-        const row_size = mod.impl.c.ggml_row_size(state.type, state.ne[0]);
-        return mod.impl.c.ggml_view_2d(ctx, state, state.ne[0], self.getNRows(), state.nb[1], 0 * row_size);
+    pub fn getKv(self: *const CompState, ctx: *mod.impl.llama_c.ggml_context, il: i32) *mod.impl.llama_c.ggml_tensor {
+        const state: *mod.impl.llama_c.ggml_tensor = self.getKvAll(ctx, il);
+        const row_size = mod.impl.llama_c.ggml_row_size(state.type, state.ne[0]);
+        return mod.impl.llama_c.ggml_view_2d(ctx, state, state.ne[0], self.getNRows(), state.nb[1], 0 * row_size);
     }
 
     /// Ports `llama_dsv4_comp_state`'s `get_score` (llama-kv-cache-dsv4.cpp:1196 @b1b770d90).
-    pub fn getScore(self: *const CompState, ctx: *mod.impl.c.ggml_context, il: i32) *mod.impl.c.ggml_tensor {
-        const state: *mod.impl.c.ggml_tensor = self.getScoreAll(ctx, il);
-        const row_size = mod.impl.c.ggml_row_size(state.type, state.ne[0]);
-        return mod.impl.c.ggml_view_2d(ctx, state, state.ne[0], self.getNRows(), state.nb[1], 0 * row_size);
+    pub fn getScore(self: *const CompState, ctx: *mod.impl.llama_c.ggml_context, il: i32) *mod.impl.llama_c.ggml_tensor {
+        const state: *mod.impl.llama_c.ggml_tensor = self.getScoreAll(ctx, il);
+        const row_size = mod.impl.llama_c.ggml_row_size(state.type, state.ne[0]);
+        return mod.impl.llama_c.ggml_view_2d(ctx, state, state.ne[0], self.getNRows(), state.nb[1], 0 * row_size);
     }
 
     /// Ports `llama_dsv4_comp_state`'s `cpy_kv` (llama-kv-cache-dsv4.cpp:1203 @b1b770d90).
-    pub fn cpyKv(self: *const CompState, ctx: *mod.impl.c.ggml_context, cur: *mod.impl.c.ggml_tensor, idxs: *mod.impl.c.ggml_tensor, il: i32) *mod.impl.c.ggml_tensor {
-        return mod.impl.c.ggml_set_rows(ctx, self.getKvAll(ctx, il), cur, idxs);
+    pub fn cpyKv(self: *const CompState, ctx: *mod.impl.llama_c.ggml_context, cur: *mod.impl.llama_c.ggml_tensor, idxs: *mod.impl.llama_c.ggml_tensor, il: i32) *mod.impl.llama_c.ggml_tensor {
+        return mod.impl.llama_c.ggml_set_rows(ctx, self.getKvAll(ctx, il), cur, idxs);
     }
 
     /// Ports `llama_dsv4_comp_state`'s `cpy_score` (llama-kv-cache-dsv4.cpp:1207 @b1b770d90).
-    pub fn cpyScore(self: *const CompState, ctx: *mod.impl.c.ggml_context, cur: *mod.impl.c.ggml_tensor, idxs: *mod.impl.c.ggml_tensor, il: i32) *mod.impl.c.ggml_tensor {
-        return mod.impl.c.ggml_set_rows(ctx, self.getScoreAll(ctx, il), cur, idxs);
+    pub fn cpyScore(self: *const CompState, ctx: *mod.impl.llama_c.ggml_context, cur: *mod.impl.llama_c.ggml_tensor, idxs: *mod.impl.llama_c.ggml_tensor, il: i32) *mod.impl.llama_c.ggml_tensor {
+        return mod.impl.llama_c.ggml_set_rows(ctx, self.getScoreAll(ctx, il), cur, idxs);
     }
 
     /// Ports `llama_dsv4_comp_state`'s `total_size` (llama-kv-cache-dsv4.cpp:1211 @b1b770d90).
     pub fn totalSize(self: *const CompState) usize {
         var size: usize = 0;
-        for (self.ctxs_bufs.bufs.items) |e| size += mod.impl.c.ggml_backend_buffer_get_size(e.buf);
+        for (self.ctxs_bufs.bufs.items) |e| size += mod.impl.llama_c.ggml_backend_buffer_get_size(e.buf);
         return size;
     }
 };
@@ -1393,7 +1393,7 @@ fn historyTokAt(in_batch: []const HistoryEntry, kv: ?*const mod.kv_cache.KvCache
         if (m.seq_id < seq_id or (m.seq_id == seq_id and m.pos <= p)) lo = mid + 1 else hi = mid;
     }
     if (lo > 0 and in_batch[lo - 1].seq_id == seq_id) return in_batch[lo - 1].tok;
-    return if (kv) |k| k.getCells(seq_id).seqPosTokLe(seq_id, p) else mod.impl.c.LLAMA_TOKEN_NULL;
+    return if (kv) |k| k.getCells(seq_id).seqPosTokLe(seq_id, p) else mod.impl.llama_c.LLAMA_TOKEN_NULL;
 }
 
 /// Ports `dsv41_shared_history_ok` (llama-kv-cache-dsv4.cpp:1426
@@ -1402,7 +1402,7 @@ fn historyTokAt(in_batch: []const HistoryEntry, kv: ?*const mod.kv_cache.KvCache
 /// if all of them agree on its predecessors.
 ///
 /// Return: false, having logged, where they do not.
-fn dsv41SharedHistoryOk(b: *const mod.impl.c.llama_batch, kv: ?*const mod.kv_cache.KvCache, n_hist: u32) bool {
+fn dsv41SharedHistoryOk(b: *const mod.impl.llama_c.llama_batch, kv: ?*const mod.kv_cache.KvCache, n_hist: u32) bool {
     const func = "dsv41_shared_history_ok";
     if (n_hist == 0 or b.token == null or b.n_seq_id == null) return true;
 
@@ -1505,8 +1505,8 @@ pub const KvCacheDsv4 = struct {
     pub fn create(
         model: *const mod.model.Model,
         no_alloc: bool,
-        type_k: mod.impl.c.enum_ggml_type,
-        type_v: mod.impl.c.enum_ggml_type,
+        type_k: mod.impl.llama_c.enum_ggml_type,
+        type_v: mod.impl.llama_c.enum_ggml_type,
         v_trans: bool,
         offload: bool,
         swa_full: bool,
@@ -1579,7 +1579,7 @@ pub const KvCacheDsv4 = struct {
         self.hparams_lid.n_embd_head_v_full = mhp.indexer_head_size;
         self.hparams_lid.n_embd_head_k_swa = mhp.indexer_head_size;
         self.hparams_lid.n_embd_head_v_swa = mhp.indexer_head_size;
-        self.hparams_lid.rope_type = mod.impl.c.LLAMA_ROPE_TYPE_NEOX;
+        self.hparams_lid.rope_type = mod.impl.llama_c.LLAMA_ROPE_TYPE_NEOX;
         makeKOnly(&self.hparams_lid);
 
         // V4.1 cross-layer KV sharing: a compressed layer reads the storage
@@ -1915,7 +1915,7 @@ pub const KvCacheDsv4 = struct {
     /// @b1b770d90): a header, the raw cache, the used rows of the compressed
     /// caches unless partial, then the compressor states.
     pub fn stateWrite(self: *const KvCacheDsv4, w: mod.io.Writer, seq_id: i32, flags: u32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
-        const partial_only = flags & mod.impl.c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY != 0;
+        const partial_only = flags & mod.impl.llama_c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY != 0;
 
         const magic: u32 = state_magic;
         const version: u32 = state_version;
@@ -1959,7 +1959,7 @@ pub const KvCacheDsv4 = struct {
         if (mode != state_mode_full and mode != state_mode_partial) return exc.throw(.runtime_error, "DSV4 state mode mismatch", .{});
 
         const partial_only = mode == state_mode_partial;
-        if (partial_only != (flags & mod.impl.c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY != 0)) {
+        if (partial_only != (flags & mod.impl.llama_c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY != 0)) {
             return exc.throw(.runtime_error, "DSV4 state flags mismatch", .{});
         }
 
@@ -2095,9 +2095,9 @@ pub const KvCacheDsv4 = struct {
 
                 const t_src = kv.getKStorage(src);
                 const t_dst = kv.getKStorage(@intCast(il));
-                mod.impl.assert(t_src.type == t_dst.type and mod.impl.c.ggml_are_same_shape(t_src, t_dst), file, 1886, "t_src->type == t_dst->type && ggml_are_same_shape(t_src, t_dst)");
+                mod.impl.assert(t_src.type == t_dst.type and mod.impl.llama_c.ggml_are_same_shape(t_src, t_dst), file, 1886, "t_src->type == t_dst->type && ggml_are_same_shape(t_src, t_dst)");
 
-                mod.impl.c.ggml_backend_tensor_copy(t_src, t_dst);
+                mod.impl.llama_c.ggml_backend_tensor_copy(t_src, t_dst);
             }
         }
     }
@@ -2407,7 +2407,7 @@ pub const RawContext = struct {
     }
 
     /// Ports `llama_kv_cache_dsv4_raw_context`'s `get_k` (llama-kv-cache-dsv4.cpp:2044 @b1b770d90).
-    pub fn getK(self: *const RawContext, ctx: *mod.impl.c.ggml_context, il: i32) *mod.impl.c.ggml_tensor {
+    pub fn getK(self: *const RawContext, ctx: *mod.impl.llama_c.ggml_context, il: i32) *mod.impl.llama_c.ggml_tensor {
         return self.kv_swa.getK(ctx, il, self.n_kv, &self.sinfos_read.items[self.i_next]);
     }
 
@@ -2415,7 +2415,7 @@ pub const RawContext = struct {
     /// @b1b770d90): `k_idxs` may be expanded to one block per stream while
     /// `k_cur` is the token block alone; each copy then gets a zero
     /// dependency on the others, so every write executes.
-    pub fn cpyK(self: *const RawContext, ctx: *mod.impl.c.ggml_context, k_cur: *mod.impl.c.ggml_tensor, k_idxs: *mod.impl.c.ggml_tensor, il: i32) *mod.impl.c.ggml_tensor {
+    pub fn cpyK(self: *const RawContext, ctx: *mod.impl.llama_c.ggml_context, k_cur: *mod.impl.llama_c.ggml_tensor, k_idxs: *mod.impl.llama_c.ggml_tensor, il: i32) *mod.impl.llama_c.ggml_tensor {
         const sinfo = &self.sinfos_write.items[self.i_next];
 
         if (k_cur.ne[2] == k_idxs.ne[0]) return self.kv_swa.cpyK(ctx, k_cur, k_idxs, il, sinfo);
@@ -2426,12 +2426,12 @@ pub const RawContext = struct {
         mod.impl.assert(k_cur.ne[2] == @as(i64, @intCast(sinfo.size())), file, 2060, "k_cur->ne[2] == (int64_t) sinfo.size()");
         mod.impl.assert(k_idxs.ne[0] == n_fanout, file, 2061, "k_idxs->ne[0] == n_fanout");
 
-        var res: ?*mod.impl.c.ggml_tensor = null;
+        var res: ?*mod.impl.llama_c.ggml_tensor = null;
         for (0..sinfo.nStream()) |s| {
-            const k_idxs_s: *mod.impl.c.ggml_tensor = mod.impl.c.ggml_view_1d(ctx, k_idxs, @intCast(sinfo.size()), s * sinfo.size() * mod.impl.c.ggml_element_size(k_idxs));
+            const k_idxs_s: *mod.impl.llama_c.ggml_tensor = mod.impl.llama_c.ggml_view_1d(ctx, k_idxs, @intCast(sinfo.size()), s * sinfo.size() * mod.impl.llama_c.ggml_element_size(k_idxs));
             const cur = self.kv_swa.cpyK(ctx, k_cur, k_idxs_s, il, sinfo);
             if (res) |r| {
-                res = mod.impl.c.ggml_add(ctx, r, mod.impl.c.ggml_sub(ctx, cur, cur));
+                res = mod.impl.llama_c.ggml_add(ctx, r, mod.impl.llama_c.ggml_sub(ctx, cur, cur));
             } else {
                 res = cur;
             }
@@ -2441,21 +2441,21 @@ pub const RawContext = struct {
 
     /// Ports `llama_kv_cache_dsv4_raw_context`'s `build_input_k_idxs`
     /// (llama-kv-cache-dsv4.cpp:2077 @b1b770d90): one index per raw write.
-    pub fn buildInputKIdxs(self: *const RawContext, ctx: *mod.impl.c.ggml_context, ubatch: *const mod.batch.Ubatch) *mod.impl.c.ggml_tensor {
+    pub fn buildInputKIdxs(self: *const RawContext, ctx: *mod.impl.llama_c.ggml_context, ubatch: *const mod.batch.Ubatch) *mod.impl.llama_c.ggml_tensor {
         const n_tokens: u32 = if (self.ubatches_write.items.len == 0) ubatch.n_tokens else self.ubatches_write.items[self.i_next].n_tokens;
 
-        const k_idxs: *mod.impl.c.ggml_tensor = mod.impl.c.ggml_new_tensor_1d(ctx, mod.impl.c.GGML_TYPE_I64, n_tokens);
-        mod.impl.c.ggml_set_input(k_idxs);
+        const k_idxs: *mod.impl.llama_c.ggml_tensor = mod.impl.llama_c.ggml_new_tensor_1d(ctx, mod.impl.llama_c.GGML_TYPE_I64, n_tokens);
+        mod.impl.llama_c.ggml_set_input(k_idxs);
         return k_idxs;
     }
 
     /// Ports `llama_kv_cache_dsv4_raw_context`'s `get_k_rot` (llama-kv-cache-dsv4.cpp:2086 @b1b770d90).
-    pub fn getKRot(self: *const RawContext) []const ?*mod.impl.c.ggml_tensor {
+    pub fn getKRot(self: *const RawContext) []const ?*mod.impl.llama_c.ggml_tensor {
         return self.kv_swa.getKRot();
     }
 
     /// Ports `llama_kv_cache_dsv4_raw_context`'s `set_input_k_idxs` (llama-kv-cache-dsv4.cpp:2090 @b1b770d90).
-    pub fn setInputKIdxs(self: *const RawContext, dst: *mod.impl.c.ggml_tensor) void {
+    pub fn setInputKIdxs(self: *const RawContext, dst: *mod.impl.llama_c.ggml_tensor) void {
         self.kv_swa.setInputKIdxs(dst, &self.ubatches_write.items[self.i_next], &self.sinfos_write.items[self.i_next]);
     }
 
@@ -2531,17 +2531,17 @@ pub const CompContext = struct {
     }
 
     /// Ports `llama_kv_cache_dsv4_comp_context`'s `get_k` (llama-kv-cache-dsv4.cpp:2146 @b1b770d90).
-    pub fn getK(self: *const CompContext, ctx: *mod.impl.c.ggml_context, il: i32) *mod.impl.c.ggml_tensor {
+    pub fn getK(self: *const CompContext, ctx: *mod.impl.llama_c.ggml_context, il: i32) *mod.impl.llama_c.ggml_tensor {
         return self.kv.getK(ctx, il, self.n_kv, &self.sinfos.items[self.i_cur]);
     }
 
     /// Ports `llama_kv_cache_dsv4_comp_context`'s `cpy_k` (llama-kv-cache-dsv4.cpp:2150 @b1b770d90).
-    pub fn cpyK(self: *const CompContext, ctx: *mod.impl.c.ggml_context, k_cur: *mod.impl.c.ggml_tensor, k_idxs: *mod.impl.c.ggml_tensor, il: i32) *mod.impl.c.ggml_tensor {
+    pub fn cpyK(self: *const CompContext, ctx: *mod.impl.llama_c.ggml_context, k_cur: *mod.impl.llama_c.ggml_tensor, k_idxs: *mod.impl.llama_c.ggml_tensor, il: i32) *mod.impl.llama_c.ggml_tensor {
         return self.kv.cpyK(ctx, k_cur, k_idxs, il, &self.sinfos.items[self.i_cur]);
     }
 
     /// Ports `llama_kv_cache_dsv4_comp_context`'s `get_k_rot` (llama-kv-cache-dsv4.cpp:2154 @b1b770d90).
-    pub fn getKRot(self: *const CompContext) []const ?*mod.impl.c.ggml_tensor {
+    pub fn getKRot(self: *const CompContext) []const ?*mod.impl.llama_c.ggml_tensor {
         return self.kv.getKRot();
     }
 };

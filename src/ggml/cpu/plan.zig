@@ -51,13 +51,13 @@ inline fn up(n: i64, m: i64) i64 {
 /// - `n_threads`: the thread budget for the graph.
 ///
 /// Return: how many threads this node's kernel can use, at least 1.
-pub fn getNTasks(node: *ggml.impl.c.ggml_tensor, n_threads: c_int) c_int {
+pub fn getNTasks(node: *ggml.impl.ggml_c.ggml_tensor, n_threads: c_int) c_int {
     // No point multi-threading a no-op.
     if (ggml.types.ggml_is_empty(node)) return 1;
 
     const n_tasks: c_int = switch (node.op) {
         // Parallel over rows: every one of these splits its work by thread.
-        ggml.impl.c.GGML_OP_CPY, ggml.impl.c.GGML_OP_DUP, ggml.impl.c.GGML_OP_CONT, ggml.impl.c.GGML_OP_ADD, ggml.impl.c.GGML_OP_ADD_ID, ggml.impl.c.GGML_OP_ACC, ggml.impl.c.GGML_OP_CUMSUM, ggml.impl.c.GGML_OP_TRI, ggml.impl.c.GGML_OP_FILL, ggml.impl.c.GGML_OP_COUNT_EQUAL, ggml.impl.c.GGML_OP_SOLVE_TRI, ggml.impl.c.GGML_OP_GATED_DELTA_NET, ggml.impl.c.GGML_OP_DSV4_HC_COMB, ggml.impl.c.GGML_OP_DSV4_HC_PRE, ggml.impl.c.GGML_OP_DSV4_HC_POST, ggml.impl.c.GGML_OP_TOP_K_MASK, ggml.impl.c.GGML_OP_SILU_BACK, ggml.impl.c.GGML_OP_MUL, ggml.impl.c.GGML_OP_DIV, ggml.impl.c.GGML_OP_NORM, ggml.impl.c.GGML_OP_RMS_NORM, ggml.impl.c.GGML_OP_RMS_NORM_BACK, ggml.impl.c.GGML_OP_L2_NORM, ggml.impl.c.GGML_OP_GROUP_NORM, ggml.impl.c.GGML_OP_CONCAT, ggml.impl.c.GGML_OP_MUL_MAT, ggml.impl.c.GGML_OP_MUL_MAT_ID, ggml.impl.c.GGML_OP_OUT_PROD, ggml.impl.c.GGML_OP_SET_ROWS, ggml.impl.c.GGML_OP_SOFT_MAX_BACK, ggml.impl.c.GGML_OP_ROPE, ggml.impl.c.GGML_OP_ROPE_BACK, ggml.impl.c.GGML_OP_ADD_REL_POS, ggml.impl.c.GGML_OP_IM2COL, ggml.impl.c.GGML_OP_IM2COL_BACK, ggml.impl.c.GGML_OP_IM2COL_3D, ggml.impl.c.GGML_OP_CONV_2D, ggml.impl.c.GGML_OP_CONV_3D, ggml.impl.c.GGML_OP_CONV_2D_DW, ggml.impl.c.GGML_OP_COL2IM_1D, ggml.impl.c.GGML_OP_CONV_TRANSPOSE_1D, ggml.impl.c.GGML_OP_CONV_TRANSPOSE_2D, ggml.impl.c.GGML_OP_UPSCALE, ggml.impl.c.GGML_OP_PAD, ggml.impl.c.GGML_OP_PAD_REFLECT_1D, ggml.impl.c.GGML_OP_ROLL, ggml.impl.c.GGML_OP_ARANGE, ggml.impl.c.GGML_OP_TIMESTEP_EMBEDDING, ggml.impl.c.GGML_OP_ARGSORT, ggml.impl.c.GGML_OP_TOP_K, ggml.impl.c.GGML_OP_FLASH_ATTN_EXT, ggml.impl.c.GGML_OP_FLASH_ATTN_BACK, ggml.impl.c.GGML_OP_SSM_CONV, ggml.impl.c.GGML_OP_SSM_SCAN, ggml.impl.c.GGML_OP_LIGHTNING_INDEXER, ggml.impl.c.GGML_OP_CROSS_ENTROPY_LOSS, ggml.impl.c.GGML_OP_CROSS_ENTROPY_LOSS_BACK, ggml.impl.c.GGML_OP_OPT_STEP_ADAMW, ggml.impl.c.GGML_OP_OPT_STEP_SGD => n_threads,
+        ggml.impl.ggml_c.GGML_OP_CPY, ggml.impl.ggml_c.GGML_OP_DUP, ggml.impl.ggml_c.GGML_OP_CONT, ggml.impl.ggml_c.GGML_OP_ADD, ggml.impl.ggml_c.GGML_OP_ADD_ID, ggml.impl.ggml_c.GGML_OP_ACC, ggml.impl.ggml_c.GGML_OP_CUMSUM, ggml.impl.ggml_c.GGML_OP_TRI, ggml.impl.ggml_c.GGML_OP_FILL, ggml.impl.ggml_c.GGML_OP_COUNT_EQUAL, ggml.impl.ggml_c.GGML_OP_SOLVE_TRI, ggml.impl.ggml_c.GGML_OP_GATED_DELTA_NET, ggml.impl.ggml_c.GGML_OP_DSV4_HC_COMB, ggml.impl.ggml_c.GGML_OP_DSV4_HC_PRE, ggml.impl.ggml_c.GGML_OP_DSV4_HC_POST, ggml.impl.ggml_c.GGML_OP_TOP_K_MASK, ggml.impl.ggml_c.GGML_OP_SILU_BACK, ggml.impl.ggml_c.GGML_OP_MUL, ggml.impl.ggml_c.GGML_OP_DIV, ggml.impl.ggml_c.GGML_OP_NORM, ggml.impl.ggml_c.GGML_OP_RMS_NORM, ggml.impl.ggml_c.GGML_OP_RMS_NORM_BACK, ggml.impl.ggml_c.GGML_OP_L2_NORM, ggml.impl.ggml_c.GGML_OP_GROUP_NORM, ggml.impl.ggml_c.GGML_OP_CONCAT, ggml.impl.ggml_c.GGML_OP_MUL_MAT, ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID, ggml.impl.ggml_c.GGML_OP_OUT_PROD, ggml.impl.ggml_c.GGML_OP_SET_ROWS, ggml.impl.ggml_c.GGML_OP_SOFT_MAX_BACK, ggml.impl.ggml_c.GGML_OP_ROPE, ggml.impl.ggml_c.GGML_OP_ROPE_BACK, ggml.impl.ggml_c.GGML_OP_ADD_REL_POS, ggml.impl.ggml_c.GGML_OP_IM2COL, ggml.impl.ggml_c.GGML_OP_IM2COL_BACK, ggml.impl.ggml_c.GGML_OP_IM2COL_3D, ggml.impl.ggml_c.GGML_OP_CONV_2D, ggml.impl.ggml_c.GGML_OP_CONV_3D, ggml.impl.ggml_c.GGML_OP_CONV_2D_DW, ggml.impl.ggml_c.GGML_OP_COL2IM_1D, ggml.impl.ggml_c.GGML_OP_CONV_TRANSPOSE_1D, ggml.impl.ggml_c.GGML_OP_CONV_TRANSPOSE_2D, ggml.impl.ggml_c.GGML_OP_UPSCALE, ggml.impl.ggml_c.GGML_OP_PAD, ggml.impl.ggml_c.GGML_OP_PAD_REFLECT_1D, ggml.impl.ggml_c.GGML_OP_ROLL, ggml.impl.ggml_c.GGML_OP_ARANGE, ggml.impl.ggml_c.GGML_OP_TIMESTEP_EMBEDDING, ggml.impl.ggml_c.GGML_OP_ARGSORT, ggml.impl.ggml_c.GGML_OP_TOP_K, ggml.impl.ggml_c.GGML_OP_FLASH_ATTN_EXT, ggml.impl.ggml_c.GGML_OP_FLASH_ATTN_BACK, ggml.impl.ggml_c.GGML_OP_SSM_CONV, ggml.impl.ggml_c.GGML_OP_SSM_SCAN, ggml.impl.ggml_c.GGML_OP_LIGHTNING_INDEXER, ggml.impl.ggml_c.GGML_OP_CROSS_ENTROPY_LOSS, ggml.impl.ggml_c.GGML_OP_CROSS_ENTROPY_LOSS_BACK, ggml.impl.ggml_c.GGML_OP_OPT_STEP_ADAMW, ggml.impl.ggml_c.GGML_OP_OPT_STEP_SGD => n_threads,
 
         // Single-threaded, either because the op is cheap or because no
         // one has written the parallel form. `GET_ROWS` could use more
@@ -65,79 +65,79 @@ pub fn getNTasks(node: *ggml.impl.c.ggml_tensor, n_threads: c_int) c_int {
         // once a GPU is carrying the model. `SET_ROWS` is not here
         // (#30454): it plans its per-thread F16 conversion rows for every
         // thread that runs it.
-        ggml.impl.c.GGML_OP_GET_ROWS, ggml.impl.c.GGML_OP_SUB, ggml.impl.c.GGML_OP_SQR, ggml.impl.c.GGML_OP_SQRT, ggml.impl.c.GGML_OP_LOG, ggml.impl.c.GGML_OP_SIN, ggml.impl.c.GGML_OP_COS, ggml.impl.c.GGML_OP_SUM, ggml.impl.c.GGML_OP_SUM_ROWS, ggml.impl.c.GGML_OP_MEAN, ggml.impl.c.GGML_OP_ARGMAX, ggml.impl.c.GGML_OP_REPEAT, ggml.impl.c.GGML_OP_REPEAT_BACK, ggml.impl.c.GGML_OP_LEAKY_RELU, ggml.impl.c.GGML_OP_SCALE, ggml.impl.c.GGML_OP_SET, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_PERMUTE, ggml.impl.c.GGML_OP_TRANSPOSE, ggml.impl.c.GGML_OP_GET_ROWS_BACK, ggml.impl.c.GGML_OP_DIAG, ggml.impl.c.GGML_OP_CLAMP, ggml.impl.c.GGML_OP_POOL_1D, ggml.impl.c.GGML_OP_POOL_2D, ggml.impl.c.GGML_OP_POOL_2D_BACK, ggml.impl.c.GGML_OP_WIN_PART, ggml.impl.c.GGML_OP_WIN_UNPART, ggml.impl.c.GGML_OP_GET_REL_POS, ggml.impl.c.GGML_OP_NONE => 1,
+        ggml.impl.ggml_c.GGML_OP_GET_ROWS, ggml.impl.ggml_c.GGML_OP_SUB, ggml.impl.ggml_c.GGML_OP_SQR, ggml.impl.ggml_c.GGML_OP_SQRT, ggml.impl.ggml_c.GGML_OP_LOG, ggml.impl.ggml_c.GGML_OP_SIN, ggml.impl.ggml_c.GGML_OP_COS, ggml.impl.ggml_c.GGML_OP_SUM, ggml.impl.ggml_c.GGML_OP_SUM_ROWS, ggml.impl.ggml_c.GGML_OP_MEAN, ggml.impl.ggml_c.GGML_OP_ARGMAX, ggml.impl.ggml_c.GGML_OP_REPEAT, ggml.impl.ggml_c.GGML_OP_REPEAT_BACK, ggml.impl.ggml_c.GGML_OP_LEAKY_RELU, ggml.impl.ggml_c.GGML_OP_SCALE, ggml.impl.ggml_c.GGML_OP_SET, ggml.impl.ggml_c.GGML_OP_RESHAPE, ggml.impl.ggml_c.GGML_OP_VIEW, ggml.impl.ggml_c.GGML_OP_PERMUTE, ggml.impl.ggml_c.GGML_OP_TRANSPOSE, ggml.impl.ggml_c.GGML_OP_GET_ROWS_BACK, ggml.impl.ggml_c.GGML_OP_DIAG, ggml.impl.ggml_c.GGML_OP_CLAMP, ggml.impl.ggml_c.GGML_OP_POOL_1D, ggml.impl.ggml_c.GGML_OP_POOL_2D, ggml.impl.ggml_c.GGML_OP_POOL_2D_BACK, ggml.impl.ggml_c.GGML_OP_WIN_PART, ggml.impl.ggml_c.GGML_OP_WIN_UNPART, ggml.impl.ggml_c.GGML_OP_GET_REL_POS, ggml.impl.ggml_c.GGML_OP_NONE => 1,
 
-        ggml.impl.c.GGML_OP_UNARY => switch (ggml.types.ggml_get_unary_op(node)) {
-            ggml.impl.c.GGML_UNARY_OP_ABS,
-            ggml.impl.c.GGML_UNARY_OP_SGN,
-            ggml.impl.c.GGML_UNARY_OP_NEG,
-            ggml.impl.c.GGML_UNARY_OP_STEP,
-            ggml.impl.c.GGML_UNARY_OP_TANH,
-            ggml.impl.c.GGML_UNARY_OP_ELU,
-            ggml.impl.c.GGML_UNARY_OP_RELU,
-            ggml.impl.c.GGML_UNARY_OP_SIGMOID,
-            ggml.impl.c.GGML_UNARY_OP_HARDSWISH,
-            ggml.impl.c.GGML_UNARY_OP_HARDSIGMOID,
-            ggml.impl.c.GGML_UNARY_OP_EXP,
-            ggml.impl.c.GGML_UNARY_OP_SOFTPLUS,
-            ggml.impl.c.GGML_UNARY_OP_EXPM1,
-            ggml.impl.c.GGML_UNARY_OP_FLOOR,
-            ggml.impl.c.GGML_UNARY_OP_CEIL,
-            ggml.impl.c.GGML_UNARY_OP_ROUND,
-            ggml.impl.c.GGML_UNARY_OP_TRUNC,
+        ggml.impl.ggml_c.GGML_OP_UNARY => switch (ggml.types.ggml_get_unary_op(node)) {
+            ggml.impl.ggml_c.GGML_UNARY_OP_ABS,
+            ggml.impl.ggml_c.GGML_UNARY_OP_SGN,
+            ggml.impl.ggml_c.GGML_UNARY_OP_NEG,
+            ggml.impl.ggml_c.GGML_UNARY_OP_STEP,
+            ggml.impl.ggml_c.GGML_UNARY_OP_TANH,
+            ggml.impl.ggml_c.GGML_UNARY_OP_ELU,
+            ggml.impl.ggml_c.GGML_UNARY_OP_RELU,
+            ggml.impl.ggml_c.GGML_UNARY_OP_SIGMOID,
+            ggml.impl.ggml_c.GGML_UNARY_OP_HARDSWISH,
+            ggml.impl.ggml_c.GGML_UNARY_OP_HARDSIGMOID,
+            ggml.impl.ggml_c.GGML_UNARY_OP_EXP,
+            ggml.impl.ggml_c.GGML_UNARY_OP_SOFTPLUS,
+            ggml.impl.ggml_c.GGML_UNARY_OP_EXPM1,
+            ggml.impl.ggml_c.GGML_UNARY_OP_FLOOR,
+            ggml.impl.ggml_c.GGML_UNARY_OP_CEIL,
+            ggml.impl.ggml_c.GGML_UNARY_OP_ROUND,
+            ggml.impl.ggml_c.GGML_UNARY_OP_TRUNC,
             => 1,
 
             // The four that cost enough per element to be worth splitting.
-            ggml.impl.c.GGML_UNARY_OP_GELU,
-            ggml.impl.c.GGML_UNARY_OP_GELU_ERF,
-            ggml.impl.c.GGML_UNARY_OP_GELU_QUICK,
-            ggml.impl.c.GGML_UNARY_OP_SILU,
-            ggml.impl.c.GGML_UNARY_OP_XIELU,
+            ggml.impl.ggml_c.GGML_UNARY_OP_GELU,
+            ggml.impl.ggml_c.GGML_UNARY_OP_GELU_ERF,
+            ggml.impl.ggml_c.GGML_UNARY_OP_GELU_QUICK,
+            ggml.impl.ggml_c.GGML_UNARY_OP_SILU,
+            ggml.impl.ggml_c.GGML_UNARY_OP_XIELU,
             => n_threads,
 
             else => ggml.impl.abort("fatal error"),
         },
 
-        ggml.impl.c.GGML_OP_GLU => switch (ggml.types.ggml_get_glu_op(node)) {
-            ggml.impl.c.GGML_GLU_OP_REGLU,
-            ggml.impl.c.GGML_GLU_OP_GEGLU,
-            ggml.impl.c.GGML_GLU_OP_SWIGLU,
-            ggml.impl.c.GGML_GLU_OP_SWIGLU_OAI,
-            ggml.impl.c.GGML_GLU_OP_GEGLU_ERF,
-            ggml.impl.c.GGML_GLU_OP_GEGLU_QUICK,
-            ggml.impl.c.GGML_GLU_OP_SWIGLU_CLAMP,
+        ggml.impl.ggml_c.GGML_OP_GLU => switch (ggml.types.ggml_get_glu_op(node)) {
+            ggml.impl.ggml_c.GGML_GLU_OP_REGLU,
+            ggml.impl.ggml_c.GGML_GLU_OP_GEGLU,
+            ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU,
+            ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU_OAI,
+            ggml.impl.ggml_c.GGML_GLU_OP_GEGLU_ERF,
+            ggml.impl.ggml_c.GGML_GLU_OP_GEGLU_QUICK,
+            ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU_CLAMP,
             => n_threads,
 
             else => ggml.impl.abort("fatal error"),
         },
 
         // Bounded by the rows there are to split.
-        ggml.impl.c.GGML_OP_SOFT_MAX => @intCast(@min(n_threads, ggml.types.ggml_nrows(ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[0])))),
+        ggml.impl.ggml_c.GGML_OP_SOFT_MAX => @intCast(@min(n_threads, ggml.types.ggml_nrows(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[0])))),
 
         // Bounded by the head count, which is where these parallelise.
-        ggml.impl.c.GGML_OP_RWKV_WKV6,
-        ggml.impl.c.GGML_OP_GATED_LINEAR_ATTN,
-        ggml.impl.c.GGML_OP_RWKV_WKV7,
-        => @intCast(@min(n_threads, ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[1]).ne[1])),
+        ggml.impl.ggml_c.GGML_OP_RWKV_WKV6,
+        ggml.impl.ggml_c.GGML_OP_GATED_LINEAR_ATTN,
+        ggml.impl.ggml_c.GGML_OP_RWKV_WKV7,
+        => @intCast(@min(n_threads, ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[1]).ne[1])),
 
         // The caller chose a task count when it built the node. All four
         // op-params layouts put `n_tasks` in the same place.
-        ggml.impl.c.GGML_OP_MAP_CUSTOM1,
-        ggml.impl.c.GGML_OP_MAP_CUSTOM2,
-        ggml.impl.c.GGML_OP_MAP_CUSTOM3,
-        ggml.impl.c.GGML_OP_CUSTOM,
+        ggml.impl.ggml_c.GGML_OP_MAP_CUSTOM1,
+        ggml.impl.ggml_c.GGML_OP_MAP_CUSTOM2,
+        ggml.impl.ggml_c.GGML_OP_MAP_CUSTOM3,
+        ggml.impl.ggml_c.GGML_OP_CUSTOM,
         => blk: {
             var p: ggml.impl.CustomOpParams = undefined;
             @memcpy(std.mem.asBytes(&p), std.mem.asBytes(&node.op_params)[0..@sizeOf(ggml.impl.CustomOpParams)]);
             break :blk if (p.n_tasks == n_tasks_max) n_threads else @intCast(@min(p.n_tasks, n_threads));
         },
 
-        ggml.impl.c.GGML_OP_COUNT => ggml.impl.abort("fatal error"),
+        ggml.impl.ggml_c.GGML_OP_COUNT => ggml.impl.abort("fatal error"),
 
         else => {
             // The C prints the op's name before aborting, so an op added
             // upstream and forgotten here says which one it was.
-            if (node.op < ggml.impl.c.GGML_OP_COUNT) {
+            if (node.op < ggml.impl.ggml_c.GGML_OP_COUNT) {
                 ggml.impl.fprintfStderr("ggml_get_n_tasks: op not implemented: %s\n", .{ggml.types.ggml_op_name(node.op)});
             } else {
                 ggml.impl.fprintfStderr("ggml_get_n_tasks: op not implemented: %d\n", .{node.op});
@@ -160,19 +160,19 @@ pub fn getNTasks(node: *ggml.impl.c.ggml_tensor, n_threads: c_int) c_int {
 ///
 /// Return: the plan, by value. `work_data` is left null for the caller to
 /// allocate `work_size` bytes into.
-pub export fn ggml_graph_plan(
+pub fn ggml_graph_plan(
     cgraph: *const ggml.impl.CGraph,
     n_threads_in: c_int,
     threadpool: ?*ggml.cpu.defs.Threadpool,
-) ggml.impl.c.struct_ggml_cplan {
+) callconv(.c) ggml.impl.ggml_c.struct_ggml_cplan {
     var n_threads = n_threads_in;
     if (n_threads <= 0) {
-        n_threads = if (threadpool) |tp| tp.n_threads else ggml.impl.c.GGML_DEFAULT_N_THREADS;
+        n_threads = if (threadpool) |tp| tp.n_threads else ggml.impl.ggml_c.GGML_DEFAULT_N_THREADS;
     }
 
     var work_size: usize = 0;
 
-    var cplan: ggml.impl.c.struct_ggml_cplan = std.mem.zeroes(ggml.impl.c.struct_ggml_cplan);
+    var cplan: ggml.impl.ggml_c.struct_ggml_cplan = std.mem.zeroes(ggml.impl.ggml_c.struct_ggml_cplan);
 
     var max_tasks: c_int = 1;
 
@@ -219,50 +219,50 @@ pub export fn ggml_graph_plan(
 /// - `n_tasks`: how many threads will run it, from `getNTasks`.
 ///
 /// Return: bytes of work buffer the node's kernel will use.
-fn nodeWorkSize(node: *const ggml.impl.c.ggml_tensor, n_tasks: i64) usize {
-    const f32_size = ggml.types.ggml_type_size(ggml.impl.c.GGML_TYPE_F32);
+fn nodeWorkSize(node: *const ggml.impl.ggml_c.ggml_tensor, n_tasks: i64) usize {
+    const f32_size = ggml.types.ggml_type_size(ggml.impl.ggml_c.GGML_TYPE_F32);
 
     switch (node.op) {
-        ggml.impl.c.GGML_OP_CPY, ggml.impl.c.GGML_OP_DUP => {
-            const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[0]);
+        ggml.impl.ggml_c.GGML_OP_CPY, ggml.impl.ggml_c.GGML_OP_DUP => {
+            const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[0]);
 
             // A `CONT` has no second source, so every pair below is guarded.
-            const src1_type: ?ggml.impl.c.enum_ggml_type =
-                if (node.src[1] == null) null else ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[1]).type;
+            const src1_type: ?ggml.impl.ggml_c.enum_ggml_type =
+                if (node.src[1] == null) null else ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[1]).type;
 
             const via_f32 = ggml.types.ggml_is_quantized(node.type) or
                 // F16 <-> BF16 copies go through an intermediate F32.
-                (src0.type == ggml.impl.c.GGML_TYPE_F16 and src1_type == ggml.impl.c.GGML_TYPE_BF16) or
-                (src0.type == ggml.impl.c.GGML_TYPE_BF16 and src1_type == ggml.impl.c.GGML_TYPE_F16) or
+                (src0.type == ggml.impl.ggml_c.GGML_TYPE_F16 and src1_type == ggml.impl.ggml_c.GGML_TYPE_BF16) or
+                (src0.type == ggml.impl.ggml_c.GGML_TYPE_BF16 and src1_type == ggml.impl.ggml_c.GGML_TYPE_F16) or
                 // So does conversion between F32 and I32.
-                (src0.type == ggml.impl.c.GGML_TYPE_F32 and src1_type == ggml.impl.c.GGML_TYPE_I32) or
-                (src0.type == ggml.impl.c.GGML_TYPE_I32 and src1_type == ggml.impl.c.GGML_TYPE_F32);
+                (src0.type == ggml.impl.ggml_c.GGML_TYPE_F32 and src1_type == ggml.impl.ggml_c.GGML_TYPE_I32) or
+                (src0.type == ggml.impl.ggml_c.GGML_TYPE_I32 and src1_type == ggml.impl.ggml_c.GGML_TYPE_F32);
 
             if (via_f32) return f32_size * @as(usize, @intCast(node.ne[0] * n_tasks));
             return 0;
         },
 
-        ggml.impl.c.GGML_OP_ADD, ggml.impl.c.GGML_OP_ADD_ID => {
-            const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[0]);
-            if (ggml.types.ggml_is_quantized(src0.type) or src0.type == ggml.impl.c.GGML_TYPE_F8_E4M3) {
+        ggml.impl.ggml_c.GGML_OP_ADD, ggml.impl.ggml_c.GGML_OP_ADD_ID => {
+            const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[0]);
+            if (ggml.types.ggml_is_quantized(src0.type) or src0.type == ggml.impl.ggml_c.GGML_TYPE_F8_E4M3) {
                 return f32_size * @as(usize, @intCast(src0.ne[0] * n_tasks));
             }
             return 0;
         },
 
-        ggml.impl.c.GGML_OP_ACC => {
+        ggml.impl.ggml_c.GGML_OP_ACC => {
             // Sized from `src[1]`, the block being written, not `src[0]`.
-            if (ggml.types.ggml_is_quantized(ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[0]).type)) {
-                return f32_size * @as(usize, @intCast(ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[1]).ne[0] * n_tasks));
+            if (ggml.types.ggml_is_quantized(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[0]).type)) {
+                return f32_size * @as(usize, @intCast(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[1]).ne[0] * n_tasks));
             }
             return 0;
         },
 
-        ggml.impl.c.GGML_OP_COUNT_EQUAL => return ggml.types.ggml_type_size(node.type) * @as(usize, @intCast(n_tasks)),
+        ggml.impl.ggml_c.GGML_OP_COUNT_EQUAL => return ggml.types.ggml_type_size(node.type) * @as(usize, @intCast(n_tasks)),
 
-        ggml.impl.c.GGML_OP_MUL_MAT => {
-            const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[1]);
-            const vec_dot_type = ggml.cpu.traits.table[@intCast(ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[0]).type)].vec_dot_type;
+        ggml.impl.ggml_c.GGML_OP_MUL_MAT => {
+            const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[1]);
+            const vec_dot_type = ggml.cpu.traits.table[@intCast(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[0]).type)].vec_dot_type;
 
             var cur: usize = 0;
             if (src1.type != vec_dot_type) {
@@ -275,14 +275,14 @@ fn nodeWorkSize(node: *const ggml.impl.c.ggml_tensor, n_tasks: i64) usize {
             return cur;
         },
 
-        ggml.impl.c.GGML_OP_MUL_MAT_ID => {
+        ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID => {
             // Four sub-allocations, each rounded up by `incr_ptr_aligned` in
             // `mulmat.zig`. The trailing `sizeof(int64_t)` on the first three
             // and the trailing cache line on the fourth are that rounding's
             // worst case.
-            const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[0]);
-            const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[1]);
-            const ids = ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[2]);
+            const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[0]);
+            const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[1]);
+            const ids = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[2]);
             const vec_dot_type = ggml.cpu.traits.table[@intCast(src0.type)].vec_dot_type;
             const n_as: usize = @intCast(src0.ne[2]);
 
@@ -306,31 +306,31 @@ fn nodeWorkSize(node: *const ggml.impl.c.ggml_tensor, n_tasks: i64) usize {
             return cur;
         },
 
-        ggml.impl.c.GGML_OP_OUT_PROD => {
-            const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[0]);
-            if (ggml.types.ggml_is_quantized(src0.type) or src0.type == ggml.impl.c.GGML_TYPE_F8_E4M3 or
-                src0.type == ggml.impl.c.GGML_TYPE_F16)
+        ggml.impl.ggml_c.GGML_OP_OUT_PROD => {
+            const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[0]);
+            if (ggml.types.ggml_is_quantized(src0.type) or src0.type == ggml.impl.ggml_c.GGML_TYPE_F8_E4M3 or
+                src0.type == ggml.impl.ggml_c.GGML_TYPE_F16)
             {
                 return f32_size * @as(usize, @intCast(src0.ne[0] * n_tasks));
             }
             return 0;
         },
 
-        ggml.impl.c.GGML_OP_SET_ROWS => {
-            const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[0]);
-            if (src0.type == ggml.impl.c.GGML_TYPE_F16 and node.type != ggml.impl.c.GGML_TYPE_F16) {
+        ggml.impl.ggml_c.GGML_OP_SET_ROWS => {
+            const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[0]);
+            if (src0.type == ggml.impl.ggml_c.GGML_TYPE_F16 and node.type != ggml.impl.ggml_c.GGML_TYPE_F16) {
                 return f32_size * @as(usize, @intCast(src0.ne[0] * n_tasks));
             }
             return 0;
         },
 
-        ggml.impl.c.GGML_OP_SOFT_MAX, ggml.impl.c.GGML_OP_ROPE, ggml.impl.c.GGML_OP_ROPE_BACK => {
+        ggml.impl.ggml_c.GGML_OP_SOFT_MAX, ggml.impl.ggml_c.GGML_OP_ROPE, ggml.impl.ggml_c.GGML_OP_ROPE_BACK => {
             return f32_size * @as(usize, @intCast(node.ne[0] * n_tasks));
         },
 
-        ggml.impl.c.GGML_OP_CONV_TRANSPOSE_1D => {
-            const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[0]);
-            const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[1]);
+        ggml.impl.ggml_c.GGML_OP_CONV_TRANSPOSE_1D => {
+            const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[0]);
+            const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[1]);
 
             ggml.impl.assert(src0.ne[3] == 1, "node->src[0]->ne[3] == 1");
             ggml.impl.assert(src1.ne[2] == 1, "node->src[1]->ne[2] == 1");
@@ -342,24 +342,24 @@ fn nodeWorkSize(node: *const ggml.impl.c.ggml_tensor, n_tasks: i64) usize {
             const ne10 = src1.ne[0]; // L
             const ne11 = src1.ne[1]; // Cin
 
-            if ((src0.type == ggml.impl.c.GGML_TYPE_F16 or src0.type == ggml.impl.c.GGML_TYPE_BF16) and
-                src1.type == ggml.impl.c.GGML_TYPE_F32)
+            if ((src0.type == ggml.impl.ggml_c.GGML_TYPE_F16 or src0.type == ggml.impl.ggml_c.GGML_TYPE_BF16) and
+                src1.type == ggml.impl.ggml_c.GGML_TYPE_F32)
             {
                 // The source is permuted into F32 (#31854); only
                 // the kernel is stored as F16.
                 return @sizeOf(f32) * @as(usize, @intCast(ne10 * ne11)) +
-                    @sizeOf(ggml.impl.c.ggml_fp16_t) * @as(usize, @intCast(ne00 * ne01 * ne02));
-            } else if (src0.type == ggml.impl.c.GGML_TYPE_F32 and src1.type == ggml.impl.c.GGML_TYPE_F32) {
+                    @sizeOf(ggml.impl.ggml_c.ggml_fp16_t) * @as(usize, @intCast(ne00 * ne01 * ne02));
+            } else if (src0.type == ggml.impl.ggml_c.GGML_TYPE_F32 and src1.type == ggml.impl.ggml_c.GGML_TYPE_F32) {
                 return @sizeOf(f32) * @as(usize, @intCast(ne00 * ne01 * ne02 + ne10 * ne11));
             }
             ggml.impl.abort("fatal error");
         },
 
-        ggml.impl.c.GGML_OP_CONV_2D, ggml.impl.c.GGML_OP_CONV_3D => return im2col_work_size,
+        ggml.impl.ggml_c.GGML_OP_CONV_2D, ggml.impl.ggml_c.GGML_OP_CONV_3D => return im2col_work_size,
 
-        ggml.impl.c.GGML_OP_CONV_TRANSPOSE_2D => {
-            const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[0]);
-            const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[1]);
+        ggml.impl.ggml_c.GGML_OP_CONV_TRANSPOSE_2D => {
+            const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[0]);
+            const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[1]);
 
             const ne00 = src0.ne[0]; // W
             const ne01 = src0.ne[1]; // H
@@ -372,10 +372,10 @@ fn nodeWorkSize(node: *const ggml.impl.c.ggml_tensor, n_tasks: i64) usize {
             const ne13 = src1.ne[3]; // Batch
 
             ggml.impl.assert(
-                src0.type == ggml.impl.c.GGML_TYPE_F16 or src0.type == ggml.impl.c.GGML_TYPE_F32,
+                src0.type == ggml.impl.ggml_c.GGML_TYPE_F16 or src0.type == ggml.impl.ggml_c.GGML_TYPE_F32,
                 "node->src[0]->type == GGML_TYPE_F16 || node->src[0]->type == GGML_TYPE_F32",
             );
-            ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "node->src[1]->type == GGML_TYPE_F32");
+            ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "node->src[1]->type == GGML_TYPE_F32");
 
             // The source is permuted into F32 (#31854), ahead of
             // the kernel in its own type.
@@ -383,14 +383,14 @@ fn nodeWorkSize(node: *const ggml.impl.c.ggml_tensor, n_tasks: i64) usize {
                 ggml.types.ggml_type_size(src0.type) * @as(usize, @intCast(ne00 * ne01 * ne02 * ne03));
         },
 
-        ggml.impl.c.GGML_OP_TOP_K => {
-            return @sizeOf(i32) * @as(usize, @intCast(ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[0]).ne[0] * n_tasks));
+        ggml.impl.ggml_c.GGML_OP_TOP_K => {
+            return @sizeOf(i32) * @as(usize, @intCast(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[0]).ne[0] * n_tasks));
         },
 
-        ggml.impl.c.GGML_OP_FLASH_ATTN_EXT => {
-            const neq2 = ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[0]).ne[2]; // query heads
-            const dk = ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[1]).ne[0]; // key width
-            const dv = ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[2]).ne[0]; // value width
+        ggml.impl.ggml_c.GGML_OP_FLASH_ATTN_EXT => {
+            const neq2 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[0]).ne[2]; // query heads
+            const dk = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[1]).ne[0]; // key width
+            const dv = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[2]).ne[0]; // value width
 
             // Prefill: per thread, Q_q + KQ + mask + VKQ32 + V32 + K_f32.
             const prefill = @sizeOf(f32) * @as(usize, @intCast((fa_tile_q * dk +
@@ -406,15 +406,15 @@ fn nodeWorkSize(node: *const ggml.impl.c.ggml_tensor, n_tasks: i64) usize {
             return @max(prefill, decode);
         },
 
-        ggml.impl.c.GGML_OP_FLASH_ATTN_BACK => {
-            const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[1]);
-            const d = ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[0]).ne[0];
+        ggml.impl.ggml_c.GGML_OP_FLASH_ATTN_BACK => {
+            const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[1]);
+            const d = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[0]).ne[0];
             const ne11 = up(src1.ne[1], soft_max_unroll);
             // Doubled for S and SM in the kernel.
             const mx_dn = @max(d, ne11) * 2;
 
             const t = src1.type;
-            if (t == ggml.impl.c.GGML_TYPE_F32 or t == ggml.impl.c.GGML_TYPE_F16 or t == ggml.impl.c.GGML_TYPE_BF16) {
+            if (t == ggml.impl.ggml_c.GGML_TYPE_F32 or t == ggml.impl.ggml_c.GGML_TYPE_F16 or t == ggml.impl.ggml_c.GGML_TYPE_BF16) {
                 // The C writes this as two identical additions with a note
                 // that the second overestimates by 2x. Kept as written.
                 return 2 * @sizeOf(f32) * @as(usize, @intCast(mx_dn * n_tasks));
@@ -422,24 +422,24 @@ fn nodeWorkSize(node: *const ggml.impl.c.ggml_tensor, n_tasks: i64) usize {
             return 0;
         },
 
-        ggml.impl.c.GGML_OP_CROSS_ENTROPY_LOSS => {
+        ggml.impl.ggml_c.GGML_OP_CROSS_ENTROPY_LOSS => {
             return ggml.types.ggml_type_size(node.type) *
-                @as(usize, @intCast(n_tasks + ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[0]).ne[0] * n_tasks));
+                @as(usize, @intCast(n_tasks + ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[0]).ne[0] * n_tasks));
         },
 
-        ggml.impl.c.GGML_OP_GATED_DELTA_NET => {
-            const s_v = ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[2]).ne[0];
+        ggml.impl.ggml_c.GGML_OP_GATED_DELTA_NET => {
+            const s_v = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[2]).ne[0];
             const k: i64 = ggml.impl.getOpParamsI32(node, 0);
             const per_thread = s_v + (if (k > 1) s_v * s_v else 0);
             return @as(usize, @intCast(per_thread * n_tasks)) * @sizeOf(f32);
         },
 
-        ggml.impl.c.GGML_OP_LIGHTNING_INDEXER => {
+        ggml.impl.ggml_c.GGML_OP_LIGHTNING_INDEXER => {
             // Scratch for dequantising the indexer keys.
-            return @sizeOf(f32) * @as(usize, @intCast(ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[1]).ne[0] * n_tasks));
+            return @sizeOf(f32) * @as(usize, @intCast(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, node.src[1]).ne[0] * n_tasks));
         },
 
-        ggml.impl.c.GGML_OP_COUNT => ggml.impl.abort("fatal error"),
+        ggml.impl.ggml_c.GGML_OP_COUNT => ggml.impl.abort("fatal error"),
 
         else => return 0,
     }
@@ -462,37 +462,37 @@ test "ggml_up rounds to a power of two" {
 test "n_tasks is 1 for an empty node whatever its op" {
     // Checked before the switch, so even an op that would otherwise take
     // every thread gets one.
-    var node: ggml.impl.c.ggml_tensor = std.mem.zeroes(ggml.impl.c.ggml_tensor);
-    node.op = ggml.impl.c.GGML_OP_MUL_MAT;
+    var node: ggml.impl.ggml_c.ggml_tensor = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
+    node.op = ggml.impl.ggml_c.GGML_OP_MUL_MAT;
     node.ne = .{ 0, 1, 1, 1 };
 
     try std.testing.expectEqual(@as(c_int, 1), getNTasks(&node, 8));
 }
 
 test "n_tasks splits the parallel ops and pins the serial ones" {
-    var node: ggml.impl.c.ggml_tensor = std.mem.zeroes(ggml.impl.c.ggml_tensor);
+    var node: ggml.impl.ggml_c.ggml_tensor = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
     node.ne = .{ 4, 4, 1, 1 };
     node.nb = .{ 4, 16, 64, 64 };
-    node.type = ggml.impl.c.GGML_TYPE_F32;
+    node.type = ggml.impl.ggml_c.GGML_TYPE_F32;
 
-    node.op = ggml.impl.c.GGML_OP_MUL_MAT;
+    node.op = ggml.impl.ggml_c.GGML_OP_MUL_MAT;
     try std.testing.expectEqual(@as(c_int, 8), getNTasks(&node, 8));
 
-    node.op = ggml.impl.c.GGML_OP_SUM;
+    node.op = ggml.impl.ggml_c.GGML_OP_SUM;
     try std.testing.expectEqual(@as(c_int, 1), getNTasks(&node, 8));
 
     // `CLAMP` is 1 with a TODO in the C, and reads like an oversight. It is
     // not one to fix here.
-    node.op = ggml.impl.c.GGML_OP_CLAMP;
+    node.op = ggml.impl.ggml_c.GGML_OP_CLAMP;
     try std.testing.expectEqual(@as(c_int, 1), getNTasks(&node, 8));
 }
 
 test "soft_max asks for no more threads than there are rows" {
-    var src: ggml.impl.c.ggml_tensor = std.mem.zeroes(ggml.impl.c.ggml_tensor);
+    var src: ggml.impl.ggml_c.ggml_tensor = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
     src.ne = .{ 16, 3, 1, 1 };
 
-    var node: ggml.impl.c.ggml_tensor = std.mem.zeroes(ggml.impl.c.ggml_tensor);
-    node.op = ggml.impl.c.GGML_OP_SOFT_MAX;
+    var node: ggml.impl.ggml_c.ggml_tensor = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
+    node.op = ggml.impl.ggml_c.GGML_OP_SOFT_MAX;
     node.ne = .{ 16, 3, 1, 1 };
     node.src[0] = &src;
 
@@ -501,8 +501,8 @@ test "soft_max asks for no more threads than there are rows" {
 }
 
 test "a custom op's task count comes out of op_params" {
-    var node: ggml.impl.c.ggml_tensor = std.mem.zeroes(ggml.impl.c.ggml_tensor);
-    node.op = ggml.impl.c.GGML_OP_CUSTOM;
+    var node: ggml.impl.ggml_c.ggml_tensor = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
+    node.op = ggml.impl.ggml_c.GGML_OP_CUSTOM;
     node.ne = .{ 4, 1, 1, 1 };
 
     const p = ggml.impl.CustomOpParams{ .fun = null, .n_tasks = 3, .userdata = null };
@@ -519,21 +519,21 @@ test "mul_mat_id reserves room for all four sub-allocations" {
     // The kernel carves these out with `incr_ptr_aligned`, so the count here
     // has to cover the alignment slack as well as the blocks themselves. An
     // underestimate is an overrun of a shared buffer.
-    var src0: ggml.impl.c.ggml_tensor = std.mem.zeroes(ggml.impl.c.ggml_tensor);
-    src0.type = ggml.impl.c.GGML_TYPE_F32;
+    var src0: ggml.impl.ggml_c.ggml_tensor = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
+    src0.type = ggml.impl.ggml_c.GGML_TYPE_F32;
     src0.ne = .{ 8, 4, 3, 1 }; // 3 experts
 
-    var src1: ggml.impl.c.ggml_tensor = std.mem.zeroes(ggml.impl.c.ggml_tensor);
-    src1.type = ggml.impl.c.GGML_TYPE_F32;
+    var src1: ggml.impl.ggml_c.ggml_tensor = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
+    src1.type = ggml.impl.ggml_c.GGML_TYPE_F32;
     src1.ne = .{ 8, 2, 1, 1 };
     src1.nb = .{ 4, 32, 64, 64 };
 
-    var ids: ggml.impl.c.ggml_tensor = std.mem.zeroes(ggml.impl.c.ggml_tensor);
-    ids.type = ggml.impl.c.GGML_TYPE_I32;
+    var ids: ggml.impl.ggml_c.ggml_tensor = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
+    ids.type = ggml.impl.ggml_c.GGML_TYPE_I32;
     ids.ne = .{ 2, 2, 1, 1 };
 
-    var node: ggml.impl.c.ggml_tensor = std.mem.zeroes(ggml.impl.c.ggml_tensor);
-    node.op = ggml.impl.c.GGML_OP_MUL_MAT_ID;
+    var node: ggml.impl.ggml_c.ggml_tensor = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
+    node.op = ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID;
     node.ne = .{ 4, 2, 2, 1 };
     node.src[0] = &src0;
     node.src[1] = &src1;
@@ -553,12 +553,12 @@ test "mul_mat_id reserves room for all four sub-allocations" {
 }
 
 test "a node with no scratch needs none" {
-    var src0: ggml.impl.c.ggml_tensor = std.mem.zeroes(ggml.impl.c.ggml_tensor);
-    src0.type = ggml.impl.c.GGML_TYPE_F32;
+    var src0: ggml.impl.ggml_c.ggml_tensor = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
+    src0.type = ggml.impl.ggml_c.GGML_TYPE_F32;
     src0.ne = .{ 4, 1, 1, 1 };
 
-    var node: ggml.impl.c.ggml_tensor = std.mem.zeroes(ggml.impl.c.ggml_tensor);
-    node.op = ggml.impl.c.GGML_OP_ADD;
+    var node: ggml.impl.ggml_c.ggml_tensor = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
+    node.op = ggml.impl.ggml_c.GGML_OP_ADD;
     node.ne = .{ 4, 1, 1, 1 };
     node.src[0] = &src0;
 

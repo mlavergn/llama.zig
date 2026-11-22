@@ -88,7 +88,7 @@ const k_shift: ggml.cpu.quants.arch.neon.u8x16 = .{ 1, 1, 1, 1, 3, 3, 3, 3, 9, 9
 /// Five digits per byte across `qs`, then four per byte in the `qh` tail. The
 /// two blocks in the C are two braced scopes; they are two loops' worth of
 /// straight-line code here for the same reason -- the strides differ.
-pub export fn ggml_vec_dot_tq1_0_q8_K(
+pub fn ggml_vec_dot_tq1_0_q8_K(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -97,14 +97,14 @@ pub export fn ggml_vec_dot_tq1_0_q8_K(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
+) callconv(.c) void {
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
     const x = as(ggml.quants.blocks.TQ1_0, vx);
     const y = as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb = @divTrunc(n, ggml.impl.c.QK_K);
+    const nb = @divTrunc(n, ggml.impl.ggml_c.QK_K);
 
     var sumf: f32 = 0.0;
 
@@ -172,7 +172,7 @@ inline fn x_qy(y: [*]const ggml.quants.blocks.Q8_K, i: usize, off: usize) [*]con
 ///
 /// Four two-bit digits per byte, extracted with a shift and a mask rather than
 /// the base-three trick `tq1_0` needs.
-pub export fn ggml_vec_dot_tq2_0_q8_K(
+pub fn ggml_vec_dot_tq2_0_q8_K(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -181,14 +181,14 @@ pub export fn ggml_vec_dot_tq2_0_q8_K(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
+) callconv(.c) void {
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
     const x = as(ggml.quants.blocks.TQ2_0, vx);
     const y = as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb = @divTrunc(n, ggml.impl.c.QK_K);
+    const nb = @divTrunc(n, ggml.impl.ggml_c.QK_K);
     const qs_len = @typeInfo(@FieldType(ggml.quants.blocks.TQ2_0, "qs")).array.len;
 
     const m3: ggml.cpu.quants.arch.neon.u8x16 = @splat(3);
@@ -233,11 +233,11 @@ test {
 const golden = if (ggml.cpu.features.golden_generic) ggml.cpu.quants.arch.golden_generic else ggml.cpu.quants.arch.golden;
 
 test "tq1_0 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_tq1_0_q8_K, ggml.impl.c.GGML_TYPE_TQ1_0, ggml.impl.c.GGML_TYPE_Q8_K, golden.tq1_0);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_tq1_0_q8_K, ggml.impl.ggml_c.GGML_TYPE_TQ1_0, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.tq1_0);
 }
 
 test "tq2_0 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_tq2_0_q8_K, ggml.impl.c.GGML_TYPE_TQ2_0, ggml.impl.c.GGML_TYPE_Q8_K, golden.tq2_0);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_tq2_0_q8_K, ggml.impl.ggml_c.GGML_TYPE_TQ2_0, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.tq2_0);
 }
 
 test "the vector digit extraction agrees with the scalar form" {

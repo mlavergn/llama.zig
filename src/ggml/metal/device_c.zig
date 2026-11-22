@@ -160,7 +160,7 @@ pub extern fn ggml_metal_device_event_init(dev: *Device) ?*Event;
 pub extern fn ggml_metal_device_event_free(dev: *Device, ev: *Event) void;
 pub extern fn ggml_metal_device_event_synchronize(dev: *Device, ev: *Event) void;
 pub extern fn ggml_metal_device_get_memory(dev: *Device, free: *usize, total: *usize) void;
-pub extern fn ggml_metal_device_supports_op(dev: *Device, op: *const ggml.impl.c.ggml_tensor) bool;
+pub extern fn ggml_metal_device_supports_op(dev: *Device, op: *const ggml.impl.ggml_c.ggml_tensor) bool;
 
 pub extern fn ggml_metal_device_init(device: c_int, n_devices: c_int) ?*Device;
 pub extern fn ggml_metal_device_free(dev: *Device) void;
@@ -219,7 +219,7 @@ pub extern fn ggml_metal_pipeline_max_theads_per_threadgroup(pipeline: PipelineW
 pub extern fn ggml_metal_device_get_library(dev: *Device) ?*Library;
 
 /// `ggml_metal_buffer_get_id` (ggml-metal-device.h:380 @b1b770d90).
-pub extern fn ggml_metal_buffer_get_id(buf: *Buffer, t: *const ggml.impl.c.ggml_tensor) BufferId;
+pub extern fn ggml_metal_buffer_get_id(buf: *Buffer, t: *const ggml.impl.ggml_c.ggml_tensor) BufferId;
 
 pub extern fn ggml_metal_pipeline_init() ?*Pipeline;
 pub extern fn ggml_metal_pipeline_free(pipeline: *Pipeline) void;
@@ -233,13 +233,13 @@ pub extern fn ggml_metal_buffer_map(dev: *Device, ptr: ?*anyopaque, size: usize,
 pub extern fn ggml_metal_buffer_free(buf: *Buffer) void;
 pub extern fn ggml_metal_buffer_get_base(buf: *Buffer) ?*anyopaque;
 pub extern fn ggml_metal_buffer_is_shared(buf: *Buffer) bool;
-pub extern fn ggml_metal_buffer_memset_tensor(buf: *Buffer, tensor: *ggml.impl.c.ggml_tensor, value: u8, offset: usize, size: usize) void;
-pub extern fn ggml_metal_buffer_set_tensor(buf: *Buffer, tensor: *ggml.impl.c.ggml_tensor, data: ?*const anyopaque, offset: usize, size: usize) void;
-pub extern fn ggml_metal_buffer_get_tensor(buf: *Buffer, tensor: *const ggml.impl.c.ggml_tensor, data: ?*anyopaque, offset: usize, size: usize) void;
-pub extern fn ggml_metal_buffer_set_tensor_n(buf: *Buffer, tensors: [*c]const [*c]ggml.impl.c.ggml_tensor, data: [*c]const ?*const anyopaque, offsets: [*c]const usize, sizes: [*c]const usize, n_tensors: usize) void;
-pub extern fn ggml_metal_buffer_get_tensor_n(buf: *Buffer, tensors: [*c]const [*c]const ggml.impl.c.ggml_tensor, data: [*c]const ?*anyopaque, offsets: [*c]const usize, sizes: [*c]const usize, n_tensors: usize) void;
-pub extern fn ggml_metal_buffer_cpy_tensor(buf: *Buffer, src: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor) bool;
-pub extern fn ggml_metal_buffer_cpy_tensor_n(buf: *Buffer, srcs: [*c]const [*c]const ggml.impl.c.ggml_tensor, dsts: [*c]const [*c]ggml.impl.c.ggml_tensor, n_tensors: usize) bool;
+pub extern fn ggml_metal_buffer_memset_tensor(buf: *Buffer, tensor: *ggml.impl.ggml_c.ggml_tensor, value: u8, offset: usize, size: usize) void;
+pub extern fn ggml_metal_buffer_set_tensor(buf: *Buffer, tensor: *ggml.impl.ggml_c.ggml_tensor, data: ?*const anyopaque, offset: usize, size: usize) void;
+pub extern fn ggml_metal_buffer_get_tensor(buf: *Buffer, tensor: *const ggml.impl.ggml_c.ggml_tensor, data: ?*anyopaque, offset: usize, size: usize) void;
+pub extern fn ggml_metal_buffer_set_tensor_n(buf: *Buffer, tensors: [*c]const [*c]ggml.impl.ggml_c.ggml_tensor, data: [*c]const ?*const anyopaque, offsets: [*c]const usize, sizes: [*c]const usize, n_tensors: usize) void;
+pub extern fn ggml_metal_buffer_get_tensor_n(buf: *Buffer, tensors: [*c]const [*c]const ggml.impl.ggml_c.ggml_tensor, data: [*c]const ?*anyopaque, offsets: [*c]const usize, sizes: [*c]const usize, n_tensors: usize) void;
+pub extern fn ggml_metal_buffer_cpy_tensor(buf: *Buffer, src: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor) bool;
+pub extern fn ggml_metal_buffer_cpy_tensor_n(buf: *Buffer, srcs: [*c]const [*c]const ggml.impl.ggml_c.ggml_tensor, dsts: [*c]const [*c]ggml.impl.ggml_c.ggml_tensor, n_tensors: usize) bool;
 pub extern fn ggml_metal_buffer_clear(buf: *Buffer, value: u8) void;
 
 // -----------------------------------------------------------------------------
@@ -249,15 +249,15 @@ pub extern fn ggml_metal_init(dev: *Device) ?*Context;
 pub extern fn ggml_metal_free(ctx: *Context) void;
 pub extern fn ggml_metal_get_name(ctx: *Context) [*c]const u8;
 pub extern fn ggml_metal_synchronize(ctx: *Context) void;
-pub extern fn ggml_metal_set_tensor_async(ctx: *Context, tensor: *ggml.impl.c.ggml_tensor, data: ?*const anyopaque, offset: usize, size: usize) void;
-pub extern fn ggml_metal_get_tensor_async(ctx: *Context, tensor: *const ggml.impl.c.ggml_tensor, data: ?*anyopaque, offset: usize, size: usize) void;
-pub extern fn ggml_metal_cpy_tensor_async(ctx_src: *Context, ctx_dst: *Context, src: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor) bool;
-pub extern fn ggml_metal_graph_compute(ctx: *Context, gf: *ggml.impl.c.ggml_cgraph) ggml.impl.c.enum_ggml_status;
-pub extern fn ggml_metal_graph_optimize(ctx: *Context, gf: *ggml.impl.c.ggml_cgraph) void;
+pub extern fn ggml_metal_set_tensor_async(ctx: *Context, tensor: *ggml.impl.ggml_c.ggml_tensor, data: ?*const anyopaque, offset: usize, size: usize) void;
+pub extern fn ggml_metal_get_tensor_async(ctx: *Context, tensor: *const ggml.impl.ggml_c.ggml_tensor, data: ?*anyopaque, offset: usize, size: usize) void;
+pub extern fn ggml_metal_cpy_tensor_async(ctx_src: *Context, ctx_dst: *Context, src: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor) bool;
+pub extern fn ggml_metal_graph_compute(ctx: *Context, gf: *ggml.impl.ggml_c.ggml_cgraph) ggml.impl.ggml_c.enum_ggml_status;
+pub extern fn ggml_metal_graph_optimize(ctx: *Context, gf: *ggml.impl.ggml_c.ggml_cgraph) void;
 pub extern fn ggml_metal_event_record(ctx: *Context, ev: *Event) void;
 pub extern fn ggml_metal_event_wait(ctx: *Context, ev: *Event) void;
 pub extern fn ggml_metal_set_n_cb(ctx: *Context, n_cb: c_int) void;
-pub extern fn ggml_metal_set_abort_callback(ctx: *Context, abort_callback: ggml.impl.c.ggml_abort_callback, user_data: ?*anyopaque) void;
+pub extern fn ggml_metal_set_abort_callback(ctx: *Context, abort_callback: ggml.impl.ggml_c.ggml_abort_callback, user_data: ?*anyopaque) void;
 pub extern fn ggml_metal_supports_family(ctx: *Context, family: c_int) bool;
 pub extern fn ggml_metal_capture_next_compute(ctx: *Context) void;
 
@@ -275,26 +275,26 @@ pub extern fn ggml_metal_capture_next_compute(ctx: *Context) void;
 // against its own `sizeof` and `offsetof`. Exported rather than asserted
 // at comptime because only the C compiler knows the answer.
 
-export fn zz_props_sizeof() usize {
+pub fn zz_props_sizeof() callconv(.c) usize {
     return @sizeOf(DeviceProps);
 }
 
 /// The same facts for `PipelineWithParams`, plus a value the C side reads
 /// back to prove the **return** ABI — 40 bytes with interior padding,
 /// returned by value 76 times over.
-export fn zz_pwp_sizeof() usize {
+pub fn zz_pwp_sizeof() callconv(.c) usize {
     return @sizeOf(PipelineWithParams);
 }
-export fn zz_pwp_nfields() usize {
+pub fn zz_pwp_nfields() callconv(.c) usize {
     return @typeInfo(PipelineWithParams).@"struct".field_names.len;
 }
-export fn zz_pwp_offset(i: usize) usize {
+pub fn zz_pwp_offset(i: usize) callconv(.c) usize {
     inline for (@typeInfo(PipelineWithParams).@"struct".field_names, 0..) |name, k| {
         if (k == i) return @offsetOf(PipelineWithParams, name);
     }
     return std.math.maxInt(usize);
 }
-export fn zz_pwp_field_size(i: usize) usize {
+pub fn zz_pwp_field_size(i: usize) callconv(.c) usize {
     inline for (@typeInfo(PipelineWithParams).@"struct".field_types, 0..) |F, k| {
         if (k == i) return @sizeOf(F);
     }
@@ -303,7 +303,7 @@ export fn zz_pwp_field_size(i: usize) usize {
 
 /// Returns a struct with every field set to a distinct marker, so the C
 /// side can confirm each one survives the return.
-export fn zz_pwp_roundtrip() PipelineWithParams {
+pub fn zz_pwp_roundtrip() callconv(.c) PipelineWithParams {
     return .{
         .pipeline = @ptrFromInt(0xdead0000),
         .nsg = 11,
@@ -314,10 +314,10 @@ export fn zz_pwp_roundtrip() PipelineWithParams {
         .cnt = false,
     };
 }
-export fn zz_props_alignof() usize {
+pub fn zz_props_alignof() callconv(.c) usize {
     return @alignOf(DeviceProps);
 }
-export fn zz_props_nfields() usize {
+pub fn zz_props_nfields() callconv(.c) usize {
     return @typeInfo(DeviceProps).@"struct".field_names.len;
 }
 
@@ -326,7 +326,7 @@ export fn zz_props_nfields() usize {
 /// One function over an index rather than 22 named exports, so adding a
 /// field upstream cannot leave a new one unchecked: the harness compares
 /// `zz_props_nfields` too.
-export fn zz_props_offset(i: usize) usize {
+pub fn zz_props_offset(i: usize) callconv(.c) usize {
     inline for (@typeInfo(DeviceProps).@"struct".field_names, 0..) |name, k| {
         if (k == i) return @offsetOf(DeviceProps, name);
     }
@@ -335,7 +335,7 @@ export fn zz_props_offset(i: usize) usize {
 
 /// The size of field `i`, which catches a field of the right offset and
 /// the wrong width — `c_int` where the C has `size_t`, say.
-export fn zz_props_field_size(i: usize) usize {
+pub fn zz_props_field_size(i: usize) callconv(.c) usize {
     inline for (@typeInfo(DeviceProps).@"struct".field_types, 0..) |F, k| {
         if (k == i) return @sizeOf(F);
     }
@@ -344,26 +344,26 @@ export fn zz_props_field_size(i: usize) usize {
 
 // `BufferId`'s layout and round-trip, for `harness/struct_layout.cpp`.
 
-export fn zz_bid_sizeof() usize {
+pub fn zz_bid_sizeof() callconv(.c) usize {
     return @sizeOf(BufferId);
 }
 
-export fn zz_bid_alignof() usize {
+pub fn zz_bid_alignof() callconv(.c) usize {
     return @alignOf(BufferId);
 }
 
-export fn zz_bid_nfields() usize {
+pub fn zz_bid_nfields() callconv(.c) usize {
     return @typeInfo(BufferId).@"struct".field_names.len;
 }
 
-export fn zz_bid_offset(i: usize) usize {
+pub fn zz_bid_offset(i: usize) callconv(.c) usize {
     inline for (@typeInfo(BufferId).@"struct".field_names, 0..) |name, k| {
         if (k == i) return @offsetOf(BufferId, name);
     }
     return std.math.maxInt(usize);
 }
 
-export fn zz_bid_field_size(i: usize) usize {
+pub fn zz_bid_field_size(i: usize) callconv(.c) usize {
     inline for (@typeInfo(BufferId).@"struct".field_types, 0..) |F, k| {
         if (k == i) return @sizeOf(F);
     }
@@ -373,7 +373,7 @@ export fn zz_bid_field_size(i: usize) usize {
 /// Takes a `BufferId` **by value** from C and hands the two fields back,
 /// so the gate can see whether the receive path carries them. This is the
 /// direction Zig 0.16 gets wrong for some shapes.
-export fn zz_bid_roundtrip(in: BufferId, out_metal: *?*anyopaque, out_offs: *usize) void {
+pub fn zz_bid_roundtrip(in: BufferId, out_metal: *?*anyopaque, out_offs: *usize) callconv(.c) void {
     out_metal.* = in.metal;
     out_offs.* = in.offs;
 }

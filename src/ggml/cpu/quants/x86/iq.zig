@@ -54,11 +54,11 @@ const keven_signs: [128]u64 = blk: {
 };
 
 inline fn grid64(comptime name: []const u8) [*]const u64 {
-    return @ptrCast(&@field(ggml.impl.c, name));
+    return @ptrCast(&@field(ggml.impl.ggml_c, name));
 }
 
 inline fn grid32(comptime name: []const u8) [*]const u32 {
-    return @ptrCast(&@field(ggml.impl.c, name));
+    return @ptrCast(&@field(ggml.impl.ggml_c, name));
 }
 
 /// Four 64-bit grid entries into one register, `e3` highest.
@@ -78,7 +78,7 @@ inline fn oddScale(ls: u32) ggml.cpu.quants.arch.avx2.m256i {
 
 /// Ports `ggml_vec_dot_iq2_xxs_q8_K` (arch/x86/quants.c:2724 @b1b770d90),
 /// the `__AVX2__` arm.
-pub export fn ggml_vec_dot_iq2_xxs_q8_K(
+pub fn ggml_vec_dot_iq2_xxs_q8_K(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -87,15 +87,15 @@ pub export fn ggml_vec_dot_iq2_xxs_q8_K(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
+) callconv(.c) void {
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
     const x = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.IQ2_XXS, vx);
     const y = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK_K));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK_K));
 
     const grid = grid64("iq2xxs_grid");
     const signs64 = &keven_signs;
@@ -111,7 +111,7 @@ pub export fn ggml_vec_dot_iq2_xxs_q8_K(
         var sumi1 = ggml.cpu.quants.arch.avx2.mm256_setzero_si256();
         var sumi2 = ggml.cpu.quants.arch.avx2.mm256_setzero_si256();
         var ib32: usize = 0;
-        while (ib32 < ggml.impl.c.QK_K / 32) : (ib32 += 2) {
+        while (ib32 < ggml.impl.ggml_c.QK_K / 32) : (ib32 += 2) {
             const q8_1 = ggml.cpu.quants.arch.avx2.mm256_loadu_si256(q8);
             q8 += 32;
             const q8_2 = ggml.cpu.quants.arch.avx2.mm256_loadu_si256(q8);
@@ -147,7 +147,7 @@ pub export fn ggml_vec_dot_iq2_xxs_q8_K(
 /// the parity of the seven, recovered with a 16-entry `pshufb` over their
 /// XOR-folded value, and the signs are spread to bytes with a shuffle and a
 /// compare against a bit selector.
-pub export fn ggml_vec_dot_iq2_xs_q8_K(
+pub fn ggml_vec_dot_iq2_xs_q8_K(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -156,15 +156,15 @@ pub export fn ggml_vec_dot_iq2_xs_q8_K(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
+) callconv(.c) void {
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
     const x = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.IQ2_XS, vx);
     const y = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK_K));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK_K));
 
     const grid = grid64("iq2xs_grid");
 
@@ -209,7 +209,7 @@ pub export fn ggml_vec_dot_iq2_xs_q8_K(
         var sumi1 = ggml.cpu.quants.arch.avx2.mm256_setzero_si256();
         var sumi2 = ggml.cpu.quants.arch.avx2.mm256_setzero_si256();
         var ib32: usize = 0;
-        while (ib32 < ggml.impl.c.QK_K / 32) : (ib32 += 4) {
+        while (ib32 < ggml.impl.ggml_c.QK_K / 32) : (ib32 += 4) {
             const q2_data = ggml.cpu.quants.arch.avx2.mm256_loadu_si256(q2);
             q2 += 16;
             // The C reads these sixteen indices back through a `uint16_t *`
@@ -304,7 +304,7 @@ inline fn applySigns(q8: ggml.cpu.quants.arch.avx2.m256i, bits: u32, mask1: ggml
 
 /// Ports `ggml_vec_dot_iq2_s_q8_K` (arch/x86/quants.c:3139 @b1b770d90), the
 /// `__AVX2__` arm.
-pub export fn ggml_vec_dot_iq2_s_q8_K(
+pub fn ggml_vec_dot_iq2_s_q8_K(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -313,15 +313,15 @@ pub export fn ggml_vec_dot_iq2_s_q8_K(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
+) callconv(.c) void {
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
     const x = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.IQ2_S, vx);
     const y = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK_K));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK_K));
 
     const grid = grid64("iq2s_grid");
 
@@ -336,7 +336,7 @@ pub export fn ggml_vec_dot_iq2_s_q8_K(
         const d = ggml.cpu.quants.arch.common.f(x[i].d) * y[i].d;
         var qs: [*]const u8 = &x[i].qs;
         const qh: [*]const u8 = &x[i].qh;
-        var signs: [*]const u8 = x[i].qs[ggml.impl.c.QK_K / 8 ..].ptr;
+        var signs: [*]const u8 = x[i].qs[ggml.impl.ggml_c.QK_K / 8 ..].ptr;
         var q8: [*]const i8 = &y[i].qs;
 
         const aux64 = std.mem.readInt(u64, &x[i].scales, .little);
@@ -346,7 +346,7 @@ pub export fn ggml_vec_dot_iq2_s_q8_K(
         var sumi1 = ggml.cpu.quants.arch.avx2.mm256_setzero_si256();
         var sumi2 = ggml.cpu.quants.arch.avx2.mm256_setzero_si256();
         var ib32: usize = 0;
-        while (ib32 < ggml.impl.c.QK_K / 32) : (ib32 += 2) {
+        while (ib32 < ggml.impl.ggml_c.QK_K / 32) : (ib32 += 2) {
             const q8_1 = ggml.cpu.quants.arch.avx2.mm256_loadu_si256(q8);
             q8 += 32;
             const q8_2 = ggml.cpu.quants.arch.avx2.mm256_loadu_si256(q8);
@@ -389,7 +389,7 @@ pub export fn ggml_vec_dot_iq2_s_q8_K(
 
 /// Ports `ggml_vec_dot_iq3_xxs_q8_K` (arch/x86/quants.c:3324 @b1b770d90),
 /// the `__AVX2__` arm.
-pub export fn ggml_vec_dot_iq3_xxs_q8_K(
+pub fn ggml_vec_dot_iq3_xxs_q8_K(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -398,15 +398,15 @@ pub export fn ggml_vec_dot_iq3_xxs_q8_K(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
+) callconv(.c) void {
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
     const x = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.IQ3_XXS, vx);
     const y = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK_K));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK_K));
 
     const grid = grid32("iq3xxs_grid");
     const signs64 = &keven_signs;
@@ -417,12 +417,12 @@ pub export fn ggml_vec_dot_iq3_xxs_q8_K(
     for (0..nb) |i| {
         const d = ggml.cpu.quants.arch.common.f(x[i].d) * y[i].d;
         var q3: [*]const u8 = &x[i].qs;
-        var gas: [*]const u8 = x[i].qs[ggml.impl.c.QK_K / 4 ..].ptr;
+        var gas: [*]const u8 = x[i].qs[ggml.impl.ggml_c.QK_K / 4 ..].ptr;
         var q8: [*]const i8 = &y[i].qs;
         var sumi1 = ggml.cpu.quants.arch.avx2.mm256_setzero_si256();
         var sumi2 = ggml.cpu.quants.arch.avx2.mm256_setzero_si256();
         var ib32: usize = 0;
-        while (ib32 < ggml.impl.c.QK_K / 32) : (ib32 += 2) {
+        while (ib32 < ggml.impl.ggml_c.QK_K / 32) : (ib32 += 2) {
             const q8_1 = ggml.cpu.quants.arch.avx2.mm256_loadu_si256(q8);
             q8 += 32;
             const q8_2 = ggml.cpu.quants.arch.avx2.mm256_loadu_si256(q8);
@@ -459,7 +459,7 @@ pub export fn ggml_vec_dot_iq3_xxs_q8_K(
 /// Nine-bit indices: eight from `qs` and the ninth from `qh`, moved into
 /// place with a per-lane variable shift. The C keeps them in a union with
 /// the two registers and reads the lanes back as `uint32_t`.
-pub export fn ggml_vec_dot_iq3_s_q8_K(
+pub fn ggml_vec_dot_iq3_s_q8_K(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -468,15 +468,15 @@ pub export fn ggml_vec_dot_iq3_s_q8_K(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
+) callconv(.c) void {
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
     const x = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.IQ3_S, vx);
     const y = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK_K));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK_K));
 
     const grid = grid32("iq3s_grid");
 
@@ -496,7 +496,7 @@ pub export fn ggml_vec_dot_iq3_s_q8_K(
         var sumi1 = ggml.cpu.quants.arch.avx2.mm256_setzero_si256();
         var sumi2 = ggml.cpu.quants.arch.avx2.mm256_setzero_si256();
         var ib32: usize = 0;
-        while (ib32 < ggml.impl.c.QK_K / 32) : (ib32 += 2) {
+        while (ib32 < ggml.impl.ggml_c.QK_K / 32) : (ib32 += 2) {
             const q8_1 = ggml.cpu.quants.arch.avx2.mm256_loadu_si256(q8);
             q8 += 32;
             const q8_2 = ggml.cpu.quants.arch.avx2.mm256_loadu_si256(q8);
@@ -542,7 +542,7 @@ pub export fn ggml_vec_dot_iq3_s_q8_K(
 /// The grid holds signed bytes, so `mul_add_epi8`'s sign trick takes them.
 /// The per-group delta, `±IQ1S_DELTA` by `qh`'s top bit, is applied once
 /// per super-block through `bsums` in a scalar accumulator.
-pub export fn ggml_vec_dot_iq1_s_q8_K(
+pub fn ggml_vec_dot_iq1_s_q8_K(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -551,15 +551,15 @@ pub export fn ggml_vec_dot_iq1_s_q8_K(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
+) callconv(.c) void {
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
     const x = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.IQ1_S, vx);
     const y = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK_K));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK_K));
 
     const grid = grid64("iq1s_grid");
 
@@ -573,7 +573,7 @@ pub export fn ggml_vec_dot_iq1_s_q8_K(
         var sumi = ggml.cpu.quants.arch.avx2.mm256_setzero_si256();
         var sumi1: i32 = 0;
         var ib: usize = 0;
-        while (ib < ggml.impl.c.QK_K / 32) : (ib += 2) {
+        while (ib < ggml.impl.ggml_c.QK_K / 32) : (ib += 2) {
             const packed_idx1 = ggml.cpu.quants.arch.avx2.pdep_u64(std.mem.readInt(u32, qs[0..4], .little), 0x00ff00ff00ff00ff) | ggml.cpu.quants.arch.avx2.pdep_u64(qh[ib], 0x700070007000700);
             const packed_idx2 = ggml.cpu.quants.arch.avx2.pdep_u64(std.mem.readInt(u32, qs[4..8], .little), 0x00ff00ff00ff00ff) | ggml.cpu.quants.arch.avx2.pdep_u64(qh[ib + 1], 0x700070007000700);
             const idx1: [4]u16 = @bitCast(packed_idx1);
@@ -605,7 +605,7 @@ pub export fn ggml_vec_dot_iq1_s_q8_K(
         accum1 = @mulAdd(f32, d, @floatFromInt(sumi1), accum1);
     }
 
-    s[0] = @mulAdd(f32, ggml.impl.c.IQ1S_DELTA, accum1, ggml.cpu.quants.arch.common.hsum_float_8(accum));
+    s[0] = @mulAdd(f32, ggml.impl.ggml_c.IQ1S_DELTA, accum1, ggml.cpu.quants.arch.common.hsum_float_8(accum));
 }
 
 /// Ports `ggml_vec_dot_iq1_m_q8_K` (arch/x86/quants.c:3777 @b1b770d90), the
@@ -615,7 +615,7 @@ pub export fn ggml_vec_dot_iq1_s_q8_K(
 /// 16-bit scale words; the 3-bit group scales are the rest. The delta's
 /// sign per eight weights becomes a byte that is negative or `+1`, applied
 /// with `psign` into a second accumulator, scaled by `IQ1M_DELTA` at the end.
-pub export fn ggml_vec_dot_iq1_m_q8_K(
+pub fn ggml_vec_dot_iq1_m_q8_K(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -624,15 +624,15 @@ pub export fn ggml_vec_dot_iq1_m_q8_K(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
+) callconv(.c) void {
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
     const x = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.IQ1_M, vx);
     const y = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK_K));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK_K));
 
     const grid = grid64("iq1s_grid");
 
@@ -664,7 +664,7 @@ pub export fn ggml_vec_dot_iq1_m_q8_K(
         var sumi1 = ggml.cpu.quants.arch.avx2.mm256_setzero_si256();
         var sumi2 = ggml.cpu.quants.arch.avx2.mm256_setzero_si256();
         var ib: usize = 0;
-        while (ib < ggml.impl.c.QK_K / 32) : (ib += 2) {
+        while (ib < ggml.impl.ggml_c.QK_K / 32) : (ib += 2) {
             const packed_idx1 = ggml.cpu.quants.arch.avx2.pdep_u64(std.mem.readInt(u32, qs[0..4], .little), 0x00ff00ff00ff00ff) |
                 ggml.cpu.quants.arch.avx2.pdep_u64(std.mem.readInt(u16, qh[0..2], .little) & 0x7777, 0xf000f000f000f00);
             const packed_idx2 = ggml.cpu.quants.arch.avx2.pdep_u64(std.mem.readInt(u32, qs[4..8], .little), 0x00ff00ff00ff00ff) |
@@ -713,7 +713,7 @@ pub export fn ggml_vec_dot_iq1_m_q8_K(
         accum2 = ggml.cpu.quants.arch.avx2.mm256_fmadd_ps(d, ggml.cpu.quants.arch.avx2.mm256_cvtepi32_ps(sumi2), accum2);
     }
 
-    s[0] = @mulAdd(f32, ggml.impl.c.IQ1M_DELTA, ggml.cpu.quants.arch.common.hsum_float_8(accum2), ggml.cpu.quants.arch.common.hsum_float_8(accum1));
+    s[0] = @mulAdd(f32, ggml.impl.ggml_c.IQ1M_DELTA, ggml.cpu.quants.arch.common.hsum_float_8(accum2), ggml.cpu.quants.arch.common.hsum_float_8(accum1));
 }
 
 /// Ports `ggml_vec_dot_iq4_xs_q8_K` (arch/x86/quants.c:4068 @b1b770d90), the
@@ -721,7 +721,7 @@ pub export fn ggml_vec_dot_iq1_m_q8_K(
 ///
 /// `iq4_nl`'s codebook in super-blocks, with 6-bit signed group scales split
 /// between `scales_l` and `scales_h`.
-pub export fn ggml_vec_dot_iq4_xs_q8_K(
+pub fn ggml_vec_dot_iq4_xs_q8_K(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -730,17 +730,17 @@ pub export fn ggml_vec_dot_iq4_xs_q8_K(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
+) callconv(.c) void {
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
-    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_K) == 0);
 
     const x = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.IQ4_XS, vx);
     const y = ggml.cpu.quants.arch.common.as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK_K));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK_K));
 
-    const values128 = ggml.cpu.quants.arch.avx2.mm_loadu_si128(&ggml.impl.c.kvalues_iq4nl);
+    const values128 = ggml.cpu.quants.arch.avx2.mm_loadu_si128(&ggml.impl.ggml_c.kvalues_iq4nl);
     const m4b = ggml.cpu.quants.arch.avx2.mm_set1_epi8(0x0f);
 
     var accum = ggml.cpu.quants.arch.avx2.mm256_setzero_ps();
@@ -751,7 +751,7 @@ pub export fn ggml_vec_dot_iq4_xs_q8_K(
         var sumi1 = ggml.cpu.quants.arch.avx2.mm256_setzero_si256();
         var sumi2 = ggml.cpu.quants.arch.avx2.mm256_setzero_si256();
         var ib: usize = 0;
-        while (ib < ggml.impl.c.QK_K / 32) : (ib += 2) {
+        while (ib < ggml.impl.ggml_c.QK_K / 32) : (ib += 2) {
             const q4bits_1 = ggml.cpu.quants.arch.avx2.mm_loadu_si128(qs);
             qs += 16;
             const q4bits_2 = ggml.cpu.quants.arch.avx2.mm_loadu_si128(qs);

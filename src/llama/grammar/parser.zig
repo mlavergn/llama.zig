@@ -110,7 +110,7 @@ fn parseSpace(s: [*:0]const u8, start: usize, newline_ok: bool) usize {
 
 /// Ports `llama_grammar_parser` (llama-grammar.h:86 @b1b770d90).
 pub const Parser = struct {
-    vocab: ?*const llama.impl.c.struct_llama_vocab,
+    vocab: ?*const llama.impl.llama_c.struct_llama_vocab,
     /// Owned keys.
     symbol_ids: std.StringHashMapUnmanaged(u32) = .empty,
     rules: std.ArrayList(Rule) = .empty,
@@ -124,7 +124,7 @@ pub const Parser = struct {
     /// - `vocab`: needed only for `<token>` references; may be null.
     ///
     /// Return: an empty parser.
-    pub fn init(vocab: ?*const llama.impl.c.struct_llama_vocab) Parser {
+    pub fn init(vocab: ?*const llama.impl.llama_c.struct_llama_vocab) Parser {
         return .{ .vocab = vocab };
     }
 
@@ -303,7 +303,7 @@ pub const Parser = struct {
         }
         pos += 1;
 
-        var tokens: [2]llama.impl.c.llama_token = undefined;
+        var tokens: [2]llama.impl.llama_c.llama_token = undefined;
         const n_tokens = llama.api.vocab.llama_tokenize(self.vocab, s + start, @intCast(pos - start), &tokens, 2, false, true);
         if (n_tokens != 1) {
             return self.fail("invalid token '{s}'", .{s[start..pos]});

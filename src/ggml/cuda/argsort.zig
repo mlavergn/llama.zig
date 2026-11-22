@@ -67,7 +67,7 @@ pub fn chunkNrows(row_bytes: usize, nrows: i64) c_int {
 /// Ports `argsort_f32_i32_cuda_cub` (argsort.cu:46 @b1b770d90). The keys
 /// sort out of place, into `temp_keys_out`: CUB's device-wide sorts do not
 /// allow their input and output to alias.
-pub fn argsortF32I32CudaCub(pool: *ggml.cuda.common.Pool, x: ?*const anyopaque, dst: [*]c_int, ncols: c_int, nrows: c_int, order: ggml.impl.c.ggml_sort_order, stream: ggml.cuda.common.cu.cudaStream_t) void {
+pub fn argsortF32I32CudaCub(pool: *ggml.cuda.common.Pool, x: ?*const anyopaque, dst: [*]c_int, ncols: c_int, nrows: c_int, order: ggml.impl.ggml_c.ggml_sort_order, stream: ggml.cuda.common.cu.cudaStream_t) void {
     var temp_indices_alloc = ggml.cuda.common.PoolAlloc(c_int).initAlloc(pool, @as(usize, @bitCast(@as(isize, ncols *% nrows))));
     defer temp_indices_alloc.deinit();
     var temp_keys_alloc = ggml.cuda.common.PoolAlloc(f32).initAlloc(pool, @as(usize, @bitCast(@as(isize, ncols *% nrows))));
@@ -115,8 +115,8 @@ pub fn argsortF32I32CudaCub(pool: *ggml.cuda.common.Pool, x: ?*const anyopaque, 
     // The C repeats the same six-way dispatch twice, once with a null
     // temporary buffer to size it and once to sort.
     const Dispatch = struct {
-        fn run(d_temp_storage: ?*anyopaque, bytes: *usize, o: ggml.impl.c.ggml_sort_order, n: c_int, cap: bool, keys: [*]f32, keys_out: [*]f32, idx: [*]c_int, out: [*]c_int, nc: c_int, offs: [*]c_int, s: ggml.cuda.common.cu.cudaStream_t) void {
-            if (o == ggml.impl.c.GGML_SORT_ORDER_ASC) {
+        fn run(d_temp_storage: ?*anyopaque, bytes: *usize, o: ggml.impl.ggml_c.ggml_sort_order, n: c_int, cap: bool, keys: [*]f32, keys_out: [*]f32, idx: [*]c_int, out: [*]c_int, nc: c_int, offs: [*]c_int, s: ggml.cuda.common.cu.cudaStream_t) void {
+            if (o == ggml.impl.ggml_c.GGML_SORT_ORDER_ASC) {
                 if (n == 1) {
                     ggml.cuda.common.cudaCheck(ggml_cuda_cub_radix_sort_pairs(d_temp_storage, bytes, keys, keys_out, idx, out, nc, s), "DeviceRadixSort::SortPairs(...)", @src());
                 } else if (cap) {
@@ -161,7 +161,7 @@ pub fn nextPowerOf2(x: c_int) c_int {
 pub const argsort_block_size: c_int = 1024;
 
 /// Ports `argsort_f32_i32_cuda_bitonic` (argsort.cu:238 @b1b770d90).
-pub fn argsortF32I32CudaBitonic(x: ?*const anyopaque, dst: ?*anyopaque, ncols: c_int, nrows: c_int, order: ggml.impl.c.ggml_sort_order, stream: ggml.cuda.common.cu.cudaStream_t) void {
+pub fn argsortF32I32CudaBitonic(x: ?*const anyopaque, dst: ?*anyopaque, ncols: c_int, nrows: c_int, order: ggml.impl.ggml_c.ggml_sort_order, stream: ggml.cuda.common.cu.cudaStream_t) void {
     // bitonic sort requires ncols to be power of 2
     const ncols_pad = nextPowerOf2(ncols);
 
@@ -176,10 +176,10 @@ pub fn argsortF32I32CudaBitonic(x: ?*const anyopaque, dst: ?*anyopaque, ncols: c
 
     const p: ggml.cuda.kernels.LaunchParams = .{ .grid = block_nums, .block = block_dims, .shmem = shared_mem, .stream = stream };
     const args = .{ x, dst, ncols, ncols_pad };
-    if (order == ggml.impl.c.GGML_SORT_ORDER_ASC) {
-        ggml.cuda.kernels.launch(ggml.cuda.kernels.get("argsort", std.fmt.comptimePrint("k_argsort_f32_i32<(ggml_sort_order){d}>", .{ggml.impl.c.GGML_SORT_ORDER_ASC})), p, args);
-    } else if (order == ggml.impl.c.GGML_SORT_ORDER_DESC) {
-        ggml.cuda.kernels.launch(ggml.cuda.kernels.get("argsort", std.fmt.comptimePrint("k_argsort_f32_i32<(ggml_sort_order){d}>", .{ggml.impl.c.GGML_SORT_ORDER_DESC})), p, args);
+    if (order == ggml.impl.ggml_c.GGML_SORT_ORDER_ASC) {
+        ggml.cuda.kernels.launch(ggml.cuda.kernels.get("argsort", std.fmt.comptimePrint("k_argsort_f32_i32<(ggml_sort_order){d}>", .{ggml.impl.ggml_c.GGML_SORT_ORDER_ASC})), p, args);
+    } else if (order == ggml.impl.ggml_c.GGML_SORT_ORDER_DESC) {
+        ggml.cuda.kernels.launch(ggml.cuda.kernels.get("argsort", std.fmt.comptimePrint("k_argsort_f32_i32<(ggml_sort_order){d}>", .{ggml.impl.ggml_c.GGML_SORT_ORDER_DESC})), p, args);
     } else {
         ggml.impl.abort("fatal error");
     }
@@ -190,20 +190,20 @@ pub fn argsortF32I32CudaBitonic(x: ?*const anyopaque, dst: ?*anyopaque, ncols: c
 
 /// Ports `ggml_cuda_op_argsort` (argsort.cu:267 @b1b770d90), the
 /// `GGML_CUDA_USE_CUB` arm.
-pub fn opArgsort(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn opArgsort(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
     var src0_d: [*]const f32 = @ptrCast(@alignCast(src0.data));
     var dst_d: [*]f32 = @ptrCast(@alignCast(dst.data));
     const stream = ctx.stream();
 
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_I32, " dst->type == GGML_TYPE_I32");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_I32, " dst->type == GGML_TYPE_I32");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
 
     const ncols: i64 = src0.ne[0];
-    const nrows: i64 = ggml.impl.c.ggml_nrows(src0);
+    const nrows: i64 = ggml.impl.ggml_c.ggml_nrows(src0);
 
-    const order: ggml.impl.c.ggml_sort_order = @bitCast(ggml.impl.getOpParamsI32(dst, 0));
+    const order: ggml.impl.ggml_c.ggml_sort_order = @bitCast(ggml.impl.getOpParamsI32(dst, 0));
 
     const ncols_pad = nextPowerOf2(@truncate(ncols));
     const shared_mem: usize = @as(usize, @bitCast(@as(isize, ncols_pad))) *% @sizeOf(c_int);

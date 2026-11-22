@@ -18,25 +18,19 @@
 //! it fails as upstream does when the download fails.
 
 const std = @import("std");
+const llama = @import("llama");
 const stdlib = @import("stdlib");
 const builtin = @import("builtin");
-const tc = @import("tools_common");
-const fit = @import("cli_fit");
-
-comptime {
-    // libllama, compiled in (see `build/tools.zig`).
-    _ = @import("llama").lib;
-}
-
-const gpa = std.heap.c_allocator;
+const tools_common = @import("tools_common");
+const cli_fit = @import("cli_fit");
 
 fn fput(f: *stdlib.stdio.Stream, comptime fmt: [*:0]const u8, args: anytype) void {
-    tc.io.fprintf(f, fmt, args);
+    tools_common.io.fprintf(f, fmt, args);
 }
 
 /// `GGML_ASSERT`, which upstream keeps in every build mode.
 fn ggmlAssert(ok: bool, comptime line: c_int, comptime expr: [*:0]const u8) void {
-    tc.ggml.ggmlAssert(ok, "llama-bench.cpp", line, expr);
+    tools_common.ggml.ggmlAssert(ok, "llama-bench.cpp", line, expr);
 }
 
 /// Ports `get_time_ns` (llama-bench.cpp:40 @b1b770d90).
@@ -45,7 +39,7 @@ fn getTimeNs() u64 {
 }
 
 /// Ports `tensor_buft_override_equal` (llama-bench.cpp:45 @b1b770d90).
-fn overrideEqual(a: tc.c.llama_model_tensor_buft_override, b: tc.c.llama_model_tensor_buft_override) bool {
+fn overrideEqual(a: llama.impl.llama_c.llama_model_tensor_buft_override, b: llama.impl.llama_c.llama_model_tensor_buft_override) bool {
     if (a.pattern != b.pattern) {
         // cString comparison that may be null
         if (a.pattern == null or b.pattern == null) return false;
@@ -55,7 +49,7 @@ fn overrideEqual(a: tc.c.llama_model_tensor_buft_override, b: tc.c.llama_model_t
 }
 
 /// Ports `vec_tensor_buft_override_equal` (llama-bench.cpp:61 @b1b770d90).
-fn overridesEqual(a: []const tc.c.llama_model_tensor_buft_override, b: []const tc.c.llama_model_tensor_buft_override) bool {
+fn overridesEqual(a: []const llama.impl.llama_c.llama_model_tensor_buft_override, b: []const llama.impl.llama_c.llama_model_tensor_buft_override) bool {
     if (a.len != b.len) return false;
     for (a, b) |x, y| {
         if (!overrideEqual(x, y)) return false;
@@ -64,7 +58,7 @@ fn overridesEqual(a: []const tc.c.llama_model_tensor_buft_override, b: []const t
 }
 
 /// Ports `vec_vec_tensor_buft_override_equal` (llama-bench.cpp:73 @b1b770d90).
-fn overrideListsEqual(a: []const []const tc.c.llama_model_tensor_buft_override, b: []const []const tc.c.llama_model_tensor_buft_override) bool {
+fn overrideListsEqual(a: []const []const llama.impl.llama_c.llama_model_tensor_buft_override, b: []const []const llama.impl.llama_c.llama_model_tensor_buft_override) bool {
     if (a.len != b.len) return false;
     for (a, b) |x, y| {
         if (!overridesEqual(x, y)) return false;
@@ -133,14 +127,14 @@ fn stdevF64(v: []const f64) f64 {
 fn devInfo(a: std.mem.Allocator, gpu: bool) ![:0]u8 {
     var list: std.ArrayList([*:0]const u8) = .empty;
     var i: usize = 0;
-    while (i < tc.c.ggml_backend_dev_count()) : (i += 1) {
-        const dev = tc.c.ggml_backend_dev_get(i);
-        const t = tc.c.ggml_backend_dev_type(dev);
+    while (i < llama.impl.llama_c.ggml_backend_dev_count()) : (i += 1) {
+        const dev = llama.impl.llama_c.ggml_backend_dev_get(i);
+        const t = llama.impl.llama_c.ggml_backend_dev_type(dev);
         const want = if (gpu)
-            t == tc.c.GGML_BACKEND_DEVICE_TYPE_GPU or t == tc.c.GGML_BACKEND_DEVICE_TYPE_IGPU
+            t == llama.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_GPU or t == llama.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_IGPU
         else
-            t == tc.c.GGML_BACKEND_DEVICE_TYPE_CPU or t == tc.c.GGML_BACKEND_DEVICE_TYPE_ACCEL;
-        if (want) try list.append(a, tc.c.ggml_backend_dev_description(dev));
+            t == llama.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_CPU or t == llama.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_ACCEL;
+        if (want) try list.append(a, llama.impl.llama_c.ggml_backend_dev_description(dev));
     }
     return join(a, [*:0]const u8, list.items, ", ");
 }
@@ -149,10 +143,10 @@ fn devInfo(a: std.mem.Allocator, gpu: bool) ![:0]u8 {
 const Thrown = error{Throw};
 
 /// Ports `parse_devices_arg` (llama-bench.cpp:144 @b1b770d90).
-fn parseDevicesArg(a: std.mem.Allocator, value: []const u8) !std.ArrayList(tc.c.ggml_backend_dev_t) {
-    var devices: std.ArrayList(tc.c.ggml_backend_dev_t) = .empty;
+fn parseDevicesArg(a: std.mem.Allocator, value: []const u8) !std.ArrayList(llama.impl.llama_c.ggml_backend_dev_t) {
+    var devices: std.ArrayList(llama.impl.llama_c.ggml_backend_dev_t) = .empty;
     const trimmed = stdlib.strings.strip(value);
-    if (trimmed.len == 0) return tc.arg.throwStr("no devices specified");
+    if (trimmed.len == 0) return tools_common.arg.throwStr("no devices specified");
     if (std.mem.eql(u8, trimmed, "auto")) return devices;
 
     const dev_names = try stdlib.strings.split(a, trimmed, '/');
@@ -163,11 +157,11 @@ fn parseDevicesArg(a: std.mem.Allocator, value: []const u8) !std.ArrayList(tc.c.
 
     for (dev_names.items) |name| {
         const dev_name = stdlib.strings.strip(name);
-        if (dev_name.len == 0) return tc.arg.throwStr("invalid device specification");
+        if (dev_name.len == 0) return tools_common.arg.throwStr("invalid device specification");
         const z = try a.dupeSentinel(u8, dev_name, 0);
-        const dev = tc.c.ggml_backend_dev_by_name(z.ptr);
-        if (dev == null or tc.c.ggml_backend_dev_type(dev) == tc.c.GGML_BACKEND_DEVICE_TYPE_CPU) {
-            return tc.arg.throw("invalid device: %s", .{z.ptr});
+        const dev = llama.impl.llama_c.ggml_backend_dev_by_name(z.ptr);
+        if (dev == null or llama.impl.llama_c.ggml_backend_dev_type(dev) == llama.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_CPU) {
+            return tools_common.arg.throw("invalid device: %s", .{z.ptr});
         }
         try devices.append(a, dev);
     }
@@ -177,13 +171,13 @@ fn parseDevicesArg(a: std.mem.Allocator, value: []const u8) !std.ArrayList(tc.c.
 }
 
 /// Ports `devices_to_string` (llama-bench.cpp:198 @b1b770d90).
-fn devicesToString(a: std.mem.Allocator, devices: []const tc.c.ggml_backend_dev_t) ![:0]const u8 {
+fn devicesToString(a: std.mem.Allocator, devices: []const llama.impl.llama_c.ggml_backend_dev_t) ![:0]const u8 {
     if (devices.len == 0) return "auto";
     if (devices.len == 1 and devices[0] == null) return "none";
     var names: std.ArrayList([*:0]const u8) = .empty;
     for (devices) |dev| {
         if (dev == null) break;
-        try names.append(a, tc.c.ggml_backend_dev_name(dev));
+        try names.append(a, llama.impl.llama_c.ggml_backend_dev_name(dev));
     }
     return join(a, [*:0]const u8, names.items, "/");
 }
@@ -213,27 +207,27 @@ fn outputFormatFromStr(s: []const u8) ?OutputFormat {
 }
 
 /// Ports `split_mode_str` (llama-bench.cpp:259 @b1b770d90).
-fn splitModeStr(mode: tc.c.llama_split_mode) [*:0]const u8 {
+fn splitModeStr(mode: llama.impl.llama_c.llama_split_mode) [*:0]const u8 {
     return switch (mode) {
-        tc.c.LLAMA_SPLIT_MODE_NONE => "none",
-        tc.c.LLAMA_SPLIT_MODE_LAYER => "layer",
-        tc.c.LLAMA_SPLIT_MODE_ROW => "row",
-        tc.c.LLAMA_SPLIT_MODE_TENSOR => "tensor",
+        llama.impl.llama_c.LLAMA_SPLIT_MODE_NONE => "none",
+        llama.impl.llama_c.LLAMA_SPLIT_MODE_LAYER => "layer",
+        llama.impl.llama_c.LLAMA_SPLIT_MODE_ROW => "row",
+        llama.impl.llama_c.LLAMA_SPLIT_MODE_TENSOR => "tensor",
         else => blk: {
-            _ = tc.c.ggml_abort("llama-bench.cpp", 270, "invalid split mode");
+            _ = llama.impl.llama_c.ggml_abort("llama-bench.cpp", 270, "invalid split mode");
             break :blk "";
         },
     };
 }
 
 /// Ports `lazy_mode_str` (llama-bench.cpp:274 @b1b770d90).
-fn lazyModeStr(mode: tc.c.llama_lazy_mode) [*:0]const u8 {
+fn lazyModeStr(mode: llama.impl.llama_c.llama_lazy_mode) [*:0]const u8 {
     return switch (mode) {
-        tc.c.LLAMA_LAZY_MODE_OFF => "off",
-        tc.c.LLAMA_LAZY_MODE_AUTO => "auto",
-        tc.c.LLAMA_LAZY_MODE_ON => "on",
+        llama.impl.llama_c.LLAMA_LAZY_MODE_OFF => "off",
+        llama.impl.llama_c.LLAMA_LAZY_MODE_AUTO => "auto",
+        llama.impl.llama_c.LLAMA_LAZY_MODE_ON => "on",
         else => blk: {
-            _ = tc.c.ggml_abort("llama-bench.cpp", 283, "invalid lazy mode");
+            _ = llama.impl.llama_c.ggml_abort("llama-bench.cpp", 283, "invalid lazy mode");
             break :blk "";
         },
     };
@@ -242,7 +236,7 @@ fn lazyModeStr(mode: tc.c.llama_lazy_mode) [*:0]const u8 {
 /// `std::stoi` on a run of digits the range pattern matched, which can
 /// only fail by being out of range.
 fn stoiDigits(a: std.mem.Allocator, s: []const u8) !c_int {
-    return tc.arg.stoi(try a.dupeSentinel(u8, s, 0));
+    return tools_common.arg.stoi(try a.dupeSentinel(u8, s, 0));
 }
 
 /// Ports `parse_int_range` (llama-bench.cpp:293 @b1b770d90): repeated
@@ -319,15 +313,15 @@ fn parseIntRange(a: std.mem.Allocator, s: []const u8, allow_negative: bool) !std
             } else if (op == '*') {
                 i *%= step;
             } else {
-                return tc.arg.throwStr("invalid range format");
+                return tools_common.arg.throwStr("invalid range format");
             }
-            if (i <= prev_i) return tc.arg.throwStr("invalid range");
+            if (i <= prev_i) return tools_common.arg.throwStr("invalid range");
         }
         pos = end.?;
         if (pos == s.len) break;
     }
 
-    if (pos != s.len) return tc.arg.throwStr("invalid range format");
+    if (pos != s.len) return tools_common.arg.throwStr("invalid range format");
     return result;
 }
 
@@ -350,7 +344,7 @@ fn splitBool(a: std.mem.Allocator, s: []const u8) !std.ArrayList(bool) {
         const ds = k;
         while (k < tok.len and std.ascii.isDigit(tok[k])) k += 1;
         const n: ?i64 = if (k == ds) null else std.fmt.parseInt(i64, tok[st..k], 10) catch null;
-        if (n != 0 and n != 1) return tc.arg.throwStr(try std.fmt.allocPrint(a, "invalid value: \"{s}\"", .{tok}));
+        if (n != 0 and n != 1) return tools_common.arg.throwStr(try std.fmt.allocPrint(a, "invalid value: \"{s}\"", .{tok}));
         try out.append(a, n == 1);
     }
     return out;
@@ -393,32 +387,32 @@ const CmdParams = struct {
     n_depth: std.ArrayList(c_int) = .empty,
     n_batch: std.ArrayList(c_int) = .empty,
     n_ubatch: std.ArrayList(c_int) = .empty,
-    type_k: std.ArrayList(tc.c.ggml_type) = .empty,
-    type_v: std.ArrayList(tc.c.ggml_type) = .empty,
+    type_k: std.ArrayList(llama.impl.llama_c.ggml_type) = .empty,
+    type_v: std.ArrayList(llama.impl.llama_c.ggml_type) = .empty,
     n_threads: std.ArrayList(c_int) = .empty,
     cpu_mask: std.ArrayList([]const u8) = .empty,
     cpu_strict: std.ArrayList(bool) = .empty,
     poll: std.ArrayList(c_int) = .empty,
     n_gpu_layers: std.ArrayList(c_int) = .empty,
     n_cpu_moe: std.ArrayList(c_int) = .empty,
-    split_mode: std.ArrayList(tc.c.llama_split_mode) = .empty,
-    load_mode: std.ArrayList(tc.c.llama_load_mode) = .empty,
-    lazy_mode: std.ArrayList(tc.c.llama_lazy_mode) = .empty,
+    split_mode: std.ArrayList(llama.impl.llama_c.llama_split_mode) = .empty,
+    load_mode: std.ArrayList(llama.impl.llama_c.llama_load_mode) = .empty,
+    lazy_mode: std.ArrayList(llama.impl.llama_c.llama_lazy_mode) = .empty,
     main_gpu: std.ArrayList(c_int) = .empty,
     no_kv_offload: std.ArrayList(bool) = .empty,
-    flash_attn: std.ArrayList(tc.c.llama_flash_attn_type) = .empty,
-    devices: std.ArrayList([]const tc.c.ggml_backend_dev_t) = .empty,
+    flash_attn: std.ArrayList(llama.impl.llama_c.llama_flash_attn_type) = .empty,
+    devices: std.ArrayList([]const llama.impl.llama_c.ggml_backend_dev_t) = .empty,
     tensor_split: std.ArrayList([]const f32) = .empty,
-    tensor_buft_overrides: std.ArrayList([]const tc.c.llama_model_tensor_buft_override) = .empty,
+    tensor_buft_overrides: std.ArrayList([]const llama.impl.llama_c.llama_model_tensor_buft_override) = .empty,
     embeddings: std.ArrayList(bool) = .empty,
     no_op_offload: std.ArrayList(bool) = .empty,
     no_host: std.ArrayList(bool) = .empty,
     repack: std.ArrayList(bool) = .empty,
     fit_params_target: std.ArrayList(usize) = .empty,
     fit_params_min_ctx: std.ArrayList(u32) = .empty,
-    numa: tc.c.ggml_numa_strategy = tc.c.GGML_NUMA_STRATEGY_DISABLED,
+    numa: llama.impl.llama_c.ggml_numa_strategy = llama.impl.llama_c.GGML_NUMA_STRATEGY_DISABLED,
     reps: c_int = 5,
-    prio: tc.c.ggml_sched_priority = tc.c.GGML_SCHED_PRIO_NORMAL,
+    prio: llama.impl.llama_c.ggml_sched_priority = llama.impl.llama_c.GGML_SCHED_PRIO_NORMAL,
     delay: c_int = 0,
     verbose: bool = false,
     progress: bool = false,
@@ -436,23 +430,23 @@ const Defaults = struct {
     n_depth: []const c_int,
     n_batch: []const c_int,
     n_ubatch: []const c_int,
-    type_k: []const tc.c.ggml_type,
-    type_v: []const tc.c.ggml_type,
+    type_k: []const llama.impl.llama_c.ggml_type,
+    type_v: []const llama.impl.llama_c.ggml_type,
     n_threads: []const c_int,
     cpu_mask: []const []const u8,
     cpu_strict: []const bool,
     poll: []const c_int,
     n_gpu_layers: []const c_int,
     n_cpu_moe: []const c_int,
-    split_mode: []const tc.c.llama_split_mode,
-    load_mode: []const tc.c.llama_load_mode,
-    lazy_mode: []const tc.c.llama_lazy_mode,
+    split_mode: []const llama.impl.llama_c.llama_split_mode,
+    load_mode: []const llama.impl.llama_c.llama_load_mode,
+    lazy_mode: []const llama.impl.llama_c.llama_lazy_mode,
     main_gpu: []const c_int,
     no_kv_offload: []const bool,
-    flash_attn: []const tc.c.llama_flash_attn_type,
-    devices: []const []const tc.c.ggml_backend_dev_t,
+    flash_attn: []const llama.impl.llama_c.llama_flash_attn_type,
+    devices: []const []const llama.impl.llama_c.ggml_backend_dev_t,
     tensor_split: []const []const f32,
-    tensor_buft_overrides: []const []const tc.c.llama_model_tensor_buft_override,
+    tensor_buft_overrides: []const []const llama.impl.llama_c.llama_model_tensor_buft_override,
     embeddings: []const bool,
     no_op_offload: []const bool,
     no_host: []const bool,
@@ -460,24 +454,24 @@ const Defaults = struct {
     fit_params_target: []const usize,
     fit_params_min_ctx: []const u32,
     reps: c_int = 5,
-    prio: tc.c.ggml_sched_priority = tc.c.GGML_SCHED_PRIO_NORMAL,
+    prio: llama.impl.llama_c.ggml_sched_priority = llama.impl.llama_c.GGML_SCHED_PRIO_NORMAL,
     delay: c_int = 0,
     output_format: OutputFormat = .markdown,
     output_format_stderr: OutputFormat = .none,
 
     fn init(a: std.mem.Allocator) !Defaults {
         const n_threads = try a.alloc(c_int, 1);
-        n_threads[0] = tc.cpu.numMath();
-        const ts = try a.alloc(f32, tc.c.llama_max_devices());
+        n_threads[0] = tools_common.cpu.numMath();
+        const ts = try a.alloc(f32, llama.api.llama.llama_max_devices());
         @memset(ts, 0);
         const tss = try a.alloc([]const f32, 1);
         tss[0] = ts;
-        const ot = try a.alloc(tc.c.llama_model_tensor_buft_override, 1);
+        const ot = try a.alloc(llama.impl.llama_c.llama_model_tensor_buft_override, 1);
         ot[0] = .{ .pattern = null, .buft = null };
-        const ots = try a.alloc([]const tc.c.llama_model_tensor_buft_override, 1);
+        const ots = try a.alloc([]const llama.impl.llama_c.llama_model_tensor_buft_override, 1);
         ots[0] = ot;
         const rpk = try a.alloc(bool, 1);
-        rpk[0] = tc.c.llama_model_default_params().use_extra_bufts;
+        rpk[0] = llama.api.model.llama_model_default_params().use_extra_bufts;
         return .{
             .model = &.{"models/7B/ggml-model-q4_0.gguf"},
             .n_prompt = &.{512},
@@ -486,20 +480,20 @@ const Defaults = struct {
             .n_depth = &.{0},
             .n_batch = &.{2048},
             .n_ubatch = &.{512},
-            .type_k = &.{tc.c.GGML_TYPE_F16},
-            .type_v = &.{tc.c.GGML_TYPE_F16},
+            .type_k = &.{llama.impl.llama_c.GGML_TYPE_F16},
+            .type_v = &.{llama.impl.llama_c.GGML_TYPE_F16},
             .n_threads = n_threads,
             .cpu_mask = &.{"0x0"},
             .cpu_strict = &.{false},
             .poll = &.{50},
             .n_gpu_layers = &.{-1},
             .n_cpu_moe = &.{0},
-            .split_mode = &.{tc.c.LLAMA_SPLIT_MODE_LAYER},
-            .load_mode = &.{tc.c.LLAMA_LOAD_MODE_AUTO},
-            .lazy_mode = &.{tc.c.LLAMA_LAZY_MODE_AUTO},
+            .split_mode = &.{llama.impl.llama_c.LLAMA_SPLIT_MODE_LAYER},
+            .load_mode = &.{llama.impl.llama_c.LLAMA_LOAD_MODE_AUTO},
+            .lazy_mode = &.{llama.impl.llama_c.LLAMA_LAZY_MODE_AUTO},
             .main_gpu = &.{0},
             .no_kv_offload = &.{false},
-            .flash_attn = &.{tc.c.LLAMA_FLASH_ATTN_TYPE_AUTO},
+            .flash_attn = &.{llama.impl.llama_c.LLAMA_FLASH_ATTN_TYPE_AUTO},
             .devices = &.{&.{}},
             .tensor_split = tss,
             .tensor_buft_overrides = ots,
@@ -515,88 +509,88 @@ const Defaults = struct {
 
 var defaults: Defaults = undefined;
 
-fn typeNames(a: std.mem.Allocator, types: []const tc.c.ggml_type) ![:0]u8 {
+fn typeNames(a: std.mem.Allocator, types: []const llama.impl.llama_c.ggml_type) ![:0]u8 {
     var names: std.ArrayList([*:0]const u8) = .empty;
-    for (types) |t| try names.append(a, tc.c.ggml_type_name(t));
+    for (types) |t| try names.append(a, llama.impl.llama_c.ggml_type_name(t));
     return join(a, [*:0]const u8, names.items, ",");
 }
 
 /// Ports `print_usage` (llama-bench.cpp:427 @b1b770d90).
 fn printUsage(a: std.mem.Allocator, argv0: [*:0]const u8) !void {
     const d = &defaults;
-    tc.io.printf("usage: %s [options]\n", .{argv0});
-    tc.io.printf("\n", .{});
-    tc.io.printf("options:\n", .{});
-    tc.io.printf("  -h, --help\n", .{});
-    tc.io.printf("  --version                                   show version and build info\n", .{});
-    tc.io.printf("  --numa <distribute|isolate|numactl>         numa mode (default: disabled)\n", .{});
-    tc.io.printf("  -r, --repetitions <n>                       number of times to repeat each test (default: %d)\n", .{d.reps});
-    tc.io.printf("  --prio <-1|0|1|2|3>                         process/thread priority (default: %d)\n", .{@as(c_int, @intCast(d.prio))});
-    tc.io.printf("  --delay <0...N> (seconds)                   delay between each test (default: %d)\n", .{d.delay});
-    tc.io.printf("  -o, --output <csv|json|jsonl|md|sql>        output format printed to stdout (default: %s)\n", .{outputFormatStr(d.output_format)});
-    tc.io.printf("  -oe, --output-err <csv|json|jsonl|md|sql>   output format printed to stderr (default: %s)\n", .{outputFormatStr(d.output_format_stderr)});
-    tc.io.printf("  --list-devices                              list available devices and exit\n", .{});
-    tc.io.printf("  -v, --verbose                               verbose output\n", .{});
-    tc.io.printf("  --progress                                  print test progress indicators\n", .{});
-    tc.io.printf("  --no-warmup                                 skip warmup runs before benchmarking\n", .{});
-    tc.io.printf("  -fitt, --fit-target <MiB>                   fit model to device memory with this margin per device in MiB (default: off)\n", .{});
-    tc.io.printf("  -fitc, --fit-ctx <n>                        minimum ctx size for --fit-target (default: 0)\n", .{});
-    if (tc.c.llama_supports_rpc()) {
-        tc.io.printf("  -rpc, --rpc <rpc_servers>                   register RPC devices (comma separated)\n", .{});
+    tools_common.io.printf("usage: %s [options]\n", .{argv0});
+    tools_common.io.printf("\n", .{});
+    tools_common.io.printf("options:\n", .{});
+    tools_common.io.printf("  -h, --help\n", .{});
+    tools_common.io.printf("  --version                                   show version and build info\n", .{});
+    tools_common.io.printf("  --numa <distribute|isolate|numactl>         numa mode (default: disabled)\n", .{});
+    tools_common.io.printf("  -r, --repetitions <n>                       number of times to repeat each test (default: %d)\n", .{d.reps});
+    tools_common.io.printf("  --prio <-1|0|1|2|3>                         process/thread priority (default: %d)\n", .{@as(c_int, @intCast(d.prio))});
+    tools_common.io.printf("  --delay <0...N> (seconds)                   delay between each test (default: %d)\n", .{d.delay});
+    tools_common.io.printf("  -o, --output <csv|json|jsonl|md|sql>        output format printed to stdout (default: %s)\n", .{outputFormatStr(d.output_format)});
+    tools_common.io.printf("  -oe, --output-err <csv|json|jsonl|md|sql>   output format printed to stderr (default: %s)\n", .{outputFormatStr(d.output_format_stderr)});
+    tools_common.io.printf("  --list-devices                              list available devices and exit\n", .{});
+    tools_common.io.printf("  -v, --verbose                               verbose output\n", .{});
+    tools_common.io.printf("  --progress                                  print test progress indicators\n", .{});
+    tools_common.io.printf("  --no-warmup                                 skip warmup runs before benchmarking\n", .{});
+    tools_common.io.printf("  -fitt, --fit-target <MiB>                   fit model to device memory with this margin per device in MiB (default: off)\n", .{});
+    tools_common.io.printf("  -fitc, --fit-ctx <n>                        minimum ctx size for --fit-target (default: 0)\n", .{});
+    if (llama.api.llama.llama_supports_rpc()) {
+        tools_common.io.printf("  -rpc, --rpc <rpc_servers>                   register RPC devices (comma separated)\n", .{});
     }
-    tc.io.printf("\n", .{});
-    tc.io.printf("test parameters:\n", .{});
-    tc.io.printf("  -m, --model <filename>                            (default: %s)\n", .{(try join(a, []const u8, d.model, ",")).ptr});
-    tc.io.printf("  -hf, -hfr, --hf-repo <user>/<model>[:quant]       Hugging Face model repository; quant is optional, case-insensitive\n", .{});
-    tc.io.printf("                                                    default to Q4_K_M, or falls back to the first file in the repo if Q4_K_M doesn't exist.\n", .{});
-    tc.io.printf("                                                    example: ggml-org/GLM-4.7-Flash-GGUF:Q4_K_M\n", .{});
-    tc.io.printf("                                                    (default: unused)\n", .{});
-    tc.io.printf("  -hff, --hf-file <file>                            Hugging Face model file. If specified, it will override the quant in --hf-repo\n", .{});
-    tc.io.printf("                                                    (default: unused)\n", .{});
-    tc.io.printf("  -hft, --hf-token <token>                          Hugging Face access token\n", .{});
-    tc.io.printf("                                                    (default: value from HF_TOKEN environment variable)\n", .{});
-    tc.io.printf("  --offline                                         Offline mode: forces use of cache, prevents network access\n", .{});
-    tc.io.printf("                                                    (default: disabled)\n", .{});
-    tc.io.printf("  -p, --n-prompt <n>                                (default: %s)\n", .{(try join(a, c_int, d.n_prompt, ",")).ptr});
-    tc.io.printf("  -n, --n-gen <n>                                   (default: %s)\n", .{(try join(a, c_int, d.n_gen, ",")).ptr});
-    tc.io.printf("  -pg <pp,tg>                                       (default: %s)\n", .{@as([*:0]const u8, "")});
-    tc.io.printf("  -d, --n-depth <n>                                 (default: %s)\n", .{(try join(a, c_int, d.n_depth, ",")).ptr});
-    tc.io.printf("  -b, --batch-size <n>                              (default: %s)\n", .{(try join(a, c_int, d.n_batch, ",")).ptr});
-    tc.io.printf("  -ub, --ubatch-size <n>                            (default: %s)\n", .{(try join(a, c_int, d.n_ubatch, ",")).ptr});
-    tc.io.printf("  -ctk, --cache-type-k <t>                          (default: %s)\n", .{(try typeNames(a, d.type_k)).ptr});
-    tc.io.printf("  -ctv, --cache-type-v <t>                          (default: %s)\n", .{(try typeNames(a, d.type_v)).ptr});
-    tc.io.printf("  -t, --threads <n>                                 (default: %s)\n", .{(try join(a, c_int, d.n_threads, ",")).ptr});
-    tc.io.printf("  -C, --cpu-mask <hex,hex>                          (default: %s)\n", .{(try join(a, []const u8, d.cpu_mask, ",")).ptr});
-    tc.io.printf("  --cpu-strict <0|1>                                (default: %s)\n", .{(try join(a, bool, d.cpu_strict, ",")).ptr});
-    tc.io.printf("  --poll <0...100>                                  (default: %s)\n", .{(try join(a, c_int, d.poll, ",")).ptr});
-    tc.io.printf("  -ngl, --n-gpu-layers <n>                          (default: %s)\n", .{(try join(a, c_int, d.n_gpu_layers, ",")).ptr});
-    tc.io.printf("  -ncmoe, --n-cpu-moe <n>                           (default: %s)\n", .{(try join(a, c_int, d.n_cpu_moe, ",")).ptr});
-    tc.io.printf("  -sm, --split-mode <none|layer|row|tensor>         (default: %s)\n", .{splitModeStr(d.split_mode[0])});
-    tc.io.printf("  -mg, --main-gpu <i>                               (default: %s)\n", .{(try join(a, c_int, d.main_gpu, ",")).ptr});
-    tc.io.printf("  -nkvo, --no-kv-offload <0|1>                      (default: %s)\n", .{(try join(a, bool, d.no_kv_offload, ",")).ptr});
-    tc.io.printf("  -fa, --flash-attn <on|off|auto>                   (default: %s)\n", .{tc.c.llama_flash_attn_type_name(d.flash_attn[0])});
-    tc.io.printf("  -dev, --device <dev0/dev1/...>                    (default: auto)\n", .{});
-    tc.io.printf("  -lm, --load-mode <auto|none|mmap|mlock|mmap+mlock|dio> (default: %s)\n", .{tc.c.llama_load_mode_name(d.load_mode[0])});
-    tc.io.printf("  -lzm, --lazy-mode <on|auto|off>                   (default: %s)\n", .{lazyModeStr(d.lazy_mode[0])});
-    tc.io.printf("  -embd, --embeddings <0|1>                         (default: %s)\n", .{(try join(a, bool, d.embeddings, ",")).ptr});
-    tc.io.printf("  -ts, --tensor-split <ts0/ts1/..>                  (default: 0)\n", .{});
-    tc.io.printf("  -ot --override-tensor <tensor name pattern>=<buffer type>;...\n", .{});
-    tc.io.printf("                                                    (default: disabled)\n", .{});
-    tc.io.printf("  -nopo, --no-op-offload <0|1>                      (default: 0)\n", .{});
-    tc.io.printf("  --no-host <0|1>                                   (default: %s)\n", .{(try join(a, bool, d.no_host, ",")).ptr});
-    tc.io.printf("  --repack <0|1>                                    (default: %s)\n", .{(try join(a, bool, d.repack, ",")).ptr});
-    tc.io.printf("\n", .{});
-    tc.io.printf("Multiple values can be given for each parameter by separating them with ','\n" ++
+    tools_common.io.printf("\n", .{});
+    tools_common.io.printf("test parameters:\n", .{});
+    tools_common.io.printf("  -m, --model <filename>                            (default: %s)\n", .{(try join(a, []const u8, d.model, ",")).ptr});
+    tools_common.io.printf("  -hf, -hfr, --hf-repo <user>/<model>[:quant]       Hugging Face model repository; quant is optional, case-insensitive\n", .{});
+    tools_common.io.printf("                                                    default to Q4_K_M, or falls back to the first file in the repo if Q4_K_M doesn't exist.\n", .{});
+    tools_common.io.printf("                                                    example: ggml-org/GLM-4.7-Flash-GGUF:Q4_K_M\n", .{});
+    tools_common.io.printf("                                                    (default: unused)\n", .{});
+    tools_common.io.printf("  -hff, --hf-file <file>                            Hugging Face model file. If specified, it will override the quant in --hf-repo\n", .{});
+    tools_common.io.printf("                                                    (default: unused)\n", .{});
+    tools_common.io.printf("  -hft, --hf-token <token>                          Hugging Face access token\n", .{});
+    tools_common.io.printf("                                                    (default: value from HF_TOKEN environment variable)\n", .{});
+    tools_common.io.printf("  --offline                                         Offline mode: forces use of cache, prevents network access\n", .{});
+    tools_common.io.printf("                                                    (default: disabled)\n", .{});
+    tools_common.io.printf("  -p, --n-prompt <n>                                (default: %s)\n", .{(try join(a, c_int, d.n_prompt, ",")).ptr});
+    tools_common.io.printf("  -n, --n-gen <n>                                   (default: %s)\n", .{(try join(a, c_int, d.n_gen, ",")).ptr});
+    tools_common.io.printf("  -pg <pp,tg>                                       (default: %s)\n", .{@as([*:0]const u8, "")});
+    tools_common.io.printf("  -d, --n-depth <n>                                 (default: %s)\n", .{(try join(a, c_int, d.n_depth, ",")).ptr});
+    tools_common.io.printf("  -b, --batch-size <n>                              (default: %s)\n", .{(try join(a, c_int, d.n_batch, ",")).ptr});
+    tools_common.io.printf("  -ub, --ubatch-size <n>                            (default: %s)\n", .{(try join(a, c_int, d.n_ubatch, ",")).ptr});
+    tools_common.io.printf("  -ctk, --cache-type-k <t>                          (default: %s)\n", .{(try typeNames(a, d.type_k)).ptr});
+    tools_common.io.printf("  -ctv, --cache-type-v <t>                          (default: %s)\n", .{(try typeNames(a, d.type_v)).ptr});
+    tools_common.io.printf("  -t, --threads <n>                                 (default: %s)\n", .{(try join(a, c_int, d.n_threads, ",")).ptr});
+    tools_common.io.printf("  -C, --cpu-mask <hex,hex>                          (default: %s)\n", .{(try join(a, []const u8, d.cpu_mask, ",")).ptr});
+    tools_common.io.printf("  --cpu-strict <0|1>                                (default: %s)\n", .{(try join(a, bool, d.cpu_strict, ",")).ptr});
+    tools_common.io.printf("  --poll <0...100>                                  (default: %s)\n", .{(try join(a, c_int, d.poll, ",")).ptr});
+    tools_common.io.printf("  -ngl, --n-gpu-layers <n>                          (default: %s)\n", .{(try join(a, c_int, d.n_gpu_layers, ",")).ptr});
+    tools_common.io.printf("  -ncmoe, --n-cpu-moe <n>                           (default: %s)\n", .{(try join(a, c_int, d.n_cpu_moe, ",")).ptr});
+    tools_common.io.printf("  -sm, --split-mode <none|layer|row|tensor>         (default: %s)\n", .{splitModeStr(d.split_mode[0])});
+    tools_common.io.printf("  -mg, --main-gpu <i>                               (default: %s)\n", .{(try join(a, c_int, d.main_gpu, ",")).ptr});
+    tools_common.io.printf("  -nkvo, --no-kv-offload <0|1>                      (default: %s)\n", .{(try join(a, bool, d.no_kv_offload, ",")).ptr});
+    tools_common.io.printf("  -fa, --flash-attn <on|off|auto>                   (default: %s)\n", .{llama.api.llama.llama_flash_attn_type_name(d.flash_attn[0])});
+    tools_common.io.printf("  -dev, --device <dev0/dev1/...>                    (default: auto)\n", .{});
+    tools_common.io.printf("  -lm, --load-mode <auto|none|mmap|mlock|mmap+mlock|dio> (default: %s)\n", .{llama.api.llama.llama_load_mode_name(d.load_mode[0])});
+    tools_common.io.printf("  -lzm, --lazy-mode <on|auto|off>                   (default: %s)\n", .{lazyModeStr(d.lazy_mode[0])});
+    tools_common.io.printf("  -embd, --embeddings <0|1>                         (default: %s)\n", .{(try join(a, bool, d.embeddings, ",")).ptr});
+    tools_common.io.printf("  -ts, --tensor-split <ts0/ts1/..>                  (default: 0)\n", .{});
+    tools_common.io.printf("  -ot --override-tensor <tensor name pattern>=<buffer type>;...\n", .{});
+    tools_common.io.printf("                                                    (default: disabled)\n", .{});
+    tools_common.io.printf("  -nopo, --no-op-offload <0|1>                      (default: 0)\n", .{});
+    tools_common.io.printf("  --no-host <0|1>                                   (default: %s)\n", .{(try join(a, bool, d.no_host, ",")).ptr});
+    tools_common.io.printf("  --repack <0|1>                                    (default: %s)\n", .{(try join(a, bool, d.repack, ",")).ptr});
+    tools_common.io.printf("\n", .{});
+    tools_common.io.printf("Multiple values can be given for each parameter by separating them with ','\n" ++
         "or by specifying the parameter multiple times. Ranges can be given as\n" ++
         "'first-last' or 'first-last+step' or 'first-last*mult'.\n", .{});
 }
 
 /// Ports `ggml_type_from_name` (llama-bench.cpp:496 @b1b770d90).
-fn typeFromName(s: []const u8) ?tc.c.ggml_type {
-    const map = [_]struct { []const u8, tc.c.ggml_type }{
-        .{ "f16", tc.c.GGML_TYPE_F16 },       .{ "bf16", tc.c.GGML_TYPE_BF16 }, .{ "f8_e4m3", tc.c.GGML_TYPE_F8_E4M3 }, .{ "q8_0", tc.c.GGML_TYPE_Q8_0 },
-        .{ "q4_0", tc.c.GGML_TYPE_Q4_0 },     .{ "q4_1", tc.c.GGML_TYPE_Q4_1 }, .{ "q5_0", tc.c.GGML_TYPE_Q5_0 },       .{ "q5_1", tc.c.GGML_TYPE_Q5_1 },
-        .{ "iq4_nl", tc.c.GGML_TYPE_IQ4_NL },
+fn typeFromName(s: []const u8) ?llama.impl.llama_c.ggml_type {
+    const map = [_]struct { []const u8, llama.impl.llama_c.ggml_type }{
+        .{ "f16", llama.impl.llama_c.GGML_TYPE_F16 },       .{ "bf16", llama.impl.llama_c.GGML_TYPE_BF16 }, .{ "f8_e4m3", llama.impl.llama_c.GGML_TYPE_F8_E4M3 }, .{ "q8_0", llama.impl.llama_c.GGML_TYPE_Q8_0 },
+        .{ "q4_0", llama.impl.llama_c.GGML_TYPE_Q4_0 },     .{ "q4_1", llama.impl.llama_c.GGML_TYPE_Q4_1 }, .{ "q5_0", llama.impl.llama_c.GGML_TYPE_Q5_0 },       .{ "q5_1", llama.impl.llama_c.GGML_TYPE_Q5_1 },
+        .{ "iq4_nl", llama.impl.llama_c.GGML_TYPE_IQ4_NL },
     };
     for (map) |m| {
         if (std.mem.eql(u8, s, m[0])) return m[1];
@@ -630,7 +624,7 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
         try printUsage(a, argv[0].ptr);
         stdlib.stdio.exit(0);
     } else if (std.mem.eql(u8, cur, "--version")) {
-        tc.build_info.print(tc.c.llama_version(), stdlib.stdio.stderr());
+        tools_common.build_info.print(llama.api.llama.llama_version(), stdlib.stdio.stderr());
         stdlib.stdio.exit(0);
     } else if (eql(cur, &.{ "-m", "--model" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
@@ -656,8 +650,8 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
         const v = NextVal.get(argv, i) orelse return error.Invalid;
         const p = try stdlib.strings.split(a, v, ',');
         if (p.items.len != 2) return error.Invalid;
-        const x = try tc.arg.stoi(try a.dupeSentinel(u8, p.items[0], 0));
-        const y = try tc.arg.stoi(try a.dupeSentinel(u8, p.items[1], 0));
+        const x = try tools_common.arg.stoi(try a.dupeSentinel(u8, p.items[0], 0));
+        const y = try tools_common.arg.stoi(try a.dupeSentinel(u8, p.items[1], 0));
         try params.n_pg.append(a, .{ x, y });
     } else if (eql(cur, &.{ "-d", "--n-depth" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
@@ -670,7 +664,7 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
         try params.n_ubatch.appendSlice(a, (try parseIntRange(a, v, false)).items);
     } else if (eql(cur, &.{ "-ctk", "--cache-type-k", "-ctv", "--cache-type-v" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
-        var types: std.ArrayList(tc.c.ggml_type) = .empty;
+        var types: std.ArrayList(llama.impl.llama_c.ggml_type) = .empty;
         for ((try stdlib.strings.split(a, v, split_delim)).items) |t| {
             try types.append(a, typeFromName(t) orelse return error.Invalid);
         }
@@ -681,7 +675,7 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
         for ((try stdlib.strings.split(a, v, split_delim)).items) |combo| {
             const devs = parseDevicesArg(a, combo) catch |e| switch (e) {
                 error.Throw => {
-                    tc.io.eprintf("error: %.*s\n", .{ @as(c_int, @intCast(tc.arg.what().len)), tc.arg.what().ptr });
+                    tools_common.io.eprintf("error: %.*s\n", .{ @as(c_int, @intCast(tools_common.arg.what().len)), tools_common.arg.what().ptr });
                     return error.Invalid;
                 },
                 else => |other| return other,
@@ -689,7 +683,7 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
             try params.devices.append(a, devs.items);
         }
     } else if (eql(cur, &.{"--list-devices"})) {
-        try tc.arg_options2.printAvailableDevices(a);
+        try tools_common.arg_options2.printAvailableDevices(a);
         stdlib.stdio.exit(0);
     } else if (eql(cur, &.{ "-t", "--threads" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
@@ -709,21 +703,21 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
     } else if (eql(cur, &.{ "-ncmoe", "--n-cpu-moe" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
         try params.n_cpu_moe.appendSlice(a, (try parseIntRange(a, v, false)).items);
-    } else if (tc.c.llama_supports_rpc() and eql(cur, &.{ "-rpc", "--rpc" })) {
+    } else if (llama.api.llama.llama_supports_rpc() and eql(cur, &.{ "-rpc", "--rpc" })) {
         // no RPC backend is built: `llama_supports_rpc` is false
         return error.Invalid;
     } else if (eql(cur, &.{ "-sm", "--split-mode" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
-        var modes: std.ArrayList(tc.c.llama_split_mode) = .empty;
+        var modes: std.ArrayList(llama.impl.llama_c.llama_split_mode) = .empty;
         for ((try stdlib.strings.split(a, v, split_delim)).items) |m| {
-            const mode: tc.c.llama_split_mode = if (std.mem.eql(u8, m, "none"))
-                tc.c.LLAMA_SPLIT_MODE_NONE
+            const mode: llama.impl.llama_c.llama_split_mode = if (std.mem.eql(u8, m, "none"))
+                llama.impl.llama_c.LLAMA_SPLIT_MODE_NONE
             else if (std.mem.eql(u8, m, "layer"))
-                tc.c.LLAMA_SPLIT_MODE_LAYER
+                llama.impl.llama_c.LLAMA_SPLIT_MODE_LAYER
             else if (std.mem.eql(u8, m, "row"))
-                tc.c.LLAMA_SPLIT_MODE_ROW
+                llama.impl.llama_c.LLAMA_SPLIT_MODE_ROW
             else if (std.mem.eql(u8, m, "tensor"))
-                tc.c.LLAMA_SPLIT_MODE_TENSOR
+                llama.impl.llama_c.LLAMA_SPLIT_MODE_TENSOR
             else
                 return error.Invalid;
             try modes.append(a, mode);
@@ -731,13 +725,13 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
         try params.split_mode.appendSlice(a, modes.items);
     } else if (eql(cur, &.{ "-lm", "--load-mode" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
-        var modes: std.ArrayList(tc.c.llama_load_mode) = .empty;
-        const names = [_]struct { []const u8, tc.c.llama_load_mode }{
-            .{ "auto", tc.c.LLAMA_LOAD_MODE_AUTO },   .{ "none", tc.c.LLAMA_LOAD_MODE_NONE },             .{ "mmap", tc.c.LLAMA_LOAD_MODE_MMAP },
-            .{ "mlock", tc.c.LLAMA_LOAD_MODE_MLOCK }, .{ "mmap+mlock", tc.c.LLAMA_LOAD_MODE_MMAP_MLOCK }, .{ "dio", tc.c.LLAMA_LOAD_MODE_DIRECT_IO },
+        var modes: std.ArrayList(llama.impl.llama_c.llama_load_mode) = .empty;
+        const names = [_]struct { []const u8, llama.impl.llama_c.llama_load_mode }{
+            .{ "auto", llama.impl.llama_c.LLAMA_LOAD_MODE_AUTO },   .{ "none", llama.impl.llama_c.LLAMA_LOAD_MODE_NONE },             .{ "mmap", llama.impl.llama_c.LLAMA_LOAD_MODE_MMAP },
+            .{ "mlock", llama.impl.llama_c.LLAMA_LOAD_MODE_MLOCK }, .{ "mmap+mlock", llama.impl.llama_c.LLAMA_LOAD_MODE_MMAP_MLOCK }, .{ "dio", llama.impl.llama_c.LLAMA_LOAD_MODE_DIRECT_IO },
         };
         for ((try stdlib.strings.split(a, v, split_delim)).items) |m| {
-            var found: ?tc.c.llama_load_mode = null;
+            var found: ?llama.impl.llama_c.llama_load_mode = null;
             for (names) |n| {
                 if (std.mem.eql(u8, m, n[0])) found = n[1];
             }
@@ -746,14 +740,14 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
         try params.load_mode.appendSlice(a, modes.items);
     } else if (eql(cur, &.{ "-lzm", "--lazy-mode" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
-        var modes: std.ArrayList(tc.c.llama_lazy_mode) = .empty;
+        var modes: std.ArrayList(llama.impl.llama_c.llama_lazy_mode) = .empty;
         for ((try stdlib.strings.split(a, v, split_delim)).items) |m| {
-            const mode: tc.c.llama_lazy_mode = if (std.mem.eql(u8, m, "on"))
-                tc.c.LLAMA_LAZY_MODE_ON
+            const mode: llama.impl.llama_c.llama_lazy_mode = if (std.mem.eql(u8, m, "on"))
+                llama.impl.llama_c.LLAMA_LAZY_MODE_ON
             else if (std.mem.eql(u8, m, "auto"))
-                tc.c.LLAMA_LAZY_MODE_AUTO
+                llama.impl.llama_c.LLAMA_LAZY_MODE_AUTO
             else if (std.mem.eql(u8, m, "off"))
-                tc.c.LLAMA_LAZY_MODE_OFF
+                llama.impl.llama_c.LLAMA_LAZY_MODE_OFF
             else
                 return error.Invalid;
             try modes.append(a, mode);
@@ -768,22 +762,22 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
     } else if (eql(cur, &.{"--numa"})) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
         if (std.mem.eql(u8, v, "distribute") or v.len == 0) {
-            params.numa = tc.c.GGML_NUMA_STRATEGY_DISTRIBUTE;
+            params.numa = llama.impl.llama_c.GGML_NUMA_STRATEGY_DISTRIBUTE;
         } else if (std.mem.eql(u8, v, "isolate")) {
-            params.numa = tc.c.GGML_NUMA_STRATEGY_ISOLATE;
+            params.numa = llama.impl.llama_c.GGML_NUMA_STRATEGY_ISOLATE;
         } else if (std.mem.eql(u8, v, "numactl")) {
-            params.numa = tc.c.GGML_NUMA_STRATEGY_NUMACTL;
+            params.numa = llama.impl.llama_c.GGML_NUMA_STRATEGY_NUMACTL;
         } else return error.Invalid;
     } else if (eql(cur, &.{ "-fa", "--flash-attn" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
-        var types: std.ArrayList(tc.c.llama_flash_attn_type) = .empty;
+        var types: std.ArrayList(llama.impl.llama_c.llama_flash_attn_type) = .empty;
         for ((try stdlib.strings.split(a, v, split_delim)).items) |t| {
-            const ty: tc.c.llama_flash_attn_type = if (tc.arg.isTruthy(t))
-                tc.c.LLAMA_FLASH_ATTN_TYPE_ENABLED
-            else if (tc.arg.isFalsey(t))
-                tc.c.LLAMA_FLASH_ATTN_TYPE_DISABLED
-            else if (tc.arg.isAutoy(t))
-                tc.c.LLAMA_FLASH_ATTN_TYPE_AUTO
+            const ty: llama.impl.llama_c.llama_flash_attn_type = if (tools_common.arg.isTruthy(t))
+                llama.impl.llama_c.LLAMA_FLASH_ATTN_TYPE_ENABLED
+            else if (tools_common.arg.isFalsey(t))
+                llama.impl.llama_c.LLAMA_FLASH_ATTN_TYPE_DISABLED
+            else if (tools_common.arg.isAutoy(t))
+                llama.impl.llama_c.LLAMA_FLASH_ATTN_TYPE_AUTO
             else
                 return error.Invalid;
             try types.append(a, ty);
@@ -806,11 +800,11 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
         for ((try stdlib.strings.split(a, v, split_delim)).items) |ts| {
             // split string by ; and /
             const split_arg = try splitSemiSlash(a, ts);
-            ggmlAssert(split_arg.items.len <= tc.c.llama_max_devices(), 932, "split_arg.size() <= llama_max_devices()");
+            ggmlAssert(split_arg.items.len <= llama.api.llama.llama_max_devices(), 932, "split_arg.size() <= llama_max_devices()");
 
-            const tensor_split = try a.alloc(f32, tc.c.llama_max_devices());
+            const tensor_split = try a.alloc(f32, llama.api.llama.llama_max_devices());
             for (tensor_split, 0..) |*t, k| {
-                t.* = if (k < split_arg.items.len) try tc.arg.stof(try a.dupeSentinel(u8, split_arg.items[k], 0)) else 0.0;
+                t.* = if (k < split_arg.items.len) try tools_common.arg.stof(try a.dupeSentinel(u8, split_arg.items[k], 0)) else 0.0;
             }
             try params.tensor_split.append(a, tensor_split);
         }
@@ -824,13 +818,13 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
         }
     } else if (eql(cur, &.{ "-r", "--repetitions" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
-        params.reps = try tc.arg.stoi(v);
+        params.reps = try tools_common.arg.stoi(v);
     } else if (eql(cur, &.{"--prio"})) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
-        params.prio = @intCast(try tc.arg.stoi(v));
+        params.prio = @intCast(try tools_common.arg.stoi(v));
     } else if (eql(cur, &.{"--delay"})) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
-        params.delay = try tc.arg.stoi(v);
+        params.delay = try tools_common.arg.stoi(v);
     } else if (eql(cur, &.{ "-o", "--output" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
         if (outputFormatFromStr(v)) |f| {
@@ -851,11 +845,11 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
         params.no_warmup = true;
     } else if (eql(cur, &.{ "-fitt", "--fit-target" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
-        for ((try stdlib.strings.split(a, v, split_delim)).items) |x| try params.fit_params_target.append(a, try tc.arg.stoull(x));
+        for ((try stdlib.strings.split(a, v, split_delim)).items) |x| try params.fit_params_target.append(a, try tools_common.arg.stoull(x));
     } else if (eql(cur, &.{ "-fitc", "--fit-ctx" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
         for ((try stdlib.strings.split(a, v, split_delim)).items) |x| {
-            try params.fit_params_min_ctx.append(a, @truncate(try tc.arg.stoul(try a.dupeSentinel(u8, x, 0))));
+            try params.fit_params_min_ctx.append(a, @truncate(try tools_common.arg.stoul(try a.dupeSentinel(u8, x, 0))));
         }
     } else {
         return error.Invalid;
@@ -881,7 +875,7 @@ fn parseCmdParams(a: std.mem.Allocator, argv: []const [:0]const u8) !CmdParams {
                 break :outer;
             },
             error.Throw => {
-                tc.io.eprintf("error: %.*s\n", .{ @as(c_int, @intCast(tc.arg.what().len)), tc.arg.what().ptr });
+                tools_common.io.eprintf("error: %.*s\n", .{ @as(c_int, @intCast(tools_common.arg.what().len)), tools_common.arg.what().ptr });
                 invalid_param = true;
                 break :outer;
             },
@@ -890,14 +884,14 @@ fn parseCmdParams(a: std.mem.Allocator, argv: []const [:0]const u8) !CmdParams {
     }
 
     if (invalid_param) {
-        tc.io.eprintf("error: invalid parameter for argument: %.*s\n", .{ @as(c_int, @intCast(argbuf.len)), argbuf.ptr });
+        tools_common.io.eprintf("error: invalid parameter for argument: %.*s\n", .{ @as(c_int, @intCast(argbuf.len)), argbuf.ptr });
         try printUsage(a, argv[0].ptr);
         stdlib.stdio.exit(1);
     }
 
     if (params.hf_repo.items.len != 0) {
         // no downloader is ported: upstream's path when the download fails
-        tc.io.eprintf("error: failed to download model from HuggingFace\n", .{});
+        tools_common.io.eprintf("error: failed to download model from HuggingFace\n", .{});
         stdlib.stdio.exit(1);
     }
 
@@ -921,14 +915,14 @@ fn parseCmdParams(a: std.mem.Allocator, argv: []const [:0]const u8) !CmdParams {
 /// Return: whether the value was invalid.
 fn parseOverrides(a: std.mem.Allocator, value_in: []const u8, params: *CmdParams) !bool {
     // `std::map<std::string, buft>`: by name, sorted
-    const Entry = struct { name: []const u8, buft: tc.c.ggml_backend_buffer_type_t };
+    const Entry = struct { name: []const u8, buft: llama.impl.llama_c.ggml_backend_buffer_type_t };
     var buft_list: std.ArrayList(Entry) = .empty;
     var k: usize = 0;
-    while (k < tc.c.ggml_backend_dev_count()) : (k += 1) {
-        const dev = tc.c.ggml_backend_dev_get(k);
-        const buft = tc.c.ggml_backend_dev_buffer_type(dev);
+    while (k < llama.impl.llama_c.ggml_backend_dev_count()) : (k += 1) {
+        const dev = llama.impl.llama_c.ggml_backend_dev_get(k);
+        const buft = llama.impl.llama_c.ggml_backend_dev_buffer_type(dev);
         if (buft != null) {
-            const name = std.mem.span(tc.c.ggml_backend_buft_name(buft));
+            const name = std.mem.span(llama.impl.llama_c.ggml_backend_buft_name(buft));
             var found = false;
             for (buft_list.items) |*e| {
                 if (std.mem.eql(u8, e.name, name)) {
@@ -957,7 +951,7 @@ fn parseOverrides(a: std.mem.Allocator, value_in: []const u8, params: *CmdParams
     while (true) {
         if (group_span == 0) {
             // Adds an empty override-tensors for an empty span
-            const empty = try a.alloc(tc.c.llama_model_tensor_buft_override, 1);
+            const empty = try a.alloc(llama.impl.llama_c.llama_model_tensor_buft_override, 1);
             empty[0] = .{ .pattern = null, .buft = null };
             try params.tensor_buft_overrides.append(a, empty);
             if (group_span == value.len) {
@@ -976,7 +970,7 @@ fn parseOverrides(a: std.mem.Allocator, value_in: []const u8, params: *CmdParams
         } else {
             value = value[group_span + 1 ..];
         }
-        var overrides: std.ArrayList(tc.c.llama_model_tensor_buft_override) = .empty;
+        var overrides: std.ArrayList(llama.impl.llama_c.llama_model_tensor_buft_override) = .empty;
         var span = strcspn(group, ";");
         while (span > 0) {
             const ov = group[0..span];
@@ -985,14 +979,14 @@ fn parseOverrides(a: std.mem.Allocator, value_in: []const u8, params: *CmdParams
             if (name_span >= span) return true;
             const tensor_name = try a.dupeSentinel(u8, ov[0..name_span], 0);
             const buffer_type = ov[name_span + 1 ..];
-            var buft: ?tc.c.ggml_backend_buffer_type_t = null;
+            var buft: ?llama.impl.llama_c.ggml_backend_buffer_type_t = null;
             for (buft_list.items) |e| {
                 if (std.mem.eql(u8, e.name, buffer_type)) buft = e.buft;
             }
             if (buft == null) {
-                tc.io.printf("error: unrecognized buffer type '%.*s'\n", .{ @as(c_int, @intCast(buffer_type.len)), buffer_type.ptr });
-                tc.io.printf("Available buffer types:\n", .{});
-                for (buft_list.items) |e| tc.io.printf("  %s\n", .{tc.c.ggml_backend_buft_name(e.buft)});
+                tools_common.io.printf("error: unrecognized buffer type '%.*s'\n", .{ @as(c_int, @intCast(buffer_type.len)), buffer_type.ptr });
+                tools_common.io.printf("Available buffer types:\n", .{});
+                for (buft_list.items) |e| tools_common.io.printf("  %s\n", .{llama.impl.llama_c.ggml_backend_buft_name(e.buft)});
                 return true;
             }
             try overrides.append(a, .{ .pattern = tensor_name.ptr, .buft = buft.? });
@@ -1014,23 +1008,23 @@ const Instance = struct {
     n_depth: c_int,
     n_batch: c_int,
     n_ubatch: c_int,
-    type_k: tc.c.ggml_type,
-    type_v: tc.c.ggml_type,
+    type_k: llama.impl.llama_c.ggml_type,
+    type_v: llama.impl.llama_c.ggml_type,
     n_threads: c_int,
     cpu_mask: []const u8,
     cpu_strict: bool,
     poll: c_int,
     n_gpu_layers: c_int,
     n_cpu_moe: c_int,
-    split_mode: tc.c.llama_split_mode,
-    load_mode: tc.c.llama_load_mode,
-    lazy_mode: tc.c.llama_lazy_mode,
+    split_mode: llama.impl.llama_c.llama_split_mode,
+    load_mode: llama.impl.llama_c.llama_load_mode,
+    lazy_mode: llama.impl.llama_c.llama_lazy_mode,
     main_gpu: c_int,
     no_kv_offload: bool,
-    flash_attn: tc.c.llama_flash_attn_type,
-    devices: []const tc.c.ggml_backend_dev_t,
+    flash_attn: llama.impl.llama_c.llama_flash_attn_type,
+    devices: []const llama.impl.llama_c.ggml_backend_dev_t,
     tensor_split: []const f32,
-    tensor_buft_overrides: []const tc.c.llama_model_tensor_buft_override,
+    tensor_buft_overrides: []const llama.impl.llama_c.llama_model_tensor_buft_override,
     embeddings: bool,
     no_op_offload: bool,
     no_host: bool,
@@ -1039,12 +1033,12 @@ const Instance = struct {
     fit_min_ctx: u32,
 
     /// The `static` vectors `to_llama_mparams` keeps its merged overrides in.
-    var merged: std.ArrayList(tc.c.llama_model_tensor_buft_override) = .empty;
+    var merged: std.ArrayList(llama.impl.llama_c.llama_model_tensor_buft_override) = .empty;
     var patterns: std.ArrayList([:0]u8) = .empty;
 
     /// Ports `to_llama_mparams` (llama-bench.cpp:1245 @b1b770d90), a member of `cmd_params_instance`.
-    fn toLlamaMparams(self: *const Instance) !tc.c.llama_model_params {
-        var mparams = tc.c.llama_model_default_params();
+    fn toLlamaMparams(self: *const Instance) !llama.impl.llama_c.llama_model_params {
+        var mparams = llama.api.model.llama_model_default_params();
 
         mparams.n_gpu_layers = self.n_gpu_layers;
         if (self.devices.len != 0) mparams.devices = @constCast(self.devices.ptr);
@@ -1069,17 +1063,17 @@ const Instance = struct {
 
             var ots = self.tensor_buft_overrides;
             if (ots.len != 0 and ots[ots.len - 1].pattern == null) ots = ots[0 .. ots.len - 1];
-            try merged.appendSlice(gpa, ots);
+            try merged.appendSlice(std.heap.c_allocator, ots);
 
             var i: c_int = 0;
             while (i < self.n_cpu_moe) : (i += 1) {
                 // `llm_ffn_block_regex` over `LLM_FFN_EXPS_REGEX` (common/common.h:1283, 1279 @b1b770d90)
-                const pat = try std.fmt.allocPrintSentinel(gpa, "blk\\.{d}{s}", .{ i, "\\.ffn_(up|down|gate|gate_up)_(ch|)exps" }, 0);
-                try patterns.append(gpa, pat);
-                try merged.append(gpa, .{ .pattern = pat.ptr, .buft = tc.c.ggml_backend_cpu_buffer_type() });
+                const pat = try std.fmt.allocPrintSentinel(std.heap.c_allocator, "blk\\.{d}{s}", .{ i, "\\.ffn_(up|down|gate|gate_up)_(ch|)exps" }, 0);
+                try patterns.append(std.heap.c_allocator, pat);
+                try merged.append(std.heap.c_allocator, .{ .pattern = pat.ptr, .buft = llama.impl.llama_c.ggml_backend_cpu_buffer_type() });
             }
 
-            try merged.append(gpa, .{ .pattern = null, .buft = null });
+            try merged.append(std.heap.c_allocator, .{ .pattern = null, .buft = null });
 
             mparams.tensor_buft_overrides = merged.items.ptr;
         }
@@ -1093,13 +1087,13 @@ const Instance = struct {
             self.split_mode == other.split_mode and
             self.main_gpu == other.main_gpu and std.mem.eql(f32, self.tensor_split, other.tensor_split) and
             self.load_mode == other.load_mode and self.lazy_mode == other.lazy_mode and
-            std.mem.eql(tc.c.ggml_backend_dev_t, self.devices, other.devices) and self.no_host == other.no_host and self.repack == other.repack and
+            std.mem.eql(llama.impl.llama_c.ggml_backend_dev_t, self.devices, other.devices) and self.no_host == other.no_host and self.repack == other.repack and
             overridesEqual(self.tensor_buft_overrides, other.tensor_buft_overrides);
     }
 
     /// Ports `to_llama_cparams` (llama-bench.cpp:1308 @b1b770d90), a member of `cmd_params_instance`.
-    fn toLlamaCparams(self: *const Instance) tc.c.llama_context_params {
-        var cparams = tc.c.llama_context_default_params();
+    fn toLlamaCparams(self: *const Instance) llama.impl.llama_c.llama_context_params {
+        var cparams = llama.api.context.llama_context_default_params();
 
         cparams.n_ctx = @intCast(self.n_prompt + self.n_gen + self.n_depth);
         cparams.n_batch = @intCast(self.n_batch);
@@ -1194,9 +1188,9 @@ const Test = struct {
     test_time: [:0]const u8,
     samples_ns: std.ArrayList(u64) = .empty,
 
-    fn init(a: std.mem.Allocator, inst: *const Instance, lmodel: ?*const tc.c.llama_model) !Test {
+    fn init(a: std.mem.Allocator, inst: *const Instance, lmodel: ?*const llama.impl.llama_c.llama_model) !Test {
         var buf: [128]u8 = undefined;
-        _ = tc.c.llama_model_desc(lmodel, &buf, buf.len);
+        _ = llama.api.model.llama_model_desc(lmodel, &buf, buf.len);
         const model_type = try a.dupeSentinel(u8, std.mem.sliceTo(&buf, 0), 0);
         // RFC 3339 date-time format
         var time_buf: [32]u8 = undefined;
@@ -1206,8 +1200,8 @@ const Test = struct {
             .gpu_info = try devInfo(a, true),
             .inst = inst.*,
             .model_type = model_type,
-            .model_size = tc.c.llama_model_size(lmodel),
-            .model_n_params = tc.c.llama_model_n_params(lmodel),
+            .model_size = llama.api.model.llama_model_size(lmodel),
+            .model_n_params = llama.api.model.llama_model_n_params(lmodel),
             .test_time = try a.dupeSentinel(u8, test_time, 0),
         };
     }
@@ -1241,13 +1235,13 @@ const Test = struct {
         var backends: std.ArrayList([*:0]const u8) = .empty;
         var rpc_used = false;
         var i: usize = 0;
-        while (i < tc.c.ggml_backend_reg_count()) : (i += 1) {
-            const reg = tc.c.ggml_backend_reg_get(i);
-            const name = std.mem.span(tc.c.ggml_backend_reg_name(reg));
+        while (i < llama.impl.llama_c.ggml_backend_reg_count()) : (i += 1) {
+            const reg = llama.impl.llama_c.ggml_backend_reg_get(i);
+            const name = std.mem.span(llama.impl.llama_c.ggml_backend_reg_name(reg));
             if (std.mem.startsWith(u8, name, "RPC")) {
-                if (tc.c.ggml_backend_reg_dev_count(reg) > 0) rpc_used = true;
+                if (llama.impl.llama_c.ggml_backend_reg_dev_count(reg) > 0) rpc_used = true;
             } else if (!std.mem.eql(u8, name, "CPU")) {
-                try backends.append(a, tc.c.ggml_backend_reg_name(reg));
+                try backends.append(a, llama.impl.llama_c.ggml_backend_reg_name(reg));
             }
         }
         if (rpc_used) try backends.append(a, "RPC");
@@ -1290,7 +1284,7 @@ const Test = struct {
         var tensor_split_str: std.ArrayList(u8) = .empty;
         var tensor_buft_overrides_str: std.ArrayList(u8) = .empty;
         var max_nonzero: usize = 0;
-        for (0..tc.c.llama_max_devices()) |i| {
+        for (0..llama.api.llama.llama_max_devices()) |i| {
             if (in.tensor_split[i] > 0) max_nonzero = i;
         }
         for (0..max_nonzero + 1) |i| {
@@ -1313,7 +1307,7 @@ const Test = struct {
                 } else {
                     try tensor_buft_overrides_str.appendSlice(a, std.mem.span(ots[i].pattern));
                     try tensor_buft_overrides_str.append(a, '=');
-                    try tensor_buft_overrides_str.appendSlice(a, std.mem.span(tc.c.ggml_backend_buft_name(ots[i].buft)));
+                    try tensor_buft_overrides_str.appendSlice(a, std.mem.span(llama.impl.llama_c.ggml_backend_buft_name(ots[i].buft)));
                 }
                 if (i + 2 < ots.len) try tensor_buft_overrides_str.append(a, ';');
             }
@@ -1333,8 +1327,8 @@ const Test = struct {
         };
         const values = try a.alloc([]const u8, fields.len);
         const vals = [_][]const u8{
-            tc.build_info.commit,
-            try S.d(a, tc.build_info.build_number),
+            tools_common.build_info.commit,
+            try S.d(a, tools_common.build_info.build_number),
             self.cpu_info,
             self.gpu_info,
             try getBackend(a),
@@ -1348,8 +1342,8 @@ const Test = struct {
             in.cpu_mask,
             S.b(in.cpu_strict),
             try S.d(a, in.poll),
-            std.mem.span(tc.c.ggml_type_name(in.type_k)),
-            std.mem.span(tc.c.ggml_type_name(in.type_v)),
+            std.mem.span(llama.impl.llama_c.ggml_type_name(in.type_k)),
+            std.mem.span(llama.impl.llama_c.ggml_type_name(in.type_v)),
             try S.d(a, in.n_gpu_layers),
             try S.d(a, in.n_cpu_moe),
             std.mem.span(splitModeStr(in.split_mode)),
@@ -1359,7 +1353,7 @@ const Test = struct {
             try devicesToString(a, in.devices),
             tensor_split_str.items,
             tensor_buft_overrides_str.items,
-            std.mem.span(tc.c.llama_load_mode_name(in.load_mode)),
+            std.mem.span(llama.api.llama.llama_load_mode_name(in.load_mode)),
             std.mem.span(lazyModeStr(in.lazy_mode)),
             S.b(in.embeddings),
             S.b(in.no_op_offload),
@@ -1527,17 +1521,17 @@ const Printer = struct {
         if (differs(c_int, params.poll.items, d.poll)) try fl.append(a, "poll");
         if (differs(c_int, params.n_batch.items, d.n_batch)) try fl.append(a, "n_batch");
         if (differs(c_int, params.n_ubatch.items, d.n_ubatch)) try fl.append(a, "n_ubatch");
-        if (differs(tc.c.ggml_type, params.type_k.items, d.type_k)) try fl.append(a, "type_k");
-        if (differs(tc.c.ggml_type, params.type_v.items, d.type_v)) try fl.append(a, "type_v");
+        if (differs(llama.impl.llama_c.ggml_type, params.type_k.items, d.type_k)) try fl.append(a, "type_k");
+        if (differs(llama.impl.llama_c.ggml_type, params.type_v.items, d.type_v)) try fl.append(a, "type_v");
         if (differs(c_int, params.main_gpu.items, d.main_gpu)) try fl.append(a, "main_gpu");
-        if (differs(tc.c.llama_split_mode, params.split_mode.items, d.split_mode)) try fl.append(a, "split_mode");
+        if (differs(llama.impl.llama_c.llama_split_mode, params.split_mode.items, d.split_mode)) try fl.append(a, "split_mode");
         if (differs(bool, params.no_kv_offload.items, d.no_kv_offload)) try fl.append(a, "no_kv_offload");
-        if (differs(tc.c.llama_flash_attn_type, params.flash_attn.items, d.flash_attn)) try fl.append(a, "flash_attn");
-        if (differsNested(tc.c.ggml_backend_dev_t, params.devices.items, d.devices)) try fl.append(a, "devices");
+        if (differs(llama.impl.llama_c.llama_flash_attn_type, params.flash_attn.items, d.flash_attn)) try fl.append(a, "flash_attn");
+        if (differsNested(llama.impl.llama_c.ggml_backend_dev_t, params.devices.items, d.devices)) try fl.append(a, "devices");
         if (differsNested(f32, params.tensor_split.items, d.tensor_split)) try fl.append(a, "tensor_split");
         if (params.tensor_buft_overrides.items.len > 1 or !overrideListsEqual(params.tensor_buft_overrides.items, d.tensor_buft_overrides)) try fl.append(a, "tensor_buft_overrides");
-        if (differs(tc.c.llama_load_mode, params.load_mode.items, d.load_mode)) try fl.append(a, "load_mode");
-        if (differs(tc.c.llama_lazy_mode, params.lazy_mode.items, d.lazy_mode)) try fl.append(a, "lazy_mode");
+        if (differs(llama.impl.llama_c.llama_load_mode, params.load_mode.items, d.load_mode)) try fl.append(a, "load_mode");
+        if (differs(llama.impl.llama_c.llama_lazy_mode, params.lazy_mode.items, d.lazy_mode)) try fl.append(a, "lazy_mode");
         if (differs(bool, params.embeddings.items, d.embeddings)) try fl.append(a, "embeddings");
         if (differs(bool, params.no_op_offload.items, d.no_op_offload)) try fl.append(a, "no_op_offload");
         if (differs(bool, params.no_host.items, d.no_host)) try fl.append(a, "no_host");
@@ -1683,7 +1677,7 @@ const Printer = struct {
     fn printFooter(self: *Printer) void {
         switch (self.format) {
             .json => fput(self.fout, "\n]\n", .{}),
-            .markdown => fput(self.fout, "\nbuild: %.*s (%d)\n", .{ @as(c_int, @intCast(tc.build_info.commit.len)), tc.build_info.commit.ptr, @as(c_int, tc.build_info.build_number) }),
+            .markdown => fput(self.fout, "\nbuild: %.*s (%d)\n", .{ @as(c_int, @intCast(tools_common.build_info.commit.len)), tools_common.build_info.commit.ptr, @as(c_int, tools_common.build_info.build_number) }),
             else => {},
         }
     }
@@ -1696,63 +1690,63 @@ const CtxState = struct {
 };
 
 /// Ports `test_prompt` (llama-bench.cpp:2171 @b1b770d90).
-fn testPrompt(ctx: ?*tc.c.llama_context, n_prompt: c_int, n_batch: c_int, n_threads: c_int) !bool {
-    tc.c.llama_set_n_threads(ctx, n_threads, n_threads);
+fn testPrompt(ctx: ?*llama.impl.llama_c.llama_context, n_prompt: c_int, n_batch: c_int, n_threads: c_int) !bool {
+    llama.api.context.llama_set_n_threads(ctx, n_threads, n_threads);
 
-    const model = tc.c.llama_get_model(ctx);
-    const vocab = tc.c.llama_model_get_vocab(model);
-    const n_vocab = tc.c.llama_vocab_n_tokens(vocab);
+    const model = llama.api.context.llama_get_model(ctx);
+    const vocab = llama.api.model.llama_model_get_vocab(model);
+    const n_vocab = llama.api.vocab.llama_vocab_n_tokens(vocab);
 
-    const tokens = try gpa.alloc(tc.c.llama_token, @intCast(n_batch));
-    defer gpa.free(tokens);
+    const tokens = try std.heap.c_allocator.alloc(llama.impl.llama_c.llama_token, @intCast(n_batch));
+    defer std.heap.c_allocator.free(tokens);
     @memset(tokens, 0);
 
     var n_processed: c_int = 0;
 
     while (n_processed < n_prompt) {
         const n_tokens = @min(n_prompt - n_processed, n_batch);
-        tokens[0] = if (n_processed == 0 and tc.c.llama_vocab_get_add_bos(vocab)) tc.c.llama_vocab_bos(vocab) else @rem(stdlib.libc.rand(), n_vocab);
+        tokens[0] = if (n_processed == 0 and llama.api.vocab.llama_vocab_get_add_bos(vocab)) llama.api.vocab.llama_vocab_bos(vocab) else @rem(stdlib.libc.rand(), n_vocab);
         var i: usize = 1;
         while (i < n_tokens) : (i += 1) tokens[i] = @rem(stdlib.libc.rand(), n_vocab);
-        var batch = tc.common.batchGetOne(gpa, ctx, tokens[0..@intCast(n_tokens)]);
+        var batch = tools_common.common.batchGetOne(std.heap.c_allocator, ctx, tokens[0..@intCast(n_tokens)]);
         defer batch.deinit();
-        const res = tc.c.llama_process(ctx, tc.c.LLAMA_PROCESS_TYPE_DECODE, batch.get());
+        const res = llama.api.context.llama_process(ctx, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, batch.get());
         if (res != 0) {
-            tc.io.eprintf("%s: failed to decode prompt batch, res = %d\n", .{ "test_prompt", res });
+            tools_common.io.eprintf("%s: failed to decode prompt batch, res = %d\n", .{ "test_prompt", res });
             return false;
         }
         n_processed += n_tokens;
     }
 
-    tc.c.llama_synchronize(ctx);
+    llama.api.context.llama_synchronize(ctx);
     return true;
 }
 
 /// Ports `test_gen` (llama-bench.cpp:2201 @b1b770d90).
-fn testGen(ctx: ?*tc.c.llama_context, n_gen: c_int, n_threads: c_int) bool {
-    tc.c.llama_set_n_threads(ctx, n_threads, n_threads);
+fn testGen(ctx: ?*llama.impl.llama_c.llama_context, n_gen: c_int, n_threads: c_int) bool {
+    llama.api.context.llama_set_n_threads(ctx, n_threads, n_threads);
 
-    const model = tc.c.llama_get_model(ctx);
-    const vocab = tc.c.llama_model_get_vocab(model);
-    const n_vocab = tc.c.llama_vocab_n_tokens(vocab);
+    const model = llama.api.context.llama_get_model(ctx);
+    const vocab = llama.api.model.llama_model_get_vocab(model);
+    const n_vocab = llama.api.vocab.llama_vocab_n_tokens(vocab);
 
-    var token: tc.c.llama_token = if (tc.c.llama_vocab_get_add_bos(vocab)) tc.c.llama_vocab_bos(vocab) else @rem(stdlib.libc.rand(), n_vocab);
+    var token: llama.impl.llama_c.llama_token = if (llama.api.vocab.llama_vocab_get_add_bos(vocab)) llama.api.vocab.llama_vocab_bos(vocab) else @rem(stdlib.libc.rand(), n_vocab);
 
-    var batch = tc.common.Batch.init(gpa, ctx);
+    var batch = tools_common.common.Batch.init(std.heap.c_allocator, ctx);
     defer batch.deinit();
-    var pos: tc.c.llama_pos = tc.c.llama_memory_seq_pos_max(tc.c.llama_get_memory(ctx), 0) + 1;
+    var pos: llama.impl.llama_c.llama_pos = llama.api.context.llama_memory_seq_pos_max(llama.api.context.llama_get_memory(ctx), 0) + 1;
 
     var i: c_int = 0;
     while (i < n_gen) : (i += 1) {
         batch.clear();
         _ = batch.add(token, pos, 0, true);
         pos += 1;
-        const res = tc.c.llama_process(ctx, tc.c.LLAMA_PROCESS_TYPE_DECODE, batch.get());
+        const res = llama.api.context.llama_process(ctx, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, batch.get());
         if (res != 0) {
-            tc.io.eprintf("%s: failed to decode generation batch, res = %d\n", .{ "test_gen", res });
+            tools_common.io.eprintf("%s: failed to decode generation batch, res = %d\n", .{ "test_gen", res });
             return false;
         }
-        tc.c.llama_synchronize(ctx);
+        llama.api.context.llama_synchronize(ctx);
         token = @rem(stdlib.libc.rand(), n_vocab);
     }
     return true;
@@ -1760,18 +1754,18 @@ fn testGen(ctx: ?*tc.c.llama_context, n_gen: c_int, n_threads: c_int) bool {
 
 /// Ports `llama_null_log_callback` (llama-bench.cpp:2227 @b1b770d90).
 /// Errors still reach stderr, so a failed load says why.
-fn nullLogCallback(level: tc.c.ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
-    if (level == tc.c.GGML_LOG_LEVEL_ERROR) {
-        tc.io.eprintf("%s", .{text});
+fn nullLogCallback(level: llama.impl.llama_c.ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
+    if (level == llama.impl.llama_c.GGML_LOG_LEVEL_ERROR) {
+        tools_common.io.eprintf("%s", .{text});
         return;
     }
 }
 
 /// The cleanup every failed test step does before `exit(1)`.
-fn failTest(comptime msg: [*:0]const u8, ctx: ?*tc.c.llama_context, lmodel: ?*tc.c.llama_model) noreturn {
-    tc.io.eprintf(msg, .{"llama_bench"});
-    tc.c.llama_free(ctx);
-    tc.c.llama_model_free(lmodel);
+fn failTest(comptime msg: [*:0]const u8, ctx: ?*llama.impl.llama_c.llama_context, lmodel: ?*llama.impl.llama_c.llama_model) noreturn {
+    tools_common.io.eprintf(msg, .{"llama_bench"});
+    llama.api.context.llama_free(ctx);
+    llama.api.model.llama_model_free(lmodel);
     stdlib.stdio.exit(1);
 }
 
@@ -1784,31 +1778,31 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
 
     // the C's `NDEBUG` and `__OPTIMIZE__`, as Zig sets them for C
     if (builtin.mode == .debug or builtin.mode == .safe) {
-        tc.io.eprintf("warning: asserts enabled, performance may be affected\n", .{});
+        tools_common.io.eprintf("warning: asserts enabled, performance may be affected\n", .{});
     }
     if (builtin.mode == .debug) {
-        tc.io.eprintf("warning: debug build, performance may be affected\n", .{});
+        tools_common.io.eprintf("warning: debug build, performance may be affected\n", .{});
     }
 
     // initialize backends
-    tc.c.ggml_backend_load_all();
+    llama.impl.llama_c.ggml_backend_load_all();
 
     defaults = try Defaults.init(a);
     const params = try parseCmdParams(a, argv);
 
-    const cpu_dev = tc.c.ggml_backend_dev_by_type(tc.c.GGML_BACKEND_DEVICE_TYPE_CPU);
+    const cpu_dev = llama.impl.llama_c.ggml_backend_dev_by_type(llama.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_CPU);
     if (cpu_dev == null) {
-        tc.io.eprintf("%s: error: CPU backend is not loaded\n", .{func});
+        tools_common.io.eprintf("%s: error: CPU backend is not loaded\n", .{func});
         return 1;
     }
 
     // initialize llama.cpp
-    if (!params.verbose) tc.c.llama_log_set(nullLogCallback, null);
-    tc.c.llama_backend_init();
-    tc.c.llama_numa_init(params.numa);
+    if (!params.verbose) llama.api.impl.llama_log_set(nullLogCallback, null);
+    llama.api.llama.llama_backend_init();
+    llama.api.llama.llama_numa_init(params.numa);
 
-    if (!tc.init.setProcessPriority(params.prio)) {
-        tc.io.eprintf("%s: error: failed to set process priority\n", .{func});
+    if (!tools_common.init.setProcessPriority(params.prio)) {
+        tools_common.io.eprintf("%s: error: failed to set process priority\n", .{func});
         return 1;
     }
 
@@ -1821,7 +1815,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
 
     const instances = try getInstances(a, &params);
 
-    var lmodel: ?*tc.c.llama_model = null;
+    var lmodel: ?*llama.impl.llama_c.llama_model = null;
     var prev_inst: ?*const Instance = null;
 
     // store the llama_context state at the previous depth that we performed a test
@@ -1831,32 +1825,32 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     const params_count = instances.items.len;
     for (instances.items) |*inst| {
         params_idx += 1;
-        if (params.progress) tc.io.eprintf("llama-bench: benchmark %d/%zu: starting\n", .{ params_idx, params_count });
+        if (params.progress) tools_common.io.eprintf("llama-bench: benchmark %d/%zu: starting\n", .{ params_idx, params_count });
         var mparams = try inst.toLlamaMparams();
         var cparams = inst.toLlamaCparams();
 
         const do_fit = inst.fit_target != defaults.fit_params_target[0] or inst.fit_min_ctx != defaults.fit_params_min_ctx[0];
 
-        const fit_tensor_split = try a.alloc(f32, tc.c.llama_max_devices());
+        const fit_tensor_split = try a.alloc(f32, llama.api.llama.llama_max_devices());
         @memset(fit_tensor_split, 0);
-        const fit_overrides = try a.alloc(tc.c.llama_model_tensor_buft_override, tc.c.llama_max_tensor_buft_overrides());
+        const fit_overrides = try a.alloc(llama.impl.llama_c.llama_model_tensor_buft_override, llama.api.llama.llama_max_tensor_buft_overrides());
         @memset(fit_overrides, .{ .pattern = null, .buft = null });
 
         if (do_fit) {
             // free the previous model so fit sees full free VRAM
             if (lmodel) |m| {
-                tc.c.llama_model_free(m);
+                llama.api.model.llama_model_free(m);
                 lmodel = null;
                 prev_inst = null;
             }
 
             // use default n_gpu_layers and n_ctx so common_fit_params can adjust them
-            mparams.n_gpu_layers = tc.c.llama_model_default_params().n_gpu_layers;
+            mparams.n_gpu_layers = llama.api.model.llama_model_default_params().n_gpu_layers;
             mparams.tensor_split = fit_tensor_split.ptr;
             mparams.tensor_buft_overrides = fit_overrides.ptr;
             cparams.n_ctx = 0;
 
-            const margins = try a.alloc(usize, tc.c.llama_max_devices());
+            const margins = try a.alloc(usize, llama.api.llama.llama_max_devices());
             @memset(margins, inst.fit_target *% 1024 *% 1024);
 
             // fit at least the requested minimum context size, not just the
@@ -1864,12 +1858,12 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
             const n_ctx_needed: u32 = @max(@as(u32, @bitCast(inst.n_prompt +% inst.n_gen +% inst.n_depth)), inst.fit_min_ctx);
             cparams.n_ctx = @max(cparams.n_ctx, n_ctx_needed);
 
-            var patterns = try fit.Patterns.init(a);
+            var patterns = try cli_fit.Patterns.init(a);
             const model_z = try a.dupeSentinel(u8, inst.model, 0);
-            _ = try fit.fitParams(
+            _ = try cli_fit.fitParams(
                 init.gpa,
                 &patterns,
-                .{ .verbosity = std.math.maxInt(i32), .sink = tc.common.fitLogSink, .json = tc.common.fitLogJson },
+                .{ .verbosity = std.math.maxInt(i32), .sink = tools_common.common.fitLogSink, .json = tools_common.common.fitLogJson },
                 &.{model_z.ptr},
                 @ptrCast(&mparams),
                 @ptrCast(&cparams),
@@ -1878,105 +1872,105 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
                 margins.ptr,
                 inst.fit_min_ctx,
                 null,
-                if (params.verbose) tc.c.GGML_LOG_LEVEL_DEBUG else tc.c.GGML_LOG_LEVEL_ERROR,
+                if (params.verbose) llama.impl.llama_c.GGML_LOG_LEVEL_DEBUG else llama.impl.llama_c.GGML_LOG_LEVEL_ERROR,
             );
         }
 
         // keep the same model between tests when possible
         if (lmodel == null or prev_inst == null or !inst.equalMparams(prev_inst.?)) {
-            if (lmodel) |m| tc.c.llama_model_free(m);
+            if (lmodel) |m| llama.api.model.llama_model_free(m);
 
             const model_z = try a.dupeSentinel(u8, inst.model, 0);
-            lmodel = tc.c.llama_model_load_from_file(model_z.ptr, mparams);
+            lmodel = llama.api.llama.llama_model_load_from_file(model_z.ptr, mparams);
             if (lmodel == null) {
-                tc.io.eprintf("%s: error: failed to load model '%s'\n", .{ func, model_z.ptr });
+                tools_common.io.eprintf("%s: error: failed to load model '%s'\n", .{ func, model_z.ptr });
                 return 1;
             }
             prev_inst = inst;
         }
 
-        const ctx = tc.c.llama_init_from_model(lmodel, cparams) orelse {
+        const ctx = llama.api.context.llama_init_from_model(lmodel, cparams) orelse {
             const model_z = try a.dupeSentinel(u8, inst.model, 0);
-            tc.io.eprintf("%s: error: failed to create context with model '%s'\n", .{ func, model_z.ptr });
-            tc.c.llama_model_free(lmodel);
+            tools_common.io.eprintf("%s: error: failed to create context with model '%s'\n", .{ func, model_z.ptr });
+            llama.api.model.llama_model_free(lmodel);
             return 1;
         };
 
         var t = try Test.init(a, inst, lmodel);
 
-        tc.c.llama_memory_clear(tc.c.llama_get_memory(ctx), false);
+        llama.api.context.llama_memory_clear(llama.api.context.llama_get_memory(ctx), false);
 
         // cool off before the test
         if (params.delay != 0) try stdlib.clock.sleepSeconds(@intCast(params.delay));
 
-        var tpp = tc.c.ggml_threadpool_params_default(inst.n_threads);
-        if (!tc.arg_options.parseCpuMask(inst.cpu_mask, &tpp.cpumask)) {
+        var tpp = llama.impl.llama_c.ggml_threadpool_params_default(inst.n_threads);
+        if (!tools_common.arg_options.parseCpuMask(inst.cpu_mask, &tpp.cpumask)) {
             const z = try a.dupeSentinel(u8, inst.cpu_mask, 0);
-            tc.io.eprintf("%s: failed to parse cpu-mask: %s\n", .{ func, z.ptr });
-            tc.c.llama_free(ctx);
-            tc.c.llama_model_free(lmodel);
+            tools_common.io.eprintf("%s: failed to parse cpu-mask: %s\n", .{ func, z.ptr });
+            llama.api.context.llama_free(ctx);
+            llama.api.model.llama_model_free(lmodel);
             stdlib.stdio.exit(1);
         }
         tpp.strict_cpu = inst.cpu_strict;
         tpp.poll = @intCast(inst.poll);
         tpp.prio = params.prio;
 
-        const threadpool = tc.c.ggml_threadpool_new(&tpp) orelse {
-            tc.io.eprintf("%s: threadpool create failed : n_threads %d\n", .{ func, tpp.n_threads });
-            tc.c.llama_free(ctx);
-            tc.c.llama_model_free(lmodel);
+        const threadpool = llama.impl.llama_c.ggml_threadpool_new(&tpp) orelse {
+            tools_common.io.eprintf("%s: threadpool create failed : n_threads %d\n", .{ func, tpp.n_threads });
+            llama.api.context.llama_free(ctx);
+            llama.api.model.llama_model_free(lmodel);
             stdlib.stdio.exit(1);
         };
 
-        tc.c.llama_attach_threadpool(ctx, threadpool, null);
+        llama.api.context.llama_attach_threadpool(ctx, threadpool, null);
 
         // warmup run
         if (!params.no_warmup) {
             if (inst.n_prompt > 0) {
-                if (params.progress) tc.io.eprintf("llama-bench: benchmark %d/%zu: warmup prompt run\n", .{ params_idx, params_count });
+                if (params.progress) tools_common.io.eprintf("llama-bench: benchmark %d/%zu: warmup prompt run\n", .{ params_idx, params_count });
                 if (!try testPrompt(ctx, inst.n_prompt, inst.n_batch, inst.n_threads)) failTest("%s: error: failed to run prompt warmup\n", ctx, lmodel);
             }
             if (inst.n_gen > 0) {
-                if (params.progress) tc.io.eprintf("llama-bench: benchmark %d/%zu: warmup generation run\n", .{ params_idx, params_count });
+                if (params.progress) tools_common.io.eprintf("llama-bench: benchmark %d/%zu: warmup generation run\n", .{ params_idx, params_count });
                 if (!testGen(ctx, 1, inst.n_threads)) failTest("%s: error: failed to run gen warmup\n", ctx, lmodel);
             }
         }
 
         var i: c_int = 0;
         while (i < params.reps) : (i += 1) {
-            tc.c.llama_memory_clear(tc.c.llama_get_memory(ctx), false);
+            llama.api.context.llama_memory_clear(llama.api.context.llama_get_memory(ctx), false);
 
             if (inst.n_depth > 0) {
                 var is_cached = inst.n_depth == cstate.depth;
 
                 if (is_cached) {
                     // if previously we have computed at this depth, just restore the state
-                    const ret = tc.c.llama_state_seq_set_data(ctx, cstate.buf.items.ptr, cstate.buf.items.len, 0);
+                    const ret = llama.api.state.llama_state_seq_set_data(ctx, cstate.buf.items.ptr, cstate.buf.items.len, 0);
                     // if the old state is incompatible with the current context - reprocess from scratch
                     if (ret == 0) is_cached = false;
                 }
 
                 if (!is_cached) {
-                    if (params.progress) tc.io.eprintf("llama-bench: benchmark %d/%zu: depth run %d/%d\n", .{ params_idx, params_count, i + 1, params.reps });
+                    if (params.progress) tools_common.io.eprintf("llama-bench: benchmark %d/%zu: depth run %d/%d\n", .{ params_idx, params_count, i + 1, params.reps });
                     if (!try testPrompt(ctx, inst.n_depth, inst.n_batch, inst.n_threads)) failTest("%s: error: failed to run depth\n", ctx, lmodel);
 
                     // store the context state for reuse in later runs
                     cstate.depth = inst.n_depth;
-                    try cstate.buf.resize(gpa, tc.c.llama_state_seq_get_size(ctx, 0));
-                    _ = tc.c.llama_state_seq_get_data(ctx, cstate.buf.items.ptr, cstate.buf.items.len, 0);
+                    try cstate.buf.resize(std.heap.c_allocator, llama.api.state.llama_state_seq_get_size(ctx, 0));
+                    _ = llama.api.state.llama_state_seq_get_data(ctx, cstate.buf.items.ptr, cstate.buf.items.len, 0);
                 } else {
-                    if (params.progress) tc.io.eprintf("llama-bench: benchmark %d/%zu: depth run %d/%d (cached)\n", .{ params_idx, params_count, i + 1, params.reps });
+                    if (params.progress) tools_common.io.eprintf("llama-bench: benchmark %d/%zu: depth run %d/%d (cached)\n", .{ params_idx, params_count, i + 1, params.reps });
                 }
             }
 
             const t_start = getTimeNs();
 
             if (inst.n_prompt > 0) {
-                if (params.progress) tc.io.eprintf("llama-bench: benchmark %d/%zu: prompt run %d/%d\n", .{ params_idx, params_count, i + 1, params.reps });
+                if (params.progress) tools_common.io.eprintf("llama-bench: benchmark %d/%zu: prompt run %d/%d\n", .{ params_idx, params_count, i + 1, params.reps });
                 if (!try testPrompt(ctx, inst.n_prompt, inst.n_batch, inst.n_threads)) failTest("%s: error: failed to run prompt\n", ctx, lmodel);
             }
             if (inst.n_gen > 0) {
-                if (params.progress) tc.io.eprintf("llama-bench: benchmark %d/%zu: generation run %d/%d\n", .{ params_idx, params_count, i + 1, params.reps });
+                if (params.progress) tools_common.io.eprintf("llama-bench: benchmark %d/%zu: generation run %d/%d\n", .{ params_idx, params_count, i + 1, params.reps });
                 if (!testGen(ctx, inst.n_gen, inst.n_threads)) failTest("%s: error: failed to run gen\n", ctx, lmodel);
             }
 
@@ -1993,19 +1987,19 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
             pr.fout.flush();
         }
 
-        tc.c.llama_perf_context_print(ctx);
+        llama.api.context.llama_perf_context_print(ctx);
 
-        tc.c.llama_free(ctx);
+        llama.api.context.llama_free(ctx);
 
-        tc.c.ggml_threadpool_free(threadpool);
+        llama.impl.llama_c.ggml_threadpool_free(threadpool);
     }
 
-    tc.c.llama_model_free(lmodel);
+    llama.api.model.llama_model_free(lmodel);
 
     if (p) |*pr| pr.printFooter();
     if (p_err) |*pr| pr.printFooter();
 
-    tc.c.llama_backend_free();
+    llama.api.llama.llama_backend_free();
 
     return 0;
 }

@@ -20,15 +20,15 @@ fn doubleToFloat(comptime x: f64) f32 {
 
 /// Ports `llm_build_rwkv7_base`'s `build_rwkv7_channel_mix`
 /// (models/rwkv7-base.cpp:8 @b1b770d90): the squared-ReLU feed-forward.
-pub fn buildRwkv7ChannelMix(b: *const llama.graph.Builder, layer: *const llama.model.Layer, cur_: *llama.impl.c.ggml_tensor, x_prev: *llama.impl.c.ggml_tensor, arch: llama.arch_table.Arch) *llama.impl.c.ggml_tensor {
+pub fn buildRwkv7ChannelMix(b: *const llama.graph.Builder, layer: *const llama.model.Layer, cur_: *llama.impl.llama_c.ggml_tensor, x_prev: *llama.impl.llama_c.ggml_tensor, arch: llama.arch_table.Arch) *llama.impl.llama_c.ggml_tensor {
     const ctx = b.ctx0;
     var cur = cur_;
-    const sx: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_sub(ctx, x_prev, cur);
+    const sx: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_sub(ctx, x_prev, cur);
     switch (arch) {
         .rwkv7 => {
-            const xk: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, llama.impl.c.ggml_mul(ctx, sx, layer.channel_mix_lerp_k), cur);
+            const xk: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, llama.impl.llama_c.ggml_mul(ctx, sx, layer.channel_mix_lerp_k), cur);
 
-            const k: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_sqr(ctx, llama.impl.c.ggml_relu(ctx, b.buildLoraMm(layer.channel_mix_key.?, xk, null)));
+            const k: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_sqr(ctx, llama.impl.llama_c.ggml_relu(ctx, b.buildLoraMm(layer.channel_mix_key.?, xk, null)));
 
             cur = b.buildLoraMm(layer.channel_mix_value.?, k, null);
         },
@@ -41,7 +41,7 @@ pub fn buildRwkv7ChannelMix(b: *const llama.graph.Builder, layer: *const llama.m
 /// (models/rwkv7-base.cpp:29 @b1b770d90): the WKV-7 recurrence.
 /// `first_layer_value` is the first layer's value, set by the first call
 /// and mixed back into every later layer's.
-pub fn buildRwkv7TimeMix(model: *const llama.model.Model, b: *const llama.graph.Builder, inp: *const llama.graph.InpRs, cur_: *llama.impl.c.ggml_tensor, x_prev: *llama.impl.c.ggml_tensor, first_layer_value: *?*llama.impl.c.ggml_tensor, ubatch: *const llama.batch.Ubatch, il: c_int) *llama.impl.c.ggml_tensor {
+pub fn buildRwkv7TimeMix(model: *const llama.model.Model, b: *const llama.graph.Builder, inp: *const llama.graph.InpRs, cur_: *llama.impl.llama_c.ggml_tensor, x_prev: *llama.impl.llama_c.ggml_tensor, first_layer_value: *?*llama.impl.llama_c.ggml_tensor, ubatch: *const llama.batch.Ubatch, il: c_int) *llama.impl.llama_c.ggml_tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const mctx_cur = b.mctx.?.cast(llama.memory_recurrent.RecurrentContext);
@@ -62,22 +62,22 @@ pub fn buildRwkv7TimeMix(model: *const llama.model.Model, b: *const llama.graph.
     const f32_size: usize = @sizeOf(f32);
     const tok: usize = @intCast(n_embd * n_tokens);
 
-    var sx: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_sub(ctx, x_prev, cur_);
-    const dummy: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_new_tensor_4d(ctx, llama.impl.c.GGML_TYPE_F32, n_embd, n_seq_tokens, n_seqs, if (has_gating) 6 else 5);
-    sx = llama.impl.c.ggml_repeat(ctx, sx, dummy);
+    var sx: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_sub(ctx, x_prev, cur_);
+    const dummy: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_new_tensor_4d(ctx, llama.impl.llama_c.GGML_TYPE_F32, n_embd, n_seq_tokens, n_seqs, if (has_gating) 6 else 5);
+    sx = llama.impl.llama_c.ggml_repeat(ctx, sx, dummy);
 
-    const xxx: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, llama.impl.c.ggml_mul(ctx, sx, layer.time_mix_lerp_fused), cur_);
+    const xxx: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, llama.impl.llama_c.ggml_mul(ctx, sx, layer.time_mix_lerp_fused), cur_);
 
-    const xr: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, xxx, n_embd, n_tokens, xxx.nb[1], 0);
-    const xw: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, xxx, n_embd, n_tokens, xxx.nb[1], tok * f32_size);
-    const xk: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, xxx, n_embd, n_tokens, xxx.nb[1], tok * 2 * f32_size);
-    const xv: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, xxx, n_embd, n_tokens, xxx.nb[1], tok * 3 * f32_size);
-    const xa: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, xxx, n_embd, n_tokens, xxx.nb[1], tok * 4 * f32_size);
-    const xg: ?*llama.impl.c.ggml_tensor = if (has_gating) llama.impl.c.ggml_view_2d(ctx, xxx, n_embd, n_tokens, xxx.nb[1], tok * 5 * f32_size) else null;
+    const xr: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_2d(ctx, xxx, n_embd, n_tokens, xxx.nb[1], 0);
+    const xw: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_2d(ctx, xxx, n_embd, n_tokens, xxx.nb[1], tok * f32_size);
+    const xk: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_2d(ctx, xxx, n_embd, n_tokens, xxx.nb[1], tok * 2 * f32_size);
+    const xv: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_2d(ctx, xxx, n_embd, n_tokens, xxx.nb[1], tok * 3 * f32_size);
+    const xa: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_2d(ctx, xxx, n_embd, n_tokens, xxx.nb[1], tok * 4 * f32_size);
+    const xg: ?*llama.impl.llama_c.ggml_tensor = if (has_gating) llama.impl.llama_c.ggml_view_2d(ctx, xxx, n_embd, n_tokens, xxx.nb[1], tok * 5 * f32_size) else null;
 
     var r = b.buildLoraMm(layer.time_mix_receptance.?, xr, null);
-    var w: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, llama.impl.c.ggml_mul_mat(ctx, layer.time_mix_w2, llama.impl.c.ggml_tanh(ctx, llama.impl.c.ggml_mul_mat(ctx, layer.time_mix_w1, xw))), layer.time_mix_w0);
-    w = llama.impl.c.ggml_exp(ctx, llama.impl.c.ggml_scale(ctx, llama.impl.c.ggml_sigmoid(ctx, w), doubleToFloat(-0.606531)));
+    var w: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, llama.impl.llama_c.ggml_mul_mat(ctx, layer.time_mix_w2, llama.impl.llama_c.ggml_tanh(ctx, llama.impl.llama_c.ggml_mul_mat(ctx, layer.time_mix_w1, xw))), layer.time_mix_w0);
+    w = llama.impl.llama_c.ggml_exp(ctx, llama.impl.llama_c.ggml_scale(ctx, llama.impl.llama_c.ggml_sigmoid(ctx, w), doubleToFloat(-0.606531)));
 
     var k = b.buildLoraMm(layer.time_mix_key.?, xk, null);
     var v = b.buildLoraMm(layer.time_mix_value.?, xv, null);
@@ -85,56 +85,56 @@ pub fn buildRwkv7TimeMix(model: *const llama.model.Model, b: *const llama.graph.
         first_layer_value.* = v;
     } else {
         // Add the first layer's value as a residual connection.
-        v = llama.impl.c.ggml_add(ctx, v, llama.impl.c.ggml_mul(ctx, llama.impl.c.ggml_sub(ctx, first_layer_value.*, v), llama.impl.c.ggml_sigmoid(ctx, llama.impl.c.ggml_add(ctx, llama.impl.c.ggml_mul_mat(ctx, layer.time_mix_v2, llama.impl.c.ggml_mul_mat(ctx, layer.time_mix_v1, xv)), layer.time_mix_v0))));
+        v = llama.impl.llama_c.ggml_add(ctx, v, llama.impl.llama_c.ggml_mul(ctx, llama.impl.llama_c.ggml_sub(ctx, first_layer_value.*, v), llama.impl.llama_c.ggml_sigmoid(ctx, llama.impl.llama_c.ggml_add(ctx, llama.impl.llama_c.ggml_mul_mat(ctx, layer.time_mix_v2, llama.impl.llama_c.ggml_mul_mat(ctx, layer.time_mix_v1, xv)), layer.time_mix_v0))));
     }
-    var g: ?*llama.impl.c.ggml_tensor = null;
+    var g: ?*llama.impl.llama_c.ggml_tensor = null;
     if (layer.time_mix_g1 != null and layer.time_mix_g2 != null) {
-        g = llama.impl.c.ggml_mul_mat(ctx, layer.time_mix_g2, llama.impl.c.ggml_sigmoid(ctx, llama.impl.c.ggml_mul_mat(ctx, layer.time_mix_g1, xg)));
+        g = llama.impl.llama_c.ggml_mul_mat(ctx, layer.time_mix_g2, llama.impl.llama_c.ggml_sigmoid(ctx, llama.impl.llama_c.ggml_mul_mat(ctx, layer.time_mix_g1, xg)));
     }
-    var a: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_sigmoid(ctx, llama.impl.c.ggml_add(ctx, llama.impl.c.ggml_mul_mat(ctx, layer.time_mix_a2, llama.impl.c.ggml_mul_mat(ctx, layer.time_mix_a1, xa)), layer.time_mix_a0));
+    var a: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_sigmoid(ctx, llama.impl.llama_c.ggml_add(ctx, llama.impl.llama_c.ggml_mul_mat(ctx, layer.time_mix_a2, llama.impl.llama_c.ggml_mul_mat(ctx, layer.time_mix_a1, xa)), layer.time_mix_a0));
 
-    var kk: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_3d(ctx, llama.impl.c.ggml_mul(ctx, k, layer.time_mix_k_k), head_size, head_count, n_tokens);
-    kk = llama.impl.c.ggml_l2_norm(ctx, kk, doubleToFloat(1e-12));
+    var kk: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_reshape_3d(ctx, llama.impl.llama_c.ggml_mul(ctx, k, layer.time_mix_k_k), head_size, head_count, n_tokens);
+    kk = llama.impl.llama_c.ggml_l2_norm(ctx, kk, doubleToFloat(1e-12));
 
-    const ka: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul(ctx, k, layer.time_mix_k_a);
-    k = llama.impl.c.ggml_add(ctx, k, llama.impl.c.ggml_sub(ctx, llama.impl.c.ggml_mul(ctx, a, ka), ka));
+    const ka: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_mul(ctx, k, layer.time_mix_k_a);
+    k = llama.impl.llama_c.ggml_add(ctx, k, llama.impl.llama_c.ggml_sub(ctx, llama.impl.llama_c.ggml_mul(ctx, a, ka), ka));
 
-    r = llama.impl.c.ggml_reshape_3d(ctx, r, head_size, head_count, n_tokens);
-    w = llama.impl.c.ggml_reshape_3d(ctx, w, head_size, head_count, n_tokens);
-    k = llama.impl.c.ggml_reshape_3d(ctx, k, head_size, head_count, n_tokens);
-    v = llama.impl.c.ggml_reshape_3d(ctx, v, head_size, head_count, n_tokens);
-    a = llama.impl.c.ggml_reshape_3d(ctx, a, head_size, head_count, n_tokens);
+    r = llama.impl.llama_c.ggml_reshape_3d(ctx, r, head_size, head_count, n_tokens);
+    w = llama.impl.llama_c.ggml_reshape_3d(ctx, w, head_size, head_count, n_tokens);
+    k = llama.impl.llama_c.ggml_reshape_3d(ctx, k, head_size, head_count, n_tokens);
+    v = llama.impl.llama_c.ggml_reshape_3d(ctx, v, head_size, head_count, n_tokens);
+    a = llama.impl.llama_c.ggml_reshape_3d(ctx, a, head_size, head_count, n_tokens);
 
     const s_l = mctx_cur.getSL(il);
     const n_embd_s: usize = hp.nEmbdS();
     var wkv_state = b.buildRs(inp, s_l, @intCast(n_embd_s), @intCast(n_seqs), null);
 
-    const wkv_output: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_rwkv_wkv7(ctx, r, w, k, v, llama.impl.c.ggml_neg(ctx, kk), llama.impl.c.ggml_mul(ctx, kk, a), wkv_state);
-    var cur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_1d(ctx, wkv_output, n_embd * n_tokens, 0);
-    wkv_state = llama.impl.c.ggml_view_1d(ctx, wkv_output, n_embd * head_size * n_seqs, tok * f32_size);
+    const wkv_output: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_rwkv_wkv7(ctx, r, w, k, v, llama.impl.llama_c.ggml_neg(ctx, kk), llama.impl.llama_c.ggml_mul(ctx, kk, a), wkv_state);
+    var cur: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_1d(ctx, wkv_output, n_embd * n_tokens, 0);
+    wkv_state = llama.impl.llama_c.ggml_view_1d(ctx, wkv_output, n_embd * head_size * n_seqs, tok * f32_size);
 
-    llama.impl.c.ggml_build_forward_expand(b.gf, llama.impl.c.ggml_cpy(ctx, wkv_state, llama.impl.c.ggml_view_1d(ctx, s_l, @as(i64, @intCast(n_embd_s)) * n_seqs, n_embd_s * kv_head * llama.impl.c.ggml_element_size(s_l))));
+    llama.impl.llama_c.ggml_build_forward_expand(b.gf, llama.impl.llama_c.ggml_cpy(ctx, wkv_state, llama.impl.llama_c.ggml_view_1d(ctx, s_l, @as(i64, @intCast(n_embd_s)) * n_seqs, n_embd_s * kv_head * llama.impl.llama_c.ggml_element_size(s_l))));
 
     if (layer.time_mix_ln != null and layer.time_mix_ln_b != null) {
         // A group norm with head_count groups.
-        cur = llama.impl.c.ggml_reshape_3d(ctx, cur, @divTrunc(n_embd, head_count), head_count, n_tokens);
-        cur = llama.impl.c.ggml_norm(ctx, cur, 64e-5);
+        cur = llama.impl.llama_c.ggml_reshape_3d(ctx, cur, @divTrunc(n_embd, head_count), head_count, n_tokens);
+        cur = llama.impl.llama_c.ggml_norm(ctx, cur, 64e-5);
 
         // Back to regular vectors.
-        cur = llama.impl.c.ggml_reshape_2d(ctx, cur, n_embd, n_tokens);
-        cur = llama.impl.c.ggml_add(ctx, llama.impl.c.ggml_mul(ctx, cur, layer.time_mix_ln), layer.time_mix_ln_b);
+        cur = llama.impl.llama_c.ggml_reshape_2d(ctx, cur, n_embd, n_tokens);
+        cur = llama.impl.llama_c.ggml_add(ctx, llama.impl.llama_c.ggml_mul(ctx, cur, layer.time_mix_ln), layer.time_mix_ln_b);
     } else {
-        cur = llama.impl.c.ggml_reshape_2d(ctx, cur, n_embd, n_tokens);
+        cur = llama.impl.llama_c.ggml_reshape_2d(ctx, cur, n_embd, n_tokens);
     }
-    const rk: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_sum_rows(ctx, llama.impl.c.ggml_mul(ctx, llama.impl.c.ggml_mul(ctx, k, r), llama.impl.c.ggml_reshape_2d(ctx, layer.time_mix_r_k, head_size, head_count)));
-    cur = llama.impl.c.ggml_add(ctx, cur, llama.impl.c.ggml_reshape_2d(ctx, llama.impl.c.ggml_mul(ctx, v, rk), n_embd, n_tokens));
+    const rk: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_sum_rows(ctx, llama.impl.llama_c.ggml_mul(ctx, llama.impl.llama_c.ggml_mul(ctx, k, r), llama.impl.llama_c.ggml_reshape_2d(ctx, layer.time_mix_r_k, head_size, head_count)));
+    cur = llama.impl.llama_c.ggml_add(ctx, cur, llama.impl.llama_c.ggml_reshape_2d(ctx, llama.impl.llama_c.ggml_mul(ctx, v, rk), n_embd, n_tokens));
 
     if (has_gating) {
-        cur = llama.impl.c.ggml_mul(ctx, cur, g);
+        cur = llama.impl.llama_c.ggml_mul(ctx, cur, g);
     }
     cur = b.buildLoraMm(layer.time_mix_output.?, cur, null);
 
-    return llama.impl.c.ggml_reshape_3d(ctx, cur, n_embd, n_seq_tokens, n_seqs);
+    return llama.impl.llama_c.ggml_reshape_3d(ctx, cur, n_embd, n_seq_tokens, n_seqs);
 }
 
 // -----------------------------------------------------------------------------

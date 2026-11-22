@@ -30,10 +30,10 @@ const mod = @import("module.zig");
 
 /// Mirrors `ctx_type_to_graph_type` (llama-context.cpp:113 @b1b770d90),
 /// which `context.zig` keeps file-private.
-fn ctxTypeToGraphType(ctx_type: mod.impl.c.enum_llama_context_type) mod.graph.GraphType {
+fn ctxTypeToGraphType(ctx_type: mod.impl.llama_c.enum_llama_context_type) mod.graph.GraphType {
     return switch (ctx_type) {
-        mod.impl.c.LLAMA_CONTEXT_TYPE_DEFAULT => .default,
-        mod.impl.c.LLAMA_CONTEXT_TYPE_MTP => .decoder_mtp,
+        mod.impl.llama_c.LLAMA_CONTEXT_TYPE_DEFAULT => .default,
+        mod.impl.llama_c.LLAMA_CONTEXT_TYPE_MTP => .decoder_mtp,
         else => mod.impl.throwRuntime("llama-context.cpp", 118, "Unsupported ctx type"),
     };
 }
@@ -46,22 +46,22 @@ fn ctxTypeToGraphType(ctx_type: mod.impl.c.enum_llama_context_type) mod.graph.Gr
 /// - `userdata`: the filter's.
 ///
 /// Return: nothing; flags `tensor` as a parameter when it qualifies.
-fn setParam(tensor: ?*mod.impl.c.ggml_tensor, param_filter: mod.impl.c.llama_opt_param_filter, userdata: ?*anyopaque) void {
+fn setParam(tensor: ?*mod.impl.llama_c.ggml_tensor, param_filter: mod.impl.llama_c.llama_opt_param_filter, userdata: ?*anyopaque) void {
     const t = tensor orelse return;
-    if (t.type != mod.impl.c.GGML_TYPE_F32) return;
+    if (t.type != mod.impl.llama_c.GGML_TYPE_F32) return;
     if (!param_filter.?(t, userdata)) return;
     const name = std.mem.sliceTo(&t.name, 0);
     if (std.mem.eql(u8, name, "token_embd.weight")) return; // FIXME
     if (std.mem.eql(u8, name, "rope_freqs.weight")) return; // FIXME
-    mod.impl.c.ggml_set_param(t);
+    mod.impl.llama_c.ggml_set_param(t);
 }
 
 /// The C++'s walk of one `llama_layer` as an array of tensor pointers:
 /// every member in declaration order, a nested struct's members in theirs.
-fn setLayerParams(comptime T: type, layer: *T, param_filter: mod.impl.c.llama_opt_param_filter, userdata: ?*anyopaque) void {
+fn setLayerParams(comptime T: type, layer: *T, param_filter: mod.impl.llama_c.llama_opt_param_filter, userdata: ?*anyopaque) void {
     const info = @typeInfo(T).@"struct";
     inline for (info.field_names, info.field_types) |name, F| {
-        if (F == ?*mod.impl.c.ggml_tensor) {
+        if (F == ?*mod.impl.llama_c.ggml_tensor) {
             setParam(@field(layer, name), param_filter, userdata);
         } else {
             setLayerParams(F, &@field(layer, name), param_filter, userdata);
@@ -79,7 +79,7 @@ fn setLayerParams(comptime T: type, layer: *T, param_filter: mod.impl.c.llama_op
 /// - `lopt_params`: the training parameters.
 ///
 /// Return: nothing.
-pub fn optInit(self: *mod.context.Context, model: *mod.model.Model, lopt_params: mod.impl.c.struct_llama_opt_params) void {
+pub fn optInit(self: *mod.context.Context, model: *mod.model.Model, lopt_params: mod.impl.llama_c.struct_llama_opt_params) void {
     mod.impl.assert(self.opt_ctx == null, "llama-context.cpp", 4191, "!opt_ctx");
     model.hparams.n_ctx_train = if (lopt_params.n_ctx_train > 0) lopt_params.n_ctx_train else self.nCtx();
     const n_batch = @min(self.nBatch(), model.hparams.n_ctx_train);
@@ -106,12 +106,12 @@ pub fn optInit(self: *mod.context.Context, model: *mod.model.Model, lopt_params:
     var exc: mod.impl.Exception = .{};
     self.schedReserve(&exc) catch exc.terminate("llama-context.cpp", 4212);
 
-    var opt_params = mod.impl.c.ggml_opt_default_params(self.sched, mod.impl.c.GGML_OPT_LOSS_TYPE_CROSS_ENTROPY);
+    var opt_params = mod.impl.llama_c.ggml_opt_default_params(self.sched, mod.impl.llama_c.GGML_OPT_LOSS_TYPE_CROSS_ENTROPY);
     opt_params.opt_period = @intCast(n_batch / n_ubatch);
     opt_params.get_opt_pars = lopt_params.get_opt_pars;
     opt_params.get_opt_pars_ud = lopt_params.get_opt_pars_ud;
     opt_params.optimizer = lopt_params.optimizer_type;
-    self.opt_ctx = mod.impl.c.ggml_opt_init(opt_params);
+    self.opt_ctx = mod.impl.llama_c.ggml_opt_init(opt_params);
 
     const param_filter = lopt_params.param_filter;
     const param_filter_ud = lopt_params.param_filter_ud;
@@ -158,12 +158,12 @@ pub fn optInit(self: *mod.context.Context, model: *mod.model.Model, lopt_params:
 /// Return: nothing.
 fn optEpochIter(
     self: *mod.context.Context,
-    dataset: mod.impl.c.ggml_opt_dataset_t,
-    result: mod.impl.c.ggml_opt_result_t,
-    tokens: []const mod.impl.c.llama_token,
-    labels_sparse: []const mod.impl.c.llama_token,
-    batch: *mod.impl.c.llama_batch,
-    callback: mod.impl.c.ggml_opt_epoch_callback,
+    dataset: mod.impl.llama_c.ggml_opt_dataset_t,
+    result: mod.impl.llama_c.ggml_opt_result_t,
+    tokens: []const mod.impl.llama_c.llama_token,
+    labels_sparse: []const mod.impl.llama_c.llama_token,
+    batch: *mod.impl.llama_c.llama_batch,
+    callback: mod.impl.llama_c.ggml_opt_epoch_callback,
     train: bool,
     idata_in_loop: i64,
     ndata_in_loop: i64,
@@ -244,39 +244,39 @@ fn optEpochIter(
 
             const gf = self.model.buildGraph(&gparams);
 
-            var ctx_compute_opt: ?*mod.impl.c.ggml_context = undefined;
+            var ctx_compute_opt: ?*mod.impl.llama_c.ggml_context = undefined;
             {
-                const size_gf: usize = @intCast(mod.impl.c.ggml_graph_size(gf));
-                const size_meta = 4 * size_gf * mod.impl.c.ggml_tensor_overhead() + 2 * mod.impl.c.ggml_graph_overhead_custom(size_gf, true);
-                const params: mod.impl.c.ggml_init_params = .{
+                const size_gf: usize = @intCast(mod.impl.llama_c.ggml_graph_size(gf));
+                const size_meta = 4 * size_gf * mod.impl.llama_c.ggml_tensor_overhead() + 2 * mod.impl.llama_c.ggml_graph_overhead_custom(size_gf, true);
+                const params: mod.impl.llama_c.ggml_init_params = .{
                     .mem_size = size_meta,
                     .mem_buffer = null,
                     .no_alloc = true,
                 };
-                ctx_compute_opt = mod.impl.c.ggml_init(params);
+                ctx_compute_opt = mod.impl.llama_c.ggml_init(params);
             }
-            mod.impl.c.ggml_opt_prepare_alloc(self.opt_ctx, ctx_compute_opt, gf, res.getInpTokens(), res.getLogits());
-            mod.impl.c.ggml_opt_alloc(self.opt_ctx, train);
+            mod.impl.llama_c.ggml_opt_prepare_alloc(self.opt_ctx, ctx_compute_opt, gf, res.getInpTokens(), res.getLogits());
+            mod.impl.llama_c.ggml_opt_alloc(self.opt_ctx, train);
 
             res.setInputs(ubatch);
             {
-                const labels: *mod.impl.c.ggml_tensor = mod.impl.c.ggml_opt_labels(self.opt_ctx);
+                const labels: *mod.impl.llama_c.ggml_tensor = mod.impl.llama_c.ggml_opt_labels(self.opt_ctx);
                 mod.impl.assert(labels.ne[1] == n_ubatch, "llama-context.cpp", 4342, "labels->ne[1] == n_ubatch");
-                _ = mod.impl.c.ggml_set_zero(labels);
+                _ = mod.impl.llama_c.ggml_set_zero(labels);
                 const onef: f32 = 1.0;
                 for (0..n_ubatch) |pos_ubatch| {
                     const ilabel = pos_ctx + pos_batch + pos_ubatch;
                     mod.impl.assert(labels_sparse[ilabel] < labels.ne[0], "llama-context.cpp", 4347, "labels_sparse[ilabel] < labels->ne[0]");
                     const off: usize = @intCast(@as(i64, @intCast(pos_ubatch)) * labels.ne[0] + labels_sparse[ilabel]);
-                    mod.impl.c.ggml_backend_tensor_set(labels, &onef, off * @sizeOf(f32), @sizeOf(f32));
+                    mod.impl.llama_c.ggml_backend_tensor_set(labels, &onef, off * @sizeOf(f32), @sizeOf(f32));
                 }
             }
             self.copy_experts.reset();
-            mod.impl.c.ggml_opt_eval(self.opt_ctx, result);
+            mod.impl.llama_c.ggml_opt_eval(self.opt_ctx, result);
             if (callback) |cb| {
                 cb(train, self.opt_ctx, dataset, result, idata_in_loop + (pos_ctx + pos_batch) / n_ubatch + 1, ndata_in_loop, t_loop_start);
             }
-            mod.impl.c.ggml_free(ctx_compute_opt);
+            mod.impl.llama_c.ggml_free(ctx_compute_opt);
 
             pos_batch += ubatch.n_tokens;
             if (!mctx.next()) break;
@@ -299,17 +299,17 @@ fn optEpochIter(
 /// Return: nothing.
 pub fn optEpoch(
     self: *mod.context.Context,
-    dataset: mod.impl.c.ggml_opt_dataset_t,
-    result_train: mod.impl.c.ggml_opt_result_t,
-    result_eval: mod.impl.c.ggml_opt_result_t,
+    dataset: mod.impl.llama_c.ggml_opt_dataset_t,
+    result_train: mod.impl.llama_c.ggml_opt_result_t,
+    result_eval: mod.impl.llama_c.ggml_opt_result_t,
     idata_split: i64,
-    callback_train: mod.impl.c.ggml_opt_epoch_callback,
-    callback_eval: mod.impl.c.ggml_opt_epoch_callback,
+    callback_train: mod.impl.llama_c.ggml_opt_epoch_callback,
+    callback_eval: mod.impl.llama_c.ggml_opt_epoch_callback,
 ) void {
     const n_ctx = self.nCtx();
     const n_batch = @min(self.cparams.n_batch, n_ctx);
     const n_ubatch = @min(self.cparams.n_ubatch, n_batch);
-    const ndata = mod.impl.c.ggml_opt_dataset_ndata(dataset);
+    const ndata = mod.impl.llama_c.ggml_opt_dataset_ndata(dataset);
 
     mod.impl.assert(idata_split >= 0, "llama-context.cpp", 4375, "idata_split >= 0");
     mod.impl.assert(idata_split <= ndata, "llama-context.cpp", 4376, "idata_split <= ndata");
@@ -318,32 +318,32 @@ pub fn optEpoch(
 
     var batch = mod.batch.batchInit(@intCast(n_batch), 0, 1);
     defer mod.batch.batchFree(batch);
-    const tokens = std.heap.c_allocator.alloc(mod.impl.c.llama_token, n_ctx) catch oom();
+    const tokens = std.heap.c_allocator.alloc(mod.impl.llama_c.llama_token, n_ctx) catch oom();
     defer std.heap.c_allocator.free(tokens);
-    const labels_sparse = std.heap.c_allocator.alloc(mod.impl.c.llama_token, n_ctx) catch oom();
+    const labels_sparse = std.heap.c_allocator.alloc(mod.impl.llama_c.llama_token, n_ctx) catch oom();
     defer std.heap.c_allocator.free(labels_sparse);
     @memset(tokens, 0);
     @memset(labels_sparse, 0);
 
     var idata: i64 = 0;
 
-    var t_loop_start = mod.impl.c.ggml_time_us();
+    var t_loop_start = mod.impl.llama_c.ggml_time_us();
     var ndata_in_loop: i64 = idata_split * ubatch_per_ctx;
     while (idata < idata_split) : (idata += 1) {
         const train = true;
         const idata_in_loop = idata * ubatch_per_ctx;
 
-        mod.impl.c.ggml_opt_dataset_get_batch_host(dataset, tokens.ptr, n_ctx * @sizeOf(mod.impl.c.llama_token), labels_sparse.ptr, idata);
+        mod.impl.llama_c.ggml_opt_dataset_get_batch_host(dataset, tokens.ptr, n_ctx * @sizeOf(mod.impl.llama_c.llama_token), labels_sparse.ptr, idata);
         optEpochIter(self, dataset, result_train, tokens, labels_sparse, &batch, callback_train, train, idata_in_loop, ndata_in_loop, t_loop_start);
     }
 
-    t_loop_start = mod.impl.c.ggml_time_us();
+    t_loop_start = mod.impl.llama_c.ggml_time_us();
     ndata_in_loop = (ndata - idata_split) * ubatch_per_ctx;
     while (idata < ndata) : (idata += 1) {
         const train = false;
         const idata_in_loop = (idata - idata_split) * ubatch_per_ctx;
 
-        mod.impl.c.ggml_opt_dataset_get_batch_host(dataset, tokens.ptr, n_ctx * @sizeOf(mod.impl.c.llama_token), labels_sparse.ptr, idata);
+        mod.impl.llama_c.ggml_opt_dataset_get_batch_host(dataset, tokens.ptr, n_ctx * @sizeOf(mod.impl.llama_c.llama_token), labels_sparse.ptr, idata);
         optEpochIter(self, dataset, result_eval, tokens, labels_sparse, &batch, callback_eval, train, idata_in_loop, ndata_in_loop, t_loop_start);
     }
 }

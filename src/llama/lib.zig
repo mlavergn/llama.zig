@@ -16,16 +16,23 @@ const mod = @import("module.zig");
 comptime {
     // Every llama.h entry point but the sampler's, from api/.
     _ = @import("exports.zig");
-    // llama-sampler.cpp, split across src/llama/sampler/; it reaches
-    // llama-grammar.cpp (src/llama/grammar/) and std::regex (regex.zig).
-    _ = mod.sampler.core;
-    _ = mod.sampler.chain;
-    _ = mod.sampler.basic;
-    _ = mod.sampler.mirostat;
-    _ = mod.sampler.penalties;
-    _ = mod.sampler.logit_bias;
-    _ = mod.sampler.infill;
-    _ = mod.sampler.grammar;
+    // llama-sampler.cpp, split across src/llama/sampler/: each `llama_*`
+    // function there, by its own name, and the two C++-linkage helpers
+    // libllama-ref's callers reach by mangled name.
+    @setEvalBranchQuota(100_000);
+    for (@typeInfo(mod.sampler).@"struct".decl_names) |file_name| {
+        const file = @field(mod.sampler, file_name);
+        if (@TypeOf(file) != type) continue;
+        for (@typeInfo(file).@"struct".decl_names) |name| {
+            if (!std.mem.startsWith(u8, name, "llama_")) continue;
+            const f = @field(file, name);
+            if (@typeInfo(@TypeOf(f)) != .@"fn") continue;
+            @export(&f, .{ .name = name });
+        }
+    }
+    // Mangled names from `nm` on the reference `llama-sampler.o`.
+    @export(&mod.sampler.chain.backendBegin, .{ .name = "_Z27llama_sampler_backend_beginP13llama_sampler" });
+    @export(&mod.sampler.chain.backendNNodes, .{ .name = "_Z29llama_sampler_backend_n_nodesPK13llama_sampler" });
 }
 
 // -----------------------------------------------------------------------------

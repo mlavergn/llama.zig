@@ -30,10 +30,6 @@ const std = @import("std");
 const input_tensor_order = @import("input_tensor_order.zig");
 const harness_root = @import("harness_root");
 
-const c = harness_root.impl.c;
-
-const gpa = std.heap.c_allocator;
-
 /// The port, under the C names.
 const P = struct {
     pub const llama_model_init_from_user = harness_root.api.llama.llama_model_init_from_user;
@@ -55,20 +51,20 @@ const P = struct {
 /// The C++, under the C names. The next-token embedding calls are in
 /// `llama.h`, so they are C symbols too.
 const R = struct {
-    pub const llama_model_init_from_user = c.llama_model_init_from_user;
-    pub const llama_model_free = c.llama_model_free;
-    pub const llama_model_load_from_file = c.llama_model_load_from_file;
-    pub const llama_model_n_layer = c.llama_model_n_layer;
-    pub const llama_init_from_model = c.llama_init_from_model;
-    pub const llama_free = c.llama_free;
-    pub const llama_n_ctx = c.llama_n_ctx;
-    pub const llama_decode = c.llama_decode;
-    pub const llama_get_logits_ith = c.llama_get_logits_ith;
-    pub const llama_get_memory = c.llama_get_memory;
-    pub const llama_memory_seq_pos_min = c.llama_memory_seq_pos_min;
-    pub const llama_memory_seq_pos_max = c.llama_memory_seq_pos_max;
-    pub const llama_set_embeddings_nextn = c.llama_set_embeddings_nextn;
-    pub const llama_get_embeddings_nextn_ith = c.llama_get_embeddings_nextn_ith;
+    pub const llama_model_init_from_user = harness_root.impl.c.llama_model_init_from_user;
+    pub const llama_model_free = harness_root.impl.c.llama_model_free;
+    pub const llama_model_load_from_file = harness_root.impl.c.llama_model_load_from_file;
+    pub const llama_model_n_layer = harness_root.impl.c.llama_model_n_layer;
+    pub const llama_init_from_model = harness_root.impl.c.llama_init_from_model;
+    pub const llama_free = harness_root.impl.c.llama_free;
+    pub const llama_n_ctx = harness_root.impl.c.llama_n_ctx;
+    pub const llama_decode = harness_root.impl.c.llama_decode;
+    pub const llama_get_logits_ith = harness_root.impl.c.llama_get_logits_ith;
+    pub const llama_get_memory = harness_root.impl.c.llama_get_memory;
+    pub const llama_memory_seq_pos_min = harness_root.impl.c.llama_memory_seq_pos_min;
+    pub const llama_memory_seq_pos_max = harness_root.impl.c.llama_memory_seq_pos_max;
+    pub const llama_set_embeddings_nextn = harness_root.impl.c.llama_set_embeddings_nextn;
+    pub const llama_get_embeddings_nextn_ith = harness_root.impl.c.llama_get_embeddings_nextn_ith;
 };
 
 // -----------------------------------------------------------------------------
@@ -78,12 +74,12 @@ var rec: ?*std.ArrayList(u8) = null;
 
 fn note(comptime fmt: []const u8, args: anytype) void {
     const r = rec orelse return;
-    r.print(gpa, fmt ++ "\n", args) catch unreachable;
+    r.print(std.heap.c_allocator, fmt ++ "\n", args) catch unreachable;
 }
 
-fn logCb(_: c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
+fn logCb(_: harness_root.impl.c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
     const r = rec orelse return;
-    r.appendSlice(gpa, std.mem.span(@as([*:0]const u8, @ptrCast(text)))) catch unreachable;
+    r.appendSlice(std.heap.c_allocator, std.mem.span(@as([*:0]const u8, @ptrCast(text)))) catch unreachable;
 }
 
 fn hashBytes(p: [*]const u8, n: usize) u64 {
@@ -93,32 +89,32 @@ fn hashBytes(p: [*]const u8, n: usize) u64 {
 var scratch: std.ArrayList(u8) = .empty;
 var n_nodes: usize = 0;
 
-fn nodeCb(t: [*c]c.ggml_tensor, ask: bool, _: ?*anyopaque) callconv(.c) bool {
+fn nodeCb(t: [*c]harness_root.impl.c.ggml_tensor, ask: bool, _: ?*anyopaque) callconv(.c) bool {
     if (ask) return true;
-    const node: *c.ggml_tensor = t;
+    const node: *harness_root.impl.c.ggml_tensor = t;
     n_nodes += 1;
     const r = rec orelse return true;
-    r.print(gpa, "node {s} {s} {s} [{d},{d},{d},{d}] [{d},{d},{d},{d}] p", .{
-        std.mem.sliceTo(&node.name, 0), c.ggml_op_desc(node), c.ggml_type_name(node.type),
-        node.ne[0],                     node.ne[1],           node.ne[2],
-        node.ne[3],                     node.nb[0],           node.nb[1],
+    r.print(std.heap.c_allocator, "node {s} {s} {s} [{d},{d},{d},{d}] [{d},{d},{d},{d}] p", .{
+        std.mem.sliceTo(&node.name, 0), harness_root.impl.c.ggml_op_desc(node), harness_root.impl.c.ggml_type_name(node.type),
+        node.ne[0],                     node.ne[1],                             node.ne[2],
+        node.ne[3],                     node.nb[0],                             node.nb[1],
         node.nb[2],                     node.nb[3],
     }) catch unreachable;
-    for (node.op_params) |w| r.print(gpa, " {x}", .{@as(u32, @bitCast(w))}) catch unreachable;
-    r.appendSlice(gpa, " src") catch unreachable;
+    for (node.op_params) |w| r.print(std.heap.c_allocator, " {x}", .{@as(u32, @bitCast(w))}) catch unreachable;
+    r.appendSlice(std.heap.c_allocator, " src") catch unreachable;
     for (node.src) |s| {
         if (s == null) continue;
-        const src: *c.ggml_tensor = s;
-        r.print(gpa, " {s}:{s}", .{ std.mem.sliceTo(&src.name, 0), c.ggml_op_desc(src) }) catch unreachable;
+        const src: *harness_root.impl.c.ggml_tensor = s;
+        r.print(std.heap.c_allocator, " {s}:{s}", .{ std.mem.sliceTo(&src.name, 0), harness_root.impl.c.ggml_op_desc(src) }) catch unreachable;
     }
     if (node.view_src != null) {
-        const v: *c.ggml_tensor = node.view_src;
-        r.print(gpa, " view {s}+{d}", .{ std.mem.sliceTo(&v.name, 0), node.view_offs }) catch unreachable;
+        const v: *harness_root.impl.c.ggml_tensor = node.view_src;
+        r.print(std.heap.c_allocator, " view {s}+{d}", .{ std.mem.sliceTo(&v.name, 0), node.view_offs }) catch unreachable;
     }
-    const n = c.ggml_nbytes(node);
-    scratch.resize(gpa, n) catch unreachable;
-    c.ggml_backend_tensor_get(node, scratch.items.ptr, 0, n);
-    r.print(gpa, " flags {x} h {x}\n", .{ node.flags, hashBytes(scratch.items.ptr, n) }) catch unreachable;
+    const n = harness_root.impl.c.ggml_nbytes(node);
+    scratch.resize(std.heap.c_allocator, n) catch unreachable;
+    harness_root.impl.c.ggml_backend_tensor_get(node, scratch.items.ptr, 0, n);
+    r.print(std.heap.c_allocator, " flags {x} h {x}\n", .{ node.flags, hashBytes(scratch.items.ptr, n) }) catch unreachable;
     return true;
 }
 
@@ -130,52 +126,52 @@ fn normalize(log: []const u8) std.ArrayList(u8) {
     var first = true;
     while (lines.next()) |line| {
         if (std.mem.startsWith(u8, line, "ggml_metal_library_compile_pipeline:")) continue;
-        if (!first) out.append(gpa, '\n') catch unreachable;
+        if (!first) out.append(std.heap.c_allocator, '\n') catch unreachable;
         first = false;
         if (std.mem.find(u8, line, "reserve took ")) |at| {
-            out.appendSlice(gpa, line[0 .. at + "reserve took ".len]) catch unreachable;
-            out.appendSlice(gpa, "N ms") catch unreachable;
-            if (std.mem.find(u8, line, ", sched copies")) |rest| out.appendSlice(gpa, line[rest..]) catch unreachable;
+            out.appendSlice(std.heap.c_allocator, line[0 .. at + "reserve took ".len]) catch unreachable;
+            out.appendSlice(std.heap.c_allocator, "N ms") catch unreachable;
+            if (std.mem.find(u8, line, ", sched copies")) |rest| out.appendSlice(std.heap.c_allocator, line[rest..]) catch unreachable;
             continue;
         }
         if (std.mem.startsWith(u8, line, "ggml_metal_log_allocated_size:")) {
             if (std.mem.findScalar(u8, line, '(')) |open| {
-                out.appendSlice(gpa, line[0..open]) catch unreachable;
-                out.appendSlice(gpa, "(N)") catch unreachable;
+                out.appendSlice(std.heap.c_allocator, line[0..open]) catch unreachable;
+                out.appendSlice(std.heap.c_allocator, "(N)") catch unreachable;
                 continue;
             }
         }
         if (std.mem.find(u8, line, "available_memory_kb: ")) |at| {
             // CUDA on a unified-memory device reads the system's free
             // memory from /proc/meminfo, which moves between any two reads.
-            out.appendSlice(gpa, line[0 .. at + "available_memory_kb: ".len]) catch unreachable;
-            out.appendSlice(gpa, "N") catch unreachable;
+            out.appendSlice(std.heap.c_allocator, line[0 .. at + "available_memory_kb: ".len]) catch unreachable;
+            out.appendSlice(std.heap.c_allocator, "N") catch unreachable;
             continue;
         }
         if (std.mem.find(u8, line, " MiB free")) |end| {
             // A device's free memory moves with what the process holds.
             var start = end;
             while (start > 0 and std.ascii.isDigit(line[start - 1])) start -= 1;
-            out.appendSlice(gpa, line[0..start]) catch unreachable;
-            out.appendSlice(gpa, "N") catch unreachable;
-            out.appendSlice(gpa, line[end..]) catch unreachable;
+            out.appendSlice(std.heap.c_allocator, line[0..start]) catch unreachable;
+            out.appendSlice(std.heap.c_allocator, "N") catch unreachable;
+            out.appendSlice(std.heap.c_allocator, line[end..]) catch unreachable;
             continue;
         }
         // Pointers.
         var i: usize = 0;
         while (i < line.len) {
             if (i + 1 < line.len and line[i] == '0' and line[i + 1] == 'x') {
-                out.appendSlice(gpa, "0xP") catch unreachable;
+                out.appendSlice(std.heap.c_allocator, "0xP") catch unreachable;
                 i += 2;
                 while (i < line.len and std.ascii.isHex(line[i])) i += 1;
                 continue;
             }
-            out.append(gpa, line[i]) catch unreachable;
+            out.append(std.heap.c_allocator, line[i]) catch unreachable;
             i += 1;
         }
     }
-    const sorted = input_tensor_order.sortRuns(gpa, out.items);
-    out.deinit(gpa);
+    const sorted = input_tensor_order.sortRuns(std.heap.c_allocator, out.items);
+    out.deinit(std.heap.c_allocator);
     return sorted;
 }
 
@@ -200,22 +196,22 @@ fn firstDiff(a: []const u8, b: []const u8) bool {
 const n_vocab = 128;
 const n_ctx_train = 256;
 
-fn setU32(g: *c.gguf_context, comptime arch: []const u8, comptime key: []const u8, v: u32) void {
-    c.gguf_set_val_u32(g, arch ++ "." ++ key, v);
+fn setU32(g: *harness_root.impl.c.gguf_context, comptime arch: []const u8, comptime key: []const u8, v: u32) void {
+    harness_root.impl.c.gguf_set_val_u32(g, arch ++ "." ++ key, v);
 }
-fn setF32(g: *c.gguf_context, comptime arch: []const u8, comptime key: []const u8, v: f32) void {
-    c.gguf_set_val_f32(g, arch ++ "." ++ key, v);
+fn setF32(g: *harness_root.impl.c.gguf_context, comptime arch: []const u8, comptime key: []const u8, v: f32) void {
+    harness_root.impl.c.gguf_set_val_f32(g, arch ++ "." ++ key, v);
 }
-fn setPattern(g: *c.gguf_context, comptime arch: []const u8, pattern: []const bool) void {
-    c.gguf_set_arr_data(g, arch ++ ".attention.sliding_window_pattern", c.GGUF_TYPE_BOOL, pattern.ptr, pattern.len);
+fn setPattern(g: *harness_root.impl.c.gguf_context, comptime arch: []const u8, pattern: []const bool) void {
+    harness_root.impl.c.gguf_set_arr_data(g, arch ++ ".attention.sliding_window_pattern", harness_root.impl.c.GGUF_TYPE_BOOL, pattern.ptr, pattern.len);
 }
 
 /// A Gemma 4 target: six layers, two of them reading earlier layers' KV.
-fn targetMeta() *c.gguf_context {
-    const g: *c.gguf_context = c.gguf_init_empty().?;
+fn targetMeta() *harness_root.impl.c.gguf_context {
+    const g: *harness_root.impl.c.gguf_context = harness_root.impl.c.gguf_init_empty().?;
     const a = "gemma4";
-    c.gguf_set_val_str(g, "general.architecture", a);
-    c.gguf_set_val_str(g, "tokenizer.ggml.model", "no_vocab");
+    harness_root.impl.c.gguf_set_val_str(g, "general.architecture", a);
+    harness_root.impl.c.gguf_set_val_str(g, "tokenizer.ggml.model", "no_vocab");
     setU32(g, a, "vocab_size", n_vocab);
     setU32(g, a, "context_length", n_ctx_train);
     setU32(g, a, "embedding_length", 128);
@@ -241,11 +237,11 @@ fn targetMeta() *c.gguf_context {
 }
 
 /// A Gemma 4 assistant for that target: two next-token layers.
-fn assistantMeta() *c.gguf_context {
-    const g: *c.gguf_context = c.gguf_init_empty().?;
+fn assistantMeta() *harness_root.impl.c.gguf_context {
+    const g: *harness_root.impl.c.gguf_context = harness_root.impl.c.gguf_init_empty().?;
     const a = "gemma4-assistant";
-    c.gguf_set_val_str(g, "general.architecture", a);
-    c.gguf_set_val_str(g, "tokenizer.ggml.model", "no_vocab");
+    harness_root.impl.c.gguf_set_val_str(g, "general.architecture", a);
+    harness_root.impl.c.gguf_set_val_str(g, "tokenizer.ggml.model", "no_vocab");
     setU32(g, a, "vocab_size", n_vocab);
     setU32(g, a, "context_length", n_ctx_train);
     setU32(g, a, "embedding_length", 64);
@@ -271,38 +267,36 @@ fn assistantMeta() *c.gguf_context {
 
 /// Deterministic data from the tensor's name: uniform in [-0.25, 0.25),
 /// norms near one so activations keep their scale.
-fn setTensorData(t_: [*c]c.ggml_tensor, ud: ?*anyopaque) callconv(.c) void {
-    const t: *c.ggml_tensor = t_;
+fn setTensorData(t_: [*c]harness_root.impl.c.ggml_tensor, ud: ?*anyopaque) callconv(.c) void {
+    const t: *harness_root.impl.c.ggml_tensor = t_;
     const seed: *const u64 = @ptrCast(@alignCast(ud.?));
     const name = std.mem.sliceTo(&t.name, 0);
     var rng = std.Random.DefaultPrng.init(seed.* ^ std.hash.Wyhash.hash(0, name));
     const r = rng.random();
     const is_norm = std.mem.find(u8, name, "norm") != null or std.mem.find(u8, name, "out_scale") != null or std.mem.find(u8, name, "rope_freqs") != null;
-    const n: usize = @intCast(c.ggml_nelements(t));
-    const vals = gpa.alloc(f32, n) catch unreachable;
-    defer gpa.free(vals);
+    const n: usize = @intCast(harness_root.impl.c.ggml_nelements(t));
+    const vals = std.heap.c_allocator.alloc(f32, n) catch unreachable;
+    defer std.heap.c_allocator.free(vals);
     for (vals) |*v| v.* = if (is_norm) 1.0 + (r.float(f32) - 0.5) * 0.2 else (r.float(f32) - 0.5) * 0.5;
     switch (t.type) {
-        c.GGML_TYPE_F32 => c.ggml_backend_tensor_set(t, vals.ptr, 0, c.ggml_nbytes(t)),
-        c.GGML_TYPE_F16 => {
-            const h = gpa.alloc(c.ggml_fp16_t, n) catch unreachable;
-            defer gpa.free(h);
-            for (vals, h) |v, *o| o.* = c.ggml_fp32_to_fp16(v);
-            c.ggml_backend_tensor_set(t, h.ptr, 0, c.ggml_nbytes(t));
+        harness_root.impl.c.GGML_TYPE_F32 => harness_root.impl.c.ggml_backend_tensor_set(t, vals.ptr, 0, harness_root.impl.c.ggml_nbytes(t)),
+        harness_root.impl.c.GGML_TYPE_F16 => {
+            const h = std.heap.c_allocator.alloc(harness_root.impl.c.ggml_fp16_t, n) catch unreachable;
+            defer std.heap.c_allocator.free(h);
+            for (vals, h) |v, *o| o.* = harness_root.impl.c.ggml_fp32_to_fp16(v);
+            harness_root.impl.c.ggml_backend_tensor_set(t, h.ptr, 0, harness_root.impl.c.ggml_nbytes(t));
         },
         else => @panic("tensor type"),
     }
 }
 
-const arch_mod = harness_root.arch;
-
 /// Fills `t`'s host data as `setTensorData` fills a device tensor.
-fn fillHost(t: *c.ggml_tensor, seed: u64) void {
+fn fillHost(t: *harness_root.impl.c.ggml_tensor, seed: u64) void {
     const name = std.mem.sliceTo(&t.name, 0);
     var rng = std.Random.DefaultPrng.init(seed ^ std.hash.Wyhash.hash(0, name));
     const r = rng.random();
     const is_norm = std.mem.find(u8, name, "norm") != null or std.mem.find(u8, name, "out_scale") != null or std.mem.find(u8, name, "rope_freqs") != null;
-    const n: usize = @intCast(c.ggml_nelements(t));
+    const n: usize = @intCast(harness_root.impl.c.ggml_nelements(t));
     const data: [*]f32 = @ptrCast(@alignCast(t.data.?));
     for (data[0..n]) |*v| v.* = if (is_norm) 1.0 + (r.float(f32) - 0.5) * 0.2 else (r.float(f32) - 0.5) * 0.5;
 }
@@ -312,9 +306,9 @@ fn fillHost(t: *c.ggml_tensor, seed: u64) void {
 /// shape and the C++ aborts in `ggml_new_tensor`.
 fn writeAssistant(path: [:0]const u8, seed: u64) void {
     const meta = assistantMeta();
-    defer c.gguf_free(meta);
-    const gctx: *c.ggml_context = c.ggml_init(.{ .mem_size = 8 << 20, .mem_buffer = null, .no_alloc = false }).?;
-    defer c.ggml_free(gctx);
+    defer harness_root.impl.c.gguf_free(meta);
+    const gctx: *harness_root.impl.c.ggml_context = harness_root.impl.c.ggml_init(.{ .mem_size = 8 << 20, .mem_buffer = null, .no_alloc = false }).?;
+    defer harness_root.impl.c.ggml_free(gctx);
     const n_embd = 64;
     const n_ff = 96;
     Add.t(gctx, meta, seed, .token_embd, "weight", -1, &.{ n_embd, n_vocab });
@@ -337,18 +331,18 @@ fn writeAssistant(path: [:0]const u8, seed: u64) void {
         Add.t(gctx, meta, seed, .ffn_down, "weight", i, &.{ n_ff, n_embd });
         Add.t(gctx, meta, seed, .ffn_post_norm, "weight", i, &.{n_embd});
     }
-    if (!c.gguf_write_to_file(meta, path.ptr, false)) @panic("gguf_write_to_file");
+    if (!harness_root.impl.c.gguf_write_to_file(meta, path.ptr, false)) @panic("gguf_write_to_file");
 }
 
 const Add = struct {
-    fn t(g: *c.ggml_context, m: *c.gguf_context, seed_: u64, tensor: arch_mod.Tensor, suffix: ?[]const u8, bid: i32, ne: []const i64) void {
-        const nm = arch_mod.tensorName(tensor, suffix, bid, -1);
-        const x: *c.ggml_tensor = c.ggml_new_tensor(g, c.GGML_TYPE_F32, @intCast(ne.len), ne.ptr);
+    fn t(g: *harness_root.impl.c.ggml_context, m: *harness_root.impl.c.gguf_context, seed_: u64, tensor: harness_root.arch.Tensor, suffix: ?[]const u8, bid: i32, ne: []const i64) void {
+        const nm = harness_root.arch.tensorName(tensor, suffix, bid, -1);
+        const x: *harness_root.impl.c.ggml_tensor = harness_root.impl.c.ggml_new_tensor(g, harness_root.impl.c.GGML_TYPE_F32, @intCast(ne.len), ne.ptr);
         var buf: [128]u8 = undefined;
         const z = std.fmt.bufPrintSentinel(&buf, "{s}", .{nm.slice()}, 0) catch unreachable;
-        _ = c.ggml_set_name(x, z.ptr);
+        _ = harness_root.impl.c.ggml_set_name(x, z.ptr);
         fillHost(x, seed_);
-        c.gguf_add_tensor(m, x);
+        harness_root.impl.c.gguf_add_tensor(m, x);
     }
 };
 
@@ -359,12 +353,12 @@ const Add = struct {
 /// tensors, so this variant cannot come from metadata alone.
 fn writeTarget(path: [:0]const u8, seed: u64) void {
     const meta = targetMeta();
-    defer c.gguf_free(meta);
+    defer harness_root.impl.c.gguf_free(meta);
     setU32(meta, "gemma4", "expert_count", 4);
     setU32(meta, "gemma4", "expert_used_count", 2);
     setU32(meta, "gemma4", "expert_feed_forward_length", 64);
-    const gctx: *c.ggml_context = c.ggml_init(.{ .mem_size = 32 << 20, .mem_buffer = null, .no_alloc = false }).?;
-    defer c.ggml_free(gctx);
+    const gctx: *harness_root.impl.c.ggml_context = harness_root.impl.c.ggml_init(.{ .mem_size = 32 << 20, .mem_buffer = null, .no_alloc = false }).?;
+    defer harness_root.impl.c.ggml_free(gctx);
     const n_embd = 128;
     const n_ff = 192;
     const n_pl = 32;
@@ -417,7 +411,7 @@ fn writeTarget(path: [:0]const u8, seed: u64) void {
         Add.t(gctx, meta, seed, .per_layer_proj, "weight", i, &.{ n_pl, n_embd });
         Add.t(gctx, meta, seed, .per_layer_post_norm, "weight", i, &.{n_embd});
     }
-    if (!c.gguf_write_to_file(meta, path.ptr, false)) @panic("gguf_write_to_file");
+    if (!harness_root.impl.c.gguf_write_to_file(meta, path.ptr, false)) @panic("gguf_write_to_file");
 }
 
 var assistant_path: [:0]const u8 = "";
@@ -447,11 +441,11 @@ const n_prompt = 20;
 
 fn script(comptime A: type, gpu: bool) void {
     var seed: u64 = 42;
-    var mp = c.llama_model_default_params();
+    var mp = harness_root.impl.c.llama_model_default_params();
     if (!gpu) mp.n_gpu_layers = 0;
 
     const meta_t = targetMeta();
-    defer c.gguf_free(meta_t);
+    defer harness_root.impl.c.gguf_free(meta_t);
     const target_ = if (target_path) |tp| A.llama_model_load_from_file(tp.ptr, mp) else A.llama_model_init_from_user(meta_t, setTensorData, &seed, mp);
     const target = target_ orelse {
         note("target: init failed", .{});
@@ -460,7 +454,7 @@ fn script(comptime A: type, gpu: bool) void {
     defer A.llama_model_free(target);
     note("target n_layer {d}", .{A.llama_model_n_layer(target)});
 
-    var cp = c.llama_context_default_params();
+    var cp = harness_root.impl.c.llama_context_default_params();
     cp.n_ctx = 128;
     cp.n_ubatch = 64;
     cp.cb_eval = nodeCb;
@@ -472,8 +466,8 @@ fn script(comptime A: type, gpu: bool) void {
     defer A.llama_free(tctx);
     A.llama_set_embeddings_nextn(tctx, true, false);
 
-    var tb = c.llama_batch_init(64, 0, 1);
-    defer c.llama_batch_free(tb);
+    var tb = harness_root.impl.c.llama_batch_init(64, 0, 1);
+    defer harness_root.impl.c.llama_batch_free(tb);
     var tokens: [n_prompt]i32 = undefined;
     for (&tokens, 0..) |*t, k| t.* = @intCast((k * 37 + 11) % n_vocab);
     for (tokens, 0..) |t, k| {
@@ -502,10 +496,10 @@ fn script(comptime A: type, gpu: bool) void {
     defer A.llama_model_free(assistant);
 
     // Without a target the C++ refuses the context.
-    var dcp = c.llama_context_default_params();
+    var dcp = harness_root.impl.c.llama_context_default_params();
     dcp.cb_eval = nodeCb;
     dcp.no_perf = true;
-    dcp.ctx_type = c.LLAMA_CONTEXT_TYPE_MTP;
+    dcp.ctx_type = harness_root.impl.c.LLAMA_CONTEXT_TYPE_MTP;
     dcp.n_ctx = A.llama_n_ctx(tctx);
     dcp.n_ubatch = 64;
     dcp.n_rs_seq = 0;
@@ -526,16 +520,16 @@ fn script(comptime A: type, gpu: bool) void {
 
     // llama_batch_init allocates only one of token and embd; the assistant
     // needs both.
-    var db = c.llama_batch_init(8, n_embd_tgt, 1);
+    var db = harness_root.impl.c.llama_batch_init(8, n_embd_tgt, 1);
     defer {
         std.c.free(db.token);
         db.token = null;
-        c.llama_batch_free(db);
+        harness_root.impl.c.llama_batch_free(db);
     }
     db.token = @ptrCast(@alignCast(std.c.malloc(8 * @sizeOf(i32)).?));
 
     const Draft = struct {
-        fn steps(dctx_: anytype, db_: *c.llama_batch, id_: *i32, h_: *[n_embd_tgt]f32, pos: i32, n: usize) void {
+        fn steps(dctx_: anytype, db_: *harness_root.impl.c.llama_batch, id_: *i32, h_: *[n_embd_tgt]f32, pos: i32, n: usize) void {
             for (0..n) |s| {
                 db_.n_tokens = 0;
                 db_.token[0] = id_.*;
@@ -600,10 +594,10 @@ pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     const gpu = !(args.len > 1 and std.mem.eql(u8, args[1], "cpu"));
 
-    c.llama_log_set(logCb, null);
+    harness_root.impl.c.llama_log_set(logCb, null);
     harness_root.api.impl.llama_log_set(logCb, null);
-    c.ggml_log_set(logCb, null);
-    c.llama_backend_init();
+    harness_root.impl.c.ggml_log_set(logCb, null);
+    harness_root.impl.c.llama_backend_init();
 
     const dir = if (std.c.getenv("ASSISTANT_DIFF_TMP")) |d| std.mem.span(d) else "/tmp";
     var path_buf: [512]u8 = undefined;
@@ -644,7 +638,7 @@ pub fn main(init: std.process.Init) !void {
     if (side.len != 0) return;
     const ok = firstDiff(rn.items, pn.items);
     std.debug.print("{s}: {s}, {d} lines\n", .{ if (gpu) "gpu" else "cpu", if (ok) "PASS" else "FAIL", std.mem.count(u8, rn.items, "\n") });
-    rn.deinit(gpa);
-    pn.deinit(gpa);
+    rn.deinit(std.heap.c_allocator);
+    pn.deinit(std.heap.c_allocator);
     if (!ok) std.process.exit(1);
 }

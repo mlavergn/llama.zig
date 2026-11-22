@@ -46,7 +46,7 @@
 const std = @import("std");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const gen = @import("cuda_kernels");
+const cuda_kernels = @import("cuda_kernels");
 
 /// A kernel, resolved at comptime.
 pub const Kernel = struct {
@@ -77,10 +77,10 @@ pub fn get(comptime library: []const u8, comptime key: []const u8) Kernel {
 
 fn lookup(comptime library: []const u8, comptime key: []const u8) Kernel {
     @setEvalBranchQuota(10_000_000);
-    const li = for (gen.libraries, 0..) |lib, i| {
+    const li = for (cuda_kernels.libraries, 0..) |lib, i| {
         if (std.mem.eql(u8, lib.name, library)) break i;
     } else @compileError("no CUDA translation unit named '" ++ library ++ "'");
-    const lib = gen.libraries[li];
+    const lib = cuda_kernels.libraries[li];
     var lo: usize = 0;
     var hi: usize = lib.entries.len;
     while (lo < hi) {
@@ -106,9 +106,9 @@ fn lookup(comptime library: []const u8, comptime key: []const u8) Kernel {
 // Loading
 
 var load_mutex: stdlib.sync.Mutex = .{};
-var libraries: [gen.libraries.len]mod.common.cu.CUlibrary = @splat(null);
-var handles: [gen.kernel_count]std.atomic.Value(?*anyopaque) = @splat(.init(null));
-var checked: [gen.kernel_count]std.atomic.Value(bool) = @splat(.init(false));
+var libraries: [cuda_kernels.libraries.len]mod.common.cu.CUlibrary = @splat(null);
+var handles: [cuda_kernels.kernel_count]std.atomic.Value(?*anyopaque) = @splat(.init(null));
+var checked: [cuda_kernels.kernel_count]std.atomic.Value(bool) = @splat(.init(false));
 
 /// The kernel's handle, loading its library on first use.
 ///
@@ -316,7 +316,7 @@ fn canUsePdl(k: Kernel, h: mod.common.cu.CUkernel) bool {
     return can;
 }
 
-var pdl_cache: [mod.common.max_devices][gen.kernel_count]std.atomic.Value(u8) = @splat(@splat(.init(0)));
+var pdl_cache: [mod.common.max_devices][cuda_kernels.kernel_count]std.atomic.Value(u8) = @splat(@splat(.init(0)));
 
 /// Ports `CUDA_SET_SHARED_MEMORY_LIMIT` (common.cuh:251 @b1b770d90): raise
 /// the kernel's dynamic shared memory limit on the current device, once.
@@ -330,7 +330,7 @@ pub fn setSharedMemoryLimit(k: Kernel, nbytes: usize) void {
     slot.store(true, .release);
 }
 
-var smem_raised: [mod.common.max_devices][gen.kernel_count]std.atomic.Value(bool) = @splat(@splat(.init(false)));
+var smem_raised: [mod.common.max_devices][cuda_kernels.kernel_count]std.atomic.Value(bool) = @splat(@splat(.init(false)));
 
 // -----------------------------------------------------------------------------
 // Spelling a key

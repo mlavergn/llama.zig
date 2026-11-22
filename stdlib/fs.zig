@@ -21,8 +21,6 @@ const std = @import("std");
 const mod = @import("module.zig");
 const builtin = @import("builtin");
 
-const E = std.c.E;
-
 /// The file type bits of `st_mode`: the same on Linux, Darwin and the CRT.
 pub const IFMT: u32 = 0o170000;
 pub const IFDIR: u32 = 0o040000;
@@ -99,7 +97,7 @@ pub fn rmdir(path: []const u8) c_int {
 /// Return: 0, or the `errno`.
 pub fn unlink(path: []const u8) c_int {
     std.Io.Dir.cwd().deleteFile(mod.file.defaultIo(), path) catch |e| {
-        if (e == error.IsDir and comptime builtin.os.tag.isDarwin()) return @backingInt(E.PERM);
+        if (e == error.IsDir and comptime builtin.os.tag.isDarwin()) return @backingInt(std.c.E.PERM);
         return mod.errno.from(e);
     };
     return 0;
@@ -219,7 +217,7 @@ fn statusOf(p: []const u8, err: *c_int) Status {
     var st: Info = .{};
     const e = statErrno(p, true, &st);
     if (e == 0) return if (st.mode & IFMT == IFDIR) .directory else .other;
-    if (e == @backingInt(E.NOENT) or e == @backingInt(E.NOTDIR)) return .not_found;
+    if (e == @backingInt(std.c.E.NOENT) or e == @backingInt(std.c.E.NOTDIR)) return .not_found;
     err.* = e;
     return .unknown;
 }
@@ -235,7 +233,7 @@ pub fn createDirectories(p: []const u8) c_int {
     switch (statusOf(p, &e)) {
         .unknown => return e,
         .directory => return 0,
-        .other => return @backingInt(E.EXIST),
+        .other => return @backingInt(std.c.E.EXIST),
         .not_found => {},
     }
     const up = mod.path.parent(p);
@@ -243,18 +241,18 @@ pub fn createDirectories(p: []const u8) c_int {
         switch (statusOf(up, &e)) {
             .unknown => return e,
             .not_found => {
-                if (std.mem.eql(u8, up, p)) return @backingInt(E.INVAL);
+                if (std.mem.eql(u8, up, p)) return @backingInt(std.c.E.INVAL);
                 const r = createDirectories(up);
                 if (r != 0) return r;
             },
-            .other => return @backingInt(E.NOTDIR),
+            .other => return @backingInt(std.c.E.NOTDIR),
             .directory => {},
         }
     }
     // `__create_directory`: `mkdir(p, 0777)`, an existing directory is fine
     const mec = mkdir(p);
     if (mec == 0) return 0;
-    if (mec != @backingInt(E.EXIST)) return mec;
+    if (mec != @backingInt(std.c.E.EXIST)) return mec;
     var ignored: c_int = 0;
     if (statusOf(p, &ignored) != .directory) return mec;
     return 0;
@@ -266,7 +264,7 @@ pub fn createDirectories(p: []const u8) c_int {
 /// Return: 0, or the `errno` of a failure other than `ENOENT`.
 pub fn removeIfExists(p: []const u8) c_int {
     const e = remove(p);
-    if (e == @backingInt(E.NOENT)) return 0;
+    if (e == @backingInt(std.c.E.NOENT)) return 0;
     return e;
 }
 
@@ -279,13 +277,13 @@ pub fn removeAll(a: std.mem.Allocator, p: []const u8) struct { n: u64, err: c_in
     const st = stat(p, false) orelse return .{ .n = 0, .err = 0 };
     var n: u64 = 0;
     if (st.mode & IFMT == IFDIR) {
-        const names = listNames(a, p) catch return .{ .n = n, .err = @backingInt(E.NOMEM) };
+        const names = listNames(a, p) catch return .{ .n = n, .err = @backingInt(std.c.E.NOMEM) };
         defer {
             for (names) |name| a.free(name);
             a.free(names);
         }
         for (names) |name| {
-            const child = mod.path.join(a, p, name) catch return .{ .n = n, .err = @backingInt(E.NOMEM) };
+            const child = mod.path.join(a, p, name) catch return .{ .n = n, .err = @backingInt(std.c.E.NOMEM) };
             defer a.free(child);
             const r = removeAll(a, child);
             n += r.n;
@@ -380,7 +378,7 @@ pub fn equivalent(a: [:0]const u8, b: [:0]const u8) bool {
         // paths is the closest the C library offers.
         var ra: [260:0]u8 = undefined;
         var rb: [260:0]u8 = undefined;
-        if (@import("libc.zig")._fullpath(&ra, a.ptr, ra.len) == null or @import("libc.zig")._fullpath(&rb, b.ptr, rb.len) == null) return false;
+        if (mod.libc._fullpath(&ra, a.ptr, ra.len) == null or mod.libc._fullpath(&rb, b.ptr, rb.len) == null) return false;
         const fb = mod.file.openIn(std_io, b) catch return false;
         fb.close(std_io);
         return std.ascii.eqlIgnoreCase(std.mem.sliceTo(&ra, 0), std.mem.sliceTo(&rb, 0));
@@ -454,7 +452,7 @@ test "a tree is made, listed, linked, renamed and removed, with the C's errno" {
     defer a.free(l);
 
     try std.testing.expectEqual(@as(c_int, 0), mkdir(d));
-    try std.testing.expectEqual(@as(c_int, @backingInt(E.EXIST)), mkdir(d));
+    try std.testing.expectEqual(@as(c_int, @backingInt(std.c.E.EXIST)), mkdir(d));
     var out = try mod.file.Out.create(std.testing.io, f);
     out.close(std.testing.io);
 
@@ -467,7 +465,7 @@ test "a tree is made, listed, linked, renamed and removed, with the C's errno" {
     try std.testing.expect(std.mem.endsWith(u8, real, "/d/f"));
 
     try std.testing.expectEqual(@as(c_int, 0), rename(f, g));
-    try std.testing.expectEqual(@as(c_int, @backingInt(E.NOENT)), rename(f, g));
+    try std.testing.expectEqual(@as(c_int, @backingInt(std.c.E.NOENT)), rename(f, g));
 
     var names: [3][]const u8 = undefined;
     var n: usize = 0;
@@ -487,8 +485,8 @@ test "a tree is made, listed, linked, renamed and removed, with the C's errno" {
     defer for (names[0..n]) |name| a.free(name);
     try std.testing.expectEqual(@as(usize, 2), n);
 
-    try std.testing.expectEqual(@as(c_int, @backingInt(E.NOTEMPTY)), rmdir(d));
-    try std.testing.expectEqual(@as(c_int, @backingInt(E.NOTDIR)), switch (Dir.open(g)) {
+    try std.testing.expectEqual(@as(c_int, @backingInt(std.c.E.NOTEMPTY)), rmdir(d));
+    try std.testing.expectEqual(@as(c_int, @backingInt(std.c.E.NOTDIR)), switch (Dir.open(g)) {
         .ok => |x| blk: {
             var y = x;
             y.close();
@@ -496,11 +494,11 @@ test "a tree is made, listed, linked, renamed and removed, with the C's errno" {
         },
         .err => |e| e,
     });
-    const expected_unlink_dir: E = if (builtin.os.tag.isDarwin()) .PERM else .ISDIR;
+    const expected_unlink_dir: std.c.E = if (builtin.os.tag.isDarwin()) .PERM else .ISDIR;
     try std.testing.expectEqual(@as(c_int, @backingInt(expected_unlink_dir)), unlink(d));
     try std.testing.expectEqual(@as(c_int, 0), unlink(l));
     try std.testing.expectEqual(@as(c_int, 0), remove(g));
-    try std.testing.expectEqual(@as(c_int, @backingInt(E.NOENT)), remove(g));
+    try std.testing.expectEqual(@as(c_int, @backingInt(std.c.E.NOENT)), remove(g));
     try std.testing.expectEqual(@as(c_int, 0), remove(d));
 
     const cwd = currentPathAlloc(a) orelse return error.TestUnexpectedResult;
@@ -551,8 +549,8 @@ test "createDirectories, listNames, copyFile and removeAll answer as libc++ does
     try std.testing.expectEqual(@as(c_int, 0), createDirectories(deep)); // already there
     try std.testing.expect(isDirectory(deep));
     try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = f, .data = "abc" });
-    try std.testing.expectEqual(@as(c_int, @backingInt(E.EXIST)), createDirectories(f));
-    try std.testing.expectEqual(@as(c_int, @backingInt(E.NOTDIR)), createDirectories(under_f));
+    try std.testing.expectEqual(@as(c_int, @backingInt(std.c.E.EXIST)), createDirectories(f));
+    try std.testing.expectEqual(@as(c_int, @backingInt(std.c.E.NOTDIR)), createDirectories(under_f));
 
     try std.testing.expectEqual(@as(c_int, 0), copyFile(a, f, g));
     try std.testing.expectEqual(@as(?u64, 3), fileSize(g));

@@ -49,14 +49,14 @@ const f16_min_size: usize = 1024 * 1024;
 
 /// Ports `ggml_vk_comm_needs_f32` (ggml-vulkan-comm.cpp:14 @b1b770d90):
 /// follows the ops the meta backend may delay a reduction across.
-fn needsF32(tensor: ?*const ggml.impl.c.ggml_tensor, depth: c_int) bool {
+fn needsF32(tensor: ?*const ggml.impl.ggml_c.ggml_tensor, depth: c_int) bool {
     const t = tensor orelse return false;
     if (depth > 64) return false;
     return switch (t.op) {
-        ggml.impl.c.GGML_OP_MUL_MAT, ggml.impl.c.GGML_OP_MUL_MAT_ID => ggml.impl.c.ggml_prec_get_acc(t) == ggml.impl.c.GGML_PREC_BF16 or ggml.impl.c.ggml_prec_get_acc(t) == ggml.impl.c.GGML_PREC_F32,
-        ggml.impl.c.GGML_OP_ADD => needsF32(t.src[0], depth + 1) or needsF32(t.src[1], depth + 1),
-        ggml.impl.c.GGML_OP_MUL, ggml.impl.c.GGML_OP_ADD_ID => needsF32(t.src[0], depth + 1),
-        ggml.impl.c.GGML_OP_VIEW => needsF32(t.src[0], depth + 1),
+        ggml.impl.ggml_c.GGML_OP_MUL_MAT, ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID => ggml.impl.ggml_c.ggml_prec_get_acc(t) == ggml.impl.ggml_c.GGML_PREC_BF16 or ggml.impl.ggml_c.ggml_prec_get_acc(t) == ggml.impl.ggml_c.GGML_PREC_F32,
+        ggml.impl.ggml_c.GGML_OP_ADD => needsF32(t.src[0], depth + 1) or needsF32(t.src[1], depth + 1),
+        ggml.impl.ggml_c.GGML_OP_MUL, ggml.impl.ggml_c.GGML_OP_ADD_ID => needsF32(t.src[0], depth + 1),
+        ggml.impl.ggml_c.GGML_OP_VIEW => needsF32(t.src[0], depth + 1),
         else => false,
     };
 }
@@ -71,10 +71,10 @@ const Sync = enum {
 
 /// Ports `vk_comm_device` (ggml-vulkan-comm.cpp:41 @b1b770d90).
 const CommDevice = struct {
-    backend: ggml.impl.c.ggml_backend_t = null,
+    backend: ggml.impl.ggml_c.ggml_backend_t = null,
     ctx: *ggml.vulkan.context.BackendCtx = undefined,
     host_ptr: ?*anyopaque = null,
-    host_buf: []ggml.impl.c.ggml_backend_buffer_t = &.{}, // host_ptr imported into each peer
+    host_buf: []ggml.impl.ggml_c.ggml_backend_buffer_t = &.{}, // host_ptr imported into each peer
 
     sfd: struct {
         get_fd: ggml.vulkan.common.vk.PFN_vkGetSemaphoreFdKHR = null,
@@ -96,8 +96,8 @@ const CommCtx = struct {
     @"align": usize = 4096,
     cap: usize = 0,
     round: u64 = 0,
-    tctx: ?*ggml.impl.c.ggml_context = null,
-    slot: *ggml.impl.c.ggml_tensor = undefined,
+    tctx: ?*ggml.impl.ggml_c.ggml_context = null,
+    slot: *ggml.impl.ggml_c.ggml_tensor = undefined,
     disabled: bool = false,
 
     thread: ?std.Thread = null,
@@ -114,7 +114,7 @@ const CommCtx = struct {
 fn freeBuffers(comm: *CommCtx) void {
     for (comm.devs) |*dv| {
         for (dv.host_buf) |*buf| {
-            ggml.impl.c.ggml_backend_buffer_free(buf.*);
+            ggml.impl.ggml_c.ggml_backend_buffer_free(buf.*);
             buf.* = null;
         }
         std.c.free(dv.host_ptr);
@@ -134,19 +134,19 @@ fn ensure(comm: *CommCtx, nbytes: usize) bool {
             return false;
         }
     }.f;
-    for (comm.devs) |dv| ggml.impl.c.ggml_backend_synchronize(dv.backend);
+    for (comm.devs) |dv| ggml.impl.ggml_c.ggml_backend_synchronize(dv.backend);
     freeBuffers(comm);
 
     const n = comm.devs.len;
     const cap = stdlib.num.pad(usize, nbytes, comm.@"align");
     for (0..n) |i| {
         const dv = &comm.devs[i];
-        if (stdlib.libc.posix_memalign(&dv.host_ptr, comm.@"align", 2 * cap) != 0) {
+        if (std.c.posix_memalign(&dv.host_ptr, comm.@"align", 2 * cap) != 0) {
             dv.host_ptr = null;
             return fail(comm);
         }
         for (0..n) |j| {
-            dv.host_buf[j] = ggml.vulkan.backend.deviceBufferFromHostPtr(ggml.impl.c.ggml_backend_get_device(comm.devs[j].backend), dv.host_ptr, 2 * cap, 2 * cap);
+            dv.host_buf[j] = ggml.vulkan.backend.deviceBufferFromHostPtr(ggml.impl.ggml_c.ggml_backend_get_device(comm.devs[j].backend), dv.host_ptr, 2 * cap, 2 * cap);
             if (dv.host_buf[j] == null) return fail(comm);
         }
     }
@@ -155,15 +155,15 @@ fn ensure(comm: *CommCtx, nbytes: usize) bool {
 }
 
 /// Ports `ggml_vk_comm_set_slot` (ggml-vulkan-comm.cpp:129 @b1b770d90).
-fn setSlot(slot: *ggml.impl.c.ggml_tensor, src: *const ggml.impl.c.ggml_tensor, ty: ggml.impl.c.ggml_type, buf: ggml.impl.c.ggml_backend_buffer_t, offs: usize) void {
+fn setSlot(slot: *ggml.impl.ggml_c.ggml_tensor, src: *const ggml.impl.ggml_c.ggml_tensor, ty: ggml.impl.ggml_c.ggml_type, buf: ggml.impl.ggml_c.ggml_backend_buffer_t, offs: usize) void {
     slot.type = ty;
-    slot.nb[0] = ggml.impl.c.ggml_type_size(ty);
-    for (0..ggml.impl.c.GGML_MAX_DIMS) |dim| {
+    slot.nb[0] = ggml.impl.ggml_c.ggml_type_size(ty);
+    for (0..ggml.impl.ggml_c.GGML_MAX_DIMS) |dim| {
         slot.ne[dim] = src.ne[dim];
         if (dim > 0) slot.nb[dim] = slot.nb[dim - 1] *% @as(usize, @bitCast(slot.ne[dim - 1]));
     }
     slot.buffer = buf;
-    slot.data = @as([*]u8, @ptrCast(ggml.impl.c.ggml_backend_buffer_get_base(buf))) + offs;
+    slot.data = @as([*]u8, @ptrCast(ggml.impl.ggml_c.ggml_backend_buffer_get_base(buf))) + offs;
 }
 
 /// Ports `ggml_vk_comm_submit` (ggml-vulkan-comm.cpp:142 @b1b770d90).
@@ -283,7 +283,7 @@ fn bridgeRelease(comm: *CommCtx, r: u64, seen: []u64, sent: []bool) ggml.vulkan.
 
 /// Ports `ggml_vk_comm_bridge_thread` (ggml-vulkan-comm.cpp:234 @b1b770d90).
 fn bridgeThread(comm: *CommCtx) void {
-    if (builtin.os.tag == .linux) _ = stdlib.libc.pthread_setname_np(std.c.pthread_self(), "ggml-vk-comm");
+    if (builtin.os.tag == .linux) _ = std.c.pthread_setname_np(std.c.pthread_self(), "ggml-vk-comm");
     const seen = std.heap.c_allocator.alloc(u64, comm.devs.len) catch oom();
     defer std.heap.c_allocator.free(seen);
     @memset(seen, 0);
@@ -295,7 +295,7 @@ fn bridgeThread(comm: *CommCtx) void {
             // `e.what()` of a `vk::SystemError`: its message, then the code's.
             var what: [256]u8 = undefined;
             const text = std.fmt.bufPrintSentinel(&what, "{s}: {s}", .{ std.mem.span(ggml.vulkan.common.last_error.what), ggml.vulkan.common.resultString(ggml.vulkan.common.last_error.result) }, 0) catch "vk::SystemError";
-            ggml.impl.c.ggml_abort(@src().file.ptr, @intCast(@src().line), "ggml_vulkan: all-reduce bridge failed: %s", text.ptr);
+            ggml.impl.ggml_c.ggml_abort(@src().file.ptr, @intCast(@src().line), "ggml_vulkan: all-reduce bridge failed: %s", text.ptr);
             unreachable;
         };
         if (!released) return;
@@ -417,7 +417,7 @@ fn sfdExport(dv: *CommDevice) c_int {
     gi.handleType = ggml.vulkan.common.vk.VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
     const result = dv.sfd.get_fd.?(dv.ctx.device.device, &gi, &fd);
     if (result != ggml.vulkan.common.vk.VK_SUCCESS) {
-        ggml.impl.c.ggml_abort(@src().file.ptr, @intCast(@src().line), "ggml_vulkan: vkGetSemaphoreFdKHR failed: %d", @as(c_int, result));
+        ggml.impl.ggml_c.ggml_abort(@src().file.ptr, @intCast(@src().line), "ggml_vulkan: vkGetSemaphoreFdKHR failed: %d", @as(c_int, result));
         unreachable;
     }
     return fd;
@@ -433,7 +433,7 @@ fn sfdImport(dv: *CommDevice, sem: ggml.vulkan.common.vk.VkSemaphore, fd: c_int)
     isi.fd = fd;
     const result = dv.sfd.import_fd.?(dv.ctx.device.device, &isi);
     if (result != ggml.vulkan.common.vk.VK_SUCCESS) {
-        ggml.impl.c.ggml_abort(@src().file.ptr, @intCast(@src().line), "ggml_vulkan: vkImportSemaphoreFdKHR failed: %d", @as(c_int, result));
+        ggml.impl.ggml_c.ggml_abort(@src().file.ptr, @intCast(@src().line), "ggml_vulkan: vkImportSemaphoreFdKHR failed: %d", @as(c_int, result));
         unreachable;
     }
 }
@@ -446,7 +446,7 @@ fn sfdExchange(comm: *CommCtx, r: u64) void {
         const last = if (j == n - 1) n - 2 else n - 1;
         for (0..n) |i| {
             if (i == j) continue;
-            const imp_fd = if (fd < 0 or i == last) fd else stdlib.libc.fcntl(fd, std.c.F.DUPFD_CLOEXEC, @as(c_int, 0));
+            const imp_fd = if (fd < 0 or i == last) fd else std.c.fcntl(fd, std.c.F.DUPFD_CLOEXEC, @as(c_int, 0));
             ggml.impl.assert(imp_fd >= 0 or fd < 0, "imp_fd >= 0 || fd < 0");
             sfdImport(&comm.devs[i], comm.devs[i].sfd.imp[j], imp_fd);
         }
@@ -456,7 +456,7 @@ fn sfdExchange(comm: *CommCtx, r: u64) void {
 
 /// Ports `ggml_vk_comm_sfd_thread` (ggml-vulkan-comm.cpp:378 @b1b770d90).
 fn sfdThread(comm: *CommCtx) void {
-    if (builtin.os.tag == .linux) _ = stdlib.libc.pthread_setname_np(std.c.pthread_self(), "ggml-vk-comm");
+    if (builtin.os.tag == .linux) _ = std.c.pthread_setname_np(std.c.pthread_self(), "ggml-vk-comm");
     var r: u64 = 1;
     while (waitSubmitted(comm, r)) : (r += 1) sfdExchange(comm, r);
 }
@@ -505,7 +505,7 @@ fn sfdWait(comm: *CommCtx, i: usize, cx: *ggml.vulkan.submit.Context, round: u64
 pub fn commFree(comm_ctx: ?*anyopaque) callconv(.c) void {
     const comm: *CommCtx = @ptrCast(@alignCast(comm_ctx.?));
     // pending reductions need the thread
-    for (comm.devs) |dv| ggml.impl.c.ggml_backend_synchronize(dv.backend);
+    for (comm.devs) |dv| ggml.impl.ggml_c.ggml_backend_synchronize(dv.backend);
     if (comm.thread) |t| {
         {
             comm.mutex.lock();
@@ -521,7 +521,7 @@ pub fn commFree(comm_ctx: ?*anyopaque) callconv(.c) void {
         bridgeFree(dv);
     }
     freeBuffers(comm);
-    if (comm.tctx) |tctx| ggml.impl.c.ggml_free(tctx);
+    if (comm.tctx) |tctx| ggml.impl.ggml_c.ggml_free(tctx);
     for (comm.devs) |*dv| {
         std.heap.c_allocator.free(dv.host_buf);
         std.heap.c_allocator.free(dv.sfd.imp);
@@ -531,7 +531,7 @@ pub fn commFree(comm_ctx: ?*anyopaque) callconv(.c) void {
 }
 
 /// Ports `ggml_backend_vk_comm_init` (ggml-vulkan-comm.cpp:450 @b1b770d90).
-pub fn commInit(backends: [*c]ggml.impl.c.ggml_backend_t, n_backends: usize) callconv(.c) ?*anyopaque {
+pub fn commInit(backends: [*c]ggml.impl.ggml_c.ggml_backend_t, n_backends: usize) callconv(.c) ?*anyopaque {
     if (ggml.vulkan.instance.instance.allreduce_disabled or n_backends < 2) return null;
     for (0..n_backends) |i| {
         if (!ggml.vulkan.backend.isVk(backends[i])) return null;
@@ -544,7 +544,7 @@ pub fn commInit(backends: [*c]ggml.impl.c.ggml_backend_t, n_backends: usize) cal
         dv.* = .{};
         dv.backend = backends[i];
         dv.ctx = @ptrCast(@alignCast(backends[i].*.context));
-        dv.host_buf = std.heap.c_allocator.alloc(ggml.impl.c.ggml_backend_buffer_t, n_backends) catch oom();
+        dv.host_buf = std.heap.c_allocator.alloc(ggml.impl.ggml_c.ggml_backend_buffer_t, n_backends) catch oom();
         @memset(dv.host_buf, null);
     }
 
@@ -572,9 +572,9 @@ pub fn commInit(backends: [*c]ggml.impl.c.ggml_backend_t, n_backends: usize) cal
     if (stdlib.env.getenv("GGML_VK_ALLREDUCE_SPIN_US")) |spin| {
         comm.spin = @as(i64, @max(0, stdlib.num.atoiC(spin))) * std.time.ns_per_us;
     }
-    const ip: ggml.impl.c.ggml_init_params = .{ .mem_size = ggml.impl.c.ggml_tensor_overhead(), .mem_buffer = null, .no_alloc = true };
-    comm.tctx = ggml.impl.c.ggml_init(ip);
-    comm.slot = ggml.impl.c.ggml_new_tensor_1d(comm.tctx, ggml.impl.c.GGML_TYPE_F32, 1);
+    const ip: ggml.impl.ggml_c.ggml_init_params = .{ .mem_size = ggml.impl.ggml_c.ggml_tensor_overhead(), .mem_buffer = null, .no_alloc = true };
+    comm.tctx = ggml.impl.ggml_c.ggml_init(ip);
+    comm.slot = ggml.impl.ggml_c.ggml_new_tensor_1d(comm.tctx, ggml.impl.ggml_c.GGML_TYPE_F32, 1);
 
     const inited = if (comm.mode == .sync_fd) sfdInit(comm) else bridgeInit(comm);
     inited catch {
@@ -592,44 +592,44 @@ pub fn commInit(backends: [*c]ggml.impl.c.ggml_backend_t, n_backends: usize) cal
 /// add their slots; all A precede any B. Slot reuse: A(k) follows own
 /// B(k-1), which waited on peers' A(k-1), submitted after their B(k-2), the
 /// last reader.
-pub fn commAllreduceTensor(comm_ctx: ?*anyopaque, tensors: [*c][*c]ggml.impl.c.ggml_tensor) callconv(.c) bool {
+pub fn commAllreduceTensor(comm_ctx: ?*anyopaque, tensors: [*c][*c]ggml.impl.ggml_c.ggml_tensor) callconv(.c) bool {
     const comm: *CommCtx = @ptrCast(@alignCast(comm_ctx.?));
     const n = comm.devs.len;
 
-    const ne = ggml.impl.c.ggml_nelements(tensors[0]);
+    const ne = ggml.impl.ggml_c.ggml_nelements(tensors[0]);
     for (0..n) |i| {
-        const t = ggml.impl.one(ggml.impl.c.ggml_tensor, tensors[i]);
-        if (t.type != ggml.impl.c.GGML_TYPE_F32 or ggml.impl.c.ggml_nelements(t) != ne or !ggml.impl.c.ggml_is_contiguous(t) or !ggml.vulkan.buffer.bufferIsVk(t.buffer)) {
+        const t = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, tensors[i]);
+        if (t.type != ggml.impl.ggml_c.GGML_TYPE_F32 or ggml.impl.ggml_c.ggml_nelements(t) != ne or !ggml.impl.ggml_c.ggml_is_contiguous(t) or !ggml.vulkan.buffer.bufferIsVk(t.buffer)) {
             return false;
         }
         const ctx = comm.devs[i].ctx;
         if (ctx.compute_ctx) |cc| if (cc.out_memcpys.items.len != 0) return false;
     }
     if (ne == 0) return true;
-    const nbytes = ggml.impl.c.ggml_nbytes(tensors[0]);
+    const nbytes = ggml.impl.ggml_c.ggml_nbytes(tensors[0]);
     if (!ensure(comm, nbytes)) return false;
 
     const f32_wire = nbytes < f16_min_size or needsF32(tensors[0], 0);
-    const wire: ggml.impl.c.ggml_type = if (f32_wire) ggml.impl.c.GGML_TYPE_F32 else ggml.impl.c.GGML_TYPE_F16;
+    const wire: ggml.impl.ggml_c.ggml_type = if (f32_wire) ggml.impl.ggml_c.GGML_TYPE_F32 else ggml.impl.ggml_c.GGML_TYPE_F16;
     comm.round += 1;
     const round = comm.round;
     const slot_offs = (round & 1) * comm.cap;
-    const slot_size = @as(usize, @intCast(ne)) * ggml.impl.c.ggml_type_size(wire);
+    const slot_size = @as(usize, @intCast(ne)) * ggml.impl.ggml_c.ggml_type_size(wire);
 
     for (0..n) |i| {
         const dv = &comm.devs[i];
         const ctx = dv.ctx;
-        const t = ggml.impl.one(ggml.impl.c.ggml_tensor, tensors[i]);
+        const t = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, tensors[i]);
         const tbuf = ggml.vulkan.buffer.tensorBuffer(t);
         const hbuf = ggml.vulkan.buffer.devBuffer(dv.host_buf[i]);
         const toffs = ggml.vulkan.buffer.tensorOffset(t) + t.view_offs;
 
         const cx = ggml.vulkan.context.getComputeCtx(ctx);
         ggml.vulkan.context.syncBuffers(ctx, cx);
-        if (t.flags & ggml.impl.c.GGML_TENSOR_FLAG_COMPUTE == 0) {
+        if (t.flags & ggml.impl.ggml_c.GGML_TENSOR_FLAG_COMPUTE == 0) {
             ggml.vulkan.common.dispatch.vkCmdFillBuffer.?(cx.cmd(), hbuf.buffer, slot_offs, stdlib.num.pad(usize, slot_size, 4), 0);
             ggml.vulkan.common.dispatch.vkCmdFillBuffer.?(cx.cmd(), tbuf.buffer, toffs, nbytes, 0);
-        } else if (wire == ggml.impl.c.GGML_TYPE_F32) {
+        } else if (wire == ggml.impl.ggml_c.GGML_TYPE_F32) {
             ggml.vulkan.submit.bufferCopyAsync(cx, hbuf, slot_offs, tbuf, toffs, nbytes);
         } else {
             setSlot(comm.slot, t, wire, dv.host_buf[i], slot_offs);
@@ -653,7 +653,7 @@ pub fn commAllreduceTensor(comm_ctx: ?*anyopaque, tensors: [*c][*c]ggml.impl.c.g
             bridgeWait(comm, i, cx, round);
         }
         ggml.vulkan.context.syncBuffers(ctx, cx);
-        const t = ggml.impl.one(ggml.impl.c.ggml_tensor, tensors[i]);
+        const t = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, tensors[i]);
         for (0..n) |j| {
             if (j == i) continue;
             setSlot(comm.slot, t, wire, comm.devs[j].host_buf[i], slot_offs);
@@ -661,7 +661,7 @@ pub fn commAllreduceTensor(comm_ctx: ?*anyopaque, tensors: [*c][*c]ggml.impl.c.g
             ggml.vulkan.context.syncBuffers(ctx, cx);
         }
         // small reductions go out with the next graph's first submit
-        if (wire != ggml.impl.c.GGML_TYPE_F32 or ggml.vulkan.instance.loggers.perf_logger_enabled) {
+        if (wire != ggml.impl.ggml_c.GGML_TYPE_F32 or ggml.vulkan.instance.loggers.perf_logger_enabled) {
             submit(ctx, cx, null, 0);
         }
     }
@@ -676,26 +676,26 @@ test {
 }
 
 test "the wire precision follows the ops a reduction may be delayed across" {
-    var mm = std.mem.zeroes(ggml.impl.c.ggml_tensor);
-    mm.op = ggml.impl.c.GGML_OP_MUL_MAT;
-    var add = std.mem.zeroes(ggml.impl.c.ggml_tensor);
-    add.op = ggml.impl.c.GGML_OP_ADD;
+    var mm = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
+    mm.op = ggml.impl.ggml_c.GGML_OP_MUL_MAT;
+    var add = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
+    add.op = ggml.impl.ggml_c.GGML_OP_ADD;
     add.src[1] = &mm;
-    var view = std.mem.zeroes(ggml.impl.c.ggml_tensor);
-    view.op = ggml.impl.c.GGML_OP_VIEW;
+    var view = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
+    view.op = ggml.impl.ggml_c.GGML_OP_VIEW;
     view.src[0] = &add;
     try std.testing.expect(!needsF32(&view, 0));
-    mm.op_params[0] = ggml.impl.c.GGML_PREC_F32;
+    mm.op_params[0] = ggml.impl.ggml_c.GGML_PREC_F32;
     try std.testing.expect(needsF32(&view, 0));
     // A bf16 accumulator wants the f32 wire too.
-    mm.op_params[0] = ggml.impl.c.GGML_PREC_BF16;
+    mm.op_params[0] = ggml.impl.ggml_c.GGML_PREC_BF16;
     try std.testing.expect(needsF32(&view, 0));
-    mm.op_params[0] = ggml.impl.c.GGML_PREC_F16;
+    mm.op_params[0] = ggml.impl.ggml_c.GGML_PREC_F16;
     try std.testing.expect(!needsF32(&view, 0));
-    mm.op_params[0] = ggml.impl.c.GGML_PREC_F32;
+    mm.op_params[0] = ggml.impl.ggml_c.GGML_PREC_F32;
     // MUL follows only its first source.
-    var mul = std.mem.zeroes(ggml.impl.c.ggml_tensor);
-    mul.op = ggml.impl.c.GGML_OP_MUL;
+    var mul = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
+    mul.op = ggml.impl.ggml_c.GGML_OP_MUL;
     mul.src[1] = &mm;
     try std.testing.expect(!needsF32(&mul, 0));
     try std.testing.expect(!needsF32(null, 0));

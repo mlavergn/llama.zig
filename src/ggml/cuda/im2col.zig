@@ -61,15 +61,15 @@ fn im2colCuda(
 }
 
 /// Ports `ggml_cuda_op_im2col` (im2col.cu:81 @b1b770d90).
-pub fn opIm2col(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+pub fn opIm2col(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
     const src1_d: ?*const anyopaque = src1.data;
     const dst_d: ?*anyopaque = dst.data;
     const stream = ctx.stream();
 
-    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F16 or dst.type == ggml.impl.c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F16 || dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F16 or dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F16 || dst->type == GGML_TYPE_F32");
 
     const s0 = ggml.impl.getOpParamsI32(dst, 0);
     const s1 = ggml.impl.getOpParamsI32(dst, 1);
@@ -94,7 +94,7 @@ pub fn opIm2col(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) v
     const N = src1.ne[if (is_2D) 3 else 2];
     const IH_IW: i64 = @bitCast(src1.nb[if (is_2D) 3 else 2] / 4); // nb is byte offset, src is type float32
 
-    if (dst.type == ggml.impl.c.GGML_TYPE_F16) {
+    if (dst.type == ggml.impl.ggml_c.GGML_TYPE_F16) {
         im2colCuda(ggml.cuda.kernels.half, src1_d, dst_d, IW, IH, OW, OH, KW, KH, IC, N, IC_IH_IW, IH_IW, s0, s1, p0, p1, d0, d1, stream);
     } else {
         im2colCuda(f32, src1_d, dst_d, IW, IH, OW, OH, KW, KH, IC, N, IC_IH_IW, IH_IW, s0, s1, p0, p1, d0, d1, stream);
@@ -165,15 +165,15 @@ fn im2col3dCuda(
 }
 
 /// Ports `ggml_cuda_op_im2col_3d` (im2col.cu:218 @b1b770d90).
-pub fn opIm2col3d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+pub fn opIm2col3d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
     const src1_d: ?*const anyopaque = src1.data;
     const dst_d: ?*anyopaque = dst.data;
     const stream = ctx.stream();
 
-    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F16 or dst.type == ggml.impl.c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F16 || dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F16 or dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F16 || dst->type == GGML_TYPE_F32");
 
     const s0 = ggml.impl.getOpParamsI32(dst, 0);
     const s1 = ggml.impl.getOpParamsI32(dst, 1);
@@ -200,13 +200,13 @@ pub fn opIm2col3d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor)
     const OH = dst.ne[2];
     const OW = dst.ne[1];
 
-    const es = ggml.impl.c.ggml_element_size(src1);
+    const es = ggml.impl.ggml_c.ggml_element_size(src1);
     const stride_x: i64 = @bitCast(src1.nb[0] / es);
     const stride_y: i64 = @bitCast(src1.nb[1] / es);
     const stride_z: i64 = @bitCast(src1.nb[2] / es);
     const stride_q: i64 = @bitCast(src1.nb[3] / es);
 
-    if (dst.type == ggml.impl.c.GGML_TYPE_F16) {
+    if (dst.type == ggml.impl.ggml_c.GGML_TYPE_F16) {
         im2col3dCuda(ggml.cuda.kernels.half, src1_d, dst_d, N, IC, ID, IH, IW, OC, KD, KH, KW, OD, OH, OW, stride_q, stride_z, stride_y, stride_x, s0, s1, s2, p0, p1, p2, d0, d1, d2, stream);
     } else {
         im2col3dCuda(f32, src1_d, dst_d, N, IC, ID, IH, IW, OC, KD, KH, KW, OD, OH, OW, stride_q, stride_z, stride_y, stride_x, s0, s1, s2, p0, p1, p2, d0, d1, d2, stream);

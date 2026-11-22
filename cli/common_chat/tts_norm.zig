@@ -23,8 +23,6 @@ const std = @import("std");
 const mod = @import("module.zig");
 const jinja = @import("zigjinja");
 
-const Allocator = std.mem.Allocator;
-
 // -----------------------------------------------------------------------------
 // character classes
 
@@ -123,7 +121,7 @@ pub const Decoded = struct {
 
 /// Ports `tts_norm_decode_utf8` (chat-tts-norm.cpp:110 @b1b770d90): invalid
 /// bytes are decoded as U+FFFD, one per byte.
-pub fn decodeUtf8(a: Allocator, s: []const u8) mod.exception.Error!Decoded {
+pub fn decodeUtf8(a: std.mem.Allocator, s: []const u8) mod.exception.Error!Decoded {
     var cpts: std.ArrayList(u32) = .empty;
     var offs: std.ArrayList(usize) = .empty;
     var i: usize = 0;
@@ -244,7 +242,7 @@ fn isZeroWidth(op: Op) bool {
 
 /// Ports `tts_norm_parser` (chat-tts-norm.cpp:207 @b1b770d90).
 const Parser = struct {
-    a: Allocator,
+    a: std.mem.Allocator,
     s: []const u32,
     p: usize = 0,
     n_caps: *usize,
@@ -517,7 +515,7 @@ const Cap = struct { start: i64, end: i64 };
 /// quantifiers are greedy and possessive (they never give back what they
 /// consumed), so there is no backtracking.
 const Matcher = struct {
-    a: Allocator,
+    a: std.mem.Allocator,
     t: []const u32,
     icase: bool,
     caps: []Cap,
@@ -671,7 +669,7 @@ pub const Pattern = struct {
     /// @b1b770d90).
     ///
     /// Return: the pattern, in `a`; `error.RuntimeError` on an invalid one.
-    pub fn init(a: Allocator, src: []const u8) mod.exception.Error!Pattern {
+    pub fn init(a: std.mem.Allocator, src: []const u8) mod.exception.Error!Pattern {
         if (src.len > max_pattern_len) {
             return mod.exception.throw(error.RuntimeError, "invalid TTS norm pattern: pattern is longer than {d} bytes", .{max_pattern_len});
         }
@@ -695,7 +693,7 @@ pub const Pattern = struct {
     /// - `end`: on success, the code point index after the match.
     /// - `groups`: on success, `[start, end)` of each capture, `-1, -1` for one
     ///   that did not participate; owned by `a`.
-    pub fn matchAt(self: *const Pattern, a: Allocator, cpts: []const u32, pos: usize, end: *usize, groups: *[]Cap) mod.exception.Error!bool {
+    pub fn matchAt(self: *const Pattern, a: std.mem.Allocator, cpts: []const u32, pos: usize, end: *usize, groups: *[]Cap) mod.exception.Error!bool {
         const caps = try a.alloc(Cap, self.n_caps);
         @memset(caps, .{ .start = -1, .end = -1 });
         var m: Matcher = .{ .a = a, .t = cpts, .icase = self.icase, .caps = caps };
@@ -725,7 +723,7 @@ pub const Segment = struct {
 /// split into matched and unmatched segments. At each position the rules
 /// are tried in order and the first non-empty match wins; otherwise one
 /// code point is skipped.
-pub fn scan(a: Allocator, text: []const u8, rules: []const *const Pattern) mod.exception.Error![]Segment {
+pub fn scan(a: std.mem.Allocator, text: []const u8, rules: []const *const Pattern) mod.exception.Error![]Segment {
     const d = try decodeUtf8(a, text);
     var out: std.ArrayList(Segment) = .empty;
     const n = d.cpts.len;
@@ -766,7 +764,7 @@ const ReplPiece = struct {
 };
 
 /// Ports `tts_norm_parse_repl` (chat-tts-norm.cpp:724 @b1b770d90).
-fn parseRepl(a: Allocator, repl: []const u8, pattern: *const Pattern) mod.exception.Error![]ReplPiece {
+fn parseRepl(a: std.mem.Allocator, repl: []const u8, pattern: *const Pattern) mod.exception.Error![]ReplPiece {
     var pieces: std.ArrayList(ReplPiece) = .empty;
     var lit: std.ArrayList(u8) = .empty;
     var i: usize = 0;
@@ -803,7 +801,7 @@ fn parseRepl(a: Allocator, repl: []const u8, pattern: *const Pattern) mod.except
 /// Ports `common_tts_norm_sub` (chat-tts-norm.cpp:759 @b1b770d90): every
 /// non-overlapping match of `pattern` replaced by `repl`, whose references
 /// are %0 (the whole match), %1..%9 (the groups) and %% (a percent).
-pub fn sub(a: Allocator, text: []const u8, pattern: *const Pattern, repl: []const u8) mod.exception.Error![]u8 {
+pub fn sub(a: std.mem.Allocator, text: []const u8, pattern: *const Pattern, repl: []const u8) mod.exception.Error![]u8 {
     const pieces = try parseRepl(a, repl, pattern);
     var out: std.ArrayList(u8) = .empty;
     for (try scan(a, text, &.{pattern})) |seg| {
@@ -832,7 +830,7 @@ const Rule = struct { name: []const u8, pattern: []const u8 };
 /// Ports `tts_norm_rules_from_value` (chat-tts-norm.cpp:788 @b1b770d90): a
 /// pattern string (rule name "match"), a dict {name: pattern}, or a list of
 /// [name, pattern] pairs.
-fn rulesFromValue(a: Allocator, v: jinja.Value) mod.exception.Error![]Rule {
+fn rulesFromValue(a: std.mem.Allocator, v: jinja.Value) mod.exception.Error![]Rule {
     var rules: std.ArrayList(Rule) = .empty;
     switch (v) {
         .string => |s| try rules.append(a, .{ .name = "match", .pattern = s }),
@@ -862,7 +860,7 @@ fn rulesFromValue(a: Allocator, v: jinja.Value) mod.exception.Error![]Rule {
 }
 
 /// `string(s, is_input)`: `s` marked input when `is_input`, else template text.
-fn mkStr(a: Allocator, s: []const u8, is_input: bool) jinja.value.CallError!jinja.Value {
+fn mkStr(a: std.mem.Allocator, s: []const u8, is_input: bool) jinja.value.CallError!jinja.Value {
     if (is_input) {
         if (jinja.provenance.active) |record| return .{ .string = try record.markInput(s) };
     }
@@ -881,7 +879,7 @@ fn callFailure(e: mod.exception.Error) jinja.value.CallError {
 }
 
 /// Ports `tts_norm_builtin_scan` (chat-tts-norm.cpp:813 @b1b770d90).
-fn builtinScan(allocator: Allocator, args: []jinja.Value, ctx: ?*anyopaque, env: ?*anyopaque) jinja.value.CallError!jinja.Value {
+fn builtinScan(allocator: std.mem.Allocator, args: []jinja.Value, ctx: ?*anyopaque, env: ?*anyopaque) jinja.value.CallError!jinja.Value {
     _ = ctx;
     _ = env;
     var arena_state = std.heap.ArenaAllocator.init(allocator);
@@ -921,7 +919,7 @@ fn builtinScan(allocator: Allocator, args: []jinja.Value, ctx: ?*anyopaque, env:
 }
 
 /// Ports `tts_norm_builtin_sub` (chat-tts-norm.cpp:851 @b1b770d90).
-fn builtinSub(allocator: Allocator, args: []jinja.Value, ctx: ?*anyopaque, env: ?*anyopaque) jinja.value.CallError!jinja.Value {
+fn builtinSub(allocator: std.mem.Allocator, args: []jinja.Value, ctx: ?*anyopaque, env: ?*anyopaque) jinja.value.CallError!jinja.Value {
     _ = ctx;
     _ = env;
     var arena_state = std.heap.ArenaAllocator.init(allocator);
@@ -943,7 +941,7 @@ fn builtinSub(allocator: Allocator, args: []jinja.Value, ctx: ?*anyopaque, env: 
 /// Parameters:
 /// - `a`: owns the two callables, for as long as the render runs.
 /// - `set`: binds one variable, as `ctx.set_val` does.
-pub fn addBuiltins(a: Allocator, ctx: anytype, comptime set: fn (@TypeOf(ctx), []const u8, jinja.Value) mod.exception.Error!void) mod.exception.Error!void {
+pub fn addBuiltins(a: std.mem.Allocator, ctx: anytype, comptime set: fn (@TypeOf(ctx), []const u8, jinja.Value) mod.exception.Error!void) mod.exception.Error!void {
     const scan_fn = try a.create(jinja.value.Callable);
     scan_fn.* = jinja.value.Callable.initWithFunc(try a.dupe(u8, "tts_norm_scan"), builtinScan, false);
     try set(ctx, "tts_norm_scan", .{ .callable = scan_fn });

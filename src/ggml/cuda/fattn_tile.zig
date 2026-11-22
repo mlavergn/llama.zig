@@ -64,14 +64,9 @@ fn getNbatchK(DKQ: c_int, DV: c_int, ncols: c_int, cc: c_int) c_int {
     return @intCast((getConfig(DKQ, DV, ncols, cc) >> 23) & ((1 << 9) - 1));
 }
 
-comptime {
-    _ = &getOccupancy;
-    _ = &getNbatchK;
-}
-
 /// One arm of `launch_fattn_tile_switch_ncols1`: the kernel for
 /// `cols_per_block` columns, launched through `launch_fattn`.
-fn launchCols(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols2: comptime_int, comptime use_logit_softcap: bool, comptime cols_per_block: comptime_int, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor, cc: c_int, warp_size: c_int) void {
+fn launchCols(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols2: comptime_int, comptime use_logit_softcap: bool, comptime cols_per_block: comptime_int, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor, cc: c_int, warp_size: c_int) void {
     const library = comptime std.fmt.comptimePrint("fattn-tile-instance-dkq{d}-dv{d}", .{ DKQ, DV });
     const nbytes_shared: usize = 0;
     const nwarps = @divTrunc(getNthreads(DKQ, DV, cols_per_block, cc), warp_size);
@@ -98,8 +93,8 @@ fn launchCols(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime nc
 
 /// Ports `launch_fattn_tile_switch_ncols1` (fattn-tile.cuh:1151 @b1b770d90),
 /// the non-HIP arm: no 64-column variant.
-fn switchNcols1(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols2: comptime_int, comptime use_logit_softcap: bool, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const Q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+fn switchNcols1(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols2: comptime_int, comptime use_logit_softcap: bool, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const Q = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     const id = ggml.cuda.common.getDevice();
     const cc = ggml.cuda.common.info().devices[@intCast(id)].cc;
@@ -143,11 +138,11 @@ fn switchNcols1(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime 
 
 /// Ports `launch_fattn_tile_switch_ncols2` (fattn-tile.cuh:1239 @b1b770d90),
 /// the non-HIP arm.
-fn switchNcols2(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime use_logit_softcap: bool, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+fn switchNcols2(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime use_logit_softcap: bool, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const KQV = dst;
-    const Q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const K = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const mask: ?*const ggml.impl.c.ggml_tensor = dst.src[3];
+    const Q = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const K = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const mask: ?*const ggml.impl.ggml_c.ggml_tensor = dst.src[3];
 
     const max_bias = ggml.impl.getOpParamsF32(KQV, 1);
 
@@ -221,7 +216,7 @@ fn switchNcols2(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime 
 }
 
 /// Ports `ggml_cuda_flash_attn_ext_tile_case` (fattn-tile.cuh:1325 @b1b770d90).
-fn tileCase(comptime DKQ: comptime_int, comptime DV: comptime_int, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+fn tileCase(comptime DKQ: comptime_int, comptime DV: comptime_int, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const KQV = dst;
 
     const logit_softcap = ggml.impl.getOpParamsF32(KQV, 2);
@@ -236,9 +231,9 @@ fn tileCase(comptime DKQ: comptime_int, comptime DV: comptime_int, ctx: *ggml.cu
 }
 
 /// Ports `ggml_cuda_flash_attn_ext_tile` (fattn-tile.cu:4 @b1b770d90).
-pub fn flashAttnExtTile(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const K = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const V = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
+pub fn flashAttnExtTile(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const K = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const V = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]);
     switch (K.ne[0]) {
         40 => {
             ggml.impl.assert(V.ne[0] == K.ne[0], "V->ne[0] == K->ne[0]");

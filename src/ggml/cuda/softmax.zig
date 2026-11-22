@@ -152,22 +152,22 @@ fn softMaxBackF32Cuda(grad: ?*const anyopaque, dstf: ?*const anyopaque, dst: ?*a
 }
 
 /// Ports `ggml_cuda_op_soft_max` (softmax.cu:383 @b1b770d90).
-pub fn opSoftMax(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1: ?*const ggml.impl.c.ggml_tensor = dst.src[1];
-    const src2: ?*const ggml.impl.c.ggml_tensor = dst.src[2];
+pub fn opSoftMax(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1: ?*const ggml.impl.ggml_c.ggml_tensor = dst.src[1];
+    const src2: ?*const ggml.impl.ggml_c.ggml_tensor = dst.src[2];
 
     const src1_d: ?*const anyopaque = if (src1) |t| t.data else null;
     const src2_d: ?*const anyopaque = if (src2) |t| t.data else null;
 
     const stream = ctx.stream();
 
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F32");
 
-    ggml.impl.assert(src1 == null or src1.?.type == ggml.impl.c.GGML_TYPE_F16 or src1.?.type == ggml.impl.c.GGML_TYPE_F32, "!src1 || src1->type == GGML_TYPE_F16 || src1->type == GGML_TYPE_F32"); // src1 contains mask and it is optional
+    ggml.impl.assert(src1 == null or src1.?.type == ggml.impl.ggml_c.GGML_TYPE_F16 or src1.?.type == ggml.impl.ggml_c.GGML_TYPE_F32, "!src1 || src1->type == GGML_TYPE_F16 || src1->type == GGML_TYPE_F32"); // src1 contains mask and it is optional
 
-    const nrows_x = ggml.impl.c.ggml_nrows(src0);
+    const nrows_x = ggml.impl.ggml_c.ggml_nrows(src0);
     const nrows_y = src0.ne[1];
 
     const ne00 = src0.ne[0];
@@ -175,7 +175,7 @@ pub fn opSoftMax(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) 
     const scale = ggml.impl.getOpParamsF32(dst, 0);
     const max_bias = ggml.impl.getOpParamsF32(dst, 1);
 
-    const use_f16 = src1 != null and src1.?.type == ggml.impl.c.GGML_TYPE_F16;
+    const use_f16 = src1 != null and src1.?.type == ggml.impl.ggml_c.GGML_TYPE_F16;
 
     const nb11: i64 = if (src1) |t| @intCast(t.nb[1]) else 1;
     const nb12: i64 = if (src1) |t| @intCast(t.nb[2]) else 1;
@@ -218,18 +218,18 @@ pub fn opSoftMax(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) 
 }
 
 /// Ports `ggml_cuda_op_soft_max_back` (softmax.cu:454 @b1b770d90).
-pub fn opSoftMaxBack(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]); // grad
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]); // forward pass output
+pub fn opSoftMaxBack(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]); // grad
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]); // forward pass output
 
     const stream = ctx.stream();
 
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F32");
 
     const ncols = src0.ne[0];
-    const nrows = ggml.impl.c.ggml_nrows(src0);
+    const nrows = ggml.impl.ggml_c.ggml_nrows(src0);
 
     const scale = ggml.impl.getOpParamsF32(dst, 0);
     const max_bias = ggml.impl.getOpParamsF32(dst, 1);

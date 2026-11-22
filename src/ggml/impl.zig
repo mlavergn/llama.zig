@@ -31,7 +31,7 @@ const stdlib = @import("stdlib");
 /// single place that changes when a new header is needed. The list is
 /// `c_import.h`, translated by `build/llamacpp.zig` (Zig 0.17 has no
 /// `@cImport`).
-pub const c = @import("ggml_c");
+pub const ggml_c = @import("ggml_c");
 
 /// Mirrors `GGML_USE_ACCELERATE`, which `build/llamacpp.zig` defines for every
 /// Darwin target and no other. Ported code that takes the C's Accelerate arm
@@ -91,7 +91,7 @@ pub extern fn ggml_log_internal(level: c_uint, format: [*:0]const u8, ...) void;
 /// Ports the `GGML_LOG_ERROR` macro (ggml-impl.h:128 @b1b770d90).
 pub const logError = struct {
     pub fn f(comptime fmt: [*:0]const u8, args: anytype) void {
-        @call(.auto, ggml_log_internal, .{ c.GGML_LOG_LEVEL_ERROR, fmt } ++ args);
+        @call(.auto, ggml_log_internal, .{ ggml_c.GGML_LOG_LEVEL_ERROR, fmt } ++ args);
     }
 }.f;
 
@@ -114,21 +114,21 @@ pub const fprintfStderr = struct {
 /// Ports the `GGML_LOG_INFO` macro (ggml-impl.h:126 @b1b770d90).
 pub const logInfo = struct {
     pub fn f(comptime fmt: [*:0]const u8, args: anytype) void {
-        @call(.auto, ggml_log_internal, .{ c.GGML_LOG_LEVEL_INFO, fmt } ++ args);
+        @call(.auto, ggml_log_internal, .{ ggml_c.GGML_LOG_LEVEL_INFO, fmt } ++ args);
     }
 }.f;
 
 /// Ports the `GGML_LOG_WARN` macro (ggml-impl.h:127 @b1b770d90).
 pub const logWarn = struct {
     pub fn f(comptime fmt: [*:0]const u8, args: anytype) void {
-        @call(.auto, ggml_log_internal, .{ c.GGML_LOG_LEVEL_WARN, fmt } ++ args);
+        @call(.auto, ggml_log_internal, .{ ggml_c.GGML_LOG_LEVEL_WARN, fmt } ++ args);
     }
 }.f;
 
 /// Ports the `GGML_LOG_CONT` macro (ggml-impl.h:130 @b1b770d90).
 pub const logCont = struct {
     pub fn f(comptime fmt: [*:0]const u8, args: anytype) void {
-        @call(.auto, ggml_log_internal, .{ c.GGML_LOG_LEVEL_CONT, fmt } ++ args);
+        @call(.auto, ggml_log_internal, .{ ggml_c.GGML_LOG_LEVEL_CONT, fmt } ++ args);
     }
 }.f;
 
@@ -153,7 +153,7 @@ pub inline fn printDebug(comptime fmt: [*:0]const u8, args: anytype) void {
 /// Ports the `GGML_LOG_DEBUG` macro (ggml-impl.h:129 @b1b770d90).
 pub const logDebug = struct {
     pub fn f(comptime fmt: [*:0]const u8, args: anytype) void {
-        @call(.auto, ggml_log_internal, .{ c.GGML_LOG_LEVEL_DEBUG, fmt } ++ args);
+        @call(.auto, ggml_log_internal, .{ ggml_c.GGML_LOG_LEVEL_DEBUG, fmt } ++ args);
     }
 }.f;
 
@@ -167,7 +167,7 @@ pub const logDebug = struct {
 ///
 /// Return: never.
 pub fn abort(comptime msg: []const u8) noreturn {
-    c.ggml_abort("ggml-alloc.zig", 0, msg ++ "");
+    ggml_c.ggml_abort("ggml-alloc.zig", 0, msg ++ "");
     unreachable;
 }
 
@@ -273,7 +273,7 @@ pub inline fn one(comptime T: type, p: [*c]T) *T {
 // Tensor predicates
 
 /// Ports `ggml_impl_is_view` (ggml-impl.h:103 @b1b770d90).
-pub inline fn isView(t: *const c.ggml_tensor) bool {
+pub inline fn isView(t: *const ggml_c.ggml_tensor) bool {
     return t.view_src != null;
 }
 
@@ -290,13 +290,13 @@ pub inline fn isView(t: *const c.ggml_tensor) bool {
 /// - `op`: the op to test.
 ///
 /// Return: true when the op writes nothing.
-pub fn opIsEmpty(op: c.enum_ggml_op) bool {
+pub fn opIsEmpty(op: ggml_c.enum_ggml_op) bool {
     return switch (op) {
-        c.GGML_OP_NONE,
-        c.GGML_OP_RESHAPE,
-        c.GGML_OP_TRANSPOSE,
-        c.GGML_OP_VIEW,
-        c.GGML_OP_PERMUTE,
+        ggml_c.GGML_OP_NONE,
+        ggml_c.GGML_OP_RESHAPE,
+        ggml_c.GGML_OP_TRANSPOSE,
+        ggml_c.GGML_OP_VIEW,
+        ggml_c.GGML_OP_PERMUTE,
         => true,
         else => false,
     };
@@ -304,9 +304,9 @@ pub fn opIsEmpty(op: c.enum_ggml_op) bool {
 
 ///
 /// Return: true when type, shape, and strides all match.
-pub fn areSameLayout(a: *const c.ggml_tensor, b: *const c.ggml_tensor) bool {
+pub fn areSameLayout(a: *const ggml_c.ggml_tensor, b: *const ggml_c.ggml_tensor) bool {
     if (a.type != b.type) return false;
-    for (0..c.GGML_MAX_DIMS) |i| {
+    for (0..ggml_c.GGML_MAX_DIMS) |i| {
         if (a.ne[i] != b.ne[i]) return false;
         if (a.nb[i] != b.nb[i]) return false;
     }
@@ -325,8 +325,8 @@ pub fn areSameLayout(a: *const c.ggml_tensor, b: *const c.ggml_tensor) bool {
 /// Parameters:
 /// - `tensor`: tensor whose parameters to set.
 /// - `params`: source bytes, at most `GGML_MAX_OP_PARAMS`.
-pub fn setOpParams(tensor: *c.ggml_tensor, params: []const u8) void {
-    std.debug.assert(params.len <= c.GGML_MAX_OP_PARAMS);
+pub fn setOpParams(tensor: *ggml_c.ggml_tensor, params: []const u8) void {
+    std.debug.assert(params.len <= ggml_c.GGML_MAX_OP_PARAMS);
     const dst: [*]u8 = @ptrCast(&tensor.op_params);
     @memcpy(dst[0..params.len], params);
 }
@@ -335,20 +335,20 @@ pub fn setOpParams(tensor: *c.ggml_tensor, params: []const u8) void {
 ///
 /// The C writes a local struct and passes its address and size; this takes the
 /// value directly so the size cannot disagree with the type.
-pub fn setOpParamsValue(tensor: *c.ggml_tensor, value: anytype) void {
+pub fn setOpParamsValue(tensor: *ggml_c.ggml_tensor, value: anytype) void {
     const bytes = std.mem.asBytes(&value);
     setOpParams(tensor, bytes);
 }
 
 /// Ports `ggml_get_op_params_i32` (ggml-impl.h:160 @b1b770d90).
-pub inline fn getOpParamsI32(tensor: *const c.ggml_tensor, i: usize) i32 {
-    std.debug.assert(i < c.GGML_MAX_OP_PARAMS / @sizeOf(i32));
+pub inline fn getOpParamsI32(tensor: *const ggml_c.ggml_tensor, i: usize) i32 {
+    std.debug.assert(i < ggml_c.GGML_MAX_OP_PARAMS / @sizeOf(i32));
     return tensor.op_params[i];
 }
 
 /// Ports `ggml_get_op_params_f32` (ggml-impl.h:165 @b1b770d90).
-pub inline fn getOpParamsF32(tensor: *const c.ggml_tensor, i: usize) f32 {
-    std.debug.assert(i < c.GGML_MAX_OP_PARAMS / @sizeOf(f32));
+pub inline fn getOpParamsF32(tensor: *const ggml_c.ggml_tensor, i: usize) f32 {
+    std.debug.assert(i < ggml_c.GGML_MAX_OP_PARAMS / @sizeOf(f32));
     return @bitCast(tensor.op_params[i]);
 }
 
@@ -359,14 +359,14 @@ pub inline fn getOpParamsF32(tensor: *const c.ggml_tensor, i: usize) f32 {
 /// 1 the hint, 2 and 3 the precisions `src[0]` and `src[1]` may be
 /// converted to. `ops.zig`'s `ggml_prec_set_acc` and `ggml_prec_set_src`
 /// write them.
-pub inline fn setOpParamsI32(tensor: *c.ggml_tensor, i: usize, value: i32) void {
-    std.debug.assert(i < c.GGML_MAX_OP_PARAMS / @sizeOf(i32));
+pub inline fn setOpParamsI32(tensor: *ggml_c.ggml_tensor, i: usize, value: i32) void {
+    std.debug.assert(i < ggml_c.GGML_MAX_OP_PARAMS / @sizeOf(i32));
     tensor.op_params[i] = value;
 }
 
 /// Ports `ggml_set_op_params_f32` (ggml-impl.h:187 @b1b770d90).
-pub inline fn setOpParamsF32(tensor: *c.ggml_tensor, i: usize, value: f32) void {
-    std.debug.assert(i < c.GGML_MAX_OP_PARAMS / @sizeOf(f32));
+pub inline fn setOpParamsF32(tensor: *ggml_c.ggml_tensor, i: usize, value: f32) void {
+    std.debug.assert(i < ggml_c.GGML_MAX_OP_PARAMS / @sizeOf(f32));
     tensor.op_params[i] = @bitCast(value);
 }
 
@@ -413,7 +413,7 @@ const bitset_mask = @bitSizeOf(Bitset) - 1;
 pub const HashSet = extern struct {
     size: usize,
     used: [*c]Bitset,
-    keys: [*c]?*c.ggml_tensor,
+    keys: [*c]?*ggml_c.ggml_tensor,
 };
 
 /// Ports `struct ggml_cgraph` (ggml-impl.h:348 @b1b770d90).
@@ -435,7 +435,7 @@ pub const Object = extern struct {
     offs: usize,
     size: usize,
     next: ?*Object,
-    type: c.enum_ggml_object_type,
+    type: ggml_c.enum_ggml_object_type,
     padding: [4]u8,
 };
 
@@ -453,10 +453,10 @@ pub const CGraph = extern struct {
     n_nodes: c_int,
     n_leafs: c_int,
 
-    nodes: [*c]?*c.ggml_tensor,
-    grads: [*c]?*c.ggml_tensor,
-    grad_accs: [*c]?*c.ggml_tensor,
-    leafs: [*c]?*c.ggml_tensor,
+    nodes: [*c]?*ggml_c.ggml_tensor,
+    grads: [*c]?*ggml_c.ggml_tensor,
+    grad_accs: [*c]?*ggml_c.ggml_tensor,
+    leafs: [*c]?*ggml_c.ggml_tensor,
     use_counts: [*c]i32,
 
     visited_hash_set: HashSet,
@@ -492,7 +492,7 @@ pub inline fn bitsetSet(bitset: [*c]Bitset, i: usize) void {
 ///
 /// The low four bits are always zero because tensors are aligned, so the C
 /// version shifts them out before taking the modulus.
-pub inline fn hash(p: *const c.ggml_tensor) usize {
+pub inline fn hash(p: *const ggml_c.ggml_tensor) usize {
     return @intFromPtr(p) >> 4;
 }
 
@@ -506,7 +506,7 @@ pub inline fn hash(p: *const c.ggml_tensor) usize {
 /// - `key`: tensor to look up.
 ///
 /// Return: the index of `key`, inserting it if it was absent.
-pub fn hashFindOrInsert(set: *HashSet, key: *c.ggml_tensor) usize {
+pub fn hashFindOrInsert(set: *HashSet, key: *ggml_c.ggml_tensor) usize {
     const h = hash(key) % set.size;
     var i = h;
     while (true) {
@@ -528,7 +528,7 @@ pub fn hashFindOrInsert(set: *HashSet, key: *c.ggml_tensor) usize {
 /// table holds neither it nor a free slot. A returned index is only a *hit*
 /// if the used bit is also set -- callers must check both, which is the
 /// asymmetry that makes this easy to get wrong.
-pub fn hashFind(set: *const HashSet, key: *const c.ggml_tensor) usize {
+pub fn hashFind(set: *const HashSet, key: *const ggml_c.ggml_tensor) usize {
     const h = hash(key) % set.size;
     var i = h;
     while (bitsetGet(set.used, i) and set.keys[i] != key) {
@@ -542,7 +542,7 @@ pub fn hashFind(set: *const HashSet, key: *const c.ggml_tensor) usize {
 ///
 /// Return: the index it was inserted at, or `hashset_already_exists` when the
 /// key was already present. Aborts when the table is full.
-pub fn hashInsert(set: *HashSet, key: *c.ggml_tensor) usize {
+pub fn hashInsert(set: *HashSet, key: *ggml_c.ggml_tensor) usize {
     const h = hash(key) % set.size;
     var i = h;
     while (true) {
@@ -559,7 +559,7 @@ pub fn hashInsert(set: *HashSet, key: *c.ggml_tensor) usize {
 }
 
 /// Ports `ggml_hash_contains` (ggml-impl.h:293 @b1b770d90).
-pub fn hashContains(set: *const HashSet, key: *const c.ggml_tensor) bool {
+pub fn hashContains(set: *const HashSet, key: *const ggml_c.ggml_tensor) bool {
     const i = hashFind(set, key);
     return i != hashset_full and bitsetGet(set.used, i);
 }

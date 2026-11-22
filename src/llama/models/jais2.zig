@@ -113,12 +113,12 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         }
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpL = llama.impl.llama_c.ggml_get_rows(ctx, inpL, inp_out_ids);
         }
 
         // The residual connection.
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpL);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpL);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The pre-FFN LayerNorm.
@@ -130,7 +130,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         b.cb(cur, "ffn_out", il);
 
         // The residual connection.
-        inpL = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        inpL = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
         inpL = b.buildCvec(inpL, il);
         b.cb(inpL, "l_out", il);
     }

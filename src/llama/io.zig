@@ -27,7 +27,7 @@ pub const Writer = struct {
 
     pub const VTable = struct {
         write: *const fn (ptr: *anyopaque, src: []const u8, exc: *mod.impl.Exception) mod.impl.Thrown!void,
-        writeTensor: *const fn (ptr: *anyopaque, tensor: *const mod.impl.c.ggml_tensor, offset: usize, size: usize, exc: *mod.impl.Exception) mod.impl.Thrown!void,
+        writeTensor: *const fn (ptr: *anyopaque, tensor: *const mod.impl.llama_c.ggml_tensor, offset: usize, size: usize, exc: *mod.impl.Exception) mod.impl.Thrown!void,
         nBytes: *const fn (ptr: *anyopaque) usize,
     };
 
@@ -39,7 +39,7 @@ pub const Writer = struct {
     /// Writes `size` bytes of `tensor`'s data from `offset`.
     ///
     /// Return: nothing, or `error.Thrown`.
-    pub fn writeTensor(self: Writer, tensor: *const mod.impl.c.ggml_tensor, offset: usize, size: usize, exc: *mod.impl.Exception) mod.impl.Thrown!void {
+    pub fn writeTensor(self: Writer, tensor: *const mod.impl.llama_c.ggml_tensor, offset: usize, size: usize, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         return self.vtable.writeTensor(self.ptr, tensor, offset, size, exc);
     }
 
@@ -73,7 +73,7 @@ pub const Reader = struct {
 
     pub const VTable = struct {
         read: *const fn (ptr: *anyopaque, dst: []u8, exc: *mod.impl.Exception) mod.impl.Thrown!void,
-        readTensor: *const fn (ptr: *anyopaque, tensor: *mod.impl.c.ggml_tensor, offset: usize, size: usize, exc: *mod.impl.Exception) mod.impl.Thrown!void,
+        readTensor: *const fn (ptr: *anyopaque, tensor: *mod.impl.llama_c.ggml_tensor, offset: usize, size: usize, exc: *mod.impl.Exception) mod.impl.Thrown!void,
         nBytes: *const fn (ptr: *anyopaque) usize,
         /// `discard`, a no-op unless a source overrides it.
         discard: ?*const fn (ptr: *anyopaque) void = null,
@@ -94,7 +94,7 @@ pub const Reader = struct {
     /// Reads `size` bytes into `tensor`'s data at `offset`.
     ///
     /// Return: nothing, or `error.Thrown`.
-    pub fn readTensor(self: Reader, tensor: *mod.impl.c.ggml_tensor, offset: usize, size: usize, exc: *mod.impl.Exception) mod.impl.Thrown!void {
+    pub fn readTensor(self: Reader, tensor: *mod.impl.llama_c.ggml_tensor, offset: usize, size: usize, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         return self.vtable.readTensor(self.ptr, tensor, offset, size, exc);
     }
 

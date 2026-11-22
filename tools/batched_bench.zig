@@ -9,35 +9,31 @@
 //! as upstream's are, so both decode the same batches.
 
 const std = @import("std");
+const llama = @import("llama");
 const stdlib = @import("stdlib");
-const tc = @import("tools_common");
-
-comptime {
-    // libllama, compiled in (see `build/tools.zig`).
-    _ = @import("llama").lib;
-}
+const tools_common = @import("tools_common");
 
 /// Ports `print_usage` (batched-bench.cpp:12 @b1b770d90).
 fn printUsage(argv: []const [:0]const u8) void {
-    tc.log.out("\nexample usage:\n", .{});
-    tc.log.out("\n    %s -m model.gguf -c 2048 -b 2048 -ub 512 -npp 128,256,512 -ntg 128,256 -npl 1,2,4,8,16,32 [-pps]\n", .{argv[0].ptr});
-    tc.log.out("\n", .{});
+    tools_common.log.out("\nexample usage:\n", .{});
+    tools_common.log.out("\n    %s -m model.gguf -c 2048 -b 2048 -ub 512 -npp 128,256,512 -ntg 128,256 -npl 1,2,4,8,16,32 [-pps]\n", .{argv[0].ptr});
+    tools_common.log.out("\n", .{});
 }
 
 /// The `decode_helper` lambda (batched-bench.cpp:82 @b1b770d90): `batch` in
 /// sub-batches of `n_batch` tokens.
-fn decodeHelper(ctx: ?*tc.c.llama_context, batch: *tc.common.Batch, n_batch: i32, synchronize: bool) bool {
+fn decodeHelper(ctx: ?*llama.impl.llama_c.llama_context, batch: *tools_common.common.Batch, n_batch: i32, synchronize: bool) bool {
     var i: i32 = 0;
     while (i < batch.size()) : (i += n_batch) {
         const n_tokens = @min(n_batch, batch.size() - i);
 
-        const ret = tc.c.llama_process(ctx, tc.c.LLAMA_PROCESS_TYPE_DECODE, batch.getSubBatch(i, n_tokens));
+        const ret = llama.api.context.llama_process(ctx, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, batch.getSubBatch(i, n_tokens));
         if (ret != 0) {
-            tc.log.err("failed to decode the batch, n_batch = %d, ret = %d\n", .{ n_batch, ret });
+            tools_common.log.err("failed to decode the batch, n_batch = %d, ret = %d\n", .{ n_batch, ret });
             return false;
         }
 
-        if (synchronize) tc.c.llama_synchronize(ctx);
+        if (synchronize) llama.api.context.llama_synchronize(ctx);
     }
     return true;
 }
@@ -45,11 +41,11 @@ fn decodeHelper(ctx: ?*tc.c.llama_context, batch: *tc.common.Batch, n_batch: i32
 /// Ports `llama_batched_bench` (batched-bench.cpp:21 @b1b770d90).
 fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     const func = "llama_batched_bench";
-    var params = try tc.params.Params.init(a);
+    var params = try tools_common.params.Params.init(a);
 
-    tc.common.init();
+    tools_common.common.init();
 
-    if (!try tc.arg.parse(argv, &params, .bench, printUsage)) return 1;
+    if (!try tools_common.arg.parse(argv, &params, .bench, printUsage)) return 1;
 
     const is_pp_shared: c_int = @intFromBool(params.is_pp_shared);
     const is_tg_separate: c_int = @intFromBool(params.is_tg_separate);
@@ -60,38 +56,38 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
 
     // init LLM
 
-    tc.c.llama_backend_init();
-    tc.c.llama_numa_init(params.numa);
+    llama.api.llama.llama_backend_init();
+    llama.api.llama.llama_numa_init(params.numa);
 
     // initialize the model
 
-    const model_params = tc.common.modelParamsToLlama(&params);
+    const model_params = tools_common.common.modelParamsToLlama(&params);
 
     const model_path = try a.dupeSentinel(u8, params.model.path, 0);
-    const model = tc.c.llama_model_load_from_file(model_path.ptr, model_params) orelse {
-        tc.io.eprintf("%s: error: unable to load model\n", .{func});
+    const model = llama.api.llama.llama_model_load_from_file(model_path.ptr, model_params) orelse {
+        tools_common.io.eprintf("%s: error: unable to load model\n", .{func});
         return 1;
     };
 
-    var ctx_params = tc.common.contextParamsToLlama(&params);
+    var ctx_params = tools_common.common.contextParamsToLlama(&params);
 
     // ensure enough sequences are available
     ctx_params.n_seq_max = if (n_pl.len == 0) 1 else @intCast(std.mem.max(i32, n_pl));
 
-    const ctx = tc.c.llama_init_from_model(model, ctx_params) orelse {
-        tc.io.eprintf("%s: error: failed to create the llama_context\n", .{func});
-        tc.c.llama_model_free(model);
+    const ctx = llama.api.context.llama_init_from_model(model, ctx_params) orelse {
+        tools_common.io.eprintf("%s: error: failed to create the llama_context\n", .{func});
+        llama.api.model.llama_model_free(model);
         return 1;
     };
 
-    const vocab = tc.c.llama_model_get_vocab(model);
-    const n_vocab = tc.c.llama_vocab_n_tokens(vocab);
+    const vocab = llama.api.model.llama_model_get_vocab(model);
+    const n_vocab = llama.api.vocab.llama_vocab_n_tokens(vocab);
 
-    const mem = tc.c.llama_get_memory(ctx);
+    const mem = llama.api.context.llama_get_memory(ctx);
 
-    const n_kv_max: i32 = @intCast(tc.c.llama_n_ctx(ctx));
+    const n_kv_max: i32 = @intCast(llama.api.context.llama_n_ctx(ctx));
 
-    var batch = tc.common.Batch.init(a, ctx);
+    var batch = tools_common.common.Batch.init(a, ctx);
     defer batch.deinit();
     const n_batch: i32 = @intCast(ctx_params.n_batch);
 
@@ -101,21 +97,21 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
         while (i < 16) : (i += 1) _ = batch.add(@rem(stdlib.libc.rand(), n_vocab), i, 0, false);
 
         if (!decodeHelper(ctx, &batch, n_batch, true)) {
-            tc.log.err("%s: llama_decode() failed\n", .{func});
-            tc.c.llama_free(ctx);
-            tc.c.llama_model_free(model);
+            tools_common.log.err("%s: llama_decode() failed\n", .{func});
+            llama.api.context.llama_free(ctx);
+            llama.api.model.llama_model_free(model);
             return 1;
         }
     }
 
     if (!params.batched_bench_output_jsonl) {
-        tc.log.out("\n", .{});
-        tc.log.out("%s: n_kv_max = %d, n_batch = %d, n_ubatch = %d, flash_attn = %d, is_pp_shared = %d, is_tg_separate = %d, n_gpu_layers = %d, n_threads = %u, n_threads_batch = %u\n", .{
+        tools_common.log.out("\n", .{});
+        tools_common.log.out("%s: n_kv_max = %d, n_batch = %d, n_ubatch = %d, flash_attn = %d, is_pp_shared = %d, is_tg_separate = %d, n_gpu_layers = %d, n_threads = %u, n_threads_batch = %u\n", .{
             func, n_kv_max, params.n_batch, params.n_ubatch, @as(c_int, @intCast(params.flash_attn_type)), is_pp_shared, is_tg_separate, params.n_gpu_layers, ctx_params.n_threads, ctx_params.n_threads_batch,
         });
-        tc.log.out("\n", .{});
-        tc.log.out("|%6s | %6s | %4s | %6s | %8s | %8s | %8s | %8s | %8s | %8s |\n", .{ "PP", "TG", "B", "N_KV", "T_PP s", "S_PP t/s", "T_TG s", "S_TG t/s", "T s", "S t/s" });
-        tc.log.out("|%6s-|-%6s-|-%4s-|-%6s-|-%8s-|-%8s-|-%8s-|-%8s-|-%8s-|-%8s-|\n", .{ "------", "------", "----", "------", "--------", "--------", "--------", "--------", "--------", "--------" });
+        tools_common.log.out("\n", .{});
+        tools_common.log.out("|%6s | %6s | %4s | %6s | %8s | %8s | %8s | %8s | %8s | %8s |\n", .{ "PP", "TG", "B", "N_KV", "T_PP s", "S_PP t/s", "T_TG s", "S_TG t/s", "T s", "S t/s" });
+        tools_common.log.out("|%6s-|-%6s-|-%4s-|-%6s-|-%8s-|-%8s-|-%8s-|-%8s-|-%8s-|-%8s-|\n", .{ "------", "------", "----", "------", "--------", "--------", "--------", "--------", "--------", "--------" });
     }
 
     for (n_pp) |pp| {
@@ -133,40 +129,40 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
                     while (i < pp) : (i += 1) _ = batch.add(@rem(stdlib.libc.rand(), n_vocab), i, j, i == pp - 1);
                 }
 
-                tc.c.llama_memory_clear(mem, false);
+                llama.api.context.llama_memory_clear(mem, false);
 
-                const t_pp_start = tc.c.ggml_time_us();
+                const t_pp_start = llama.impl.llama_c.ggml_time_us();
 
                 if (!decodeHelper(ctx, &batch, n_batch, false)) {
-                    tc.log.err("%s: llama_decode() failed\n", .{func});
-                    tc.c.llama_free(ctx);
-                    tc.c.llama_model_free(model);
+                    tools_common.log.err("%s: llama_decode() failed\n", .{func});
+                    llama.api.context.llama_free(ctx);
+                    llama.api.model.llama_model_free(model);
                     return 1;
                 }
 
-                tc.c.llama_synchronize(ctx);
+                llama.api.context.llama_synchronize(ctx);
 
-                const t_pp_end = tc.c.ggml_time_us();
+                const t_pp_end = llama.impl.llama_c.ggml_time_us();
 
                 if (is_pp_shared != 0) {
                     var i: i32 = 1;
-                    while (i < pl) : (i += 1) tc.c.llama_memory_seq_cp(mem, 0, i, -1, -1);
+                    while (i < pl) : (i += 1) llama.api.context.llama_memory_seq_cp(mem, 0, i, -1, -1);
 
                     if (!params.kv_unified) {
                         // run one dummy token to apply the memory copy
                         batch.clear();
                         _ = batch.add(@rem(stdlib.libc.rand(), n_vocab), pp + 0, 0, true);
                         if (!decodeHelper(ctx, &batch, n_batch, true)) {
-                            tc.log.err("%s: llama_decode() failed\n", .{func});
-                            tc.c.llama_free(ctx);
-                            tc.c.llama_model_free(model);
+                            tools_common.log.err("%s: llama_decode() failed\n", .{func});
+                            llama.api.context.llama_free(ctx);
+                            llama.api.model.llama_model_free(model);
                             return 1;
                         }
-                        _ = tc.c.llama_memory_seq_rm(mem, 0, pp, -1);
+                        _ = llama.api.context.llama_memory_seq_rm(mem, 0, pp, -1);
                     }
                 }
 
-                const t_tg_start = tc.c.ggml_time_us();
+                const t_tg_start = llama.impl.llama_c.ggml_time_us();
 
                 if (is_tg_separate != 0) {
                     // decode pattern:
@@ -178,9 +174,9 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
                             batch.clear();
                             _ = batch.add(@rem(stdlib.libc.rand(), n_vocab), pp + i, jj, true);
                             if (!decodeHelper(ctx, &batch, n_batch, true)) {
-                                tc.log.err("%s: llama_decode() failed\n", .{func});
-                                tc.c.llama_free(ctx);
-                                tc.c.llama_model_free(model);
+                                tools_common.log.err("%s: llama_decode() failed\n", .{func});
+                                llama.api.context.llama_free(ctx);
+                                llama.api.model.llama_model_free(model);
                                 return 1;
                             }
                         }
@@ -194,15 +190,15 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
                         var jj: i32 = 0;
                         while (jj < pl) : (jj += 1) _ = batch.add(@rem(stdlib.libc.rand(), n_vocab), pp + i, jj, true);
                         if (!decodeHelper(ctx, &batch, n_batch, true)) {
-                            tc.log.err("%s: llama_decode() failed\n", .{func});
-                            tc.c.llama_free(ctx);
-                            tc.c.llama_model_free(model);
+                            tools_common.log.err("%s: llama_decode() failed\n", .{func});
+                            llama.api.context.llama_free(ctx);
+                            llama.api.model.llama_model_free(model);
                             return 1;
                         }
                     }
                 }
 
-                const t_tg_end = tc.c.ggml_time_us();
+                const t_tg_end = llama.impl.llama_c.ggml_time_us();
 
                 const n_kv = n_ctx_req;
 
@@ -215,13 +211,13 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
                 const speed: f32 = @as(f32, @floatFromInt((if (is_pp_shared != 0) pp else pl * pp) + pl * tg)) / t;
 
                 if (params.batched_bench_output_jsonl) {
-                    tc.log.out("{\"n_kv_max\": %d, \"n_batch\": %d, \"n_ubatch\": %d, \"flash_attn\": %d, \"is_pp_shared\": %d, \"n_gpu_layers\": %d, \"n_threads\": %u, \"n_threads_batch\": %u, \"pp\": %d, \"tg\": %d, \"pl\": %d, \"n_kv\": %d, \"t_pp\": %f, \"speed_pp\": %f, \"t_tg\": %f, \"speed_tg\": %f, \"t\": %f, \"speed\": %f}\n", .{
+                    tools_common.log.out("{\"n_kv_max\": %d, \"n_batch\": %d, \"n_ubatch\": %d, \"flash_attn\": %d, \"is_pp_shared\": %d, \"n_gpu_layers\": %d, \"n_threads\": %u, \"n_threads_batch\": %u, \"pp\": %d, \"tg\": %d, \"pl\": %d, \"n_kv\": %d, \"t_pp\": %f, \"speed_pp\": %f, \"t_tg\": %f, \"speed_tg\": %f, \"t\": %f, \"speed\": %f}\n", .{
                         n_kv_max,    params.n_batch,  params.n_ubatch, @as(c_int, @intCast(params.flash_attn_type)), @as(c_int, @intFromBool(params.is_pp_shared)), params.n_gpu_layers, ctx_params.n_threads, ctx_params.n_threads_batch,
                         pp,          tg,              pl,              n_kv,                                         @as(f64, t_pp),                                @as(f64, speed_pp),  @as(f64, t_tg),       @as(f64, speed_tg),
                         @as(f64, t), @as(f64, speed),
                     });
                 } else {
-                    tc.log.out("|%6d | %6d | %4d | %6d | %8.3f | %8.2f | %8.3f | %8.2f | %8.3f | %8.2f |\n", .{
+                    tools_common.log.out("|%6d | %6d | %4d | %6d | %8.3f | %8.2f | %8.3f | %8.2f | %8.3f | %8.2f |\n", .{
                         pp, tg, pl, n_kv, @as(f64, t_pp), @as(f64, speed_pp), @as(f64, t_tg), @as(f64, speed_tg), @as(f64, t), @as(f64, speed),
                     });
                 }
@@ -229,13 +225,13 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
         }
     }
 
-    tc.log.out("\n", .{});
-    tc.c.llama_perf_context_print(ctx);
+    tools_common.log.out("\n", .{});
+    llama.api.context.llama_perf_context_print(ctx);
 
-    tc.c.llama_free(ctx);
-    tc.c.llama_model_free(model);
+    llama.api.context.llama_free(ctx);
+    llama.api.model.llama_model_free(model);
 
-    tc.c.llama_backend_free();
+    llama.api.llama.llama_backend_free();
 
     return 0;
 }

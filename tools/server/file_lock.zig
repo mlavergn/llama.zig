@@ -9,11 +9,7 @@
 
 const std = @import("std");
 const stdlib = @import("stdlib");
-const tc = @import("tools_common");
-
-const Allocator = std.mem.Allocator;
-
-const LOCK = std.posix.LOCK;
+const tools_common = @import("tools_common");
 
 /// `open(path, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0664)` on
 /// `std.Io`, which has no create without following a final link: an open
@@ -45,7 +41,7 @@ pub const KeepWaiting = struct {
 /// Ports `common_file_lock` (file-lock.h:8 @b1b770d90): `flock` on a file
 /// opened lazily, so a read-only cache works if the lock is never acquired.
 pub const FileLock = struct {
-    a: Allocator,
+    a: std.mem.Allocator,
     lock_path: []const u8,
     file: ?std.Io.File = null,
     locked: bool = false,
@@ -62,7 +58,7 @@ pub const FileLock = struct {
     ///
     /// Parameters:
     /// - `lock_path`: borrowed; an empty path locks nothing.
-    pub fn init(a: Allocator, lock_path: []const u8) FileLock {
+    pub fn init(a: std.mem.Allocator, lock_path: []const u8) FileLock {
         return .{ .a = a, .lock_path = lock_path };
     }
 
@@ -74,7 +70,7 @@ pub const FileLock = struct {
 
     /// Ports `try_lock` (file-lock.cpp:68 @b1b770d90), a member of
     /// `common_file_lock`.
-    fn tryLock(self: *FileLock) Allocator.Error!Status {
+    fn tryLock(self: *FileLock) std.mem.Allocator.Error!Status {
         const func = "try_lock";
         if (self.lock_path.len == 0) {
             return .acquired; // no lock path, nothing to lock
@@ -85,7 +81,7 @@ pub const FileLock = struct {
             const f = openNoFollow(io, self.lock_path) catch {
                 const z = try self.a.dupeSentinel(u8, self.lock_path, 0);
                 defer self.a.free(z);
-                tc.log.err("%s: cannot open lock file: %s\n", .{ func, z.ptr });
+                tools_common.log.err("%s: cannot open lock file: %s\n", .{ func, z.ptr });
                 return .err;
             };
             // open() filters the mode through the umask
@@ -98,7 +94,7 @@ pub const FileLock = struct {
 
         // the system's flock, not std's tryLock, which folds EACCES and the
         // errno printed below into errors of its own
-        const e = std.posix.errno(std.posix.system.flock(f.handle, LOCK.EX | LOCK.NB));
+        const e = std.posix.errno(std.posix.system.flock(f.handle, std.posix.LOCK.EX | std.posix.LOCK.NB));
         if (e == .SUCCESS) {
             self.locked = true;
             return .acquired;
@@ -108,7 +104,7 @@ pub const FileLock = struct {
             return .busy;
         }
         // flock is not implemented (some NFS/FUSE mounts): report it instead of racing
-        tc.log.err("%s: file locking failed (%s)\n", .{ func, stdlib.errno.strerror(@backingInt(e)) });
+        tools_common.log.err("%s: file locking failed (%s)\n", .{ func, stdlib.errno.strerror(@backingInt(e)) });
         return .err;
     }
 
@@ -118,7 +114,7 @@ pub const FileLock = struct {
     /// the wait.
     ///
     /// Return: false when cancelled, or when locking is unavailable.
-    pub fn acquire(self: *FileLock, keep_waiting: ?KeepWaiting) Allocator.Error!bool {
+    pub fn acquire(self: *FileLock, keep_waiting: ?KeepWaiting) std.mem.Allocator.Error!bool {
         // the lock file is opened by try_lock, its parent must exist by then
         if (self.lock_path.len != 0) {
             const lock_dir = stdlib.path.parent(self.lock_path);
@@ -127,7 +123,7 @@ pub const FileLock = struct {
                 if (ec != 0) {
                     const z = try self.a.dupeSentinel(u8, lock_dir, 0);
                     defer self.a.free(z);
-                    tc.log.err("%s: unable to create lock directory '%s': %s\n", .{ "acquire", z.ptr, stdlib.errno.strerror(ec) });
+                    tools_common.log.err("%s: unable to create lock directory '%s': %s\n", .{ "acquire", z.ptr, stdlib.errno.strerror(ec) });
                     return false;
                 }
             }
@@ -153,7 +149,7 @@ pub const FileLock = struct {
     pub fn close(self: *FileLock) void {
         if (self.file) |f| {
             if (self.locked) {
-                _ = std.posix.system.flock(f.handle, LOCK.UN);
+                _ = std.posix.system.flock(f.handle, std.posix.LOCK.UN);
             }
             f.close(stdlib.file.defaultIo());
         }

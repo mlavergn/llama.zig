@@ -34,27 +34,27 @@ fn oom() noreturn {
     llama.impl.abort("llama-vocab.cpp", 0, "out of memory");
 }
 
-pub const token_null: llama.impl.c.llama_token = llama.impl.c.LLAMA_TOKEN_NULL;
+pub const token_null: llama.impl.llama_c.llama_token = llama.impl.llama_c.LLAMA_TOKEN_NULL;
 
-const attr_unknown: llama.impl.c.enum_llama_token_attr = llama.impl.c.LLAMA_TOKEN_ATTR_UNKNOWN;
-const attr_unused: llama.impl.c.enum_llama_token_attr = llama.impl.c.LLAMA_TOKEN_ATTR_UNUSED;
-const attr_normal: llama.impl.c.enum_llama_token_attr = llama.impl.c.LLAMA_TOKEN_ATTR_NORMAL;
-const attr_control: llama.impl.c.enum_llama_token_attr = llama.impl.c.LLAMA_TOKEN_ATTR_CONTROL;
-const attr_user_defined: llama.impl.c.enum_llama_token_attr = llama.impl.c.LLAMA_TOKEN_ATTR_USER_DEFINED;
-const attr_byte: llama.impl.c.enum_llama_token_attr = llama.impl.c.LLAMA_TOKEN_ATTR_BYTE;
-const attr_lstrip: llama.impl.c.enum_llama_token_attr = llama.impl.c.LLAMA_TOKEN_ATTR_LSTRIP;
-const attr_rstrip: llama.impl.c.enum_llama_token_attr = llama.impl.c.LLAMA_TOKEN_ATTR_RSTRIP;
-const attr_undefined: llama.impl.c.enum_llama_token_attr = llama.impl.c.LLAMA_TOKEN_ATTR_UNDEFINED;
+const attr_unknown: llama.impl.llama_c.enum_llama_token_attr = llama.impl.llama_c.LLAMA_TOKEN_ATTR_UNKNOWN;
+const attr_unused: llama.impl.llama_c.enum_llama_token_attr = llama.impl.llama_c.LLAMA_TOKEN_ATTR_UNUSED;
+const attr_normal: llama.impl.llama_c.enum_llama_token_attr = llama.impl.llama_c.LLAMA_TOKEN_ATTR_NORMAL;
+const attr_control: llama.impl.llama_c.enum_llama_token_attr = llama.impl.llama_c.LLAMA_TOKEN_ATTR_CONTROL;
+const attr_user_defined: llama.impl.llama_c.enum_llama_token_attr = llama.impl.llama_c.LLAMA_TOKEN_ATTR_USER_DEFINED;
+const attr_byte: llama.impl.llama_c.enum_llama_token_attr = llama.impl.llama_c.LLAMA_TOKEN_ATTR_BYTE;
+const attr_lstrip: llama.impl.llama_c.enum_llama_token_attr = llama.impl.llama_c.LLAMA_TOKEN_ATTR_LSTRIP;
+const attr_rstrip: llama.impl.llama_c.enum_llama_token_attr = llama.impl.llama_c.LLAMA_TOKEN_ATTR_RSTRIP;
+const attr_undefined: llama.impl.llama_c.enum_llama_token_attr = llama.impl.llama_c.LLAMA_TOKEN_ATTR_UNDEFINED;
 
-pub const type_none: llama.impl.c.enum_llama_vocab_type = llama.impl.c.LLAMA_VOCAB_TYPE_NONE;
-pub const type_spm: llama.impl.c.enum_llama_vocab_type = llama.impl.c.LLAMA_VOCAB_TYPE_SPM;
-pub const type_bpe: llama.impl.c.enum_llama_vocab_type = llama.impl.c.LLAMA_VOCAB_TYPE_BPE;
-pub const type_wpm: llama.impl.c.enum_llama_vocab_type = llama.impl.c.LLAMA_VOCAB_TYPE_WPM;
-pub const type_ugm: llama.impl.c.enum_llama_vocab_type = llama.impl.c.LLAMA_VOCAB_TYPE_UGM;
-pub const type_rwkv: llama.impl.c.enum_llama_vocab_type = llama.impl.c.LLAMA_VOCAB_TYPE_RWKV;
-pub const type_plamo2: llama.impl.c.enum_llama_vocab_type = llama.impl.c.LLAMA_VOCAB_TYPE_PLAMO2;
-pub const type_test: llama.impl.c.enum_llama_vocab_type = llama.impl.c.LLAMA_VOCAB_TYPE_TEST;
-pub const type_plamo3: llama.impl.c.enum_llama_vocab_type = llama.impl.c.LLAMA_VOCAB_TYPE_PLAMO3;
+pub const type_none: llama.impl.llama_c.enum_llama_vocab_type = llama.impl.llama_c.LLAMA_VOCAB_TYPE_NONE;
+pub const type_spm: llama.impl.llama_c.enum_llama_vocab_type = llama.impl.llama_c.LLAMA_VOCAB_TYPE_SPM;
+pub const type_bpe: llama.impl.llama_c.enum_llama_vocab_type = llama.impl.llama_c.LLAMA_VOCAB_TYPE_BPE;
+pub const type_wpm: llama.impl.llama_c.enum_llama_vocab_type = llama.impl.llama_c.LLAMA_VOCAB_TYPE_WPM;
+pub const type_ugm: llama.impl.llama_c.enum_llama_vocab_type = llama.impl.llama_c.LLAMA_VOCAB_TYPE_UGM;
+pub const type_rwkv: llama.impl.llama_c.enum_llama_vocab_type = llama.impl.llama_c.LLAMA_VOCAB_TYPE_RWKV;
+pub const type_plamo2: llama.impl.llama_c.enum_llama_vocab_type = llama.impl.llama_c.LLAMA_VOCAB_TYPE_PLAMO2;
+pub const type_test: llama.impl.llama_c.enum_llama_vocab_type = llama.impl.llama_c.LLAMA_VOCAB_TYPE_TEST;
+pub const type_plamo3: llama.impl.llama_c.enum_llama_vocab_type = llama.impl.llama_c.LLAMA_VOCAB_TYPE_PLAMO3;
 
 /// Ports `enum llama_vocab_pre_type` (llama-vocab.h:10 @b1b770d90).
 pub const PreType = enum(c_int) {
@@ -141,7 +141,7 @@ pub const TokenData = struct {
     off: u32,
     len: u32,
     score: f32,
-    attr: llama.impl.c.enum_llama_token_attr,
+    attr: llama.impl.llama_c.enum_llama_token_attr,
 };
 
 /// Ports `llama_vocab`'s `normalizer_options` (llama-vocab.h:97 @b1b770d90).
@@ -245,7 +245,7 @@ pub const Tokenizer = union(enum) {
 /// span of the raw text still to tokenize. Ports `fragment_buffer_variant`
 /// (llama-vocab.cpp:2067 @b1b770d90).
 pub const Fragment = union(enum) {
-    token: llama.impl.c.llama_token,
+    token: llama.impl.llama_c.llama_token,
     raw: struct { offset: usize, length: usize },
 };
 
@@ -257,28 +257,28 @@ pub const Vocab = struct {
     tokenizer_model: std.ArrayList(u8) = .empty,
     tokenizer_pre: std.ArrayList(u8) = .empty,
 
-    type: llama.impl.c.enum_llama_vocab_type = type_spm,
+    type: llama.impl.llama_c.enum_llama_vocab_type = type_spm,
     pre_type: PreType = .default,
 
     max_token_len: i32 = 0,
 
-    special_bos_id: llama.impl.c.llama_token = 1,
-    special_eos_id: llama.impl.c.llama_token = 2,
-    special_eot_id: llama.impl.c.llama_token = token_null,
-    special_eom_id: llama.impl.c.llama_token = token_null,
-    special_unk_id: llama.impl.c.llama_token = 0,
-    special_sep_id: llama.impl.c.llama_token = token_null,
-    special_pad_id: llama.impl.c.llama_token = token_null,
-    special_mask_id: llama.impl.c.llama_token = token_null,
+    special_bos_id: llama.impl.llama_c.llama_token = 1,
+    special_eos_id: llama.impl.llama_c.llama_token = 2,
+    special_eot_id: llama.impl.llama_c.llama_token = token_null,
+    special_eom_id: llama.impl.llama_c.llama_token = token_null,
+    special_unk_id: llama.impl.llama_c.llama_token = 0,
+    special_sep_id: llama.impl.llama_c.llama_token = token_null,
+    special_pad_id: llama.impl.llama_c.llama_token = token_null,
+    special_mask_id: llama.impl.llama_c.llama_token = token_null,
 
-    linefeed_id: llama.impl.c.llama_token = 13,
+    linefeed_id: llama.impl.llama_c.llama_token = 13,
 
-    special_fim_pre_id: llama.impl.c.llama_token = token_null,
-    special_fim_suf_id: llama.impl.c.llama_token = token_null,
-    special_fim_mid_id: llama.impl.c.llama_token = token_null,
-    special_fim_pad_id: llama.impl.c.llama_token = token_null,
-    special_fim_rep_id: llama.impl.c.llama_token = token_null,
-    special_fim_sep_id: llama.impl.c.llama_token = token_null,
+    special_fim_pre_id: llama.impl.llama_c.llama_token = token_null,
+    special_fim_suf_id: llama.impl.llama_c.llama_token = token_null,
+    special_fim_mid_id: llama.impl.llama_c.llama_token = token_null,
+    special_fim_pad_id: llama.impl.llama_c.llama_token = token_null,
+    special_fim_rep_id: llama.impl.llama_c.llama_token = token_null,
+    special_fim_sep_id: llama.impl.llama_c.llama_token = token_null,
 
     add_space_prefix: bool = false,
     add_bos: bool = false,
@@ -296,12 +296,12 @@ pub const Vocab = struct {
 
     metaspace_prepend_scheme: MetaspacePrependScheme = .never,
 
-    token_to_id: stdlib.libcxx.StringMap(llama.impl.c.llama_token),
+    token_to_id: stdlib.libcxx.StringMap(llama.impl.llama_c.llama_token),
     id_to_token: std.ArrayList(TokenData) = .empty,
     /// Every token's text, each followed by a NUL.
     text_buf: std.ArrayList(u8) = .empty,
 
-    cache_special_tokens: std.ArrayList(llama.impl.c.llama_token) = .empty,
+    cache_special_tokens: std.ArrayList(llama.impl.llama_c.llama_token) = .empty,
     /// `cache_token_to_piece`: piece `i` is `piece_buf[piece_off[i]..piece_off[i + 1]]`.
     piece_buf: std.ArrayList(u8) = .empty,
     piece_off: std.ArrayList(u32) = .empty,
@@ -309,9 +309,9 @@ pub const Vocab = struct {
     bpe_ranks: BpeRanks = .{},
 
     /// `std::set<llama_token>`: kept sorted, as the set iterates.
-    special_eog_ids: std.ArrayList(llama.impl.c.llama_token) = .empty,
+    special_eog_ids: std.ArrayList(llama.impl.llama_c.llama_token) = .empty,
 
-    suppress_tokens: std.ArrayList(llama.impl.c.llama_token) = .empty,
+    suppress_tokens: std.ArrayList(llama.impl.llama_c.llama_token) = .empty,
 
     tokenizer: Tokenizer = .none,
 
@@ -322,7 +322,7 @@ pub const Vocab = struct {
     /// Return: an empty vocabulary, reserved for the lifecycle convention as
     /// fallible.
     pub fn init() error{OutOfMemory}!Vocab {
-        return .{ .token_to_id = try stdlib.libcxx.StringMap(llama.impl.c.llama_token).init(std.heap.c_allocator) };
+        return .{ .token_to_id = try stdlib.libcxx.StringMap(llama.impl.llama_c.llama_token).init(std.heap.c_allocator) };
     }
 
     /// Return: nothing.
@@ -367,7 +367,7 @@ pub const Vocab = struct {
     }
 
     /// The text of token `id`, with no bounds check, as `id_to_token[id]`.
-    pub fn text(self: *const Vocab, id: llama.impl.c.llama_token) [:0]const u8 {
+    pub fn text(self: *const Vocab, id: llama.impl.llama_c.llama_token) [:0]const u8 {
         const d = self.id_to_token.items[@intCast(id)];
         return self.text_buf.items[d.off..][0..d.len :0];
     }
@@ -377,50 +377,50 @@ pub const Vocab = struct {
     }
 
     /// Ports `llama_vocab::impl`'s `is_normal` (llama-vocab.cpp:3544 @b1b770d90).
-    pub fn isNormal(self: *const Vocab, id: llama.impl.c.llama_token) bool {
+    pub fn isNormal(self: *const Vocab, id: llama.impl.llama_c.llama_token) bool {
         self.assertNotNone(3545);
         return (self.id_to_token.items[@intCast(id)].attr & attr_normal) != 0;
     }
 
     /// Ports `llama_vocab::impl`'s `is_unknown` (llama-vocab.cpp:3549 @b1b770d90).
-    pub fn isUnknown(self: *const Vocab, id: llama.impl.c.llama_token) bool {
+    pub fn isUnknown(self: *const Vocab, id: llama.impl.llama_c.llama_token) bool {
         self.assertNotNone(3550);
         return (self.id_to_token.items[@intCast(id)].attr & attr_unknown) != 0;
     }
 
     /// Ports `llama_vocab::impl`'s `is_control` (llama-vocab.cpp:3554 @b1b770d90).
-    pub fn isControl(self: *const Vocab, id: llama.impl.c.llama_token) bool {
+    pub fn isControl(self: *const Vocab, id: llama.impl.llama_c.llama_token) bool {
         self.assertNotNone(3555);
         return (self.id_to_token.items[@intCast(id)].attr & attr_control) != 0;
     }
 
     /// Ports `llama_vocab::impl`'s `is_byte` (llama-vocab.cpp:3559 @b1b770d90).
-    pub fn isByte(self: *const Vocab, id: llama.impl.c.llama_token) bool {
+    pub fn isByte(self: *const Vocab, id: llama.impl.llama_c.llama_token) bool {
         self.assertNotNone(3560);
         return (self.id_to_token.items[@intCast(id)].attr & attr_byte) != 0;
     }
 
     /// Ports `llama_vocab::impl`'s `is_user_defined` (llama-vocab.cpp:3564 @b1b770d90).
-    pub fn isUserDefined(self: *const Vocab, id: llama.impl.c.llama_token) bool {
+    pub fn isUserDefined(self: *const Vocab, id: llama.impl.llama_c.llama_token) bool {
         self.assertNotNone(3565);
         return (self.id_to_token.items[@intCast(id)].attr & attr_user_defined) != 0;
     }
 
     /// Ports `llama_vocab::impl`'s `is_unused` (llama-vocab.cpp:3569 @b1b770d90).
-    pub fn isUnused(self: *const Vocab, id: llama.impl.c.llama_token) bool {
+    pub fn isUnused(self: *const Vocab, id: llama.impl.llama_c.llama_token) bool {
         self.assertNotNone(3570);
         return (self.id_to_token.items[@intCast(id)].attr & attr_unused) != 0;
     }
 
     /// Ports `llama_vocab::impl`'s `is_eog` (llama-vocab.cpp:3574 @b1b770d90).
-    pub fn isEog(self: *const Vocab, id: llama.impl.c.llama_token) bool {
+    pub fn isEog(self: *const Vocab, id: llama.impl.llama_c.llama_token) bool {
         return id != token_null and eogIndex(self.special_eog_ids.items, id) != null;
     }
 
     /// Ports `llama_vocab`'s `text_to_token` (llama-vocab.cpp:4463 @b1b770d90).
     ///
     /// Return: the token whose text is `t`, or `token_null`.
-    pub fn textToToken(self: *const Vocab, t: []const u8) llama.impl.c.llama_token {
+    pub fn textToToken(self: *const Vocab, t: []const u8) llama.impl.llama_c.llama_token {
         llama.impl.assert(self.type != type_none, "llama-vocab.cpp", 4464, "pimpl->type != LLAMA_VOCAB_TYPE_NONE");
         return if (self.token_to_id.get(t)) |v| v.* else token_null;
     }
@@ -429,19 +429,19 @@ pub const Vocab = struct {
     ///
     /// Return: the token's data, or `error.Thrown` with
     /// `std::out_of_range("vector")`.
-    pub fn tokenDataAt(self: *const Vocab, id: llama.impl.c.llama_token, exc: *llama.impl.Exception) llama.impl.Thrown!TokenData {
+    pub fn tokenDataAt(self: *const Vocab, id: llama.impl.llama_c.llama_token, exc: *llama.impl.Exception) llama.impl.Thrown!TokenData {
         if (id < 0 or id >= self.id_to_token.items.len) return exc.throw(.out_of_range, "vector", .{});
         return self.id_to_token.items[@intCast(id)];
     }
 
     /// Ports `llama_vocab`'s `get_token_data` (llama-vocab.cpp:4472 @b1b770d90).
-    pub fn getTokenData(self: *const Vocab, id: llama.impl.c.llama_token, exc: *llama.impl.Exception) llama.impl.Thrown!TokenData {
+    pub fn getTokenData(self: *const Vocab, id: llama.impl.llama_c.llama_token, exc: *llama.impl.Exception) llama.impl.Thrown!TokenData {
         llama.impl.assert(self.type != type_none, "llama-vocab.cpp", 4473, "pimpl->type != LLAMA_VOCAB_TYPE_NONE");
         return self.tokenDataAt(id, exc);
     }
 
     /// Ports `llama_vocab::impl`'s `token_get_attr` (llama-vocab.cpp:3601 @b1b770d90).
-    pub fn tokenGetAttr(self: *const Vocab, id: llama.impl.c.llama_token, exc: *llama.impl.Exception) llama.impl.Thrown!llama.impl.c.enum_llama_token_attr {
+    pub fn tokenGetAttr(self: *const Vocab, id: llama.impl.llama_c.llama_token, exc: *llama.impl.Exception) llama.impl.Thrown!llama.impl.llama_c.enum_llama_token_attr {
         self.assertNotNone(3602);
         return (try self.tokenDataAt(id, exc)).attr;
     }
@@ -463,7 +463,7 @@ pub const Vocab = struct {
     /// Ports `llama_vocab::impl`'s `token_to_byte` (llama-vocab.cpp:3578 @b1b770d90).
     ///
     /// Return: the byte a `<0xXX>` token stands for, or `error.Thrown`.
-    pub fn tokenToByte(self: *const Vocab, id: llama.impl.c.llama_token, exc: *llama.impl.Exception) llama.impl.Thrown!u8 {
+    pub fn tokenToByte(self: *const Vocab, id: llama.impl.llama_c.llama_token, exc: *llama.impl.Exception) llama.impl.Thrown!u8 {
         llama.impl.assert(self.type != type_none, "llama-vocab.cpp", 3579, "get_type() != LLAMA_VOCAB_TYPE_NONE");
         llama.impl.assert(self.isByte(id), "llama-vocab.cpp", 3580, "is_byte(id)");
         const d = try self.tokenDataAt(id, exc);
@@ -483,7 +483,7 @@ pub const Vocab = struct {
     ///
     /// Return: the token for byte `ch`, or `error.Thrown` with
     /// `unordered_map`'s `at`'s `std`'s `out_of_range`.
-    pub fn byteToToken(self: *const Vocab, ch: u8, exc: *llama.impl.Exception) llama.impl.Thrown!llama.impl.c.llama_token {
+    pub fn byteToToken(self: *const Vocab, ch: u8, exc: *llama.impl.Exception) llama.impl.Thrown!llama.impl.llama_c.llama_token {
         llama.impl.assert(self.type != type_none, "llama-vocab.cpp", 4430, "get_type() != LLAMA_VOCAB_TYPE_NONE");
         const hex = "0123456789ABCDEF";
         switch (self.type) {
@@ -507,7 +507,7 @@ pub const Vocab = struct {
     }
 
     /// `token_to_id.at(key)`.
-    fn atKey(self: *const Vocab, key: []const u8, exc: *llama.impl.Exception) llama.impl.Thrown!llama.impl.c.llama_token {
+    fn atKey(self: *const Vocab, key: []const u8, exc: *llama.impl.Exception) llama.impl.Thrown!llama.impl.llama_c.llama_token {
         if (self.token_to_id.get(key)) |v| return v.*;
         return exc.throw(.out_of_range, "unordered_map::at: key not found", .{});
     }
@@ -611,17 +611,17 @@ pub const Vocab = struct {
 
                 const idx = ml.find(.tokenizer_precompiled_charsmap);
                 if (idx != -1) {
-                    if (llama.impl.c.gguf_get_kv_type(ctx, idx) != llama.impl.c.GGUF_TYPE_ARRAY) {
+                    if (llama.impl.llama_c.gguf_get_kv_type(ctx, idx) != llama.impl.llama_c.GGUF_TYPE_ARRAY) {
                         const kn = ml.name(.tokenizer_precompiled_charsmap);
                         return exc.throw(.runtime_error, "invalid gguf type for {s}", .{kn.slice()});
                     }
-                    const pc_type = llama.impl.c.gguf_get_arr_type(ctx, idx);
-                    if (pc_type != llama.impl.c.GGUF_TYPE_INT8 and pc_type != llama.impl.c.GGUF_TYPE_UINT8) {
+                    const pc_type = llama.impl.llama_c.gguf_get_arr_type(ctx, idx);
+                    if (pc_type != llama.impl.llama_c.GGUF_TYPE_INT8 and pc_type != llama.impl.llama_c.GGUF_TYPE_UINT8) {
                         const kn = ml.name(.tokenizer_precompiled_charsmap);
                         return exc.throw(.runtime_error, "invalid gguf type for {s}", .{kn.slice()});
                     }
-                    const n = llama.impl.c.gguf_get_arr_n(ctx, idx);
-                    const pc: [*]const u8 = @ptrCast(llama.impl.c.gguf_get_arr_data(ctx, idx).?);
+                    const n = llama.impl.llama_c.gguf_get_arr_n(ctx, idx);
+                    const pc: [*]const u8 = @ptrCast(llama.impl.llama_c.gguf_get_arr_data(ctx, idx).?);
                     self.precompiled_charsmap.appendSlice(std.heap.c_allocator, pc[0..n]) catch oom();
                     if (self.precompiled_charsmap.items.len < 4) {
                         return exc.throw(.runtime_error, "precompiled_charsmap too small for xcda_blob_size header!", .{});
@@ -780,15 +780,15 @@ pub const Vocab = struct {
 
     fn readMerges(self: *Vocab, ml: *const llama.gguf_meta.Meta, idx: i64, exc: *llama.impl.Exception) llama.impl.Thrown!void {
         const ctx = ml.ctx;
-        if (llama.impl.c.gguf_get_kv_type(ctx, idx) != llama.impl.c.GGUF_TYPE_ARRAY or llama.impl.c.gguf_get_arr_type(ctx, idx) != llama.impl.c.GGUF_TYPE_STRING) {
+        if (llama.impl.llama_c.gguf_get_kv_type(ctx, idx) != llama.impl.llama_c.GGUF_TYPE_ARRAY or llama.impl.llama_c.gguf_get_arr_type(ctx, idx) != llama.impl.llama_c.GGUF_TYPE_STRING) {
             const kn = ml.name(.tokenizer_merges);
             return exc.throw(.runtime_error, "invalid gguf type for {s}", .{kn.slice()});
         }
-        const n_merges: c_int = @truncate(@as(i64, @intCast(llama.impl.c.gguf_get_arr_n(ctx, idx))));
+        const n_merges: c_int = @truncate(@as(i64, @intCast(llama.impl.llama_c.gguf_get_arr_n(ctx, idx))));
         if (n_merges > 0) self.bpe_ranks.reserve(@intCast(n_merges));
         var i: c_int = 0;
         while (i < n_merges) : (i += 1) {
-            const word = llama.gguf_meta.cString(llama.impl.c.gguf_get_arr_str(ctx, idx, @intCast(i)));
+            const word = llama.gguf_meta.cString(llama.impl.llama_c.gguf_get_arr_str(ctx, idx, @intCast(i)));
             var first: []const u8 = "";
             var second: []const u8 = "";
             // `*word ? strchr(word + 1, ' ') : nullptr`
@@ -1030,46 +1030,46 @@ pub const Vocab = struct {
 
         const token_idx = ml.find(.tokenizer_list);
         if (token_idx == -1) return exc.throw(.runtime_error, "cannot find tokenizer vocab in model file\n", .{});
-        if (llama.impl.c.gguf_get_kv_type(ctx, token_idx) != llama.impl.c.GGUF_TYPE_ARRAY or llama.impl.c.gguf_get_arr_type(ctx, token_idx) != llama.impl.c.GGUF_TYPE_STRING) {
+        if (llama.impl.llama_c.gguf_get_kv_type(ctx, token_idx) != llama.impl.llama_c.GGUF_TYPE_ARRAY or llama.impl.llama_c.gguf_get_arr_type(ctx, token_idx) != llama.impl.llama_c.GGUF_TYPE_STRING) {
             const kn = ml.name(.tokenizer_list);
             return exc.throw(.runtime_error, "invalid gguf type for {s}", .{kn.slice()});
         }
 
-        const n_tokens: u32 = @truncate(llama.impl.c.gguf_get_arr_n(ctx, token_idx));
+        const n_tokens: u32 = @truncate(llama.impl.llama_c.gguf_get_arr_n(ctx, token_idx));
 
         var scores: ?[*]const f32 = null;
         var iscores: ?[*]const i32 = null;
         const score_idx = ml.find(.tokenizer_scores);
         if (score_idx != -1) {
-            const kv_type = llama.impl.c.gguf_get_kv_type(ctx, score_idx);
-            const arr_type = if (kv_type == llama.impl.c.GGUF_TYPE_ARRAY) llama.impl.c.gguf_get_arr_type(ctx, score_idx) else llama.impl.c.GGUF_TYPE_COUNT;
-            if (arr_type != llama.impl.c.GGUF_TYPE_INT32 and arr_type != llama.impl.c.GGUF_TYPE_FLOAT32) {
+            const kv_type = llama.impl.llama_c.gguf_get_kv_type(ctx, score_idx);
+            const arr_type = if (kv_type == llama.impl.llama_c.GGUF_TYPE_ARRAY) llama.impl.llama_c.gguf_get_arr_type(ctx, score_idx) else llama.impl.llama_c.GGUF_TYPE_COUNT;
+            if (arr_type != llama.impl.llama_c.GGUF_TYPE_INT32 and arr_type != llama.impl.llama_c.GGUF_TYPE_FLOAT32) {
                 const kn = ml.name(.tokenizer_scores);
                 return exc.throw(.runtime_error, "invalid gguf type for {s}", .{kn.slice()});
             }
-            const n_scores: u32 = @truncate(llama.impl.c.gguf_get_arr_n(ctx, score_idx));
+            const n_scores: u32 = @truncate(llama.impl.llama_c.gguf_get_arr_n(ctx, score_idx));
             if (n_scores < n_tokens) {
                 return exc.throw(.runtime_error, "Index out of array bounds for scores ({d} < {d})\n", .{ n_scores, n_tokens });
             }
-            if (arr_type == llama.impl.c.GGUF_TYPE_INT32) {
-                iscores = @ptrCast(@alignCast(llama.impl.c.gguf_get_arr_data(ctx, score_idx).?));
+            if (arr_type == llama.impl.llama_c.GGUF_TYPE_INT32) {
+                iscores = @ptrCast(@alignCast(llama.impl.llama_c.gguf_get_arr_data(ctx, score_idx).?));
             } else {
-                scores = @ptrCast(@alignCast(llama.impl.c.gguf_get_arr_data(ctx, score_idx).?));
+                scores = @ptrCast(@alignCast(llama.impl.llama_c.gguf_get_arr_data(ctx, score_idx).?));
             }
         }
 
         var toktypes: ?[*]const i32 = null;
         const toktype_idx = ml.find(.tokenizer_token_type);
         if (toktype_idx != -1) {
-            if (llama.impl.c.gguf_get_kv_type(ctx, toktype_idx) != llama.impl.c.GGUF_TYPE_ARRAY or llama.impl.c.gguf_get_arr_type(ctx, toktype_idx) != llama.impl.c.GGUF_TYPE_INT32) {
+            if (llama.impl.llama_c.gguf_get_kv_type(ctx, toktype_idx) != llama.impl.llama_c.GGUF_TYPE_ARRAY or llama.impl.llama_c.gguf_get_arr_type(ctx, toktype_idx) != llama.impl.llama_c.GGUF_TYPE_INT32) {
                 const kn = ml.name(.tokenizer_token_type);
                 return exc.throw(.runtime_error, "invalid gguf type for {s}", .{kn.slice()});
             }
-            const n_toktypes: u32 = @truncate(llama.impl.c.gguf_get_arr_n(ctx, toktype_idx));
+            const n_toktypes: u32 = @truncate(llama.impl.llama_c.gguf_get_arr_n(ctx, toktype_idx));
             if (n_toktypes < n_tokens) {
                 return exc.throw(.runtime_error, "Index out of array bounds for toktypes ({d} < {d})\n", .{ n_toktypes, n_tokens });
             }
-            toktypes = @ptrCast(@alignCast(llama.impl.c.gguf_get_arr_data(ctx, toktype_idx).?));
+            toktypes = @ptrCast(@alignCast(llama.impl.llama_c.gguf_get_arr_data(ctx, toktype_idx).?));
         }
 
         self.id_to_token.ensureTotalCapacity(std.heap.c_allocator, n_tokens) catch oom();
@@ -1087,7 +1087,7 @@ pub const Vocab = struct {
         // and a map node per token and never grows one buffer.
         var text_len: usize = 0;
         for (0..n_tokens) |k| {
-            const w = llama.gguf_meta.cString(llama.impl.c.gguf_get_arr_str(ctx, token_idx, k));
+            const w = llama.gguf_meta.cString(llama.impl.llama_c.gguf_get_arr_str(ctx, token_idx, k));
             text_len += if (w.len == 0) std.fmt.count("[EMPTY_{d}]", .{k}) else w.len;
         }
         self.text_buf.ensureTotalCapacityPrecise(std.heap.c_allocator, self.text_buf.items.len + text_len + n_tokens) catch oom();
@@ -1095,7 +1095,7 @@ pub const Vocab = struct {
 
         var i: u32 = 0;
         while (i < n_tokens) : (i += 1) {
-            var word = llama.gguf_meta.cString(llama.impl.c.gguf_get_arr_str(ctx, token_idx, i));
+            var word = llama.gguf_meta.cString(llama.impl.llama_c.gguf_get_arr_str(ctx, token_idx, i));
             var empty_buf: [32]u8 = undefined;
             if (word.len == 0) {
                 llama.impl.logWarn("%s: empty token at index %u\n", .{ "load", i });
@@ -1118,12 +1118,12 @@ pub const Vocab = struct {
             }
             if (toktypes) |tt| {
                 d.attr = switch (tt[i]) {
-                    llama.impl.c.LLAMA_TOKEN_TYPE_UNKNOWN => attr_unknown,
-                    llama.impl.c.LLAMA_TOKEN_TYPE_UNUSED => attr_unused,
-                    llama.impl.c.LLAMA_TOKEN_TYPE_NORMAL => attr_normal,
-                    llama.impl.c.LLAMA_TOKEN_TYPE_CONTROL => attr_control,
-                    llama.impl.c.LLAMA_TOKEN_TYPE_USER_DEFINED => attr_user_defined,
-                    llama.impl.c.LLAMA_TOKEN_TYPE_BYTE => attr_byte,
+                    llama.impl.llama_c.LLAMA_TOKEN_TYPE_UNKNOWN => attr_unknown,
+                    llama.impl.llama_c.LLAMA_TOKEN_TYPE_UNUSED => attr_unused,
+                    llama.impl.llama_c.LLAMA_TOKEN_TYPE_NORMAL => attr_normal,
+                    llama.impl.llama_c.LLAMA_TOKEN_TYPE_CONTROL => attr_control,
+                    llama.impl.llama_c.LLAMA_TOKEN_TYPE_USER_DEFINED => attr_user_defined,
+                    llama.impl.llama_c.LLAMA_TOKEN_TYPE_BYTE => attr_byte,
                     else => attr_undefined,
                 };
             }
@@ -1149,7 +1149,7 @@ pub const Vocab = struct {
         };
     }
 
-    fn eogInsert(self: *Vocab, id: llama.impl.c.llama_token) void {
+    fn eogInsert(self: *Vocab, id: llama.impl.llama_c.llama_token) void {
         const items = self.special_eog_ids.items;
         var lo: usize = 0;
         var hi: usize = items.len;
@@ -1161,11 +1161,11 @@ pub const Vocab = struct {
         self.special_eog_ids.insert(std.heap.c_allocator, lo, id) catch oom();
     }
 
-    fn eogErase(self: *Vocab, id: llama.impl.c.llama_token) void {
+    fn eogErase(self: *Vocab, id: llama.impl.llama_c.llama_token) void {
         if (eogIndex(self.special_eog_ids.items, id)) |i| _ = self.special_eog_ids.orderedRemove(i);
     }
 
-    fn controlLooking(self: *Vocab, id: llama.impl.c.llama_token, t: []const u8) void {
+    fn controlLooking(self: *Vocab, id: llama.impl.llama_c.llama_token, t: []const u8) void {
         const attr = &self.id_to_token.items[@intCast(id)].attr;
         if ((attr.* & attr_control) == 0) {
             warnControlLooking(id, t);
@@ -1177,7 +1177,7 @@ pub const Vocab = struct {
     /// `impl::load`.
     fn loadSpecialTokens(self: *Vocab, ml: *const llama.gguf_meta.Meta, exc: *llama.impl.Exception) llama.impl.Thrown!void {
         const n_vocab = self.id_to_token.items.len;
-        const Special = struct { kv: llama.arch_table.Kv, id: *llama.impl.c.llama_token };
+        const Special = struct { kv: llama.arch_table.Kv, id: *llama.impl.llama_c.llama_token };
         const special_token_types = [_]Special{
             .{ .kv = .tokenizer_bos_id, .id = &self.special_bos_id },
             .{ .kv = .tokenizer_eos_id, .id = &self.special_eos_id },
@@ -1258,13 +1258,13 @@ pub const Vocab = struct {
             const ctx = ml.ctx;
             const idx = ml.find(.tokenizer_suppress_tokens);
             if (idx != -1) {
-                if (llama.impl.c.gguf_get_kv_type(ctx, idx) != llama.impl.c.GGUF_TYPE_ARRAY or llama.impl.c.gguf_get_arr_type(ctx, idx) != llama.impl.c.GGUF_TYPE_INT32) {
+                if (llama.impl.llama_c.gguf_get_kv_type(ctx, idx) != llama.impl.llama_c.GGUF_TYPE_ARRAY or llama.impl.llama_c.gguf_get_arr_type(ctx, idx) != llama.impl.llama_c.GGUF_TYPE_INT32) {
                     const kn = ml.name(.tokenizer_suppress_tokens);
                     return exc.throw(.runtime_error, "invalid gguf type for {s}", .{kn.slice()});
                 }
-                const n: c_int = @truncate(@as(i64, @intCast(llama.impl.c.gguf_get_arr_n(ctx, idx))));
+                const n: c_int = @truncate(@as(i64, @intCast(llama.impl.llama_c.gguf_get_arr_n(ctx, idx))));
                 if (n > 0) {
-                    const data: [*]const i32 = @ptrCast(@alignCast(llama.impl.c.gguf_get_arr_data(ctx, idx).?));
+                    const data: [*]const i32 = @ptrCast(@alignCast(llama.impl.llama_c.gguf_get_arr_data(ctx, idx).?));
                     for (0..@intCast(n)) |i| {
                         const id = data[i];
                         if (id >= 0 and id < @as(c_int, @intCast(n_vocab))) self.suppress_tokens.append(std.heap.c_allocator, id) catch oom();
@@ -1425,11 +1425,11 @@ pub const Vocab = struct {
             var has_call = false;
             var has_end = false;
             var has_flush = false;
-            var end_id: llama.impl.c.llama_token = token_null;
+            var end_id: llama.impl.llama_c.llama_token = token_null;
 
             llama.impl.logInfo("%s: printing all EOG tokens:\n", .{"load"});
             for (self.special_eog_ids.items) |tid| {
-                if (tid < 0 or tid >= @as(llama.impl.c.llama_token, @intCast(n_vocab))) {
+                if (tid < 0 or tid >= @as(llama.impl.llama_c.llama_token, @intCast(n_vocab))) {
                     llama.impl.logWarn("%s: EOG token id %d is out of range (vocab size %zu), skipping\n", .{ "load", tid, n_vocab });
                     continue;
                 }
@@ -1460,9 +1460,9 @@ pub const Vocab = struct {
             // in the whole vocab
             var has_normal_s_marker = self.token_to_id.get("<rfl:parameter name=\"") != null;
             var has_s = false;
-            var s_id: llama.impl.c.llama_token = token_null;
+            var s_id: llama.impl.llama_c.llama_token = token_null;
             for (self.special_eog_ids.items) |tid| {
-                if (tid < 0 or tid >= @as(llama.impl.c.llama_token, @intCast(n_vocab))) continue;
+                if (tid < 0 or tid >= @as(llama.impl.llama_c.llama_token, @intCast(n_vocab))) continue;
                 const t = self.text(tid);
                 if (eql(t, "<|tool_response>") or eql(t, "<|plamo:eos|>")) {
                     has_normal_s_marker = true;
@@ -1481,20 +1481,20 @@ pub const Vocab = struct {
 
     const SpecialCtx = struct { v: *const Vocab };
 
-    fn longerText(ctx: SpecialCtx, a: llama.impl.c.llama_token, b: llama.impl.c.llama_token) bool {
+    fn longerText(ctx: SpecialCtx, a: llama.impl.llama_c.llama_token, b: llama.impl.llama_c.llama_token) bool {
         return ctx.v.id_to_token.items[@intCast(a)].len > ctx.v.id_to_token.items[@intCast(b)].len;
     }
 
     /// The special-token cache, from the end of `impl::load`.
     fn buildSpecialTokensCache(self: *Vocab) void {
-        const n: llama.impl.c.llama_token = @intCast(self.id_to_token.items.len);
-        var id: llama.impl.c.llama_token = 0;
+        const n: llama.impl.llama_c.llama_token = @intCast(self.id_to_token.items.len);
+        var id: llama.impl.llama_c.llama_token = 0;
         while (id < n) : (id += 1) {
             if ((self.id_to_token.items[@intCast(id)].attr & (attr_control | attr_user_defined | attr_unknown)) != 0) {
                 self.cache_special_tokens.append(std.heap.c_allocator, id) catch oom();
             }
         }
-        stdlib.libcxx.sort(llama.impl.c.llama_token, self.cache_special_tokens.items, SpecialCtx{ .v = self }, longerText);
+        stdlib.libcxx.sort(llama.impl.llama_c.llama_token, self.cache_special_tokens.items, SpecialCtx{ .v = self }, longerText);
         llama.impl.logInfo("%s: special tokens cache size = %u\n", .{ "load", @as(u32, @intCast(self.cache_special_tokens.items.len)) });
     }
 
@@ -1564,14 +1564,14 @@ pub const Vocab = struct {
     }
 
     /// `_set_tokenid_attr`.
-    fn setTokenIdAttr(self: *Vocab, id: llama.impl.c.llama_token, attr: llama.impl.c.enum_llama_token_attr, value: bool, exc: *llama.impl.Exception) llama.impl.Thrown!void {
+    fn setTokenIdAttr(self: *Vocab, id: llama.impl.llama_c.llama_token, attr: llama.impl.llama_c.enum_llama_token_attr, value: bool, exc: *llama.impl.Exception) llama.impl.Thrown!void {
         var current: u32 = (try self.tokenDataAt(id, exc)).attr;
         current = if (value) current | attr else current & ~@as(u32, attr);
         self.id_to_token.items[@intCast(id)].attr = current;
     }
 
     /// `_set_token_attr`.
-    fn setTokenAttr(self: *Vocab, token: []const u8, attr: llama.impl.c.enum_llama_token_attr, value: bool, exc: *llama.impl.Exception) llama.impl.Thrown!void {
+    fn setTokenAttr(self: *Vocab, token: []const u8, attr: llama.impl.llama_c.enum_llama_token_attr, value: bool, exc: *llama.impl.Exception) llama.impl.Thrown!void {
         try self.setTokenIdAttr(try self.atKey(token, exc), attr, value, exc);
     }
 
@@ -1654,10 +1654,10 @@ pub const Vocab = struct {
     /// - `exc`: receives what is thrown.
     ///
     /// Return: the tokens, owned by the caller, or `error.Thrown`.
-    pub fn tokenize(self: *const Vocab, raw_text: []const u8, add_special: bool, parse_special: bool, exc: *llama.impl.Exception) llama.impl.Thrown!std.ArrayList(llama.impl.c.llama_token) {
+    pub fn tokenize(self: *const Vocab, raw_text: []const u8, add_special: bool, parse_special: bool, exc: *llama.impl.Exception) llama.impl.Thrown!std.ArrayList(llama.impl.llama_c.llama_token) {
         llama.impl.assert(self.tokenizer != .none, "llama-vocab.cpp", 3813, "tokenizer && \"Tokenizer not initialized. Call llama_vocab::init_tokenizer() first.\"");
 
-        var output: std.ArrayList(llama.impl.c.llama_token) = .empty;
+        var output: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
         errdefer output.deinit(std.heap.c_allocator);
         var fragments: std.ArrayList(Fragment) = .empty;
         defer fragments.deinit(std.heap.c_allocator);
@@ -1829,7 +1829,7 @@ pub const Vocab = struct {
     ///
     /// Return: the number of tokens written; minus the number needed when
     /// `tokens` is too small; `INT32_MIN` past `int32_t`; or `error.Thrown`.
-    pub fn tokenizeInto(self: *const Vocab, text_in: []const u8, tokens: []llama.impl.c.llama_token, add_special: bool, parse_special: bool, exc: *llama.impl.Exception) llama.impl.Thrown!i32 {
+    pub fn tokenizeInto(self: *const Vocab, text_in: []const u8, tokens: []llama.impl.llama_c.llama_token, add_special: bool, parse_special: bool, exc: *llama.impl.Exception) llama.impl.Thrown!i32 {
         var res = try self.tokenize(text_in, add_special, parse_special, exc);
         defer res.deinit(std.heap.c_allocator);
         if (res.items.len >= std.math.maxInt(i32)) {
@@ -1867,7 +1867,7 @@ pub const Vocab = struct {
     /// - `exc`: receives what is thrown.
     ///
     /// Return: the bytes written, minus the bytes needed, or `error.Thrown`.
-    pub fn tokenToPiece(self: *const Vocab, token: llama.impl.c.llama_token, buf: []u8, lstrip: i32, special: bool, exc: *llama.impl.Exception) llama.impl.Thrown!i32 {
+    pub fn tokenToPiece(self: *const Vocab, token: llama.impl.llama_c.llama_token, buf: []u8, lstrip: i32, special: bool, exc: *llama.impl.Exception) llama.impl.Thrown!i32 {
         const attr_special = attr_unknown | attr_control;
         const attr = try self.tokenGetAttr(token, exc);
         if (!special and (attr & attr_special) != 0) return 0;
@@ -1953,7 +1953,7 @@ pub const Vocab = struct {
     /// (llama-vocab.cpp:4206 @b1b770d90): the cached piece.
     ///
     /// Return: the piece, borrowed until `deinit`, or `error.Thrown`.
-    pub fn cachedPiece(self: *const Vocab, token: llama.impl.c.llama_token, exc: *llama.impl.Exception) llama.impl.Thrown![]const u8 {
+    pub fn cachedPiece(self: *const Vocab, token: llama.impl.llama_c.llama_token, exc: *llama.impl.Exception) llama.impl.Thrown![]const u8 {
         if (token < 0 or self.piece_off.items.len == 0 or token >= self.piece_off.items.len - 1) return exc.throw(.out_of_range, "vector", .{});
         const i: usize = @intCast(token);
         return self.piece_buf.items[self.piece_off.items[i]..self.piece_off.items[i + 1]];
@@ -1971,7 +1971,7 @@ pub const Vocab = struct {
     /// - `exc`: receives what is thrown.
     ///
     /// Return: the bytes written, minus the bytes needed, or `error.Thrown`.
-    pub fn detokenize(self: *const Vocab, tokens_in: []const llama.impl.c.llama_token, text_out: []u8, remove_special: bool, unparse_special: bool, exc: *llama.impl.Exception) llama.impl.Thrown!i32 {
+    pub fn detokenize(self: *const Vocab, tokens_in: []const llama.impl.llama_c.llama_token, text_out: []u8, remove_special: bool, unparse_special: bool, exc: *llama.impl.Exception) llama.impl.Thrown!i32 {
         if (self.type == type_none) return 0;
         llama.impl.assert(self.tokenizer != .none, "llama-vocab.cpp", 4221, "tokenizer && \"Tokenizer not initialized. Call llama_vocab::init_tokenizer() first.\"");
 
@@ -2107,7 +2107,7 @@ pub const Vocab = struct {
             "%s: FIM REP token         = %d '%s'\n",
             "%s: FIM SEP token         = %d '%s'\n",
         };
-        const ids = [_]llama.impl.c.llama_token{
+        const ids = [_]llama.impl.llama_c.llama_token{
             self.special_bos_id,     self.special_eos_id,     self.special_eot_id,     self.special_eom_id,
             self.special_unk_id,     self.special_sep_id,     self.special_pad_id,     self.special_mask_id,
             self.linefeed_id,        self.special_fim_pre_id, self.special_fim_suf_id, self.special_fim_mid_id,
@@ -2124,7 +2124,7 @@ pub const Vocab = struct {
     }
 
     /// `id_to_token.at(id).text`.
-    fn textAt(self: *const Vocab, id: llama.impl.c.llama_token, exc: *llama.impl.Exception) llama.impl.Thrown![:0]const u8 {
+    fn textAt(self: *const Vocab, id: llama.impl.llama_c.llama_token, exc: *llama.impl.Exception) llama.impl.Thrown![:0]const u8 {
         _ = try self.tokenDataAt(id, exc);
         return self.text(id);
     }
@@ -2152,7 +2152,7 @@ fn containsAny(s: []const u8, comptime needles: []const []const u8) bool {
     return false;
 }
 
-fn eogIndex(items: []const llama.impl.c.llama_token, id: llama.impl.c.llama_token) ?usize {
+fn eogIndex(items: []const llama.impl.llama_c.llama_token, id: llama.impl.llama_c.llama_token) ?usize {
     var lo: usize = 0;
     var hi: usize = items.len;
     while (lo < hi) {
@@ -2171,7 +2171,7 @@ fn cz(buf: []u8, s: []const u8) [*:0]const u8 {
     return @ptrCast(buf.ptr);
 }
 
-fn warnControlLooking(id: llama.impl.c.llama_token, t: []const u8) void {
+fn warnControlLooking(id: llama.impl.llama_c.llama_token, t: []const u8) void {
     var tb: [512]u8 = undefined;
     llama.impl.logWarn("%s: control-looking token: %6d '%s' was not control-type; this is probably a bug in the model. its type will be overridden\n", .{ "load", id, cz(&tb, t) });
 }

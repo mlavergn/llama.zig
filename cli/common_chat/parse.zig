@@ -13,8 +13,6 @@ const mod = @import("module.zig");
 const json = @import("json");
 const peg = @import("peg");
 
-const Allocator = std.mem.Allocator;
-
 /// Ports `common_chat_parser_params` (chat.h:347 @b1b770d90): per-message
 /// parsing syntax, derived from `common_chat_params`.
 pub const ParserParams = struct {
@@ -27,7 +25,7 @@ pub const ParserParams = struct {
 };
 
 /// Ports `common_chat_parse` (chat.cpp:1801 @b1b770d90).
-pub fn parse(gpa: Allocator, input: *const mod.input.Input, is_partial: bool, params: *const ParserParams) mod.exception.Error!mod.msg.Msg {
+pub fn parse(gpa: std.mem.Allocator, input: *const mod.input.Input, is_partial: bool, params: *const ParserParams) mod.exception.Error!mod.msg.Msg {
     return pegParse(gpa, params.parser, input, is_partial, params);
 }
 
@@ -53,7 +51,7 @@ fn mapperKind(format: mod.msg.Format) mod.chat_peg.Mapper.Kind {
 /// - `src_parser`: the parser; null or empty for content only.
 ///
 /// Return: the message. `error.RuntimeError` when the reply does not match.
-pub fn pegParse(gpa: Allocator, src_parser: ?*const peg.Arena, input: *const mod.input.Input, is_partial: bool, params: *const ParserParams) mod.exception.Error!mod.msg.Msg {
+pub fn pegParse(gpa: std.mem.Allocator, src_parser: ?*const peg.Arena, input: *const mod.input.Input, is_partial: bool, params: *const ParserParams) mod.exception.Error!mod.msg.Msg {
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
     const a = arena_state.allocator();
@@ -114,7 +112,7 @@ pub fn pegParse(gpa: Allocator, src_parser: ?*const peg.Arena, input: *const mod
 }
 
 /// The message a mapper of the format's kind reads off the AST.
-fn mapMessage(gpa: Allocator, ctx: *const peg.ParseContext, result: *const peg.ParseResult, format: mod.msg.Format) mod.exception.Error!mod.msg.Msg {
+fn mapMessage(gpa: std.mem.Allocator, ctx: *const peg.ParseContext, result: *const peg.ParseResult, format: mod.msg.Format) mod.exception.Error!mod.msg.Msg {
     var msg: mod.msg.Msg = .{};
     errdefer msg.deinit(gpa);
     try mod.msg.Msg.setField(gpa, &msg.role, "assistant");

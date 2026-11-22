@@ -411,9 +411,9 @@ pub const CpuShare = struct {
 /// @b1b770d90): gate, up, down, or gate_up, down.
 ///
 /// Return: the tensors, at most four, in `out`'s first slots.
-fn layerExperts(layer: *const mod.model.Layer, out: *[4]*mod.impl.c.ggml_tensor) usize {
+fn layerExperts(layer: *const mod.model.Layer, out: *[4]*mod.impl.llama_c.ggml_tensor) usize {
     var n: usize = 0;
-    for ([_]?*mod.impl.c.ggml_tensor{ layer.ffn_gate_up_exps, layer.ffn_gate_exps, layer.ffn_up_exps, layer.ffn_down_exps }) |t_| {
+    for ([_]?*mod.impl.llama_c.ggml_tensor{ layer.ffn_gate_up_exps, layer.ffn_gate_exps, layer.ffn_up_exps, layer.ffn_down_exps }) |t_| {
         if (t_) |t| {
             out[n] = t;
             n += 1;
@@ -423,12 +423,12 @@ fn layerExperts(layer: *const mod.model.Layer, out: *[4]*mod.impl.c.ggml_tensor)
 }
 
 /// Ports `llama_moe_cache_same_layout` (llama-moe-cache.cpp:300 @b1b770d90).
-fn sameLayout(a: []const *mod.impl.c.ggml_tensor, b: []const *mod.impl.c.ggml_tensor) bool {
+fn sameLayout(a: []const *mod.impl.llama_c.ggml_tensor, b: []const *mod.impl.llama_c.ggml_tensor) bool {
     if (a.len != b.len) {
         return false;
     }
     for (a, b) |x, y| {
-        if (x.type != y.type or !mod.impl.c.ggml_are_same_shape(x, y) or x.nb[2] != y.nb[2]) {
+        if (x.type != y.type or !mod.impl.llama_c.ggml_are_same_shape(x, y) or x.nb[2] != y.nb[2]) {
             return false;
         }
     }
@@ -436,10 +436,10 @@ fn sameLayout(a: []const *mod.impl.c.ggml_tensor, b: []const *mod.impl.c.ggml_te
 }
 
 /// Ports `llama_moe_cache_is_host_weight` (llama-moe-cache.cpp:312 @b1b770d90).
-fn isHostWeight(t: *const mod.impl.c.ggml_tensor) bool {
+fn isHostWeight(t: *const mod.impl.llama_c.ggml_tensor) bool {
     return t.buffer != null and
-        mod.impl.c.ggml_backend_buffer_get_usage(t.buffer) == mod.impl.c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS and
-        mod.impl.c.ggml_backend_buffer_is_host(t.buffer);
+        mod.impl.llama_c.ggml_backend_buffer_get_usage(t.buffer) == mod.impl.llama_c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS and
+        mod.impl.llama_c.ggml_backend_buffer_is_host(t.buffer);
 }
 
 /// Ports `llama_moe_cache` (llama-moe-cache.h:13 @b1b770d90) and its `impl`
@@ -449,16 +449,16 @@ pub const MoeCache = struct {
     /// A GPU with its own budget and banks; it caches the layers assigned
     /// to it.
     const Device = struct {
-        backend: mod.impl.c.ggml_backend_t,
-        buft: mod.impl.c.ggml_backend_buffer_type_t,
+        backend: mod.impl.llama_c.ggml_backend_t,
+        buft: mod.impl.llama_c.ggml_backend_buffer_type_t,
         /// The host experts of the layers it caches.
         host_bytes: usize = 0,
         /// Its share of the budget.
         split: f64 = 0.0,
 
         /// The banks and their views.
-        ctx: ?*mod.impl.c.ggml_context = null,
-        buf: mod.impl.c.ggml_backend_buffer_t = null,
+        ctx: ?*mod.impl.llama_c.ggml_context = null,
+        buf: mod.impl.llama_c.ggml_backend_buffer_t = null,
         buf_size: usize = 0,
     };
 
@@ -468,10 +468,10 @@ pub const MoeCache = struct {
         /// The device.
         id: i32,
         /// The expert tensors of the first layer.
-        ref: std.ArrayList(*mod.impl.c.ggml_tensor) = .empty,
+        ref: std.ArrayList(*mod.impl.llama_c.ggml_tensor) = .empty,
         layers: std.ArrayList(i32) = .empty,
         /// The device storage of every slot, one per expert tensor.
-        banks: std.ArrayList(*mod.impl.c.ggml_tensor) = .empty,
+        banks: std.ArrayList(*mod.impl.llama_c.ggml_tensor) = .empty,
         host_bytes: usize = 0,
         n_slots: i32 = 0,
         lru: Lru = .{},
@@ -481,18 +481,18 @@ pub const MoeCache = struct {
         /// -1 when the layer is not cached.
         ig: i32 = -1,
         /// I32 `[1, n_expert]`, in host memory.
-        slot_map: ?*mod.impl.c.ggml_tensor = null,
+        slot_map: ?*mod.impl.llama_c.ggml_tensor = null,
         /// Looked up in place of `slot_map` by the graphs with a CPU part,
         /// if `cpu_share > 0`; its data is not used.
-        slot_map_cpu: ?*mod.impl.c.ggml_tensor = null,
+        slot_map_cpu: ?*mod.impl.llama_c.ggml_tensor = null,
         /// I32 `[1, n_expert]`, in host memory, if `cpu_share > 0`.
-        cpu_map: ?*mod.impl.c.ggml_tensor = null,
+        cpu_map: ?*mod.impl.llama_c.ggml_tensor = null,
         /// The experts set in `cpu_map`.
         cpu_experts: std.ArrayList(i32) = .empty,
         /// The fraction of a miss carried over to the next plan, in 1/65536.
         cpu_acc: u32 = 0,
         /// The host expert tensors, in the order of the banks.
-        experts: [4]*mod.impl.c.ggml_tensor = undefined,
+        experts: [4]*mod.impl.llama_c.ggml_tensor = undefined,
         n_experts: usize = 0,
     };
 
@@ -501,7 +501,7 @@ pub const MoeCache = struct {
         /// The index of the bank.
         ip: i32,
         /// The view of the bank used in place of the host experts.
-        cached: *mod.impl.c.ggml_tensor,
+        cached: *mod.impl.llama_c.ggml_tensor,
     };
 
     const Stats = struct {
@@ -530,9 +530,9 @@ pub const MoeCache = struct {
     groups: std.ArrayList(Group) = .empty,
     layers: []Layer = &.{},
     /// The host experts to the cached experts.
-    bindings: std.AutoHashMapUnmanaged(*const mod.impl.c.ggml_tensor, Binding) = .empty,
+    bindings: std.AutoHashMapUnmanaged(*const mod.impl.llama_c.ggml_tensor, Binding) = .empty,
     /// A slot map to its layer.
-    layer_of: std.AutoHashMapUnmanaged(*const mod.impl.c.ggml_tensor, LayerOf) = .empty,
+    layer_of: std.AutoHashMapUnmanaged(*const mod.impl.llama_c.ggml_tensor, LayerOf) = .empty,
 
     ids: std.ArrayList(i32) = .empty,
     fills: std.ArrayList(Lru.Fill) = .empty,
@@ -550,12 +550,12 @@ pub const MoeCache = struct {
     trace: ?*std.c.FILE = null,
 
     /// The slot maps, in host memory.
-    ctx_host: ?*mod.impl.c.ggml_context = null,
-    buf_host: mod.impl.c.ggml_backend_buffer_t = null,
+    ctx_host: ?*mod.impl.llama_c.ggml_context = null,
+    buf_host: mod.impl.llama_c.ggml_backend_buffer_t = null,
     buf_host_size: usize = 0,
 
     /// The views `copyExperts` makes.
-    ctx_views: ?*mod.impl.c.ggml_context = null,
+    ctx_views: ?*mod.impl.llama_c.ggml_context = null,
 
     /// Ports the constructor of `llama_moe_cache` (llama-moe-cache.cpp:875
     /// @b1b770d90) and of its `impl` (llama-moe-cache.cpp:401 @b1b770d90).
@@ -571,7 +571,7 @@ pub const MoeCache = struct {
     /// - `exc`: receives what is thrown.
     ///
     /// Return: the cache, the caller's to `destroy`, or `error.Thrown`.
-    pub fn create(model: *const mod.model.Model, no_alloc: bool, backends: []const mod.impl.c.ggml_backend_t, bufts: []const mod.impl.c.ggml_backend_buffer_type_t, size: usize, cpu_share: f32, exc: *mod.impl.Exception) mod.impl.Thrown!*MoeCache {
+    pub fn create(model: *const mod.model.Model, no_alloc: bool, backends: []const mod.impl.llama_c.ggml_backend_t, bufts: []const mod.impl.llama_c.ggml_backend_buffer_type_t, size: usize, cpu_share: f32, exc: *mod.impl.Exception) mod.impl.Thrown!*MoeCache {
         // `__func__` in the constructor of `struct impl`
         const func = "impl";
         const self = std.heap.c_allocator.create(MoeCache) catch oom();
@@ -581,15 +581,15 @@ pub const MoeCache = struct {
         @memset(self.layers, .{});
 
         for (backends, bufts) |be, buft| {
-            const dev_type = mod.impl.c.ggml_backend_dev_type(mod.impl.c.ggml_backend_get_device(be));
-            if (dev_type == mod.impl.c.GGML_BACKEND_DEVICE_TYPE_GPU or dev_type == mod.impl.c.GGML_BACKEND_DEVICE_TYPE_IGPU) {
+            const dev_type = mod.impl.llama_c.ggml_backend_dev_type(mod.impl.llama_c.ggml_backend_get_device(be));
+            if (dev_type == mod.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_GPU or dev_type == mod.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_IGPU) {
                 self.devices.append(std.heap.c_allocator, .{ .backend = be, .buft = buft }) catch oom();
             }
         }
         if (self.devices.items.len == 0) {
             return exc.throw(.runtime_error, "MoE cache requires a GPU backend", .{});
         }
-        if (model.params.split_mode == mod.impl.c.LLAMA_SPLIT_MODE_TENSOR) {
+        if (model.params.split_mode == mod.impl.llama_c.LLAMA_SPLIT_MODE_TENSOR) {
             return exc.throw(.runtime_error, "MoE cache does not support tensor parallelism", .{});
         }
         if (model.hparams.n_expert == 0 or self.n_expert_used == 0) {
@@ -599,7 +599,7 @@ pub const MoeCache = struct {
         // only cache the layers that keep all of their experts in host
         // memory, on the device the layer is assigned to
         for (model.layers, 0..) |*mlayer, il| {
-            var experts: [4]*mod.impl.c.ggml_tensor = undefined;
+            var experts: [4]*mod.impl.llama_c.ggml_tensor = undefined;
             const n = layerExperts(mlayer, &experts);
             if (n == 0) continue;
             var all_host = true;
@@ -608,7 +608,7 @@ pub const MoeCache = struct {
 
             var id_opt: ?usize = null;
             for (self.devices.items, 0..) |d, i| {
-                if (mod.impl.c.ggml_backend_get_device(d.backend) == model.devLayer(il)) {
+                if (mod.impl.llama_c.ggml_backend_get_device(d.backend) == model.devLayer(il)) {
                     id_opt = i;
                     break;
                 }
@@ -630,8 +630,8 @@ pub const MoeCache = struct {
             };
             g.layers.append(std.heap.c_allocator, @intCast(il)) catch oom();
             for (experts[0..n]) |t| {
-                g.host_bytes += mod.impl.c.ggml_nbytes(t);
-                self.devices.items[id].host_bytes += mod.impl.c.ggml_nbytes(t);
+                g.host_bytes += mod.impl.llama_c.ggml_nbytes(t);
+                self.devices.items[id].host_bytes += mod.impl.llama_c.ggml_nbytes(t);
             }
         }
         if (self.groups.items.len == 0) {
@@ -658,11 +658,11 @@ pub const MoeCache = struct {
             if (d.host_bytes == 0) {
                 continue;
             }
-            const dev = mod.impl.c.ggml_backend_get_device(d.backend);
+            const dev = mod.impl.llama_c.ggml_backend_get_device(d.backend);
             if (split_by_free) {
                 var free: usize = 0;
                 var total: usize = 0;
-                mod.impl.c.ggml_backend_dev_memory(dev, &free, &total);
+                mod.impl.llama_c.ggml_backend_dev_memory(dev, &free, &total);
                 d.split = @floatFromInt(free);
             } else {
                 var at: ?usize = null;
@@ -730,8 +730,8 @@ pub const MoeCache = struct {
         self.ctx_host = try initCtx(n_tensors_host, exc);
         self.ctx_views = try initCtx(2, exc);
 
-        const buft_host = mod.impl.c.ggml_backend_cpu_buffer_type();
-        const alignment_host = mod.impl.c.ggml_backend_buft_get_alignment(buft_host);
+        const buft_host = mod.impl.llama_c.ggml_backend_cpu_buffer_type();
+        const alignment_host = mod.impl.llama_c.ggml_backend_buft_get_alignment(buft_host);
 
         for (self.groups.items, 0..) |*g, ig| {
             if (g.n_slots == 0) {
@@ -739,9 +739,9 @@ pub const MoeCache = struct {
             }
             const ctx = self.devices.items[@intCast(g.id)].ctx;
             for (g.ref.items) |t| {
-                const bank: *mod.impl.c.ggml_tensor = mod.impl.c.ggml_new_tensor_3d(ctx, t.type, t.ne[0], t.ne[1], g.n_slots + self.n_zero + 1);
+                const bank: *mod.impl.llama_c.ggml_tensor = mod.impl.llama_c.ggml_new_tensor_3d(ctx, t.type, t.ne[0], t.ne[1], g.n_slots + self.n_zero + 1);
                 mod.impl.assert(bank.nb[2] == t.nb[2], "llama-moe-cache.cpp", 555, "bank->nb[2] == t->nb[2]");
-                _ = mod.impl.c.ggml_format_name(bank, "moe_cache.%zu.%s", ig, mod.impl.c.ggml_get_name(t));
+                _ = mod.impl.llama_c.ggml_format_name(bank, "moe_cache.%zu.%s", ig, mod.impl.llama_c.ggml_get_name(t));
                 g.banks.append(std.heap.c_allocator, bank) catch oom();
             }
             for (g.layers.items) |il| {
@@ -750,25 +750,25 @@ pub const MoeCache = struct {
                 l.n_experts = layerExperts(&model.layers[@intCast(il)], &l.experts);
                 for (l.experts[0..l.n_experts], 0..) |e, ip| {
                     const bank = g.banks.items[ip];
-                    const cached: *mod.impl.c.ggml_tensor = mod.impl.c.ggml_view_3d(ctx, bank, bank.ne[0], bank.ne[1], g.n_slots + self.n_zero, bank.nb[1], bank.nb[2], 0);
-                    _ = mod.impl.c.ggml_format_name(cached, "moe_cache.%s", mod.impl.c.ggml_get_name(e));
+                    const cached: *mod.impl.llama_c.ggml_tensor = mod.impl.llama_c.ggml_view_3d(ctx, bank, bank.ne[0], bank.ne[1], g.n_slots + self.n_zero, bank.nb[1], bank.nb[2], 0);
+                    _ = mod.impl.llama_c.ggml_format_name(cached, "moe_cache.%s", mod.impl.llama_c.ggml_get_name(e));
                     self.bindings.put(std.heap.c_allocator, e, .{ .il = il, .ip = @intCast(ip), .cached = cached }) catch oom();
                 }
-                const slot_map: *mod.impl.c.ggml_tensor = mod.impl.c.ggml_new_tensor_2d(self.ctx_host, mod.impl.c.GGML_TYPE_I32, 1, g.ref.items[0].ne[2]);
-                _ = mod.impl.c.ggml_format_name(slot_map, "moe_cache.slot_map-%d", il);
+                const slot_map: *mod.impl.llama_c.ggml_tensor = mod.impl.llama_c.ggml_new_tensor_2d(self.ctx_host, mod.impl.llama_c.GGML_TYPE_I32, 1, g.ref.items[0].ne[2]);
+                _ = mod.impl.llama_c.ggml_format_name(slot_map, "moe_cache.slot_map-%d", il);
                 l.slot_map = slot_map;
                 self.layer_of.put(std.heap.c_allocator, slot_map, .{ .il = il, .has_cpu = false }) catch oom();
-                self.buf_host_size += stdlib.num.pad(usize, mod.impl.c.ggml_nbytes(slot_map), alignment_host);
+                self.buf_host_size += stdlib.num.pad(usize, mod.impl.llama_c.ggml_nbytes(slot_map), alignment_host);
                 if (self.n_zero > 0) {
-                    const slot_map_cpu: *mod.impl.c.ggml_tensor = mod.impl.c.ggml_new_tensor_2d(self.ctx_host, mod.impl.c.GGML_TYPE_I32, 1, g.ref.items[0].ne[2]);
-                    _ = mod.impl.c.ggml_format_name(slot_map_cpu, "moe_cache.slot_map_cpu-%d", il);
+                    const slot_map_cpu: *mod.impl.llama_c.ggml_tensor = mod.impl.llama_c.ggml_new_tensor_2d(self.ctx_host, mod.impl.llama_c.GGML_TYPE_I32, 1, g.ref.items[0].ne[2]);
+                    _ = mod.impl.llama_c.ggml_format_name(slot_map_cpu, "moe_cache.slot_map_cpu-%d", il);
                     l.slot_map_cpu = slot_map_cpu;
                     self.layer_of.put(std.heap.c_allocator, slot_map_cpu, .{ .il = il, .has_cpu = true }) catch oom();
-                    self.buf_host_size += stdlib.num.pad(usize, mod.impl.c.ggml_nbytes(slot_map_cpu), alignment_host);
-                    const cpu_map: *mod.impl.c.ggml_tensor = mod.impl.c.ggml_new_tensor_2d(self.ctx_host, mod.impl.c.GGML_TYPE_I32, 1, g.ref.items[0].ne[2]);
-                    _ = mod.impl.c.ggml_format_name(cpu_map, "moe_cache.cpu_map-%d", il);
+                    self.buf_host_size += stdlib.num.pad(usize, mod.impl.llama_c.ggml_nbytes(slot_map_cpu), alignment_host);
+                    const cpu_map: *mod.impl.llama_c.ggml_tensor = mod.impl.llama_c.ggml_new_tensor_2d(self.ctx_host, mod.impl.llama_c.GGML_TYPE_I32, 1, g.ref.items[0].ne[2]);
+                    _ = mod.impl.llama_c.ggml_format_name(cpu_map, "moe_cache.cpu_map-%d", il);
                     l.cpu_map = cpu_map;
-                    self.buf_host_size += stdlib.num.pad(usize, mod.impl.c.ggml_nbytes(cpu_map), alignment_host);
+                    self.buf_host_size += stdlib.num.pad(usize, mod.impl.llama_c.ggml_nbytes(cpu_map), alignment_host);
                 }
             }
             self.devices.items[@intCast(g.id)].buf_size += self.allocSize(g, g.n_slots);
@@ -780,14 +780,14 @@ pub const MoeCache = struct {
             const ctx = d.ctx orelse continue;
             d.buf = try mod.memory.Bufs.allocBuf(ctx, d.buft, no_alloc, "MoE cache", exc);
             if (!no_alloc) {
-                mod.impl.c.ggml_backend_buffer_clear(d.buf, 0);
-                d.buf_size = mod.impl.c.ggml_backend_buffer_get_size(d.buf);
+                mod.impl.llama_c.ggml_backend_buffer_clear(d.buf, 0);
+                d.buf_size = mod.impl.llama_c.ggml_backend_buffer_get_size(d.buf);
             }
         }
         self.buf_host = try mod.memory.Bufs.allocBuf(self.ctx_host.?, buft_host, no_alloc, "MoE cache slot maps", exc);
         if (!no_alloc) {
-            mod.impl.c.ggml_backend_buffer_clear(self.buf_host, 0xff); // the CPU maps are -1
-            self.buf_host_size = mod.impl.c.ggml_backend_buffer_get_size(self.buf_host);
+            mod.impl.llama_c.ggml_backend_buffer_clear(self.buf_host, 0xff); // the CPU maps are -1
+            self.buf_host_size = mod.impl.llama_c.ggml_backend_buffer_get_size(self.buf_host);
 
             for (self.groups.items) |*g| {
                 for (g.layers.items) |il| {
@@ -804,10 +804,10 @@ pub const MoeCache = struct {
         // slot maps are copied with the copy callback
         for (self.devices.items) |*d| {
             if (d.buf != null) {
-                mod.impl.c.ggml_backend_buffer_set_usage(d.buf, mod.impl.c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
+                mod.impl.llama_c.ggml_backend_buffer_set_usage(d.buf, mod.impl.llama_c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
             }
         }
-        mod.impl.c.ggml_backend_buffer_set_usage(self.buf_host, mod.impl.c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
+        mod.impl.llama_c.ggml_backend_buffer_set_usage(self.buf_host, mod.impl.llama_c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
 
         for (self.devices.items, 0..) |*d, id| {
             if (d.host_bytes == 0) {
@@ -815,7 +815,7 @@ pub const MoeCache = struct {
             }
             mod.impl.logInfo("%s: %10s MoE cache size = %8.2f MiB for %.2f MiB of host experts, %.0f%% of the misses on the CPU\n", .{
                 func,
-                mod.impl.c.ggml_backend_buft_name(d.buft),
+                mod.impl.llama_c.ggml_backend_buft_name(d.buft),
                 @as(f64, @floatFromInt(d.buf_size)) / 1024.0 / 1024.0,
                 @as(f64, @floatFromInt(d.host_bytes)) / 1024.0 / 1024.0,
                 100.0 * @as(f64, self.cpu_share),
@@ -826,7 +826,7 @@ pub const MoeCache = struct {
                     mod.impl.logInfo("%s: %2zu layers, %s: %5d slots (%.1f%%, %.1f tokens worth)\n", .{
                         func,
                         g.layers.items.len,
-                        mod.impl.c.ggml_type_name(g.ref.items[g.ref.items.len - 1].type),
+                        mod.impl.llama_c.ggml_type_name(g.ref.items[g.ref.items.len - 1].type),
                         g.n_slots,
                         100.0 * @as(f64, @floatFromInt(g.n_slots)) / n_all,
                         @as(f64, @floatFromInt(g.n_slots)) / @as(f64, @floatFromInt(g.layers.items.len * @as(usize, @intCast(self.n_expert_used)))),
@@ -840,9 +840,9 @@ pub const MoeCache = struct {
 
     /// The `init_ctx` lambda of the constructor (llama-moe-cache.cpp:524
     /// @b1b770d90).
-    fn initCtx(n_tensors: usize, exc: *mod.impl.Exception) mod.impl.Thrown!*mod.impl.c.ggml_context {
-        return mod.impl.c.ggml_init(.{
-            .mem_size = n_tensors * mod.impl.c.ggml_tensor_overhead(),
+    fn initCtx(n_tensors: usize, exc: *mod.impl.Exception) mod.impl.Thrown!*mod.impl.llama_c.ggml_context {
+        return mod.impl.llama_c.ggml_init(.{
+            .mem_size = n_tensors * mod.impl.llama_c.ggml_tensor_overhead(),
             .mem_buffer = null,
             .no_alloc = true,
         }) orelse return exc.throw(.runtime_error, "failed to create the MoE cache context", .{});
@@ -852,7 +852,7 @@ pub const MoeCache = struct {
     /// @b1b770d90): the `n_zero` zero slots after the cached ones, and one
     /// extra slot at the end, as CUDA's MMQ can read past the last expert.
     fn allocSize(self: *const MoeCache, g: *const Group, n_slots: i32) usize {
-        const alignment = mod.impl.c.ggml_backend_buft_get_alignment(self.devices.items[@intCast(g.id)].buft);
+        const alignment = mod.impl.llama_c.ggml_backend_buft_get_alignment(self.devices.items[@intCast(g.id)].buft);
         var res: usize = 0;
         for (g.ref.items) |t| {
             res += stdlib.num.pad(usize, t.nb[2] * @as(usize, @intCast(n_slots + self.n_zero + 1)), alignment);
@@ -898,7 +898,7 @@ pub const MoeCache = struct {
             W.f64_(self, split_sum);
             W.u64_(self, g.host_bytes);
             W.u64_(self, d.host_bytes);
-            W.u64_(self, mod.impl.c.ggml_backend_buft_get_alignment(d.buft));
+            W.u64_(self, mod.impl.llama_c.ggml_backend_buft_get_alignment(d.buft));
             W.u32_(self, @truncate(g.ref.items.len));
             for (g.ref.items) |t| {
                 W.u64_(self, t.nb[2]);
@@ -923,9 +923,9 @@ pub const MoeCache = struct {
         self.logStats();
         if (self.trace) |f| _ = std.c.fclose(f);
 
-        if (self.ctx_views) |ctx| mod.impl.c.ggml_free(ctx);
-        if (self.buf_host != null) mod.impl.c.ggml_backend_buffer_free(self.buf_host);
-        if (self.ctx_host) |ctx| mod.impl.c.ggml_free(ctx);
+        if (self.ctx_views) |ctx| mod.impl.llama_c.ggml_free(ctx);
+        if (self.buf_host != null) mod.impl.llama_c.ggml_backend_buffer_free(self.buf_host);
+        if (self.ctx_host) |ctx| mod.impl.llama_c.ggml_free(ctx);
         self.cpu.deinit(std.heap.c_allocator);
         self.fills.deinit(std.heap.c_allocator);
         self.ids.deinit(std.heap.c_allocator);
@@ -941,8 +941,8 @@ pub const MoeCache = struct {
         }
         self.groups.deinit(std.heap.c_allocator);
         for (self.devices.items) |*d| {
-            if (d.buf != null) mod.impl.c.ggml_backend_buffer_free(d.buf);
-            if (d.ctx) |ctx| mod.impl.c.ggml_free(ctx);
+            if (d.buf != null) mod.impl.llama_c.ggml_backend_buffer_free(d.buf);
+            if (d.ctx) |ctx| mod.impl.llama_c.ggml_free(ctx);
         }
         self.devices.deinit(std.heap.c_allocator);
         std.heap.c_allocator.destroy(self);
@@ -952,7 +952,7 @@ pub const MoeCache = struct {
     /// @b1b770d90).
     ///
     /// Return: the device that caches layer `il`.
-    pub fn backend(self: *const MoeCache, il: i32) mod.impl.c.ggml_backend_t {
+    pub fn backend(self: *const MoeCache, il: i32) mod.impl.llama_c.ggml_backend_t {
         return self.devices.items[@intCast(self.groups.items[@intCast(self.layers[@intCast(il)].ig)].id)].backend;
     }
 
@@ -965,7 +965,7 @@ pub const MoeCache = struct {
     ///
     /// Return: the slot map of layer `il`, when its experts can be read from
     /// the cache for `n_tokens` tokens, else null.
-    pub fn getSlotMap(self: *const MoeCache, il: i32, n_tokens: i64, n_expert_used: i64, cpu_part: bool) ?*mod.impl.c.ggml_tensor {
+    pub fn getSlotMap(self: *const MoeCache, il: i32, n_tokens: i64, n_expert_used: i64, cpu_part: bool) ?*mod.impl.llama_c.ggml_tensor {
         if (il < 0 or il >= @as(i32, @intCast(self.layers.len)) or self.layers[@intCast(il)].ig < 0) {
             return null;
         }
@@ -986,22 +986,22 @@ pub const MoeCache = struct {
     /// `[1, n_expert]` in host memory, `e` for these experts and -1 for the
     /// others; null if no misses of the layer are computed on the CPU for
     /// ubatches of `n_tokens` tokens.
-    pub fn getCpuMap(self: *const MoeCache, il: i32, n_tokens: i64) ?*mod.impl.c.ggml_tensor {
+    pub fn getCpuMap(self: *const MoeCache, il: i32, n_tokens: i64) ?*mod.impl.llama_c.ggml_tensor {
         if (il < 0 or il >= @as(i32, @intCast(self.layers.len))) {
             return null;
         }
         const cpu_map = self.layers[@intCast(il)].cpu_map orelse return null;
         // the scheduler would run the CPU part on a device that offloads
         // such batches from host weights
-        var probe = std.mem.zeroes(mod.impl.c.ggml_tensor);
-        probe.op = mod.impl.c.GGML_OP_MUL_MAT_ID;
-        probe.type = mod.impl.c.GGML_TYPE_F32;
+        var probe = std.mem.zeroes(mod.impl.llama_c.ggml_tensor);
+        probe.op = mod.impl.llama_c.GGML_OP_MUL_MAT_ID;
+        probe.type = mod.impl.llama_c.GGML_TYPE_F32;
         probe.ne[0] = 1;
         probe.ne[1] = self.n_expert_used;
         probe.ne[2] = n_tokens;
         probe.ne[3] = 1;
         for (self.devices.items) |d| {
-            if (mod.impl.c.ggml_backend_offload_op(d.backend, &probe)) {
+            if (mod.impl.llama_c.ggml_backend_offload_op(d.backend, &probe)) {
                 return null;
             }
         }
@@ -1013,7 +1013,7 @@ pub const MoeCache = struct {
     ///
     /// Return: the experts of `w` in the cache, or null when `w` is not
     /// cached.
-    pub fn getExperts(self: *const MoeCache, w: ?*const mod.impl.c.ggml_tensor) ?*mod.impl.c.ggml_tensor {
+    pub fn getExperts(self: *const MoeCache, w: ?*const mod.impl.llama_c.ggml_tensor) ?*mod.impl.llama_c.ggml_tensor {
         const b = self.bindings.get(w orelse return null) orelse return null;
         return b.cached;
     }
@@ -1027,7 +1027,7 @@ pub const MoeCache = struct {
     ///
     /// Return: the number of experts copied, 0 when expert `e` is not
     /// cached.
-    pub fn copyExperts(self: *MoeCache, backend_: mod.impl.c.ggml_backend_t, w: *const mod.impl.c.ggml_tensor, dst: *mod.impl.c.ggml_tensor, e: i64, last: i64) i64 {
+    pub fn copyExperts(self: *MoeCache, backend_: mod.impl.llama_c.ggml_backend_t, w: *const mod.impl.llama_c.ggml_tensor, dst: *mod.impl.llama_c.ggml_tensor, e: i64, last: i64) i64 {
         const b = self.bindings.get(w) orelse return 0;
         const g = &self.groups.items[@intCast(self.layers[@intCast(b.il)].ig)];
         if (backend_ != self.devices.items[@intCast(g.id)].backend) {
@@ -1044,15 +1044,15 @@ pub const MoeCache = struct {
         }
 
         const bank = g.banks.items[@intCast(b.ip)];
-        mod.impl.c.ggml_reset(self.ctx_views);
-        const src_view: *mod.impl.c.ggml_tensor = mod.impl.c.ggml_view_3d(self.ctx_views, bank, bank.ne[0], bank.ne[1], n, bank.nb[1], bank.nb[2], @as(usize, @intCast(slots[@intCast(e)])) * bank.nb[2]);
-        const dst_view: *mod.impl.c.ggml_tensor = mod.impl.c.ggml_view_3d(self.ctx_views, dst, dst.ne[0], dst.ne[1], n, dst.nb[1], dst.nb[2], @as(usize, @intCast(e)) * dst.nb[2]);
-        _ = mod.impl.c.ggml_backend_view_init(src_view);
-        _ = mod.impl.c.ggml_backend_view_init(dst_view);
-        mod.impl.c.ggml_backend_tensor_copy_async(backend_, backend_, src_view, dst_view);
+        mod.impl.llama_c.ggml_reset(self.ctx_views);
+        const src_view: *mod.impl.llama_c.ggml_tensor = mod.impl.llama_c.ggml_view_3d(self.ctx_views, bank, bank.ne[0], bank.ne[1], n, bank.nb[1], bank.nb[2], @as(usize, @intCast(slots[@intCast(e)])) * bank.nb[2]);
+        const dst_view: *mod.impl.llama_c.ggml_tensor = mod.impl.llama_c.ggml_view_3d(self.ctx_views, dst, dst.ne[0], dst.ne[1], n, dst.nb[1], dst.nb[2], @as(usize, @intCast(e)) * dst.nb[2]);
+        _ = mod.impl.llama_c.ggml_backend_view_init(src_view);
+        _ = mod.impl.llama_c.ggml_backend_view_init(dst_view);
+        mod.impl.llama_c.ggml_backend_tensor_copy_async(backend_, backend_, src_view, dst_view);
 
         self.stats_copy.hits += @intCast(n);
-        self.stats_copy.bytes += mod.impl.c.ggml_nbytes(src_view);
+        self.stats_copy.bytes += mod.impl.llama_c.ggml_nbytes(src_view);
 
         return n;
     }
@@ -1062,7 +1062,7 @@ pub const MoeCache = struct {
     /// scheduler's copy callback for a slot map.
     ///
     /// Return: false when `src` is not a slot map.
-    pub fn copy(self: *MoeCache, backend_: mod.impl.c.ggml_backend_t, src: *const mod.impl.c.ggml_tensor, dst: *mod.impl.c.ggml_tensor, graph: *mod.impl.c.ggml_cgraph) bool {
+    pub fn copy(self: *MoeCache, backend_: mod.impl.llama_c.ggml_backend_t, src: *const mod.impl.llama_c.ggml_tensor, dst: *mod.impl.llama_c.ggml_tensor, graph: *mod.impl.llama_c.ggml_cgraph) bool {
         const lo = self.layer_of.get(src) orelse return false;
         const il = lo.il;
         const has_cpu = lo.has_cpu;
@@ -1072,12 +1072,12 @@ pub const MoeCache = struct {
         mod.impl.assert(backend_ == self.devices.items[@intCast(g.id)].backend, "llama-moe-cache.cpp", 771, "backend == devices[g.id].backend");
 
         // the get_rows that looks up the slots of the selected experts
-        const n_nodes = mod.impl.c.ggml_graph_n_nodes(graph);
-        var lookup: ?*const mod.impl.c.ggml_tensor = null;
+        const n_nodes = mod.impl.llama_c.ggml_graph_n_nodes(graph);
+        var lookup: ?*const mod.impl.llama_c.ggml_tensor = null;
         var i: c_int = 0;
         while (i < n_nodes and lookup == null) : (i += 1) {
-            const node: *const mod.impl.c.ggml_tensor = mod.impl.c.ggml_graph_node(graph, i);
-            if (node.op == mod.impl.c.GGML_OP_GET_ROWS and node.src[0] == dst) {
+            const node: *const mod.impl.llama_c.ggml_tensor = mod.impl.llama_c.ggml_graph_node(graph, i);
+            if (node.op == mod.impl.llama_c.GGML_OP_GET_ROWS and node.src[0] == dst) {
                 lookup = node;
             }
         }
@@ -1086,23 +1086,23 @@ pub const MoeCache = struct {
         // the selected experts must be computed in an earlier split: the
         // scheduler starts a new split at the lookup because it reads a host
         // weight, but only when the split already has inputs
-        const sel: *const mod.impl.c.ggml_tensor = lookup.?.src[1];
+        const sel: *const mod.impl.llama_c.ggml_tensor = lookup.?.src[1];
         i = 0;
         while (i < n_nodes) : (i += 1) {
-            const node: *const mod.impl.c.ggml_tensor = mod.impl.c.ggml_graph_node(graph, i);
-            if (node == sel or node == @as(?*const mod.impl.c.ggml_tensor, sel.view_src)) {
-                mod.impl.c.ggml_abort("llama-moe-cache.cpp", 790, "the experts of layer %d are selected in the same split as their MoE cache lookup", il);
+            const node: *const mod.impl.llama_c.ggml_tensor = mod.impl.llama_c.ggml_graph_node(graph, i);
+            if (node == sel or node == @as(?*const mod.impl.llama_c.ggml_tensor, sel.view_src)) {
+                mod.impl.llama_c.ggml_abort("llama-moe-cache.cpp", 790, "the experts of layer %d are selected in the same split as their MoE cache lookup", il);
             }
         }
-        mod.impl.assert(mod.impl.c.ggml_is_contiguous(sel), "llama-moe-cache.cpp", 793, "ggml_is_contiguous(sel)");
-        mod.impl.assert(sel.op == mod.impl.c.GGML_OP_RESHAPE, "llama-moe-cache.cpp", 794, "sel->op == GGML_OP_RESHAPE"); // of the [n_expert_used, n_tokens] ids, see build_moe_cache_slots
+        mod.impl.assert(mod.impl.llama_c.ggml_is_contiguous(sel), "llama-moe-cache.cpp", 793, "ggml_is_contiguous(sel)");
+        mod.impl.assert(sel.op == mod.impl.llama_c.GGML_OP_RESHAPE, "llama-moe-cache.cpp", 794, "sel->op == GGML_OP_RESHAPE"); // of the [n_expert_used, n_tokens] ids, see build_moe_cache_slots
 
-        const sel_src: *const mod.impl.c.ggml_tensor = sel.src[0].?;
+        const sel_src: *const mod.impl.llama_c.ggml_tensor = sel.src[0].?;
         const n_used: i32 = @truncate(sel_src.ne[0]);
 
-        self.ids.resize(std.heap.c_allocator, @intCast(mod.impl.c.ggml_nelements(sel))) catch oom();
-        mod.impl.c.ggml_backend_tensor_get_async(backend_, sel, if (self.ids.items.len == 0) null else self.ids.items.ptr, 0, mod.impl.c.ggml_nbytes(sel));
-        mod.impl.c.ggml_backend_synchronize(backend_);
+        self.ids.resize(std.heap.c_allocator, @intCast(mod.impl.llama_c.ggml_nelements(sel))) catch oom();
+        mod.impl.llama_c.ggml_backend_tensor_get_async(backend_, sel, if (self.ids.items.len == 0) null else self.ids.items.ptr, 0, mod.impl.llama_c.ggml_nbytes(sel));
+        mod.impl.llama_c.ggml_backend_synchronize(backend_);
 
         if (self.trace != null) {
             self.writeTrace(il, n_used);
@@ -1113,7 +1113,7 @@ pub const MoeCache = struct {
         const share_q: u32 = if (has_cpu and g.lru.n_filled == g.lru.n_slots) self.cpu_share_q else 0;
         var n_hit: usize = 0;
         if (!g.lru.plan(il, self.ids.items, sel_src.ne[1], n_used, self.n_zero, CpuShare{ .share_q = share_q, .acc = &l.cpu_acc }, &self.fills, &self.cpu, &n_hit)) {
-            mod.impl.c.ggml_abort("llama-moe-cache.cpp", 815, "the MoE cache is too small for the experts selected in layer %d", il);
+            mod.impl.llama_c.ggml_abort("llama-moe-cache.cpp", 815, "the MoE cache is too small for the experts selected in layer %d", il);
         }
         if (has_cpu) {
             const cpu_map: [*]i32 = @ptrCast(@alignCast(l.cpu_map.?.data));
@@ -1141,7 +1141,7 @@ pub const MoeCache = struct {
                     n += 1;
                 }
                 const base: [*]const u8 = @ptrCast(w.data.?);
-                mod.impl.c.ggml_backend_tensor_set_async(backend_, bank, base + @as(usize, @intCast(fills[k].expert)) * expert_size, @as(usize, @intCast(fills[k].slot)) * expert_size, n * expert_size);
+                mod.impl.llama_c.ggml_backend_tensor_set_async(backend_, bank, base + @as(usize, @intCast(fills[k].expert)) * expert_size, @as(usize, @intCast(fills[k].slot)) * expert_size, n * expert_size);
                 bytes += n * expert_size;
                 k += n;
             }
@@ -1154,7 +1154,7 @@ pub const MoeCache = struct {
         st.bytes += bytes;
 
         // the next copy synchronizes the backend before it changes the slot map again
-        mod.impl.c.ggml_backend_tensor_set_async(backend_, dst, l.slot_map.?.data, 0, mod.impl.c.ggml_nbytes(l.slot_map.?));
+        mod.impl.llama_c.ggml_backend_tensor_set_async(backend_, dst, l.slot_map.?.data, 0, mod.impl.llama_c.ggml_nbytes(l.slot_map.?));
 
         return true;
     }
@@ -1192,11 +1192,11 @@ pub const MoeCache = struct {
         var res: std.ArrayList(mod.model.BuftSize) = .empty;
         for (self.devices.items) |d| {
             if (d.buf != null) {
-                mod.model.addBuftSize(&res, mod.impl.c.ggml_backend_buffer_get_type(d.buf), d.buf_size);
+                mod.model.addBuftSize(&res, mod.impl.llama_c.ggml_backend_buffer_get_type(d.buf), d.buf_size);
             }
         }
         if (self.buf_host != null) {
-            mod.model.addBuftSize(&res, mod.impl.c.ggml_backend_buffer_get_type(self.buf_host), self.buf_host_size);
+            mod.model.addBuftSize(&res, mod.impl.llama_c.ggml_backend_buffer_get_type(self.buf_host), self.buf_host_size);
         }
         return res.toOwnedSlice(std.heap.c_allocator) catch oom();
     }

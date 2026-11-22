@@ -36,18 +36,11 @@
 //! Usage: api_diff <tmpdir> <file.gguf | corpus.inp>...
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const input_tensor_order = @import("input_tensor_order.zig");
 const harness_root = @import("harness_root");
 
-const c = harness_root.impl.c;
-const M = harness_root.model;
-const api = harness_root.api;
-const Token = c.llama_token;
-
-const gpa = std.heap.c_allocator;
-
-extern fn _Z18llama_log_internal14ggml_log_levelPKcz(level: c.enum_ggml_log_level, format: [*:0]const u8, ...) void;
+extern fn _Z18llama_log_internal14ggml_log_levelPKcz(level: harness_root.impl.c.enum_ggml_log_level, format: [*:0]const u8, ...) void;
 
 /// The scratch directory `main` was given.
 var tmp_dir: []const u8 = "";
@@ -58,46 +51,46 @@ var tmp_dir: []const u8 = "";
 ///
 /// Return: the copy's path.
 fn embedCopy(path: [:0]const u8, offset: usize) [:0]const u8 {
-    const out = gpa.printSentinel("{s}/embedded-{d}.gguf", .{ tmp_dir, offset }, 0) catch unreachable;
-    const in = libc.fopen(path.ptr, "rb").?;
-    defer _ = libc.fclose(in);
-    const o = libc.fopen(out.ptr, "wb").?;
-    defer _ = libc.fclose(o);
+    const out = std.heap.c_allocator.printSentinel("{s}/embedded-{d}.gguf", .{ tmp_dir, offset }, 0) catch unreachable;
+    const in = stdlib.libc.fopen(path.ptr, "rb").?;
+    defer _ = stdlib.libc.fclose(in);
+    const o = stdlib.libc.fopen(out.ptr, "wb").?;
+    defer _ = stdlib.libc.fclose(o);
     var buf: [65536]u8 = undefined;
     @memset(&buf, 'x');
-    _ = libc.fwrite(&buf, 1, offset, o);
+    _ = stdlib.libc.fwrite(&buf, 1, offset, o);
     while (true) {
-        const n = libc.fread(&buf, 1, buf.len, in);
+        const n = stdlib.libc.fread(&buf, 1, buf.len, in);
         if (n == 0) break;
-        _ = libc.fwrite(&buf, 1, n, o);
+        _ = stdlib.libc.fwrite(&buf, 1, n, o);
     }
     return out;
 }
 
 /// `llama_model_load_from_file_ptr` on both sides, each reading its own
 /// handle positioned `offset` bytes in.
-fn filePtrLoad(label: []const u8, path: [:0]const u8, offset: c_long, mp: c.struct_llama_model_params) void {
+fn filePtrLoad(label: []const u8, path: [:0]const u8, offset: c_long, mp: harness_root.impl.c.struct_llama_model_params) void {
     var la: std.ArrayList(u8) = .empty;
-    defer la.deinit(gpa);
+    defer la.deinit(std.heap.c_allocator);
     var lb: std.ArrayList(u8) = .empty;
-    defer lb.deinit(gpa);
-    const fa = libc.fopen(path.ptr, "rb").?;
-    defer _ = libc.fclose(fa);
-    const fb = libc.fopen(path.ptr, "rb").?;
-    defer _ = libc.fclose(fb);
-    _ = libc.fseek(fa, offset, 0);
-    _ = libc.fseek(fb, offset, 0);
+    defer lb.deinit(std.heap.c_allocator);
+    const fa = stdlib.libc.fopen(path.ptr, "rb").?;
+    defer _ = stdlib.libc.fclose(fa);
+    const fb = stdlib.libc.fopen(path.ptr, "rb").?;
+    defer _ = stdlib.libc.fclose(fb);
+    _ = stdlib.libc.fseek(fa, offset, 0);
+    _ = stdlib.libc.fseek(fb, offset, 0);
     rec = &la;
-    const rm = c.llama_model_load_from_file_ptr(@ptrCast(@alignCast(fa)), mp);
+    const rm = harness_root.impl.c.llama_model_load_from_file_ptr(@ptrCast(@alignCast(fa)), mp);
     rec = &lb;
     const pm = F(.port, "llama_model_load_from_file_ptr")(@ptrCast(@alignCast(fb)), mp);
     rec = null;
     checks += 1;
     if ((rm == null) != (pm == null)) fail("{s}: C++ {} port {}", .{ label, rm != null, pm != null });
     var na = normalize(la.items);
-    defer na.deinit(gpa);
+    defer na.deinit(std.heap.c_allocator);
     var nb = normalize(lb.items);
-    defer nb.deinit(gpa);
+    defer nb.deinit(std.heap.c_allocator);
     sameTranscript(label, na.items, nb.items);
     if (rm != null and pm != null) compareModels(label, rm.?, pm.?);
     freeBoth(.{ .rm = rm, .pm = pm });
@@ -118,12 +111,12 @@ fn fail(comptime fmt: []const u8, args: anytype) void {
 
 const Side = enum { ref, port };
 
-const port_mods = .{ api.llama, api.model, api.vocab, api.impl, api.batch, api.chat, api.cparams, api.model_loader };
+const port_mods = .{ harness_root.api.llama, harness_root.api.model, harness_root.api.vocab, harness_root.api.impl, harness_root.api.batch, harness_root.api.chat, harness_root.api.cparams, harness_root.api.model_loader };
 
 /// The function `name` on side `s`: `llama.h`'s, or the port's, which must
 /// have exactly the translated type.
-fn F(comptime s: Side, comptime name: []const u8) *const @TypeOf(@field(c, name)) {
-    if (s == .ref) return &@field(c, name);
+fn F(comptime s: Side, comptime name: []const u8) *const @TypeOf(@field(harness_root.impl.c, name)) {
+    if (s == .ref) return &@field(harness_root.impl.c, name);
     inline for (port_mods) |m| {
         if (@hasDecl(m, name)) return &@field(m, name);
     }
@@ -135,9 +128,9 @@ fn F(comptime s: Side, comptime name: []const u8) *const @TypeOf(@field(c, name)
 
 var rec: ?*std.ArrayList(u8) = null;
 
-fn logCb(_: c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
+fn logCb(_: harness_root.impl.c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
     const r = rec orelse return;
-    r.appendSlice(gpa, std.mem.span(@as([*:0]const u8, @ptrCast(text)))) catch unreachable;
+    r.appendSlice(std.heap.c_allocator, std.mem.span(@as([*:0]const u8, @ptrCast(text)))) catch unreachable;
 }
 
 /// `n` copies of `ch`, as a string literal.
@@ -149,7 +142,7 @@ fn rep(comptime ch: u8, comptime n: usize) *const [n:0]u8 {
 }
 
 fn w(out: *std.ArrayList(u8), comptime fmt: []const u8, args: anytype) void {
-    out.print(gpa, fmt ++ "\n", args) catch unreachable;
+    out.print(std.heap.c_allocator, fmt ++ "\n", args) catch unreachable;
 }
 
 /// `v`'s fields copied into a zeroed struct, so its bytes hold no padding.
@@ -174,33 +167,33 @@ fn normalize(log: []const u8) std.ArrayList(u8) {
     var first = true;
     while (lines.next()) |line| {
         if (std.mem.startsWith(u8, line, "ggml_metal_library_compile_pipeline:")) continue;
-        if (!first) out.append(gpa, '\n') catch unreachable;
+        if (!first) out.append(std.heap.c_allocator, '\n') catch unreachable;
         first = false;
         // A device's free memory is the system's, at that moment.
         if (std.mem.endsWith(u8, line, " MiB free")) {
             if (std.mem.findLast(u8, line, " - ")) |at| {
-                out.appendSlice(gpa, line[0..at]) catch unreachable;
-                out.appendSlice(gpa, " - N MiB free") catch unreachable;
+                out.appendSlice(std.heap.c_allocator, line[0..at]) catch unreachable;
+                out.appendSlice(std.heap.c_allocator, " - N MiB free") catch unreachable;
                 continue;
             }
         }
         // CUDA on a unified-memory device reads the system's free memory
         // from /proc/meminfo, as `context_diff.zig` notes.
         if (std.mem.find(u8, line, "available_memory_kb: ")) |at| {
-            out.appendSlice(gpa, line[0 .. at + "available_memory_kb: ".len]) catch unreachable;
-            out.appendSlice(gpa, "N") catch unreachable;
+            out.appendSlice(std.heap.c_allocator, line[0 .. at + "available_memory_kb: ".len]) catch unreachable;
+            out.appendSlice(std.heap.c_allocator, "N") catch unreachable;
             continue;
         }
         if (std.mem.startsWith(u8, line, "ggml_metal_log_allocated_size:")) {
             if (std.mem.findScalar(u8, line, '(')) |open| {
-                out.appendSlice(gpa, line[0..open]) catch unreachable;
+                out.appendSlice(std.heap.c_allocator, line[0..open]) catch unreachable;
                 continue;
             }
         }
-        out.appendSlice(gpa, line) catch unreachable;
+        out.appendSlice(std.heap.c_allocator, line) catch unreachable;
     }
-    const sorted = input_tensor_order.sortRuns(gpa, out.items);
-    out.deinit(gpa);
+    const sorted = input_tensor_order.sortRuns(std.heap.c_allocator, out.items);
+    out.deinit(std.heap.c_allocator);
     return sorted;
 }
 
@@ -224,9 +217,9 @@ fn sameTranscript(name: []const u8, a: []const u8, b: []const u8) void {
 /// Runs `script` on both sides and compares the transcripts.
 fn both(name: []const u8, comptime script: anytype, args: anytype) void {
     var a: std.ArrayList(u8) = .empty;
-    defer a.deinit(gpa);
+    defer a.deinit(std.heap.c_allocator);
     var b: std.ArrayList(u8) = .empty;
-    defer b.deinit(gpa);
+    defer b.deinit(std.heap.c_allocator);
     @call(.auto, script, .{ Side.ref, &a } ++ args);
     @call(.auto, script, .{ Side.port, &b } ++ args);
     sameTranscript(name, a.items, b.items);
@@ -236,14 +229,14 @@ const sentinel: u8 = 0xA5;
 
 /// A buffer of `n` bytes, pre-filled, with room to see writes past `n`.
 fn scratchBuf(n: usize) []u8 {
-    const b = gpa.alloc(u8, n + 16) catch unreachable;
+    const b = std.heap.c_allocator.alloc(u8, n + 16) catch unreachable;
     @memset(b, sentinel);
     return b;
 }
 
 /// The whole pre-filled buffer, escaped.
 fn dumpBuf(out: *std.ArrayList(u8), b: []const u8) void {
-    out.print(gpa, "  buf \"{f}\"\n", .{std.zig.fmtString(b)}) catch unreachable;
+    out.print(std.heap.c_allocator, "  buf \"{f}\"\n", .{std.zig.fmtString(b)}) catch unreachable;
 }
 
 // -----------------------------------------------------------------------------
@@ -255,24 +248,24 @@ fn dumpBuf(out: *std.ArrayList(u8), b: []const u8) void {
 /// other. Null when it did not die of SIGABRT.
 fn dies(body: *const fn (ctx: usize) void, ctx: usize, out: []u8) ?[]const u8 {
     var fds: [2]c_int = undefined;
-    if (libc.pipe(&fds) != 0) return null;
-    const pid = libc.fork();
+    if (std.c.pipe(&fds) != 0) return null;
+    const pid = std.c.fork();
     if (pid == 0) {
-        _ = libc.dup2(fds[1], 2);
-        _ = libc.close(fds[0]);
+        _ = std.c.dup2(fds[1], 2);
+        _ = std.c.close(fds[0]);
         body(ctx);
-        libc._exit(0);
+        std.c._exit(0);
     }
-    _ = libc.close(fds[1]);
+    _ = std.c.close(fds[1]);
     var len: usize = 0;
     while (len < out.len) {
-        const got = libc.read(fds[0], out[len..].ptr, out.len - len);
+        const got = std.c.read(fds[0], out[len..].ptr, out.len - len);
         if (got <= 0) break;
         len += @intCast(got);
     }
-    _ = libc.close(fds[0]);
+    _ = std.c.close(fds[0]);
     var status: c_int = 0;
-    _ = libc.waitpid(pid, &status, 0);
+    _ = std.c.waitpid(pid, &status, 0);
     if (status & 0x7f != 6) return null;
     var lines = std.mem.splitScalar(u8, out[0..len], '\n');
     while (lines.next()) |line| {
@@ -310,17 +303,17 @@ fn sameDeath(name: []const u8, ref: *const fn (usize) void, port: *const fn (usi
 
 fn staticScript(comptime s: Side, out: *std.ArrayList(u8)) void {
     // Names.
-    for ([_]c.enum_llama_flash_attn_type{ c.LLAMA_FLASH_ATTN_TYPE_AUTO, c.LLAMA_FLASH_ATTN_TYPE_DISABLED, c.LLAMA_FLASH_ATTN_TYPE_ENABLED }) |t| {
+    for ([_]harness_root.impl.c.enum_llama_flash_attn_type{ harness_root.impl.c.LLAMA_FLASH_ATTN_TYPE_AUTO, harness_root.impl.c.LLAMA_FLASH_ATTN_TYPE_DISABLED, harness_root.impl.c.LLAMA_FLASH_ATTN_TYPE_ENABLED }) |t| {
         w(out, "flash_attn_type_name {d} {s}", .{ t, str(F(s, "llama_flash_attn_type_name")(t)) });
     }
-    var lm: c.enum_llama_load_mode = 0;
-    while (lm <= c.LLAMA_LOAD_MODE_DIRECT_IO) : (lm += 1) {
+    var lm: harness_root.impl.c.enum_llama_load_mode = 0;
+    while (lm <= harness_root.impl.c.LLAMA_LOAD_MODE_DIRECT_IO) : (lm += 1) {
         const n = F(s, "llama_load_mode_name")(lm);
         w(out, "load_mode_name {d} {s} -> {d}", .{ lm, str(n), F(s, "llama_load_mode_from_str")(n) });
     }
     var ft: c_uint = 0;
     while (ft < 64) : (ft += 1) {
-        w(out, "ftype_name {d} {s} | {s}", .{ ft, str(F(s, "llama_ftype_name")(ft)), str(F(s, "llama_ftype_name")(ft | c.LLAMA_FTYPE_GUESSED)) });
+        w(out, "ftype_name {d} {s} | {s}", .{ ft, str(F(s, "llama_ftype_name")(ft)), str(F(s, "llama_ftype_name")(ft | harness_root.impl.c.LLAMA_FTYPE_GUESSED)) });
     }
     for ([_]c_uint{ 999, 1023, 2048, 0xffffffff, 0xfffffbff }) |v| w(out, "ftype_name {d} {s}", .{ v, str(F(s, "llama_ftype_name")(v)) });
     var mk: c_uint = 0;
@@ -350,7 +343,7 @@ fn staticScript(comptime s: Side, out: *std.ArrayList(u8)) void {
     splitScript(s, out);
     batchScript(s, out);
 
-    F(s, "llama_numa_init")(c.GGML_NUMA_STRATEGY_DISABLED);
+    F(s, "llama_numa_init")(harness_root.impl.c.GGML_NUMA_STRATEGY_DISABLED);
     F(s, "llama_backend_free")();
     F(s, "llama_backend_init")();
     w(out, "time_us positive {}", .{F(s, "llama_time_us")() > 0});
@@ -364,7 +357,7 @@ fn splitScript(comptime s: Side, out: *std.ArrayList(u8)) void {
     const lens = [_]usize{ 0, 1, 10, 23, 24, 25, 40, 1024 };
     for (prefixes) |p| for (nos) |no| for (counts) |cnt| for (lens) |len| {
         const b = scratchBuf(len);
-        defer gpa.free(b);
+        defer std.heap.c_allocator.free(b);
         const r = F(s, "llama_split_path")(if (len == 0) null else b.ptr, len, p.ptr, no, cnt);
         w(out, "split_path '{s}' {d} {d} {d} -> {d}", .{ p[0..@min(p.len, 20)], no, cnt, len, r });
         dumpBuf(out, b);
@@ -373,12 +366,12 @@ fn splitScript(comptime s: Side, out: *std.ArrayList(u8)) void {
     // Prefixes: a real split name for each (no, count), and near misses.
     var path_buf: [512]u8 = undefined;
     for (prefixes) |p| for (nos) |no| for (counts) |cnt| {
-        const n = c.snprintf(&path_buf, path_buf.len, "%s-%05d-of-%05d.gguf", p.ptr, no +% 1, cnt);
+        const n = harness_root.impl.c.snprintf(&path_buf, path_buf.len, "%s-%05d-of-%05d.gguf", p.ptr, no +% 1, cnt);
         if (n <= 0 or n >= path_buf.len) continue;
         const real = path_buf[0..@intCast(n) :0];
         for ([_]i32{ no, no +% 1 }) |ask| for (lens) |len| {
             const b = scratchBuf(len);
-            defer gpa.free(b);
+            defer std.heap.c_allocator.free(b);
             const r = F(s, "llama_split_prefix")(if (len == 0) null else b.ptr, len, real.ptr, ask, cnt);
             w(out, "split_prefix {d} {d} {d} {d} -> {d}", .{ no, ask, cnt, len, r });
             dumpBuf(out, b);
@@ -386,7 +379,7 @@ fn splitScript(comptime s: Side, out: *std.ArrayList(u8)) void {
     };
     for ([_][:0]const u8{ "", "x", "-00001-of-00002.gguf", "a-00001-of-00002.gguf", "a-00001-of-00002.ggu", "a-1-of-2.gguf" }) |p| for (lens) |len| {
         const b = scratchBuf(len);
-        defer gpa.free(b);
+        defer std.heap.c_allocator.free(b);
         const r = F(s, "llama_split_prefix")(if (len == 0) null else b.ptr, len, p.ptr, 0, 2);
         w(out, "split_prefix '{s}' {d} -> {d}", .{ p, len, r });
         dumpBuf(out, b);
@@ -394,10 +387,10 @@ fn splitScript(comptime s: Side, out: *std.ArrayList(u8)) void {
 }
 
 fn batchScript(comptime s: Side, out: *std.ArrayList(u8)) void {
-    var toks = [_]Token{ 1, 2, 3 };
+    var toks = [_]harness_root.impl.c.llama_token{ 1, 2, 3 };
     const one = F(s, "llama_batch_get_one")(&toks, 3);
     w(out, "get_one n {d} token {} embd {} pos {} n_seq_id {} seq_id {} logits {}", .{
-        one.n_tokens, one.token == @as([*c]Token, &toks), one.embd == null, one.pos == null, one.n_seq_id == null, one.seq_id == null, one.logits == null,
+        one.n_tokens, one.token == @as([*c]harness_root.impl.c.llama_token, &toks), one.embd == null, one.pos == null, one.n_seq_id == null, one.seq_id == null, one.logits == null,
     });
     const shapes = [_][3]i32{ .{ 0, 0, 1 }, .{ 1, 0, 1 }, .{ 5, 0, 2 }, .{ 3, 8, 1 }, .{ 512, 0, 4 }, .{ 2, 4, 0 } };
     for (shapes) |sh| {
@@ -414,13 +407,13 @@ fn batchScript(comptime s: Side, out: *std.ArrayList(u8)) void {
         // Each side frees what the other allocated: both are malloc.
         F(if (s == .ref) .port else .ref, "llama_batch_free")(b);
     }
-    F(s, "llama_batch_free")(std.mem.zeroes(c.llama_batch));
+    F(s, "llama_batch_free")(std.mem.zeroes(harness_root.impl.c.llama_batch));
 }
 
 // -----------------------------------------------------------------------------
 // Chat templates
 
-const conversation = [_]c.llama_chat_message{
+const conversation = [_]harness_root.impl.c.llama_chat_message{
     .{ .role = "system", .content = "You are a helpful assistant. Réponds en français." },
     .{ .role = "user", .content = "Hello! What is 2+2?\n" },
     .{ .role = "assistant", .content = "  It is 4.  " },
@@ -432,20 +425,20 @@ fn chatScript(comptime s: Side, out: *std.ArrayList(u8), tmpls: []const ?[:0]con
     for (tmpls) |t| {
         const tp: [*c]const u8 = if (t) |x| x.ptr else null;
         for ([_]usize{ 0, 1, 2, 4 }) |n_msg| for ([_]bool{ false, true }) |add_ass| {
-            const msgs: [*c]const c.llama_chat_message = if (n_msg == 0) null else &conversation;
+            const msgs: [*c]const harness_root.impl.c.llama_chat_message = if (n_msg == 0) null else &conversation;
             const r = apply(tp, msgs, n_msg, add_ass, null, 0);
             w(out, "apply '{s}' n {d} ass {} -> {d}", .{ if (t) |x| x[0..@min(x.len, 40)] else "(null)", n_msg, add_ass, r });
             if (r < 0) continue;
             const ru: usize = @intCast(r);
             for ([_]usize{ 1, ru -| 1, ru, ru + 1, ru + 40 }) |len| {
                 const b = scratchBuf(len + 8);
-                defer gpa.free(b);
+                defer std.heap.c_allocator.free(b);
                 const r2 = apply(tp, msgs, n_msg, add_ass, b.ptr, @intCast(len));
                 w(out, "  len {d} -> {d}", .{ len, r2 });
                 dumpBuf(out, b);
             }
             const b = scratchBuf(8);
-            defer gpa.free(b);
+            defer std.heap.c_allocator.free(b);
             w(out, "  len -3 -> {d}", .{apply(tp, msgs, n_msg, add_ass, b.ptr, -3)});
             dumpBuf(out, b);
         };
@@ -455,33 +448,33 @@ fn chatScript(comptime s: Side, out: *std.ArrayList(u8), tmpls: []const ?[:0]con
 // -----------------------------------------------------------------------------
 // Logging
 
-var cap_level: c.enum_ggml_log_level = 0;
+var cap_level: harness_root.impl.c.enum_ggml_log_level = 0;
 
-fn capLevel(level: c.enum_ggml_log_level, text: [*c]const u8, ud: ?*anyopaque) callconv(.c) void {
+fn capLevel(level: harness_root.impl.c.enum_ggml_log_level, text: [*c]const u8, ud: ?*anyopaque) callconv(.c) void {
     cap_level = level;
     logCb(level, text, ud);
 }
 
 fn logScript(comptime s: Side, out: *std.ArrayList(u8)) void {
     var mine: std.ArrayList(u8) = .empty;
-    defer mine.deinit(gpa);
+    defer mine.deinit(std.heap.c_allocator);
     const saved = rec;
     defer rec = saved;
     rec = &mine;
 
     var tag: u8 = 1;
     F(s, "llama_log_set")(capLevel, &tag);
-    var cb: c.ggml_log_callback = null;
+    var cb: harness_root.impl.c.ggml_log_callback = null;
     var ud: ?*anyopaque = null;
     F(s, "llama_log_get")(&cb, &ud);
-    w(out, "get after set: cb {} ud {}", .{ cb == @as(c.ggml_log_callback, capLevel), ud == @as(?*anyopaque, &tag) });
+    w(out, "get after set: cb {} ud {}", .{ cb == @as(harness_root.impl.c.ggml_log_callback, capLevel), ud == @as(?*anyopaque, &tag) });
     // Through the other side's getter: both read ggml's.
     F(if (s == .ref) .port else .ref, "llama_log_get")(&cb, &ud);
-    w(out, "other get: cb {} ud {}", .{ cb == @as(c.ggml_log_callback, capLevel), ud == @as(?*anyopaque, &tag) });
+    w(out, "other get: cb {} ud {}", .{ cb == @as(harness_root.impl.c.ggml_log_callback, capLevel), ud == @as(?*anyopaque, &tag) });
 
     const long = rep('y', 300);
     const msgs = [_][:0]const u8{ "", "x", rep('a', 126), rep('a', 127), rep('a', 128), rep('a', 129), long };
-    for (msgs) |m| for ([_]c_uint{ c.GGML_LOG_LEVEL_NONE, c.GGML_LOG_LEVEL_DEBUG, c.GGML_LOG_LEVEL_INFO, c.GGML_LOG_LEVEL_WARN, c.GGML_LOG_LEVEL_ERROR, c.GGML_LOG_LEVEL_CONT }) |lvl| {
+    for (msgs) |m| for ([_]c_uint{ harness_root.impl.c.GGML_LOG_LEVEL_NONE, harness_root.impl.c.GGML_LOG_LEVEL_DEBUG, harness_root.impl.c.GGML_LOG_LEVEL_INFO, harness_root.impl.c.GGML_LOG_LEVEL_WARN, harness_root.impl.c.GGML_LOG_LEVEL_ERROR, harness_root.impl.c.GGML_LOG_LEVEL_CONT }) |lvl| {
         mine.clearRetainingCapacity();
         cap_level = 99;
         if (s == .ref) {
@@ -495,37 +488,37 @@ fn logScript(comptime s: Side, out: *std.ArrayList(u8)) void {
     F(s, "llama_log_set")(null, null);
     F(s, "llama_log_get")(&cb, &ud);
     w(out, "get after null: cb null {} ud null {}", .{ cb == null, ud == null });
-    if (s == .port) w(out, "default restored {}", .{harness_root.log.g_logger_state.log_callback == @as(c.ggml_log_callback, harness_root.log.callbackDefault)}) else w(out, "default restored true", .{});
-    c.llama_log_set(logCb, null);
+    if (s == .port) w(out, "default restored {}", .{harness_root.log.g_logger_state.log_callback == @as(harness_root.impl.c.ggml_log_callback, harness_root.log.callbackDefault)}) else w(out, "default restored true", .{});
+    harness_root.impl.c.llama_log_set(logCb, null);
     harness_root.api.impl.llama_log_set(logCb, null);
-    c.ggml_log_set(logCb, null);
+    harness_root.impl.c.ggml_log_set(logCb, null);
 }
 
 fn refDefaultLog(_: usize) void {
-    c.llama_log_set(null, null);
-    _Z18llama_log_internal14ggml_log_levelPKcz(c.GGML_LOG_LEVEL_INFO, "x:1: to stderr %d\n", @as(c_int, 7));
-    c.ggml_abort("x", 1, "done");
+    harness_root.impl.c.llama_log_set(null, null);
+    _Z18llama_log_internal14ggml_log_levelPKcz(harness_root.impl.c.GGML_LOG_LEVEL_INFO, "x:1: to stderr %d\n", @as(c_int, 7));
+    harness_root.impl.c.ggml_abort("x", 1, "done");
 }
 
 fn portDefaultLog(_: usize) void {
-    api.impl.llama_log_set(null, null);
-    harness_root.log.logInternal(c.GGML_LOG_LEVEL_INFO, "x:1: to stderr %d\n", .{@as(c_int, 7)});
-    c.ggml_abort("x", 1, "done");
+    harness_root.api.impl.llama_log_set(null, null);
+    harness_root.log.logInternal(harness_root.impl.c.GGML_LOG_LEVEL_INFO, "x:1: to stderr %d\n", .{@as(c_int, 7)});
+    harness_root.impl.c.ggml_abort("x", 1, "done");
 }
 
 // -----------------------------------------------------------------------------
 // Models
 
-extern fn _Z24llama_model_get_tok_embdPK11llama_modelPf(model: ?*const c.struct_llama_model, out: ?[*]f32) u32;
-extern fn _Z29llama_model_get_tok_embd_rowsPK11llama_modelPKijPf(model: ?*const c.struct_llama_model, tokens: ?[*]const c.llama_token, n_tokens: u32, out: ?[*]f32) u32;
-extern fn _Z26llama_model_n_tokens_delayPK11llama_model(model: ?*const c.struct_llama_model) u32;
+extern fn _Z24llama_model_get_tok_embdPK11llama_modelPf(model: ?*const harness_root.impl.c.struct_llama_model, out: ?[*]f32) u32;
+extern fn _Z29llama_model_get_tok_embd_rowsPK11llama_modelPKijPf(model: ?*const harness_root.impl.c.struct_llama_model, tokens: ?[*]const harness_root.impl.c.llama_token, n_tokens: u32, out: ?[*]f32) u32;
+extern fn _Z26llama_model_n_tokens_delayPK11llama_model(model: ?*const harness_root.impl.c.struct_llama_model) u32;
 
 /// `llama-ext.h`'s token-embedding reads and `llama_model_n_tokens_delay`,
 /// which have C++ linkage in the reference.
-fn extScript(comptime s: Side, out: *std.ArrayList(u8), mc: ?*const c.struct_llama_model) void {
-    const tok_embd = if (s == .ref) _Z24llama_model_get_tok_embdPK11llama_modelPf else api.model.llama_model_get_tok_embd;
-    const rows = if (s == .ref) _Z29llama_model_get_tok_embd_rowsPK11llama_modelPKijPf else api.model.llama_model_get_tok_embd_rows;
-    const delay = if (s == .ref) _Z26llama_model_n_tokens_delayPK11llama_model else api.model.llama_model_n_tokens_delay;
+fn extScript(comptime s: Side, out: *std.ArrayList(u8), mc: ?*const harness_root.impl.c.struct_llama_model) void {
+    const tok_embd = if (s == .ref) _Z24llama_model_get_tok_embdPK11llama_modelPf else harness_root.api.model.llama_model_get_tok_embd;
+    const rows = if (s == .ref) _Z29llama_model_get_tok_embd_rowsPK11llama_modelPKijPf else harness_root.api.model.llama_model_get_tok_embd_rows;
+    const delay = if (s == .ref) _Z26llama_model_n_tokens_delayPK11llama_model else harness_root.api.model.llama_model_n_tokens_delay;
 
     w(out, "n_tokens_delay {d}", .{delay(mc)});
 
@@ -535,7 +528,7 @@ fn extScript(comptime s: Side, out: *std.ArrayList(u8), mc: ?*const c.struct_lla
     const n_vocab = F(s, "llama_vocab_n_tokens")(F(s, "llama_model_get_vocab")(mc));
     const n_embd: usize = @intCast(@max(F(s, "llama_model_n_embd")(mc), 1));
     var dst: [8 * 8192]f32 = undefined;
-    const lists = [_][]const c.llama_token{
+    const lists = [_][]const harness_root.impl.c.llama_token{
         &.{0},
         &.{ 1, 0, 1 },
         &.{ n_vocab - 1, 3 },
@@ -553,8 +546,8 @@ fn extScript(comptime s: Side, out: *std.ArrayList(u8), mc: ?*const c.struct_lla
     w(out, "tok_embd_rows null out {d}", .{rows(mc, lists[0].ptr, 1, null)});
 }
 
-fn modelScript(comptime s: Side, out: *std.ArrayList(u8), m: ?*c.struct_llama_model) void {
-    const mc: ?*const c.struct_llama_model = m;
+fn modelScript(comptime s: Side, out: *std.ArrayList(u8), m: ?*harness_root.impl.c.struct_llama_model) void {
+    const mc: ?*const harness_root.impl.c.struct_llama_model = m;
     extScript(s, out, mc);
     w(out, "vocab non-null {}", .{F(s, "llama_model_get_vocab")(mc) != null});
     {
@@ -573,7 +566,7 @@ fn modelScript(comptime s: Side, out: *std.ArrayList(u8), m: ?*c.struct_llama_mo
         const dl: usize = @intCast(dlen);
         for ([_]usize{ 1, 5, dl -| 1, dl, dl + 1, 256 }) |len| {
             const b = scratchBuf(len);
-            defer gpa.free(b);
+            defer std.heap.c_allocator.free(b);
             w(out, "  desc {d} -> {d}", .{ len, F(s, "llama_model_desc")(mc, b.ptr, len) });
             dumpBuf(out, b);
         }
@@ -606,7 +599,7 @@ fn modelScript(comptime s: Side, out: *std.ArrayList(u8), m: ?*c.struct_llama_mo
             const nu: usize = if (n > 0) @intCast(n) else 0;
             for ([_]usize{ 1, 7, nu -| 1, nu, nu + 1 }) |len| {
                 const b = scratchBuf(len);
-                defer gpa.free(b);
+                defer std.heap.c_allocator.free(b);
                 w(out, "  {d} -> {d}", .{ len, f(mc, idx, b.ptr, len) });
                 dumpBuf(out, b);
             }
@@ -616,7 +609,7 @@ fn modelScript(comptime s: Side, out: *std.ArrayList(u8), m: ?*c.struct_llama_mo
                 const key: [*:0]const u8 = @ptrCast(&big);
                 const vn = F(s, "llama_model_meta_val_str")(mc, key, null, 0);
                 const vb = scratchBuf(@intCast(@max(vn, 0) + 1));
-                defer gpa.free(vb);
+                defer std.heap.c_allocator.free(vb);
                 w(out, "  by key -> {d} {d}", .{ vn, F(s, "llama_model_meta_val_str")(mc, key, vb.ptr, vb.len - 16) });
                 dumpBuf(out, vb);
             }
@@ -627,13 +620,13 @@ fn modelScript(comptime s: Side, out: *std.ArrayList(u8), m: ?*c.struct_llama_mo
         const key = F(s, "llama_model_meta_key_str")(mk);
         if (key == null) continue;
         const b = scratchBuf(64);
-        defer gpa.free(b);
+        defer std.heap.c_allocator.free(b);
         w(out, "meta_key {d} -> {d}", .{ mk, F(s, "llama_model_meta_val_str")(mc, key, b.ptr, 64) });
         dumpBuf(out, b);
     }
     for ([_][:0]const u8{ "", "no.such.key", "general.architecture", "tokenizer.ggml.tokens" }) |key| for ([_]usize{ 0, 1, 4096 }) |len| {
         const b = scratchBuf(len);
-        defer gpa.free(b);
+        defer std.heap.c_allocator.free(b);
         w(out, "meta_val '{s}' {d} -> {d}", .{ key, len, F(s, "llama_model_meta_val_str")(mc, key.ptr, if (len == 0) null else b.ptr, len) });
         dumpBuf(out, b);
     };
@@ -642,7 +635,7 @@ fn modelScript(comptime s: Side, out: *std.ArrayList(u8), m: ?*c.struct_llama_mo
 // -----------------------------------------------------------------------------
 // Vocabularies
 
-fn vocabScalars(comptime s: Side, out: *std.ArrayList(u8), v: ?*const c.struct_llama_vocab) void {
+fn vocabScalars(comptime s: Side, out: *std.ArrayList(u8), v: ?*const harness_root.impl.c.struct_llama_vocab) void {
     const names = .{
         "llama_vocab_bos",     "llama_vocab_eos",      "llama_vocab_eot",     "llama_vocab_sep",
         "llama_vocab_nl",      "llama_vocab_pad",      "llama_vocab_mask",    "llama_vocab_fim_pre",
@@ -661,30 +654,30 @@ fn vocabScalars(comptime s: Side, out: *std.ArrayList(u8), v: ?*const c.struct_l
     w(out, "suppress null-count null {}", .{F(s, "llama_vocab_get_suppress_tokens")(v, null) == null});
 }
 
-fn tokenToPiece(comptime s: Side, v: ?*const c.struct_llama_vocab, tok: Token, b: []u8, len: i32, lstrip: i32, special: bool) i32 {
+fn tokenToPiece(comptime s: Side, v: ?*const harness_root.impl.c.struct_llama_vocab, tok: harness_root.impl.c.llama_token, b: []u8, len: i32, lstrip: i32, special: bool) i32 {
     return F(s, "llama_token_to_piece")(v, tok, if (len == 0) null else b.ptr, len, lstrip, special);
 }
 
 /// Every token, both sides at once.
-fn checkTokens(name: []const u8, rv: ?*const c.struct_llama_vocab, pv: ?*const c.struct_llama_vocab) void {
-    const n: i32 = c.llama_vocab_n_tokens(rv);
-    const is_rwkv = c.llama_vocab_type(rv) == c.LLAMA_VOCAB_TYPE_RWKV;
+fn checkTokens(name: []const u8, rv: ?*const harness_root.impl.c.struct_llama_vocab, pv: ?*const harness_root.impl.c.struct_llama_vocab) void {
+    const n: i32 = harness_root.impl.c.llama_vocab_n_tokens(rv);
+    const is_rwkv = harness_root.impl.c.llama_vocab_type(rv) == harness_root.impl.c.LLAMA_VOCAB_TYPE_RWKV;
     var ba: [512]u8 = undefined;
     var bb: [512]u8 = undefined;
     var t: i32 = 0;
     while (t < n) : (t += 1) {
         checks += 1;
-        const ta = str(c.llama_vocab_get_text(rv, t));
+        const ta = str(harness_root.impl.c.llama_vocab_get_text(rv, t));
         const tb = str(F(.port, "llama_vocab_get_text")(pv, t));
         if (!std.mem.eql(u8, ta, tb)) fail("{s}: token {d} text differs", .{ name, t });
-        const sa: u32 = @bitCast(c.llama_vocab_get_score(rv, t));
+        const sa: u32 = @bitCast(harness_root.impl.c.llama_vocab_get_score(rv, t));
         if (sa != @as(u32, @bitCast(F(.port, "llama_vocab_get_score")(pv, t))))
             fail("{s}: token {d} score differs", .{ name, t });
-        const aa = c.llama_vocab_get_attr(rv, t);
+        const aa = harness_root.impl.c.llama_vocab_get_attr(rv, t);
         if (aa != F(.port, "llama_vocab_get_attr")(pv, t)) fail("{s}: token {d} attr differs", .{ name, t });
-        const ea = c.llama_vocab_is_eog(rv, t);
+        const ea = harness_root.impl.c.llama_vocab_is_eog(rv, t);
         if (ea != F(.port, "llama_vocab_is_eog")(pv, t)) fail("{s}: token {d} eog differs", .{ name, t });
-        const ca = c.llama_vocab_is_control(rv, t);
+        const ca = harness_root.impl.c.llama_vocab_is_control(rv, t);
         if (ca != F(.port, "llama_vocab_is_control")(pv, t)) fail("{s}: token {d} control differs", .{ name, t });
 
         for ([_]bool{ false, true }) |special| for ([_]i32{ 0, 1, 3 }) |lstrip| {
@@ -710,21 +703,21 @@ fn checkTokens(name: []const u8, rv: ?*const c.struct_llama_vocab, pv: ?*const c
         };
     }
     // Ids past the vocabulary that do not throw.
-    for ([_]Token{ n, n + 5, -1, std.math.minInt(Token) }) |x| {
+    for ([_]harness_root.impl.c.llama_token{ n, n + 5, -1, std.math.minInt(harness_root.impl.c.llama_token) }) |x| {
         checks += 1;
-        if (c.llama_vocab_is_eog(rv, x) != F(.port, "llama_vocab_is_eog")(pv, x)) fail("{s}: is_eog({d}) differs", .{ name, x });
+        if (harness_root.impl.c.llama_vocab_is_eog(rv, x) != F(.port, "llama_vocab_is_eog")(pv, x)) fail("{s}: is_eog({d}) differs", .{ name, x });
     }
 }
 
-fn tokenizeOn(comptime s: Side, v: ?*const c.struct_llama_vocab, text: []const u8, buf: []Token, n_max: i32, add: bool, parse: bool) i32 {
+fn tokenizeOn(comptime s: Side, v: ?*const harness_root.impl.c.struct_llama_vocab, text: []const u8, buf: []harness_root.impl.c.llama_token, n_max: i32, add: bool, parse: bool) i32 {
     return F(s, "llama_tokenize")(v, if (text.len == 0) null else text.ptr, @intCast(text.len), if (n_max <= 0) null else buf.ptr, n_max, add, parse);
 }
 
-fn detokenizeOn(comptime s: Side, v: ?*const c.struct_llama_vocab, toks: []const Token, n: i32, buf: []u8, len: i32, rm: bool, unparse: bool) i32 {
+fn detokenizeOn(comptime s: Side, v: ?*const harness_root.impl.c.struct_llama_vocab, toks: []const harness_root.impl.c.llama_token, n: i32, buf: []u8, len: i32, rm: bool, unparse: bool) i32 {
     return F(s, "llama_detokenize")(v, if (toks.len == 0) null else toks.ptr, n, if (len <= 0) null else buf.ptr, len, rm, unparse);
 }
 
-fn checkDetokenize(name: []const u8, rv: ?*const c.struct_llama_vocab, pv: ?*const c.struct_llama_vocab, toks: []const Token) void {
+fn checkDetokenize(name: []const u8, rv: ?*const harness_root.impl.c.struct_llama_vocab, pv: ?*const harness_root.impl.c.struct_llama_vocab, toks: []const harness_root.impl.c.llama_token) void {
     var ba: [8192]u8 = undefined;
     var bb: [8192]u8 = undefined;
     for ([_]bool{ false, true }) |rm| for ([_]bool{ false, true }) |unparse| {
@@ -755,9 +748,9 @@ fn checkDetokenize(name: []const u8, rv: ?*const c.struct_llama_vocab, pv: ?*con
     };
 }
 
-fn checkText(name: []const u8, rv: ?*const c.struct_llama_vocab, pv: ?*const c.struct_llama_vocab, text: []const u8) void {
-    var ta: [4096]Token = undefined;
-    var tb: [4096]Token = undefined;
+fn checkText(name: []const u8, rv: ?*const harness_root.impl.c.struct_llama_vocab, pv: ?*const harness_root.impl.c.struct_llama_vocab, text: []const u8) void {
+    var ta: [4096]harness_root.impl.c.llama_token = undefined;
+    var tb: [4096]harness_root.impl.c.llama_token = undefined;
     for ([_]bool{ false, true }) |add| for ([_]bool{ false, true }) |parse| {
         const need = tokenizeOn(.ref, rv, text, &ta, 0, add, parse);
         const needu: i32 = if (need < 0) -need else need;
@@ -769,7 +762,7 @@ fn checkText(name: []const u8, rv: ?*const c.struct_llama_vocab, pv: ?*const c.s
             const ra = tokenizeOn(.ref, rv, text, &ta, n_max, add, parse);
             const rb = tokenizeOn(.port, pv, text, &tb, n_max, add, parse);
             checks += 1;
-            if (ra != rb or !std.mem.eql(Token, &ta, &tb)) {
+            if (ra != rb or !std.mem.eql(harness_root.impl.c.llama_token, &ta, &tb)) {
                 fail("{s}: tokenize \"{f}\" (add {}, parse {}, max {d}) -> {d} vs {d}", .{ name, std.zig.fmtString(text[0..@min(text.len, 60)]), add, parse, n_max, ra, rb });
                 return;
             }
@@ -779,16 +772,16 @@ fn checkText(name: []const u8, rv: ?*const c.struct_llama_vocab, pv: ?*const c.s
     };
 }
 
-fn buildCorpus(rng: std.Random, rv: ?*const c.struct_llama_vocab, base: []const []const u8, out: *std.ArrayList([]u8)) void {
-    for (base) |s| out.append(gpa, gpa.dupe(u8, s) catch unreachable) catch unreachable;
-    const n: i32 = c.llama_vocab_n_tokens(rv);
+fn buildCorpus(rng: std.Random, rv: ?*const harness_root.impl.c.struct_llama_vocab, base: []const []const u8, out: *std.ArrayList([]u8)) void {
+    for (base) |s| out.append(std.heap.c_allocator, std.heap.c_allocator.dupe(u8, s) catch unreachable) catch unreachable;
+    const n: i32 = harness_root.impl.c.llama_vocab_n_tokens(rv);
     // Special and user-defined token texts, spliced into random text.
     var specials: std.ArrayList([]const u8) = .empty;
-    defer specials.deinit(gpa);
+    defer specials.deinit(std.heap.c_allocator);
     var t: i32 = 0;
     while (t < n) : (t += 1) {
-        const a = c.llama_vocab_get_attr(rv, t);
-        if (a & (c.LLAMA_TOKEN_ATTR_CONTROL | c.LLAMA_TOKEN_ATTR_USER_DEFINED) != 0) specials.append(gpa, str(c.llama_vocab_get_text(rv, t))) catch unreachable;
+        const a = harness_root.impl.c.llama_vocab_get_attr(rv, t);
+        if (a & (harness_root.impl.c.LLAMA_TOKEN_ATTR_CONTROL | harness_root.impl.c.LLAMA_TOKEN_ATTR_USER_DEFINED) != 0) specials.append(std.heap.c_allocator, str(harness_root.impl.c.llama_vocab_get_text(rv, t))) catch unreachable;
     }
     const alphabet = " \t\nabcxyzABCXYZ0123456789.,!?'\"-_()[]<>|/\\\xc3\xa9\xe2\x80\x99\xf0\x9f\x98\x80\xe4\xb8\xad";
     for (0..60) |_| {
@@ -796,25 +789,25 @@ fn buildCorpus(rng: std.Random, rv: ?*const c.struct_llama_vocab, base: []const 
         const len = rng.uintLessThan(usize, 80);
         for (0..len) |_| {
             if (specials.items.len != 0 and rng.uintLessThan(u8, 12) == 0) {
-                if (rng.boolean()) s.append(gpa, ' ') catch unreachable;
-                s.appendSlice(gpa, specials.items[rng.uintLessThan(usize, specials.items.len)]) catch unreachable;
-                if (rng.boolean()) s.append(gpa, ' ') catch unreachable;
+                if (rng.boolean()) s.append(std.heap.c_allocator, ' ') catch unreachable;
+                s.appendSlice(std.heap.c_allocator, specials.items[rng.uintLessThan(usize, specials.items.len)]) catch unreachable;
+                if (rng.boolean()) s.append(std.heap.c_allocator, ' ') catch unreachable;
             } else if (rng.uintLessThan(u8, 30) == 0) {
-                s.append(gpa, rng.int(u8)) catch unreachable; // invalid UTF-8 too
+                s.append(std.heap.c_allocator, rng.int(u8)) catch unreachable; // invalid UTF-8 too
             } else {
-                s.append(gpa, alphabet[rng.uintLessThan(usize, alphabet.len)]) catch unreachable;
+                s.append(std.heap.c_allocator, alphabet[rng.uintLessThan(usize, alphabet.len)]) catch unreachable;
             }
         }
-        out.append(gpa, s.toOwnedSlice(gpa) catch unreachable) catch unreachable;
+        out.append(std.heap.c_allocator, s.toOwnedSlice(std.heap.c_allocator) catch unreachable) catch unreachable;
     }
 }
 
-fn checkVocab(name: []const u8, rv: ?*const c.struct_llama_vocab, pv: ?*const c.struct_llama_vocab, corpus: []const []const u8) void {
+fn checkVocab(name: []const u8, rv: ?*const harness_root.impl.c.struct_llama_vocab, pv: ?*const harness_root.impl.c.struct_llama_vocab, corpus: []const []const u8) void {
     {
         var a: std.ArrayList(u8) = .empty;
-        defer a.deinit(gpa);
+        defer a.deinit(std.heap.c_allocator);
         var b: std.ArrayList(u8) = .empty;
-        defer b.deinit(gpa);
+        defer b.deinit(std.heap.c_allocator);
         vocabScalars(.ref, &a, rv);
         vocabScalars(.port, &b, pv);
         sameTranscript(name, a.items, b.items);
@@ -825,20 +818,20 @@ fn checkVocab(name: []const u8, rv: ?*const c.struct_llama_vocab, pv: ?*const c.
     const rng = prng.random();
     var texts: std.ArrayList([]u8) = .empty;
     defer {
-        for (texts.items) |s| gpa.free(s);
-        texts.deinit(gpa);
+        for (texts.items) |s| std.heap.c_allocator.free(s);
+        texts.deinit(std.heap.c_allocator);
     }
     buildCorpus(rng, rv, corpus, &texts);
     for (texts.items) |s| checkText(name, rv, pv, s);
 
     // Random ids, every one in range.
-    const n: i32 = c.llama_vocab_n_tokens(rv);
-    var toks: [64]Token = undefined;
+    const n: i32 = harness_root.impl.c.llama_vocab_n_tokens(rv);
+    var toks: [64]harness_root.impl.c.llama_token = undefined;
     for (0..40) |_| {
         const k = rng.uintLessThan(usize, toks.len);
-        for (toks[0..k]) |*t| t.* = rng.intRangeLessThan(Token, 0, n);
-        if (k > 0 and rng.boolean()) toks[0] = c.llama_vocab_bos(rv);
-        if (k > 1 and rng.boolean()) toks[k - 1] = c.llama_vocab_eos(rv);
+        for (toks[0..k]) |*t| t.* = rng.intRangeLessThan(harness_root.impl.c.llama_token, 0, n);
+        if (k > 0 and rng.boolean()) toks[0] = harness_root.impl.c.llama_vocab_bos(rv);
+        if (k > 1 and rng.boolean()) toks[k - 1] = harness_root.impl.c.llama_vocab_eos(rv);
         for (toks[0..k]) |*t| if (t.* < 0 or t.* >= n) {
             t.* = 0;
         };
@@ -847,58 +840,58 @@ fn checkVocab(name: []const u8, rv: ?*const c.struct_llama_vocab, pv: ?*const c.
 }
 
 // The terminations, through one vocabulary the parent set.
-var death_rv: ?*const c.struct_llama_vocab = null;
-var death_pv: ?*const c.struct_llama_vocab = null;
+var death_rv: ?*const harness_root.impl.c.struct_llama_vocab = null;
+var death_pv: ?*const harness_root.impl.c.struct_llama_vocab = null;
 
 fn refPieceOob(k: usize) void {
     var b: [16]u8 = undefined;
-    _ = c.llama_token_to_piece(death_rv, @intCast(k), &b, 16, 0, true);
+    _ = harness_root.impl.c.llama_token_to_piece(death_rv, @intCast(k), &b, 16, 0, true);
 }
 fn portPieceOob(k: usize) void {
     var b: [16]u8 = undefined;
     _ = F(.port, "llama_token_to_piece")(death_pv, @intCast(k), &b, 16, 0, true);
 }
 fn refTextOob(k: usize) void {
-    _ = c.llama_vocab_get_text(death_rv, @intCast(k));
+    _ = harness_root.impl.c.llama_vocab_get_text(death_rv, @intCast(k));
 }
 fn portTextOob(k: usize) void {
     _ = F(.port, "llama_vocab_get_text")(death_pv, @intCast(k));
 }
 fn refScoreOob(k: usize) void {
-    _ = c.llama_vocab_get_score(death_rv, @intCast(k));
+    _ = harness_root.impl.c.llama_vocab_get_score(death_rv, @intCast(k));
 }
 fn portScoreOob(k: usize) void {
     _ = F(.port, "llama_vocab_get_score")(death_pv, @intCast(k));
 }
 fn refAttrOob(k: usize) void {
-    _ = c.llama_vocab_get_attr(death_rv, @intCast(k));
+    _ = harness_root.impl.c.llama_vocab_get_attr(death_rv, @intCast(k));
 }
 fn portAttrOob(k: usize) void {
     _ = F(.port, "llama_vocab_get_attr")(death_pv, @intCast(k));
 }
 fn refTokNeg(_: usize) void {
-    var t: [8]Token = undefined;
-    _ = c.llama_tokenize(death_rv, "abc", -1, &t, 8, false, false);
+    var t: [8]harness_root.impl.c.llama_token = undefined;
+    _ = harness_root.impl.c.llama_tokenize(death_rv, "abc", -1, &t, 8, false, false);
 }
 fn portTokNeg(_: usize) void {
-    var t: [8]Token = undefined;
+    var t: [8]harness_root.impl.c.llama_token = undefined;
     _ = F(.port, "llama_tokenize")(death_pv, "abc", -1, &t, 8, false, false);
 }
 fn refDetokNeg(_: usize) void {
-    const t = [_]Token{ 5, 6 };
-    _ = c.llama_detokenize(death_rv, &t, 2, null, -1, false, false);
+    const t = [_]harness_root.impl.c.llama_token{ 5, 6 };
+    _ = harness_root.impl.c.llama_detokenize(death_rv, &t, 2, null, -1, false, false);
 }
 fn portDetokNeg(_: usize) void {
-    const t = [_]Token{ 5, 6 };
+    const t = [_]harness_root.impl.c.llama_token{ 5, 6 };
     _ = F(.port, "llama_detokenize")(death_pv, &t, 2, null, -1, false, false);
 }
 fn refDetokOob(k: usize) void {
-    const t = [_]Token{@intCast(k)};
+    const t = [_]harness_root.impl.c.llama_token{@intCast(k)};
     var b: [16]u8 = undefined;
-    _ = c.llama_detokenize(death_rv, &t, 1, &b, 16, false, true);
+    _ = harness_root.impl.c.llama_detokenize(death_rv, &t, 1, &b, 16, false, true);
 }
 fn portDetokOob(k: usize) void {
-    const t = [_]Token{@intCast(k)};
+    const t = [_]harness_root.impl.c.llama_token{@intCast(k)};
     var b: [16]u8 = undefined;
     _ = F(.port, "llama_detokenize")(death_pv, &t, 1, &b, 16, false, true);
 }
@@ -917,42 +910,42 @@ fn checkVocabDeaths(name: []const u8, n_vocab: i32) void {
 
 // Other terminations.
 fn refBadLoadMode(_: usize) void {
-    _ = c.llama_load_mode_from_str("mmap ");
+    _ = harness_root.impl.c.llama_load_mode_from_str("mmap ");
 }
 fn portBadLoadMode(_: usize) void {
     _ = F(.port, "llama_load_mode_from_str")("mmap ");
 }
 fn refLoadModeName(_: usize) void {
-    _ = c.llama_load_mode_name(6);
+    _ = harness_root.impl.c.llama_load_mode_name(6);
 }
 fn portLoadModeName(_: usize) void {
     _ = F(.port, "llama_load_mode_name")(6);
 }
 fn refFaName(_: usize) void {
-    _ = c.llama_flash_attn_type_name(2);
+    _ = harness_root.impl.c.llama_flash_attn_type_name(2);
 }
 fn portFaName(_: usize) void {
     _ = F(.port, "llama_flash_attn_type_name")(2);
 }
 fn refUserNull(_: usize) void {
-    _ = c.llama_model_init_from_user(null, null, null, c.llama_model_default_params());
+    _ = harness_root.impl.c.llama_model_init_from_user(null, null, null, harness_root.impl.c.llama_model_default_params());
 }
 fn portUserNull(_: usize) void {
-    _ = F(.port, "llama_model_init_from_user")(null, null, null, c.llama_model_default_params());
+    _ = F(.port, "llama_model_init_from_user")(null, null, null, harness_root.impl.c.llama_model_default_params());
 }
 
 // -----------------------------------------------------------------------------
 // Loading
 
-const Loaded = struct { rm: ?*c.struct_llama_model, pm: ?*c.struct_llama_model };
+const Loaded = struct { rm: ?*harness_root.impl.c.struct_llama_model, pm: ?*harness_root.impl.c.struct_llama_model };
 
 /// Loads through `name` on both sides with the same arguments, and compares
 /// what each logged and whether each loaded.
 fn loadBoth(label: []const u8, comptime name: []const u8, args: anytype) Loaded {
     var la: std.ArrayList(u8) = .empty;
-    defer la.deinit(gpa);
+    defer la.deinit(std.heap.c_allocator);
     var lb: std.ArrayList(u8) = .empty;
-    defer lb.deinit(gpa);
+    defer lb.deinit(std.heap.c_allocator);
     rec = &la;
     const rm = @call(.auto, F(.ref, name), args);
     rec = &lb;
@@ -961,30 +954,30 @@ fn loadBoth(label: []const u8, comptime name: []const u8, args: anytype) Loaded 
     checks += 1;
     if ((rm == null) != (pm == null)) fail("{s}: C++ loaded {} port loaded {}", .{ label, rm != null, pm != null });
     var na = normalize(la.items);
-    defer na.deinit(gpa);
+    defer na.deinit(std.heap.c_allocator);
     var nb = normalize(lb.items);
-    defer nb.deinit(gpa);
+    defer nb.deinit(std.heap.c_allocator);
     sameTranscript(label, na.items, nb.items);
     return .{ .rm = rm, .pm = pm };
 }
 
 fn freeBoth(l: Loaded) void {
-    if (l.rm) |m| c.llama_model_free(m);
+    if (l.rm) |m| harness_root.impl.c.llama_model_free(m);
     if (l.pm) |m| F(.port, "llama_model_free")(m);
 }
 
-fn compareModels(label: []const u8, rm: *c.struct_llama_model, pm: *c.struct_llama_model) void {
+fn compareModels(label: []const u8, rm: *harness_root.impl.c.struct_llama_model, pm: *harness_root.impl.c.struct_llama_model) void {
     var a: std.ArrayList(u8) = .empty;
-    defer a.deinit(gpa);
+    defer a.deinit(std.heap.c_allocator);
     var b: std.ArrayList(u8) = .empty;
-    defer b.deinit(gpa);
+    defer b.deinit(std.heap.c_allocator);
     modelScript(.ref, &a, rm);
     modelScript(.port, &b, pm);
     sameTranscript(label, a.items, b.items);
 }
 
 fn checkLoadVariants(path: [:0]const u8) void {
-    var mp = c.llama_model_default_params();
+    var mp = harness_root.impl.c.llama_model_default_params();
     mp.vocab_only = true;
     var paths = [_][*c]const u8{ path.ptr, "/nonexistent-split.gguf" };
     var l = loadBoth("load_from_splits [path]", "llama_model_load_from_splits", .{ @as([*c][*c]const u8, &paths), @as(usize, 1), mp });
@@ -998,7 +991,7 @@ fn checkLoadVariants(path: [:0]const u8) void {
     freeBoth(loadBoth("load_from_file \"\"", "llama_model_load_from_file", .{ "", mp }));
     freeBoth(loadBoth("load_from_file missing", "llama_model_load_from_file", .{ "/nonexistent/model.gguf", mp }));
     freeBoth(loadBoth("load_from_file a corpus file", "llama_model_load_from_file", .{ "llama.cpp/models/ggml-vocab-llama-spm.gguf.inp", mp }));
-    freeBoth(loadBoth("load_from_file_ptr null", "llama_model_load_from_file_ptr", .{ @as([*c]c.FILE, null), mp }));
+    freeBoth(loadBoth("load_from_file_ptr null", "llama_model_load_from_file_ptr", .{ @as([*c]harness_root.impl.c.FILE, null), mp }));
 
     // Each side reads its own handle from the start.
     filePtrLoad("load_from_file_ptr", path, 0, mp);
@@ -1010,7 +1003,7 @@ fn checkLoadVariants(path: [:0]const u8) void {
         for ([_]usize{ 37, 64 }) |off| {
             const p = embedCopy(path, off);
             var m2 = mp;
-            for ([_]c.enum_llama_load_mode{ c.LLAMA_LOAD_MODE_AUTO, c.LLAMA_LOAD_MODE_MMAP, c.LLAMA_LOAD_MODE_NONE }) |lm| {
+            for ([_]harness_root.impl.c.enum_llama_load_mode{ harness_root.impl.c.LLAMA_LOAD_MODE_AUTO, harness_root.impl.c.LLAMA_LOAD_MODE_MMAP, harness_root.impl.c.LLAMA_LOAD_MODE_NONE }) |lm| {
                 m2.load_mode = lm;
                 var lb_buf: [64]u8 = undefined;
                 const label = std.fmt.bufPrint(&lb_buf, "load_from_file_ptr +{d} mode {d}", .{ off, lm }) catch unreachable;
@@ -1019,9 +1012,9 @@ fn checkLoadVariants(path: [:0]const u8) void {
         }
     }
     {
-        const meta = c.gguf_init_from_file(path.ptr, .{ .no_alloc = true, .ctx = null }).?;
-        defer c.gguf_free(meta);
-        l = loadBoth("init_from_user", "llama_model_init_from_user", .{ meta, @as(c.llama_model_set_tensor_data_t, null), @as(?*anyopaque, null), mp });
+        const meta = harness_root.impl.c.gguf_init_from_file(path.ptr, .{ .no_alloc = true, .ctx = null }).?;
+        defer harness_root.impl.c.gguf_free(meta);
+        l = loadBoth("init_from_user", "llama_model_init_from_user", .{ meta, @as(harness_root.impl.c.llama_model_set_tensor_data_t, null), @as(?*anyopaque, null), mp });
         if (l.rm != null and l.pm != null) compareModels("init_from_user", l.rm.?, l.pm.?);
         freeBoth(l);
     }
@@ -1029,12 +1022,12 @@ fn checkLoadVariants(path: [:0]const u8) void {
         // A whole model from edited metadata, its tensors zeroed by the
         // caller: what a vocabulary-only load never reads -- classifier
         // labels, named templates, the sampling keys -- on the full path.
-        const meta = c.gguf_init_from_file(path.ptr, .{ .no_alloc = true, .ctx = null }).?;
-        defer c.gguf_free(meta);
+        const meta = harness_root.impl.c.gguf_init_from_file(path.ptr, .{ .no_alloc = true, .ctx = null }).?;
+        defer harness_root.impl.c.gguf_free(meta);
         addMeta(meta, "qwen35");
-        var fp = c.llama_model_default_params();
+        var fp = harness_root.impl.c.llama_model_default_params();
         fp.n_gpu_layers = 0;
-        l = loadBoth("init_from_user, edited, full", "llama_model_init_from_user", .{ meta, @as(c.llama_model_set_tensor_data_t, zeroTensor), @as(?*anyopaque, null), fp });
+        l = loadBoth("init_from_user, edited, full", "llama_model_init_from_user", .{ meta, @as(harness_root.impl.c.llama_model_set_tensor_data_t, zeroTensor), @as(?*anyopaque, null), fp });
         if (l.rm != null and l.pm != null) {
             compareModels("init_from_user, edited, full", l.rm.?, l.pm.?);
         } else {
@@ -1045,54 +1038,54 @@ fn checkLoadVariants(path: [:0]const u8) void {
     F(.port, "llama_model_free")(null);
 }
 
-fn zeroTensor(t: [*c]c.ggml_tensor, _: ?*anyopaque) callconv(.c) void {
-    c.ggml_backend_tensor_memset(t, 0, 0, c.ggml_nbytes(t));
+fn zeroTensor(t: [*c]harness_root.impl.c.ggml_tensor, _: ?*anyopaque) callconv(.c) void {
+    harness_root.impl.c.ggml_backend_tensor_memset(t, 0, 0, harness_root.impl.c.ggml_nbytes(t));
 }
 
 // -----------------------------------------------------------------------------
 // Synthesized files
 
-fn setStrs(ctx: *c.gguf_context, key: [:0]const u8, strs: []const [:0]const u8) void {
+fn setStrs(ctx: *harness_root.impl.c.gguf_context, key: [:0]const u8, strs: []const [:0]const u8) void {
     var ptrs: std.ArrayList([*c]const u8) = .empty;
-    defer ptrs.deinit(gpa);
-    for (strs) |x| ptrs.append(gpa, x.ptr) catch unreachable;
-    c.gguf_set_arr_str(ctx, key.ptr, @ptrCast(ptrs.items.ptr), ptrs.items.len);
+    defer ptrs.deinit(std.heap.c_allocator);
+    for (strs) |x| ptrs.append(std.heap.c_allocator, x.ptr) catch unreachable;
+    harness_root.impl.c.gguf_set_arr_str(ctx, key.ptr, @ptrCast(ptrs.items.ptr), ptrs.items.len);
 }
 
 /// The metadata no shipped file has, for an architecture named `arch`.
-fn addMeta(ctx: *c.gguf_context, comptime arch: []const u8) void {
+fn addMeta(ctx: *harness_root.impl.c.gguf_context, comptime arch: []const u8) void {
     const labels_key = arch ++ ".classifier.output_labels";
     setStrs(ctx, labels_key, &.{ "negative", "positive", "", "n\xc3\xa9utre \"q\"" });
-    c.gguf_set_val_str(ctx, "tokenizer.chat_template", "{% for m in messages %}<|im_start|>{{ m.role }}{% endfor %}");
-    c.gguf_set_val_str(ctx, "tokenizer.chat_template.tool_use", "[INST] tools [/INST]");
-    c.gguf_set_val_str(ctx, "tokenizer.chat_template.rag", "");
-    c.gguf_set_val_str(ctx, "general.sampling.sequence", "top_k;top_p;temp");
-    c.gguf_set_val_i32(ctx, "general.sampling.top_k", 40);
-    c.gguf_set_val_f32(ctx, "general.sampling.top_p", 0.95);
-    c.gguf_set_val_f32(ctx, "general.sampling.temp", 0.7);
-    c.gguf_set_val_i32(ctx, "general.sampling.mirostat", 2);
-    c.gguf_set_val_f32(ctx, "general.sampling.mirostat_eta", 1.0e-7);
-    c.gguf_set_val_bool(ctx, "test.bool", true);
-    c.gguf_set_val_u64(ctx, "test.u64", std.math.maxInt(u64));
-    c.gguf_set_val_i64(ctx, "test.i64", std.math.minInt(i64));
-    c.gguf_set_val_f64(ctx, "test.f64", -1.0e300);
-    c.gguf_set_val_i8(ctx, "test.i8", -128);
-    c.gguf_set_val_u16(ctx, "test.u16", 65535);
-    c.gguf_set_val_str(ctx, "test.quoted", "a \"b\" \\c\nd\te");
-    c.gguf_set_val_str(ctx, "test.empty", "");
+    harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.chat_template", "{% for m in messages %}<|im_start|>{{ m.role }}{% endfor %}");
+    harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.chat_template.tool_use", "[INST] tools [/INST]");
+    harness_root.impl.c.gguf_set_val_str(ctx, "tokenizer.chat_template.rag", "");
+    harness_root.impl.c.gguf_set_val_str(ctx, "general.sampling.sequence", "top_k;top_p;temp");
+    harness_root.impl.c.gguf_set_val_i32(ctx, "general.sampling.top_k", 40);
+    harness_root.impl.c.gguf_set_val_f32(ctx, "general.sampling.top_p", 0.95);
+    harness_root.impl.c.gguf_set_val_f32(ctx, "general.sampling.temp", 0.7);
+    harness_root.impl.c.gguf_set_val_i32(ctx, "general.sampling.mirostat", 2);
+    harness_root.impl.c.gguf_set_val_f32(ctx, "general.sampling.mirostat_eta", 1.0e-7);
+    harness_root.impl.c.gguf_set_val_bool(ctx, "test.bool", true);
+    harness_root.impl.c.gguf_set_val_u64(ctx, "test.u64", std.math.maxInt(u64));
+    harness_root.impl.c.gguf_set_val_i64(ctx, "test.i64", std.math.minInt(i64));
+    harness_root.impl.c.gguf_set_val_f64(ctx, "test.f64", -1.0e300);
+    harness_root.impl.c.gguf_set_val_i8(ctx, "test.i8", -128);
+    harness_root.impl.c.gguf_set_val_u16(ctx, "test.u16", 65535);
+    harness_root.impl.c.gguf_set_val_str(ctx, "test.quoted", "a \"b\" \\c\nd\te");
+    harness_root.impl.c.gguf_set_val_str(ctx, "test.empty", "");
     const long = rep('L', 9000);
-    c.gguf_set_val_str(ctx, "test.long", long);
+    harness_root.impl.c.gguf_set_val_str(ctx, "test.long", long);
 }
 
 /// Upstream's SPM vocabulary with what no shipped file has: classifier
 /// labels, named chat templates, the sampling keys `llama_model_meta_key_str`
 /// names, and values that are long, quoted, empty or of every scalar type.
 fn synthMeta(dir: []const u8, base: [:0]const u8) [:0]const u8 {
-    const ctx = c.gguf_init_from_file(base.ptr, .{ .no_alloc = true, .ctx = null }).?;
-    defer c.gguf_free(ctx);
+    const ctx = harness_root.impl.c.gguf_init_from_file(base.ptr, .{ .no_alloc = true, .ctx = null }).?;
+    defer harness_root.impl.c.gguf_free(ctx);
     addMeta(ctx, "llama");
-    const path = gpa.printSentinel("{s}/meta-rich.gguf", .{dir}, 0) catch unreachable;
-    if (!c.gguf_write_to_file(ctx, path.ptr, true)) @panic("cannot write a synthetic file");
+    const path = std.heap.c_allocator.printSentinel("{s}/meta-rich.gguf", .{dir}, 0) catch unreachable;
+    if (!harness_root.impl.c.gguf_write_to_file(ctx, path.ptr, true)) @panic("cannot write a synthetic file");
     return path;
 }
 
@@ -1115,26 +1108,26 @@ pub fn main(init: std.process.Init) !void {
             while (true) {
                 const n = std.c.fread(&chunk, 1, chunk.len, f);
                 if (n == 0) break;
-                try buf.appendSlice(gpa, chunk[0..n]);
+                try buf.appendSlice(std.heap.c_allocator, chunk[0..n]);
             }
             _ = std.c.fclose(f);
             var it = std.mem.splitSequence(u8, buf.items, "\n__ggml_vocab_test__\n");
-            while (it.next()) |s| try corpus.append(gpa, s);
+            while (it.next()) |s| try corpus.append(std.heap.c_allocator, s);
         } else {
-            try files.append(gpa, try gpa.dupeSentinel(u8, a, 0));
+            try files.append(std.heap.c_allocator, try std.heap.c_allocator.dupeSentinel(u8, a, 0));
         }
     }
 
     tmp_dir = args[1];
-    c.llama_log_set(logCb, null);
+    harness_root.impl.c.llama_log_set(logCb, null);
 
     harness_root.api.impl.llama_log_set(logCb, null);
-    c.ggml_log_set(logCb, null);
-    c.llama_backend_init();
+    harness_root.impl.c.ggml_log_set(logCb, null);
+    harness_root.impl.c.llama_backend_init();
 
     for (files.items) |f| {
         if (std.mem.endsWith(u8, f, "ggml-vocab-llama-spm.gguf")) {
-            try files.append(gpa, synthMeta(args[1], f));
+            try files.append(std.heap.c_allocator, synthMeta(args[1], f));
             break;
         }
     }
@@ -1154,10 +1147,10 @@ pub fn main(init: std.process.Init) !void {
     var tmpls: std.ArrayList(?[:0]const u8) = .empty;
     {
         var names: [128][*c]const u8 = undefined;
-        const n: usize = @intCast(c.llama_chat_builtin_templates(&names, names.len));
-        for (names[0..n]) |p| try tmpls.append(gpa, std.mem.span(@as([*:0]const u8, @ptrCast(p))));
-        for ([_][:0]const u8{ "", "bogus", "chatml ", "<|im_start|>", "[INST]", "<start_of_turn>", "<|user|>", "### Instruction:", "{{ bos_token }}" }) |t| try tmpls.append(gpa, t);
-        try tmpls.append(gpa, null);
+        const n: usize = @intCast(harness_root.impl.c.llama_chat_builtin_templates(&names, names.len));
+        for (names[0..n]) |p| try tmpls.append(std.heap.c_allocator, std.mem.span(@as([*:0]const u8, @ptrCast(p))));
+        for ([_][:0]const u8{ "", "bogus", "chatml ", "<|im_start|>", "[INST]", "<start_of_turn>", "<|user|>", "### Instruction:", "{{ bos_token }}" }) |t| try tmpls.append(std.heap.c_allocator, t);
+        try tmpls.append(std.heap.c_allocator, null);
     }
 
     var tally_loaded: usize = 0;
@@ -1165,7 +1158,7 @@ pub fn main(init: std.process.Init) !void {
     for (files.items) |path| {
         case_failures = 0;
         const name = std.Io.Dir.path.basename(path);
-        var mp = c.llama_model_default_params();
+        var mp = harness_root.impl.c.llama_model_default_params();
         mp.vocab_only = true;
         const l = loadBoth(name, "llama_model_load_from_file", .{ path.ptr, mp });
         defer freeBoth(l);
@@ -1176,21 +1169,21 @@ pub fn main(init: std.process.Init) !void {
         const rm = l.rm.?;
         const pm = l.pm.?;
         tally_loaded += 1;
-        const is_model = c.llama_model_n_params(rm) > 0;
+        const is_model = harness_root.impl.c.llama_model_n_params(rm) > 0;
         if (variants_on == null and is_model) variants_on = path;
         compareModels(name, rm, pm);
-        checkVocab(name, c.llama_model_get_vocab(rm), F(.port, "llama_model_get_vocab")(pm), corpus.items);
+        checkVocab(name, harness_root.impl.c.llama_model_get_vocab(rm), F(.port, "llama_model_get_vocab")(pm), corpus.items);
         // The model's own template, as raw text. Copied: the string lives in
         // the model's metadata, and the model is freed at the end of this
         // iteration, long before `chatScript` reads it.
-        if (c.llama_model_chat_template(rm, null)) |t| try tmpls.append(gpa, try gpa.dupeSentinel(u8, std.mem.span(@as([*:0]const u8, @ptrCast(t))), 0));
-        death_rv = c.llama_model_get_vocab(rm);
+        if (harness_root.impl.c.llama_model_chat_template(rm, null)) |t| try tmpls.append(std.heap.c_allocator, try std.heap.c_allocator.dupeSentinel(u8, std.mem.span(@as([*:0]const u8, @ptrCast(t))), 0));
+        death_rv = harness_root.impl.c.llama_model_get_vocab(rm);
         death_pv = F(.port, "llama_model_get_vocab")(pm);
-        checkVocabDeaths(name, c.llama_vocab_n_tokens(death_rv));
+        checkVocabDeaths(name, harness_root.impl.c.llama_vocab_n_tokens(death_rv));
 
         // A model, loaded in full.
         if (is_model) {
-            var fp = c.llama_model_default_params();
+            var fp = harness_root.impl.c.llama_model_default_params();
             fp.vocab_only = false;
             var label: [256]u8 = undefined;
             const lab = std.fmt.bufPrint(&label, "{s} (full)", .{name}) catch name;

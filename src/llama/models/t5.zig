@@ -197,7 +197,7 @@ fn buildDecoder(model: *const llama.model.Model, b: *const llama.graph.Builder) 
             cur = b.buildAttn(inp_attn_self, layer.wo, layer.wo_b, layer.wo_s, qkv.q, qkv.k, qkv.v, kq_b, null, null, 1.0, il);
             b.cb(cur, "kqv_out", il);
         }
-        cur = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(cur, "cross_inp", il);
 
         var inpCA = cur;
@@ -217,18 +217,18 @@ fn buildDecoder(model: *const llama.model.Model, b: *const llama.graph.Builder) 
             var Vcur = b.buildLoraMm(layer.wv_cross.?, embd_enc, null);
             b.cb(Vcur, "Vcur", il);
 
-            Qcur = llama.impl.c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
-            Kcur = llama.impl.c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, n_outputs_enc);
-            Vcur = llama.impl.c.ggml_reshape_3d(ctx, Vcur, n_embd_head, b.n_head_kv, n_outputs_enc);
+            Qcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
+            Kcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, n_outputs_enc);
+            Vcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Vcur, n_embd_head, b.n_head_kv, n_outputs_enc);
 
             cur = b.buildAttn(inp_attn_cross, layer.wo_cross, null, null, Qcur, Kcur, Vcur, null, null, null, 1.0, il);
             b.cb(cur, "kqv_out", il);
         }
         if (il == dec_n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpCA = llama.impl.c.ggml_get_rows(ctx, inpCA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpCA = llama.impl.llama_c.ggml_get_rows(ctx, inpCA, inp_out_ids);
         }
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpCA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpCA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The feed-forward network.
@@ -241,7 +241,7 @@ fn buildDecoder(model: *const llama.model.Model, b: *const llama.graph.Builder) 
             cur = b.buildFfn(cur, layer.ffn_up, null, null, layer.ffn_gate, null, null, layer.ffn_down, null, null, null, if (gated) .gelu else .relu, if (gated) .par else .seq, il);
             b.cb(cur, "ffn_out", il);
         }
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
         b.cb(cur, "ffn_out", il);
 
         cur = b.buildCvec(cur, il);
@@ -303,9 +303,9 @@ pub fn buildEncoder(model: *const llama.model.Model, b: *const llama.graph.Build
             var Vcur = b.buildLoraMm(layer.wv_enc.?, cur, null);
             b.cb(Vcur, "Vcur", il);
 
-            Qcur = llama.impl.c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
-            Kcur = llama.impl.c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, b.n_tokens);
-            Vcur = llama.impl.c.ggml_reshape_3d(ctx, Vcur, n_embd_head, b.n_head_kv, b.n_tokens);
+            Qcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
+            Kcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, b.n_tokens);
+            Vcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Vcur, n_embd_head, b.n_head_kv, b.n_tokens);
 
             const attn_rel_b = layer.attn_rel_b_enc orelse model.layers[0].attn_rel_b_enc;
             const kq_b = b.buildPosBias(pos_bucket_enc, attn_rel_b.?);
@@ -314,10 +314,10 @@ pub fn buildEncoder(model: *const llama.model.Model, b: *const llama.graph.Build
             b.cb(cur, "kqv_out", il);
         }
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The feed-forward network.
@@ -330,7 +330,7 @@ pub fn buildEncoder(model: *const llama.model.Model, b: *const llama.graph.Build
             cur = b.buildFfn(cur, layer.ffn_up_enc, null, null, layer.ffn_gate_enc, null, null, layer.ffn_down_enc, null, null, null, if (gated) .gelu else .relu, if (gated) .par else .seq, il);
             b.cb(cur, "ffn_out", il);
         }
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
         b.cb(cur, "ffn_out", il);
 
         cur = b.buildCvec(cur, il);
@@ -347,7 +347,7 @@ pub fn buildEncoder(model: *const llama.model.Model, b: *const llama.graph.Build
     b.cb(cur, "result_norm", -1);
     b.res.t_embd = cur;
 
-    llama.impl.c.ggml_build_forward_expand(b.gf, cur);
+    llama.impl.llama_c.ggml_build_forward_expand(b.gf, cur);
 }
 
 // -----------------------------------------------------------------------------

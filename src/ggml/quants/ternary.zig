@@ -46,9 +46,9 @@ inline fn lround(v: f32) i32 {
 /// Three passes over the block because the trit count does not divide evenly:
 /// 32 bytes at a time while a full 5x32 span remains, then 16 at a time, then
 /// the four-trit tail in `qh`.
-pub export fn quantize_row_tq1_0_ref(x_in: [*c]const f32, y: [*c]ggml.quants.blocks.TQ1_0, k: i64) void {
-    std.debug.assert(@rem(k, ggml.impl.c.QK_K) == 0);
-    const nb: usize = @intCast(@divExact(k, ggml.impl.c.QK_K));
+pub fn quantize_row_tq1_0_ref(x_in: [*c]const f32, y: [*c]ggml.quants.blocks.TQ1_0, k: i64) callconv(.c) void {
+    std.debug.assert(@rem(k, ggml.impl.ggml_c.QK_K) == 0);
+    const nb: usize = @intCast(@divExact(k, ggml.impl.ggml_c.QK_K));
     var x = x_in;
 
     const qs_len = @typeInfo(@FieldType(ggml.quants.blocks.TQ1_0, "qs")).array.len;
@@ -56,7 +56,7 @@ pub export fn quantize_row_tq1_0_ref(x_in: [*c]const f32, y: [*c]ggml.quants.blo
 
     for (0..nb) |i| {
         var amax: f32 = 0.0;
-        for (0..ggml.impl.c.QK_K) |j| amax = @max(amax, @abs(x[j]));
+        for (0..ggml.impl.ggml_c.QK_K) |j| amax = @max(amax, @abs(x[j]));
 
         const d = amax;
         const id: f32 = if (d != 0.0) 1.0 / d else 0.0;
@@ -114,9 +114,9 @@ inline fn ceilDiv243(q: u8) u8 {
 }
 
 /// Ports `dequantize_row_tq1_0` (ggml-quants.c:2444 @b1b770d90).
-pub export fn dequantize_row_tq1_0(x: [*c]const ggml.quants.blocks.TQ1_0, y_in: [*c]f32, k: i64) void {
-    std.debug.assert(@rem(k, ggml.impl.c.QK_K) == 0);
-    const nb: usize = @intCast(@divExact(k, ggml.impl.c.QK_K));
+pub fn dequantize_row_tq1_0(x: [*c]const ggml.quants.blocks.TQ1_0, y_in: [*c]f32, k: i64) callconv(.c) void {
+    std.debug.assert(@rem(k, ggml.impl.ggml_c.QK_K) == 0);
+    const nb: usize = @intCast(@divExact(k, ggml.impl.ggml_c.QK_K));
     var y = y_in;
 
     const pow3 = [6]u8{ 1, 3, 9, 27, 81, 243 };
@@ -163,16 +163,16 @@ pub export fn dequantize_row_tq1_0(x: [*c]const ggml.quants.blocks.TQ1_0, y_in: 
 }
 
 /// Ports `quantize_row_tq2_0_ref` (ggml-quants.c:2398 @b1b770d90).
-pub export fn quantize_row_tq2_0_ref(x_in: [*c]const f32, y: [*c]ggml.quants.blocks.TQ2_0, k: i64) void {
-    std.debug.assert(@rem(k, ggml.impl.c.QK_K) == 0);
-    const nb: usize = @intCast(@divExact(k, ggml.impl.c.QK_K));
+pub fn quantize_row_tq2_0_ref(x_in: [*c]const f32, y: [*c]ggml.quants.blocks.TQ2_0, k: i64) callconv(.c) void {
+    std.debug.assert(@rem(k, ggml.impl.ggml_c.QK_K) == 0);
+    const nb: usize = @intCast(@divExact(k, ggml.impl.ggml_c.QK_K));
     var x = x_in;
 
     const qs_len = @typeInfo(@FieldType(ggml.quants.blocks.TQ2_0, "qs")).array.len;
 
     for (0..nb) |i| {
         var amax: f32 = 0.0;
-        for (0..ggml.impl.c.QK_K) |j| amax = @max(amax, @abs(x[j]));
+        for (0..ggml.impl.ggml_c.QK_K) |j| amax = @max(amax, @abs(x[j]));
 
         const d = amax;
         const id: f32 = if (d != 0.0) 1.0 / d else 0.0;
@@ -195,9 +195,9 @@ pub export fn quantize_row_tq2_0_ref(x_in: [*c]const f32, y: [*c]ggml.quants.blo
 }
 
 /// Ports `dequantize_row_tq2_0` (ggml-quants.c:2483 @b1b770d90).
-pub export fn dequantize_row_tq2_0(x: [*c]const ggml.quants.blocks.TQ2_0, y_in: [*c]f32, k: i64) void {
-    std.debug.assert(@rem(k, ggml.impl.c.QK_K) == 0);
-    const nb: usize = @intCast(@divExact(k, ggml.impl.c.QK_K));
+pub fn dequantize_row_tq2_0(x: [*c]const ggml.quants.blocks.TQ2_0, y_in: [*c]f32, k: i64) callconv(.c) void {
+    std.debug.assert(@rem(k, ggml.impl.ggml_c.QK_K) == 0);
+    const nb: usize = @intCast(@divExact(k, ggml.impl.ggml_c.QK_K));
     var y = y_in;
 
     const qs_len = @typeInfo(@FieldType(ggml.quants.blocks.TQ2_0, "qs")).array.len;
@@ -269,7 +269,7 @@ test "tq2_0 matches the C on every pattern" {
 test "a ternary round trip yields only -d, 0 and +d" {
     // Independent of the checksums: whatever the packing does, the values that
     // come back must be exactly three, or the format is not ternary.
-    var src: [ggml.impl.c.QK_K]f32 = undefined;
+    var src: [ggml.impl.ggml_c.QK_K]f32 = undefined;
     for (&src, 0..) |*v, i| v.* = switch (i % 3) {
         0 => -0.75,
         1 => 0.0,
@@ -278,10 +278,10 @@ test "a ternary round trip yields only -d, 0 and +d" {
 
     var b: ggml.quants.blocks.TQ2_0 = undefined;
     @memset(std.mem.asBytes(&b), 0);
-    quantize_row_tq2_0_ref(&src, @ptrCast(&b), ggml.impl.c.QK_K);
+    quantize_row_tq2_0_ref(&src, @ptrCast(&b), ggml.impl.ggml_c.QK_K);
 
-    var out: [ggml.impl.c.QK_K]f32 = undefined;
-    dequantize_row_tq2_0(@ptrCast(&b), &out, ggml.impl.c.QK_K);
+    var out: [ggml.impl.ggml_c.QK_K]f32 = undefined;
+    dequantize_row_tq2_0(@ptrCast(&b), &out, ggml.impl.ggml_c.QK_K);
 
     const d = ggml.impl.fp16ToFp32(b.d);
     for (out) |v| {

@@ -20,12 +20,12 @@
 const ggml = @import("../../module.zig");
 
 /// Ports `ggml_compute_forward_sum_f32` (ops.cpp:1301 @b1b770d90).
-fn sumF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+fn sumF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     if (params.ith != 0) return;
 
-    ggml.impl.assert(ggml.impl.c.ggml_is_scalar(dst), "ggml_is_scalar(dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_scalar(dst), "ggml_is_scalar(dst)");
 
     const ne00 = src0.ne[0];
     const ne01 = src0.ne[1];
@@ -81,12 +81,12 @@ fn sumF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_ten
 /// The two differ only in the element type and in which `_ggf` helper they
 /// call, so they are one function over a comptime type. Both accumulate in
 /// `f32`, unlike the `f32` variant above, which accumulates in `double`.
-fn sumNarrow(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+fn sumNarrow(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     if (params.ith != 0) return;
 
-    ggml.impl.assert(ggml.impl.c.ggml_is_scalar(dst), "ggml_is_scalar(dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_scalar(dst), "ggml_is_scalar(dst)");
     ggml.impl.assert(src0.nb[0] == @sizeOf(T), "src0->nb[0] == sizeof(T)");
 
     const ne00 = src0.ne[0];
@@ -110,7 +110,7 @@ fn sumNarrow(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: 
             while (j01 < ne01) : (j01 += 1) {
                 const row: [*]const T = @ptrCast(@alignCast(s0 +
                     @as(usize, @intCast(j01)) * nb01 + @as(usize, @intCast(j02)) * nb02 + @as(usize, @intCast(j03)) * nb03));
-                if (T == ggml.impl.c.ggml_fp16_t) ggml.cpu.ops.vecinline.sum_f16_ggf(ne00, &row_sum, row) else ggml.cpu.ops.vecinline.sum_bf16_ggf(ne00, &row_sum, row);
+                if (T == ggml.impl.ggml_c.ggml_fp16_t) ggml.cpu.ops.vecinline.sum_f16_ggf(ne00, &row_sum, row) else ggml.cpu.ops.vecinline.sum_bf16_ggf(ne00, &row_sum, row);
                 sum += row_sum;
             }
         }
@@ -119,20 +119,20 @@ fn sumNarrow(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: 
 }
 
 /// Ports `ggml_compute_forward_sum` (ops.cpp:1412 @b1b770d90).
-pub export fn ggml_compute_forward_sum(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_sum(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => sumF32(params, dst),
-        ggml.impl.c.GGML_TYPE_F16 => sumNarrow(ggml.impl.c.ggml_fp16_t, params, dst),
-        ggml.impl.c.GGML_TYPE_BF16 => sumNarrow(ggml.impl.c.ggml_bf16_t, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => sumF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => sumNarrow(ggml.impl.ggml_c.ggml_fp16_t, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_BF16 => sumNarrow(ggml.impl.ggml_c.ggml_bf16_t, params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
 
 /// Ports `ggml_compute_forward_cumsum_f32` (ops.cpp:1440 @b1b770d90).
-fn cumsumF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+fn cumsumF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     ggml.impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
     ggml.impl.assert(dst.nb[0] == @sizeOf(f32), "dst->nb[0] == sizeof(float)");
@@ -165,18 +165,18 @@ fn cumsumF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_
 }
 
 /// Ports `ggml_compute_forward_cumsum` (ops.cpp:1470 @b1b770d90).
-pub export fn ggml_compute_forward_cumsum(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_cumsum(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => cumsumF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => cumsumF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
 
 /// Ports `ggml_compute_forward_sum_rows_f32` (ops.cpp:1490 @b1b770d90).
-fn sumRowsF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+fn sumRowsF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     if (params.ith != 0) return;
 
@@ -212,18 +212,18 @@ fn sumRowsF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml
 }
 
 /// Ports `ggml_compute_forward_sum_rows` (ops.cpp:1523 @b1b770d90).
-pub export fn ggml_compute_forward_sum_rows(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_sum_rows(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => sumRowsF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => sumRowsF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
 
 /// Ports `ggml_compute_forward_mean_f32` (ops.cpp:1543 @b1b770d90).
-fn meanF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+fn meanF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     if (params.ith != 0) return;
 
@@ -256,18 +256,18 @@ fn meanF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_te
 }
 
 /// Ports `ggml_compute_forward_mean` (ops.cpp:1580 @b1b770d90).
-pub export fn ggml_compute_forward_mean(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_mean(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => meanF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => meanF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
 
 /// Ports `ggml_compute_forward_argmax_f32` (ops.cpp:1600 @b1b770d90).
-fn argmaxF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+fn argmaxF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     if (params.ith != 0) return;
 
@@ -293,29 +293,29 @@ fn argmaxF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_
 }
 
 /// Ports `ggml_compute_forward_argmax` (ops.cpp:1628 @b1b770d90).
-pub export fn ggml_compute_forward_argmax(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_argmax(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => argmaxF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => argmaxF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
 
 /// Ports `ggml_compute_forward_count_equal_i32` (ops.cpp:1648 @b1b770d90).
-fn countEqualI32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+fn countEqualI32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
     const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_I32, "src0->type == GGML_TYPE_I32");
-    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_I32, "src1->type == GGML_TYPE_I32");
-    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0, src1), "ggml_are_same_shape(src0, src1)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_scalar(dst), "ggml_is_scalar(dst)");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_I64, "dst->type == GGML_TYPE_I64");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_I32, "src0->type == GGML_TYPE_I32");
+    ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_I32, "src1->type == GGML_TYPE_I32");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, src1), "ggml_are_same_shape(src0, src1)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_scalar(dst), "ggml_is_scalar(dst)");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_I64, "dst->type == GGML_TYPE_I64");
 
-    const nr: i64 = @intCast(ggml.impl.c.ggml_nrows(src0));
+    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src0));
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
@@ -367,11 +367,11 @@ fn countEqualI32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.g
 }
 
 /// Ports `ggml_compute_forward_count_equal` (ops.cpp:1708 @b1b770d90).
-pub export fn ggml_compute_forward_count_equal(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_count_equal(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_I32 => countEqualI32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_I32 => countEqualI32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }

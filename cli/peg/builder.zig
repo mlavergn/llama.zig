@@ -22,9 +22,10 @@
 
 const std = @import("std");
 const mod = @import("module.zig");
+/// `json_mod`, not `json`: `Builder.json()` ports upstream's
+/// `common_peg_parser_builder::json()`, and inside `Builder` the bare name
+/// would be ambiguous.
 const json_mod = @import("json");
-
-const Allocator = std.mem.Allocator;
 
 /// Ports `parse_hex_escape` (peg-parser.cpp:36 @b1b770d90).
 ///
@@ -90,7 +91,7 @@ fn parseCharClassChar(content: []const u8, pos: usize) struct { u32, usize } {
 ///
 /// Return: the ranges, allocated with `a`, and whether the class is
 /// negated.
-fn parseCharClasses(a: Allocator, classes: []const u8) mod.errors.Error!struct { []mod.arena.CharRange, bool } {
+fn parseCharClasses(a: std.mem.Allocator, classes: []const u8) mod.errors.Error!struct { []mod.arena.CharRange, bool } {
     var ranges: std.ArrayList(mod.arena.CharRange) = .empty;
     var negated = false;
     var content = classes;
@@ -118,7 +119,7 @@ fn parseCharClasses(a: Allocator, classes: []const u8) mod.errors.Error!struct {
 /// `gbnf_format_rule_name`, which stands in for `rule_name` here.
 ///
 /// Return: allocated with `a`.
-pub fn ruleName(a: Allocator, name: []const u8) mod.errors.Error![]u8 {
+pub fn ruleName(a: std.mem.Allocator, name: []const u8) mod.errors.Error![]u8 {
     return json_mod.schema_to_grammar.gbnfFormatRuleName(a, name) catch |e| return mod.errors.fromSchema(e);
 }
 
@@ -131,7 +132,7 @@ pub const Builder = struct {
     ///
     /// Return: a builder over an empty arena; `deinit` frees it unless
     /// `build` took it.
-    pub fn init(gpa: Allocator) mod.errors.Error!Builder {
+    pub fn init(gpa: std.mem.Allocator) mod.errors.Error!Builder {
         return .{ .arena = try mod.arena.Arena.init(gpa) };
     }
 
@@ -140,7 +141,7 @@ pub const Builder = struct {
         self.arena.deinit();
     }
 
-    fn mem(self: *Builder) Allocator {
+    fn mem(self: *Builder) std.mem.Allocator {
         return self.arena.alloc();
     }
 
@@ -681,7 +682,7 @@ pub const Builder = struct {
 /// its root from `f`, built.
 ///
 /// Return: the arena, owned by the caller.
-pub fn buildPegParser(gpa: Allocator, ctx: anytype, comptime f: fn (@TypeOf(ctx), *Builder) mod.errors.Error!mod.arena.ParserId) mod.errors.Error!mod.arena.Arena {
+pub fn buildPegParser(gpa: std.mem.Allocator, ctx: anytype, comptime f: fn (@TypeOf(ctx), *Builder) mod.errors.Error!mod.arena.ParserId) mod.errors.Error!mod.arena.Arena {
     var b = try Builder.init(gpa);
     defer b.deinit();
     b.setRoot(try f(ctx, &b));

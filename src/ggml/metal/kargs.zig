@@ -1430,11 +1430,11 @@ const all = .{
     silu_back,
 };
 
-export fn zz_kargs_count() usize {
+pub fn zz_kargs_count() callconv(.c) usize {
     return all.len;
 }
 
-export fn zz_kargs_name(i: usize) ?[*:0]const u8 {
+pub fn zz_kargs_name(i: usize) callconv(.c) ?[*:0]const u8 {
     @setEvalBranchQuota(200000);
     inline for (all, 0..) |T, k| {
         if (k == i) return @typeName(T)[(comptime std.mem.findScalarLast(u8, @typeName(T), '.').? + 1)..].ptr;
@@ -1442,7 +1442,7 @@ export fn zz_kargs_name(i: usize) ?[*:0]const u8 {
     return null;
 }
 
-export fn zz_kargs_sizeof(i: usize) usize {
+pub fn zz_kargs_sizeof(i: usize) callconv(.c) usize {
     @setEvalBranchQuota(200000);
     inline for (all, 0..) |T, k| {
         if (k == i) return @sizeOf(T);
@@ -1450,7 +1450,7 @@ export fn zz_kargs_sizeof(i: usize) usize {
     return std.math.maxInt(usize);
 }
 
-export fn zz_kargs_alignof(i: usize) usize {
+pub fn zz_kargs_alignof(i: usize) callconv(.c) usize {
     @setEvalBranchQuota(200000);
     inline for (all, 0..) |T, k| {
         if (k == i) return @alignOf(T);
@@ -1458,7 +1458,7 @@ export fn zz_kargs_alignof(i: usize) usize {
     return std.math.maxInt(usize);
 }
 
-export fn zz_kargs_nfields(i: usize) usize {
+pub fn zz_kargs_nfields(i: usize) callconv(.c) usize {
     @setEvalBranchQuota(200000);
     inline for (all, 0..) |T, k| {
         if (k == i) return @typeInfo(T).@"struct".field_names.len;
@@ -1466,7 +1466,7 @@ export fn zz_kargs_nfields(i: usize) usize {
     return std.math.maxInt(usize);
 }
 
-export fn zz_kargs_field_offset(i: usize, f: usize) usize {
+pub fn zz_kargs_field_offset(i: usize, f: usize) callconv(.c) usize {
     @setEvalBranchQuota(200000);
     inline for (all, 0..) |T, k| {
         if (k == i) {
@@ -1479,7 +1479,7 @@ export fn zz_kargs_field_offset(i: usize, f: usize) usize {
     return std.math.maxInt(usize);
 }
 
-export fn zz_kargs_field_size(i: usize, f: usize) usize {
+pub fn zz_kargs_field_size(i: usize, f: usize) callconv(.c) usize {
     @setEvalBranchQuota(200000);
     inline for (all, 0..) |T, k| {
         if (k == i) {
@@ -1492,7 +1492,7 @@ export fn zz_kargs_field_size(i: usize, f: usize) usize {
     return std.math.maxInt(usize);
 }
 
-export fn zz_kargs_field_name(i: usize, f: usize) ?[*:0]const u8 {
+pub fn zz_kargs_field_name(i: usize, f: usize) callconv(.c) ?[*:0]const u8 {
     @setEvalBranchQuota(200000);
     inline for (all, 0..) |T, k| {
         if (k == i) {

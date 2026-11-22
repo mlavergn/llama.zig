@@ -35,18 +35,12 @@
 //! Usage: chat_diff <llama-chat.cpp> <file.gguf|file.jinja>...
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const harness_root = @import("harness_root");
-
-const c = harness_root.impl.c;
-const chat = harness_root.chat;
-const Message = chat.Message;
-
-const gpa = std.heap.c_allocator;
 
 extern fn ref_detect(p: [*]const u8, n: usize) c_int;
 extern fn ref_from_str(p: [*]const u8, n: usize) c_int;
-extern fn ref_apply(tmpl: c_int, msgs: [*]const Message, n: usize, add_ass: bool, init: [*:0]const u8, out: *[*]u8, out_len: *usize) i32;
+extern fn ref_apply(tmpl: c_int, msgs: [*]const harness_root.chat.Message, n: usize, add_ass: bool, init: [*:0]const u8, out: *[*]u8, out_len: *usize) i32;
 extern fn ref_free_buf(p: [*]u8) void;
 
 /// UTF-8 and Latin-1, where `isspace` and `toupper` reach past ASCII, and
@@ -68,18 +62,18 @@ fn esc(s: []const u8) []const u8 {
     var out: std.ArrayList(u8) = .empty;
     for (s[0..@min(s.len, 160)]) |b| {
         if (b >= 0x20 and b < 0x7f and b != '\\') {
-            out.append(gpa, b) catch unreachable;
+            out.append(std.heap.c_allocator, b) catch unreachable;
         } else {
-            const e = std.fmt.allocPrint(gpa, "\\x{x:0>2}", .{b}) catch unreachable;
-            out.appendSlice(gpa, e) catch unreachable;
+            const e = std.fmt.allocPrint(std.heap.c_allocator, "\\x{x:0>2}", .{b}) catch unreachable;
+            out.appendSlice(std.heap.c_allocator, e) catch unreachable;
         }
     }
-    if (s.len > 160) out.appendSlice(gpa, "...") catch unreachable;
+    if (s.len > 160) out.appendSlice(std.heap.c_allocator, "...") catch unreachable;
     return out.items;
 }
 
 fn readFile(path: []const u8) []u8 {
-    return std.Io.Dir.cwd().readFileAlloc(std.Io.Threaded.global_single_threaded.io(), path, gpa, .unlimited) catch {
+    return std.Io.Dir.cwd().readFileAlloc(std.Io.Threaded.global_single_threaded.io(), path, std.heap.c_allocator, .unlimited) catch {
         std.debug.print("cannot open {s}\n", .{path});
         std.process.exit(2);
     };
@@ -113,7 +107,7 @@ fn extractNeedles(src: []const u8) [][]const u8 {
         while (src[i] != '"') : (i += 1) {
             if (src[i] == '\\') {
                 i += 1;
-                lit.append(gpa, switch (src[i]) {
+                lit.append(std.heap.c_allocator, switch (src[i]) {
                     'n' => '\n',
                     't' => '\t',
                     '\\' => '\\',
@@ -125,10 +119,10 @@ fn extractNeedles(src: []const u8) [][]const u8 {
                     },
                 }) catch unreachable;
             } else {
-                lit.append(gpa, src[i]) catch unreachable;
+                lit.append(std.heap.c_allocator, src[i]) catch unreachable;
             }
         }
-        needles.append(gpa, lit.items) catch unreachable;
+        needles.append(std.heap.c_allocator, lit.items) catch unreachable;
     }
     return needles.items;
 }
@@ -143,7 +137,7 @@ var detected: [64]usize = @splat(0);
 fn checkDetect(what: []const u8, s: []const u8) void {
     checks += 1;
     const r = ref_detect(s.ptr, s.len);
-    const p = @backingInt(chat.detectTemplate(s));
+    const p = @backingInt(harness_root.chat.detectTemplate(s));
     if (r >= 0 and r < detected.len) detected[@intCast(r)] += 1;
     if (r != p) fail("detect [{s}] '{s}' (len {d}): ref {d} port {d}", .{ what, esc(s), s.len, r, p });
 }
@@ -151,20 +145,20 @@ fn checkDetect(what: []const u8, s: []const u8) void {
 fn checkFromStr(s: []const u8) void {
     checks += 1;
     const r = ref_from_str(s.ptr, s.len);
-    const p: c_int = if (chat.templateFromStr(s)) |t| @backingInt(t) else -1;
+    const p: c_int = if (harness_root.chat.templateFromStr(s)) |t| @backingInt(t) else -1;
     if (r != p) fail("from_str '{s}': ref {d} port {d}", .{ esc(s), r, p });
 }
 
-fn describe(conv: []const Message) []const u8 {
+fn describe(conv: []const harness_root.chat.Message) []const u8 {
     var out: std.ArrayList(u8) = .empty;
     for (conv) |m| {
-        const s = std.fmt.allocPrint(gpa, "[{s}: {s}] ", .{ esc(std.mem.span(m.role)), esc(std.mem.span(m.content)) }) catch unreachable;
-        out.appendSlice(gpa, s) catch unreachable;
+        const s = std.fmt.allocPrint(std.heap.c_allocator, "[{s}: {s}] ", .{ esc(std.mem.span(m.role)), esc(std.mem.span(m.content)) }) catch unreachable;
+        out.appendSlice(std.heap.c_allocator, s) catch unreachable;
     }
     return out.items;
 }
 
-fn compareOutput(what: []const u8, conv: []const Message, add_ass: bool, r: i32, ref_out: []const u8, p: i32, port_out: []const u8) void {
+fn compareOutput(what: []const u8, conv: []const harness_root.chat.Message, add_ass: bool, r: i32, ref_out: []const u8, p: i32, port_out: []const u8) void {
     checks += 1;
     if (r != p or !std.mem.eql(u8, ref_out, port_out)) {
         const at = std.mem.findDiff(u8, ref_out, port_out) orelse @min(ref_out.len, port_out.len);
@@ -178,14 +172,14 @@ fn compareOutput(what: []const u8, conv: []const Message, add_ass: bool, r: i32,
 
 var out_list: std.ArrayList(u8) = .empty;
 
-fn checkApply(t: c_int, conv: []const Message, add_ass: bool) void {
+fn checkApply(t: c_int, conv: []const harness_root.chat.Message, add_ass: bool) void {
     var ref_p: [*]u8 = undefined;
     var ref_len: usize = 0;
     const r = ref_apply(t, conv.ptr, conv.len, add_ass, "sentinel", &ref_p, &ref_len);
     defer ref_free_buf(ref_p);
     out_list.clearRetainingCapacity();
     out_list.appendSlice(harness_root.impl.allocator, "sentinel") catch unreachable;
-    const p = chat.applyTemplate(@fromBackingInt(@intCast(t)), conv, &out_list, add_ass);
+    const p = harness_root.chat.applyTemplate(@fromBackingInt(@intCast(t)), conv, &out_list, add_ass);
     var nb: [32]u8 = undefined;
     const what = std.fmt.bufPrint(&nb, "apply tmpl {d}", .{t}) catch unreachable;
     compareOutput(what, conv, add_ass, r, ref_p[0..ref_len], p, out_list.items);
@@ -193,19 +187,19 @@ fn checkApply(t: c_int, conv: []const Message, add_ass: bool) void {
 
 /// `llama_chat_apply_template` against what its shim will do: detect, then
 /// apply, -1 for an unknown template.
-fn checkPublic(tmpl: [:0]const u8, conv: []const Message, add_ass: bool) void {
-    const r = c.llama_chat_apply_template(tmpl.ptr, conv.ptr, conv.len, add_ass, null, 0);
+fn checkPublic(tmpl: [:0]const u8, conv: []const harness_root.chat.Message, add_ass: bool) void {
+    const r = harness_root.impl.c.llama_chat_apply_template(tmpl.ptr, conv.ptr, conv.len, add_ass, null, 0);
     var ref_out: []u8 = &.{};
     if (r > 0) {
-        ref_out = gpa.alloc(u8, @intCast(r + 1)) catch unreachable;
-        const r2 = c.llama_chat_apply_template(tmpl.ptr, conv.ptr, conv.len, add_ass, ref_out.ptr, r + 1);
+        ref_out = std.heap.c_allocator.alloc(u8, @intCast(r + 1)) catch unreachable;
+        const r2 = harness_root.impl.c.llama_chat_apply_template(tmpl.ptr, conv.ptr, conv.len, add_ass, ref_out.ptr, r + 1);
         std.debug.assert(r2 == r);
         ref_out = ref_out[0..@intCast(r)];
     }
-    defer if (ref_out.len != 0) gpa.free(ref_out);
+    defer if (ref_out.len != 0) std.heap.c_allocator.free(ref_out);
     out_list.clearRetainingCapacity();
-    const t = chat.detectTemplate(tmpl);
-    const p = if (t == .unknown) -1 else chat.applyTemplate(t, conv, &out_list, add_ass);
+    const t = harness_root.chat.detectTemplate(tmpl);
+    const p = if (t == .unknown) -1 else harness_root.chat.applyTemplate(t, conv, &out_list, add_ass);
     const port_out: []const u8 = if (p > 0) out_list.items else &.{};
     var nb: [200]u8 = undefined;
     const what = std.fmt.bufPrint(&nb, "llama_chat_apply_template '{s}'", .{tmpl[0..@min(tmpl.len, 60)]}) catch unreachable;
@@ -216,8 +210,8 @@ fn checkPublic(tmpl: [:0]const u8, conv: []const Message, add_ass: bool) void {
 // Builtin names
 
 fn checkBuiltins() [][:0]const u8 {
-    const ref_n = c.llama_chat_builtin_templates(null, 0);
-    const port_n = chat.builtinTemplates(null, 0);
+    const ref_n = harness_root.impl.c.llama_chat_builtin_templates(null, 0);
+    const port_n = harness_root.chat.builtinTemplates(null, 0);
     checks += 1;
     if (ref_n != port_n) fail("builtin count: ref {d} port {d}", .{ ref_n, port_n });
     const n: usize = @intCast(ref_n);
@@ -226,8 +220,8 @@ fn checkBuiltins() [][:0]const u8 {
     for ([_]usize{ 1, 5, n - 1, n, n + 1, 200 }) |len| {
         var ref_arr: [256][*c]const u8 = @splat(sentinel);
         var port_arr: [256]?[*:0]const u8 = @splat(sentinel);
-        const r = c.llama_chat_builtin_templates(&ref_arr, len);
-        const p = chat.builtinTemplates(&port_arr, len);
+        const r = harness_root.impl.c.llama_chat_builtin_templates(&ref_arr, len);
+        const p = harness_root.chat.builtinTemplates(&port_arr, len);
         checks += 1;
         if (r != p) fail("builtin len {d}: ref {d} port {d}", .{ len, r, p });
         for (0..ref_arr.len) |i| {
@@ -240,8 +234,8 @@ fn checkBuiltins() [][:0]const u8 {
 
     var names: std.ArrayList([:0]const u8) = .empty;
     var arr: [256][*c]const u8 = undefined;
-    _ = c.llama_chat_builtin_templates(&arr, n);
-    for (arr[0..n]) |p| names.append(gpa, std.mem.span(@as([*:0]const u8, @ptrCast(p)))) catch unreachable;
+    _ = harness_root.impl.c.llama_chat_builtin_templates(&arr, n);
+    for (arr[0..n]) |p| names.append(std.heap.c_allocator, std.mem.span(@as([*:0]const u8, @ptrCast(p)))) catch unreachable;
     return names.items;
 }
 
@@ -260,11 +254,11 @@ fn checkNames(names: []const [:0]const u8) void {
             checkFromStr(name[k + 1 ..]);
             checkDetect("name suffix", name[k + 1 ..]);
         }
-        const upper = gpa.dupe(u8, name) catch unreachable;
+        const upper = std.heap.c_allocator.dupe(u8, name) catch unreachable;
         for (upper) |*b| b.* = std.ascii.toUpper(b.*);
         checkFromStr(upper);
         checkDetect("name upper", upper);
-        const padded = std.fmt.allocPrint(gpa, "{s} ", .{name}) catch unreachable;
+        const padded = std.fmt.allocPrint(std.heap.c_allocator, "{s} ", .{name}) catch unreachable;
         checkFromStr(padded);
         checkDetect("name padded", padded);
     }
@@ -281,23 +275,23 @@ fn checkNeedles(needles: []const []const u8, rand: std.Random) void {
         // Alone, and after every other marker, since most markers decide
         // only beside a companion (`<|assistant|>` with `<|end|>`).
         for (0..a.len) |k| {
-            const dropped = std.mem.concat(gpa, u8, &.{ a[0..k], a[k + 1 ..] }) catch unreachable;
-            const changed = gpa.dupe(u8, a) catch unreachable;
+            const dropped = std.mem.concat(std.heap.c_allocator, u8, &.{ a[0..k], a[k + 1 ..] }) catch unreachable;
+            const changed = std.heap.c_allocator.dupe(u8, a) catch unreachable;
             changed[k] ^= 0x20;
             checkDetect("needle dropped byte", dropped);
             checkDetect("needle changed byte", changed);
             for (needles) |b| {
-                const d2 = std.mem.concat(gpa, u8, &.{ b, " ", dropped }) catch unreachable;
+                const d2 = std.mem.concat(std.heap.c_allocator, u8, &.{ b, " ", dropped }) catch unreachable;
                 checkDetect("marker, needle dropped byte", d2);
-                gpa.free(d2);
-                const c2 = std.mem.concat(gpa, u8, &.{ b, " ", changed }) catch unreachable;
+                std.heap.c_allocator.free(d2);
+                const c2 = std.mem.concat(std.heap.c_allocator, u8, &.{ b, " ", changed }) catch unreachable;
                 checkDetect("marker, needle changed byte", c2);
-                gpa.free(c2);
+                std.heap.c_allocator.free(c2);
             }
         }
         for (needles) |b| {
-            checkDetect("pair", std.mem.concat(gpa, u8, &.{ a, b }) catch unreachable);
-            checkDetect("pair spaced", std.mem.concat(gpa, u8, &.{ a, " x ", b }) catch unreachable);
+            checkDetect("pair", std.mem.concat(std.heap.c_allocator, u8, &.{ a, b }) catch unreachable);
+            checkDetect("pair spaced", std.mem.concat(std.heap.c_allocator, u8, &.{ a, " x ", b }) catch unreachable);
         }
     }
     const fillers = [_][]const u8{ "", " ", "x", "{{ ", " }}", "\n", "mistral", "'", "\"" };
@@ -305,11 +299,11 @@ fn checkNeedles(needles: []const []const u8, rand: std.Random) void {
         var s: std.ArrayList(u8) = .empty;
         const k = rand.intRangeAtMost(usize, 1, 7);
         for (0..k) |_| {
-            s.appendSlice(gpa, fillers[rand.uintLessThan(usize, fillers.len)]) catch unreachable;
-            s.appendSlice(gpa, needles[rand.uintLessThan(usize, needles.len)]) catch unreachable;
+            s.appendSlice(std.heap.c_allocator, fillers[rand.uintLessThan(usize, fillers.len)]) catch unreachable;
+            s.appendSlice(std.heap.c_allocator, needles[rand.uintLessThan(usize, needles.len)]) catch unreachable;
         }
         checkDetect("random markers", s.items);
-        s.deinit(gpa);
+        s.deinit(std.heap.c_allocator);
     }
 }
 
@@ -318,10 +312,10 @@ fn removeAll(s: []const u8, needle: []const u8) []const u8 {
     var out: std.ArrayList(u8) = .empty;
     var i: usize = 0;
     while (std.mem.findPos(u8, s, i, needle)) |p| {
-        out.appendSlice(gpa, s[i..p]) catch unreachable;
+        out.appendSlice(std.heap.c_allocator, s[i..p]) catch unreachable;
         i = p + needle.len;
     }
-    out.appendSlice(gpa, s[i..]) catch unreachable;
+    out.appendSlice(std.heap.c_allocator, s[i..]) catch unreachable;
     return out.items;
 }
 
@@ -337,7 +331,7 @@ fn checkTemplateSource(name: []const u8, t: []const u8, needles: []const []const
             checkDetect(name, t[0..e]);
             checkDetect(name, t[0 .. e - 1]);
             checkDetect(name, t[p..]);
-            checkDetect(name, std.mem.concat(gpa, u8, &.{ t[0..p], t[e..] }) catch unreachable);
+            checkDetect(name, std.mem.concat(std.heap.c_allocator, u8, &.{ t[0..p], t[e..] }) catch unreachable);
             if (nd.len == 0) break;
         }
         checkDetect(name, removeAll(t, nd));
@@ -353,19 +347,19 @@ fn checkTemplateSource(name: []const u8, t: []const u8, needles: []const []const
 }
 
 fn templatesFromGguf(path: []const u8, out: *std.ArrayList([:0]const u8)) void {
-    const pz = gpa.dupeSentinel(u8, path, 0) catch unreachable;
-    const ctx = c.gguf_init_from_file(pz.ptr, .{ .no_alloc = true, .ctx = null }) orelse {
+    const pz = std.heap.c_allocator.dupeSentinel(u8, path, 0) catch unreachable;
+    const ctx = harness_root.impl.c.gguf_init_from_file(pz.ptr, .{ .no_alloc = true, .ctx = null }) orelse {
         fail("{s}: gguf_init_from_file failed", .{path});
         return;
     };
-    defer c.gguf_free(ctx);
-    const n: usize = @intCast(c.gguf_get_n_kv(ctx));
+    defer harness_root.impl.c.gguf_free(ctx);
+    const n: usize = @intCast(harness_root.impl.c.gguf_get_n_kv(ctx));
     for (0..n) |i| {
-        const key = std.mem.span(c.gguf_get_key(ctx, @intCast(i)));
+        const key = std.mem.span(harness_root.impl.c.gguf_get_key(ctx, @intCast(i)));
         if (!std.mem.startsWith(u8, key, "tokenizer.chat_template")) continue;
-        if (c.gguf_get_kv_type(ctx, @intCast(i)) != c.GGUF_TYPE_STRING) continue;
-        const v = std.mem.span(c.gguf_get_val_str(ctx, @intCast(i)));
-        out.append(gpa, gpa.dupeSentinel(u8, v, 0) catch unreachable) catch unreachable;
+        if (harness_root.impl.c.gguf_get_kv_type(ctx, @intCast(i)) != harness_root.impl.c.GGUF_TYPE_STRING) continue;
+        const v = std.mem.span(harness_root.impl.c.gguf_get_val_str(ctx, @intCast(i)));
+        out.append(std.heap.c_allocator, std.heap.c_allocator.dupeSentinel(u8, v, 0) catch unreachable) catch unreachable;
     }
 }
 
@@ -397,29 +391,29 @@ const contents = [_][:0]const u8{
     "<s>assistant\n",
 };
 
-fn conversation(spec: []const [2][:0]const u8) []Message {
-    const out = gpa.alloc(Message, spec.len) catch unreachable;
+fn conversation(spec: []const [2][:0]const u8) []harness_root.chat.Message {
+    const out = std.heap.c_allocator.alloc(harness_root.chat.Message, spec.len) catch unreachable;
     for (spec, out) |s, *m| m.* = .{ .role = s[0].ptr, .content = s[1].ptr };
     return out;
 }
 
 /// Every byte at both edges of a message, for `trim`'s `isspace`, and as a
 /// role's first and last byte and as a one-byte role, for `toupper`.
-fn byteSweep() [][]Message {
-    var convs: std.ArrayList([]Message) = .empty;
+fn byteSweep() [][]harness_root.chat.Message {
+    var convs: std.ArrayList([]harness_root.chat.Message) = .empty;
     for (1..256) |b| {
         const by: u8 = @intCast(b);
-        const edged = gpa.dupeSentinel(u8, &.{ by, 'x', by }, 0) catch unreachable;
-        const role1 = gpa.dupeSentinel(u8, &.{ by, 'o', 'l', 'e', by }, 0) catch unreachable;
-        const role0 = gpa.dupeSentinel(u8, &.{by}, 0) catch unreachable;
-        convs.append(gpa, conversation(&.{ .{ "system", edged }, .{ "user", edged }, .{ "assistant", edged }, .{ "tool", edged } })) catch unreachable;
-        convs.append(gpa, conversation(&.{ .{ role1, "c" }, .{ role0, edged } })) catch unreachable;
+        const edged = std.heap.c_allocator.dupeSentinel(u8, &.{ by, 'x', by }, 0) catch unreachable;
+        const role1 = std.heap.c_allocator.dupeSentinel(u8, &.{ by, 'o', 'l', 'e', by }, 0) catch unreachable;
+        const role0 = std.heap.c_allocator.dupeSentinel(u8, &.{by}, 0) catch unreachable;
+        convs.append(std.heap.c_allocator, conversation(&.{ .{ "system", edged }, .{ "user", edged }, .{ "assistant", edged }, .{ "tool", edged } })) catch unreachable;
+        convs.append(std.heap.c_allocator, conversation(&.{ .{ role1, "c" }, .{ role0, edged } })) catch unreachable;
     }
     return convs.items;
 }
 
-fn buildConversations(rand: std.Random) [][]Message {
-    var convs: std.ArrayList([]Message) = .empty;
+fn buildConversations(rand: std.Random) [][]harness_root.chat.Message {
+    var convs: std.ArrayList([]harness_root.chat.Message) = .empty;
     const fixed = [_][]const [2][:0]const u8{
         &.{},
         &.{.{ "user", "Hello" }},
@@ -437,18 +431,18 @@ fn buildConversations(rand: std.Random) [][]Message {
         &.{ .{ "model", "m" }, .{ "user", "u" } },
         &.{ .{ "system", "" }, .{ "user", "" }, .{ "assistant", "" } },
     };
-    for (fixed) |f| convs.append(gpa, conversation(f)) catch unreachable;
+    for (fixed) |f| convs.append(std.heap.c_allocator, conversation(f)) catch unreachable;
 
-    convs.appendSlice(gpa, byteSweep()) catch unreachable;
+    convs.appendSlice(std.heap.c_allocator, byteSweep()) catch unreachable;
 
     for (0..2500) |_| {
         const n = rand.uintLessThan(usize, 8);
-        const conv = gpa.alloc(Message, n) catch unreachable;
+        const conv = std.heap.c_allocator.alloc(harness_root.chat.Message, n) catch unreachable;
         for (conv) |*m| {
             const r = if (rand.boolean()) roles[rand.uintLessThan(usize, 4)] else roles[rand.uintLessThan(usize, roles.len)];
             m.* = .{ .role = r.ptr, .content = contents[rand.uintLessThan(usize, contents.len)].ptr };
         }
-        convs.append(gpa, conv) catch unreachable;
+        convs.append(std.heap.c_allocator, conv) catch unreachable;
     }
     return convs.items;
 }
@@ -481,7 +475,7 @@ pub fn main(init: std.process.Init) !void {
         if (std.mem.endsWith(u8, path, ".gguf")) {
             templatesFromGguf(path, &sources);
         } else {
-            sources.append(gpa, gpa.dupeSentinel(u8, readFile(path), 0) catch unreachable) catch unreachable;
+            sources.append(std.heap.c_allocator, std.heap.c_allocator.dupeSentinel(u8, readFile(path), 0) catch unreachable) catch unreachable;
         }
     }
     std.debug.print("  {d} template sources from {d} files\n", .{ sources.items.len, args.len - 2 });
@@ -496,7 +490,7 @@ pub fn main(init: std.process.Init) !void {
     checks += 1;
     if (reached != 56) {
         var missing: std.ArrayList(u8) = .empty;
-        for (detected[0..56], 0..) |n, i| if (n == 0) missing.appendSlice(gpa, std.fmt.allocPrint(gpa, " {d}", .{i}) catch unreachable) catch unreachable;
+        for (detected[0..56], 0..) |n, i| if (n == 0) missing.appendSlice(std.heap.c_allocator, std.fmt.allocPrint(std.heap.c_allocator, " {d}", .{i}) catch unreachable) catch unreachable;
         fail("detection never returned:{s}", .{missing.items});
     }
 
@@ -515,7 +509,7 @@ pub fn main(init: std.process.Init) !void {
     // maps 0xe0-0xfe -- which the C++ never reaches for a role, because it
     // passes a signed `char`. A missing locale is reported, not failed.
     for (locales) |loc| {
-        if (libc.setlocale(libc.LC.ALL, loc) == null) {
+        if (stdlib.libc.setlocale(stdlib.libc.LC.ALL, loc) == null) {
             std.debug.print("  locale {s} not installed; its sweep is skipped\n", .{loc});
             continue;
         }
@@ -527,7 +521,7 @@ pub fn main(init: std.process.Init) !void {
             }
         }
     }
-    _ = libc.setlocale(libc.LC.ALL, "C");
+    _ = stdlib.libc.setlocale(stdlib.libc.LC.ALL, "C");
 
     std.debug.print("  llama_chat_apply_template\n", .{});
     for (convs[0..300]) |conv| {

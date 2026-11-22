@@ -8,12 +8,13 @@
 //! began at.
 
 const std = @import("std");
+const llama = @import("llama");
 const mtmd = @import("../module.zig");
 const stdlib = @import("stdlib");
 
 /// Ports `build` (granite-speech.cpp:5 @b1b770d90), a member of
 /// `mtmd_graph_granite_speech`.
-pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*llama.impl.llama_c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
     const model = g.model;
@@ -37,23 +38,23 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     const proj_input_dim: c_int = @truncate(@as(i64, n_embd) *% @as(i64, @intCast(hparams.feature_layers.items.len + 1)));
     const use_feature_concat = hparams.feature_layers.items.len != 0;
 
-    const attn_dists = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, @as(i64, context_size) * context_size);
-    _ = mtmd.impl.c.ggml_set_name(attn_dists, "attn_dists");
-    mtmd.impl.c.ggml_set_input(attn_dists);
+    const attn_dists = llama.impl.llama_c.ggml_new_tensor_1d(ctx0, llama.impl.llama_c.GGML_TYPE_I32, @as(i64, context_size) * context_size);
+    _ = llama.impl.llama_c.ggml_set_name(attn_dists, "attn_dists");
+    llama.impl.llama_c.ggml_set_input(attn_dists);
 
     var attn_mask: mtmd.graph.T = null;
     if (remainder > 0) {
-        attn_mask = mtmd.impl.c.ggml_new_tensor_4d(ctx0, mtmd.impl.c.GGML_TYPE_F32, context_size, context_size, 1, num_blocks);
-        _ = mtmd.impl.c.ggml_set_name(attn_mask, "attn_mask");
-        mtmd.impl.c.ggml_set_input(attn_mask);
+        attn_mask = llama.impl.llama_c.ggml_new_tensor_4d(ctx0, llama.impl.llama_c.GGML_TYPE_F32, context_size, context_size, 1, num_blocks);
+        _ = llama.impl.llama_c.ggml_set_name(attn_mask, "attn_mask");
+        llama.impl.llama_c.ggml_set_input(attn_mask);
     }
 
     const inp = g.buildInpRaw(1);
-    var cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, inp));
+    var cur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, inp));
     g.cb(cur, "inp_transposed", -1);
 
     cur = g.buildMm(model.inp_proj_w, cur);
-    cur = mtmd.impl.c.ggml_add(ctx0, cur, model.inp_proj_b);
+    cur = llama.impl.llama_c.ggml_add(ctx0, cur, model.inp_proj_b);
     g.cb(cur, "inp_linear", -1);
 
     // Capture layer 0 if requested (after input_linear)
@@ -78,7 +79,7 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
             ffn1 = g.buildFfn(ffn1, layer.ff_up_w, layer.ff_up_b, null, null, layer.ff_down_w, layer.ff_down_b, .silu, il);
             g.cb(ffn1, "ffn1_out", il);
 
-            residual = mtmd.impl.c.ggml_add(ctx0, residual, mtmd.impl.c.ggml_scale(ctx0, ffn1, 0.5));
+            residual = llama.impl.llama_c.ggml_add(ctx0, residual, llama.impl.llama_c.ggml_scale(ctx0, ffn1, 0.5));
             g.cb(residual, "ffn1_residual", il);
         }
 
@@ -89,50 +90,50 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
             g.cb(normed, "attn_norm", il);
 
             if (n_frames < padded_len) {
-                normed = mtmd.impl.c.ggml_pad(ctx0, normed, 0, padded_len - n_frames, 0, 0);
+                normed = llama.impl.llama_c.ggml_pad(ctx0, normed, 0, padded_len - n_frames, 0, 0);
             }
 
             var Q = g.buildMm(layer.q_w, normed);
             var K = g.buildMm(layer.k_w, normed);
             var V = g.buildMm(layer.v_w, normed);
 
-            Q = mtmd.impl.c.ggml_reshape_4d(ctx0, Q, d_head, n_head, context_size, num_blocks);
-            K = mtmd.impl.c.ggml_reshape_4d(ctx0, K, d_head, n_head, context_size, num_blocks);
-            V = mtmd.impl.c.ggml_reshape_4d(ctx0, V, d_head, n_head, context_size, num_blocks);
+            Q = llama.impl.llama_c.ggml_reshape_4d(ctx0, Q, d_head, n_head, context_size, num_blocks);
+            K = llama.impl.llama_c.ggml_reshape_4d(ctx0, K, d_head, n_head, context_size, num_blocks);
+            V = llama.impl.llama_c.ggml_reshape_4d(ctx0, V, d_head, n_head, context_size, num_blocks);
 
-            const Q_perm = mtmd.impl.c.ggml_permute(ctx0, Q, 0, 2, 1, 3);
-            const K_perm = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, K, 0, 2, 1, 3));
+            const Q_perm = llama.impl.llama_c.ggml_permute(ctx0, Q, 0, 2, 1, 3);
+            const K_perm = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_permute(ctx0, K, 0, 2, 1, 3));
 
-            const kq = mtmd.impl.c.ggml_mul_mat(ctx0, K_perm, Q_perm);
+            const kq = llama.impl.llama_c.ggml_mul_mat(ctx0, K_perm, Q_perm);
 
             // Shaw RPE: pos_emb ne[2]=1 broadcasts against Q ne[2]=num_blocks in mul_mat
-            var pos_emb = mtmd.impl.c.ggml_get_rows(ctx0, layer.attn_rel_pos_emb, attn_dists);
-            pos_emb = mtmd.impl.c.ggml_reshape_3d(ctx0, pos_emb, d_head, context_size, context_size);
-            pos_emb = mtmd.impl.c.ggml_reshape_4d(ctx0, pos_emb, d_head, context_size, 1, context_size);
+            var pos_emb = llama.impl.llama_c.ggml_get_rows(ctx0, layer.attn_rel_pos_emb, attn_dists);
+            pos_emb = llama.impl.llama_c.ggml_reshape_3d(ctx0, pos_emb, d_head, context_size, context_size);
+            pos_emb = llama.impl.llama_c.ggml_reshape_4d(ctx0, pos_emb, d_head, context_size, 1, context_size);
 
-            const Q_shaw = mtmd.impl.c.ggml_permute(ctx0, Q, 0, 1, 3, 2);
-            var pos_attn = mtmd.impl.c.ggml_mul_mat(ctx0, pos_emb, Q_shaw);
-            pos_attn = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, pos_attn, 0, 2, 3, 1));
+            const Q_shaw = llama.impl.llama_c.ggml_permute(ctx0, Q, 0, 1, 3, 2);
+            var pos_attn = llama.impl.llama_c.ggml_mul_mat(ctx0, pos_emb, Q_shaw);
+            pos_attn = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_permute(ctx0, pos_attn, 0, 2, 3, 1));
 
-            const scores = mtmd.impl.c.ggml_add(ctx0, kq, pos_attn);
-            const attn_weights = mtmd.impl.c.ggml_soft_max_ext(ctx0, scores, attn_mask, g.kq_scale, 0.0);
+            const scores = llama.impl.llama_c.ggml_add(ctx0, kq, pos_attn);
+            const attn_weights = llama.impl.llama_c.ggml_soft_max_ext(ctx0, scores, attn_mask, g.kq_scale, 0.0);
 
-            const V_perm = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, V, 1, 2, 0, 3));
-            var attn_out = mtmd.impl.c.ggml_mul_mat(ctx0, V_perm, attn_weights);
+            const V_perm = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_permute(ctx0, V, 1, 2, 0, 3));
+            var attn_out = llama.impl.llama_c.ggml_mul_mat(ctx0, V_perm, attn_weights);
 
-            attn_out = mtmd.impl.c.ggml_permute(ctx0, attn_out, 0, 2, 1, 3);
-            attn_out = mtmd.impl.c.ggml_cont_2d(ctx0, attn_out, n_embd, padded_len);
+            attn_out = llama.impl.llama_c.ggml_permute(ctx0, attn_out, 0, 2, 1, 3);
+            attn_out = llama.impl.llama_c.ggml_cont_2d(ctx0, attn_out, n_embd, padded_len);
 
             if (n_frames < padded_len) {
-                attn_out = mtmd.impl.c.ggml_view_2d(ctx0, attn_out, n_embd, n_frames, mtmd.graph.nb(attn_out, 1), 0);
+                attn_out = llama.impl.llama_c.ggml_view_2d(ctx0, attn_out, n_embd, n_frames, mtmd.graph.nb(attn_out, 1), 0);
             }
 
             cur = g.buildMm(layer.o_w, attn_out);
-            cur = mtmd.impl.c.ggml_add(ctx0, cur, layer.o_b);
+            cur = llama.impl.llama_c.ggml_add(ctx0, cur, layer.o_b);
             g.cb(cur, "attn_out", il);
         }
 
-        residual = mtmd.impl.c.ggml_add(ctx0, residual, cur);
+        residual = llama.impl.llama_c.ggml_add(ctx0, residual, cur);
 
         // conv module
         {
@@ -140,35 +141,35 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
             g.cb(cur, "conv_norm", il);
 
             var x = g.buildMm(layer.conv_pw1_w, cur);
-            x = mtmd.impl.c.ggml_add(ctx0, x, layer.conv_pw1_b);
+            x = llama.impl.llama_c.ggml_add(ctx0, x, layer.conv_pw1_b);
             g.cb(x, "conv_pw1", il);
 
             // GLU: ggml has no fused op, manual split + sigmoid gate
             {
                 const d = @divTrunc(mtmd.graph.ne(x, 0), 2);
-                const gate = mtmd.impl.c.ggml_sigmoid(ctx0, mtmd.impl.c.ggml_view_2d(ctx0, x, d, mtmd.graph.ne(x, 1), mtmd.graph.nb(x, 1), @as(usize, @intCast(d)) * mtmd.graph.nb(x, 0)));
-                x = mtmd.impl.c.ggml_mul(ctx0, mtmd.impl.c.ggml_view_2d(ctx0, x, d, mtmd.graph.ne(x, 1), mtmd.graph.nb(x, 1), 0), gate);
-                x = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, x));
+                const gate = llama.impl.llama_c.ggml_sigmoid(ctx0, llama.impl.llama_c.ggml_view_2d(ctx0, x, d, mtmd.graph.ne(x, 1), mtmd.graph.nb(x, 1), @as(usize, @intCast(d)) * mtmd.graph.nb(x, 0)));
+                x = llama.impl.llama_c.ggml_mul(ctx0, llama.impl.llama_c.ggml_view_2d(ctx0, x, d, mtmd.graph.ne(x, 1), mtmd.graph.nb(x, 1), 0), gate);
+                x = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, x));
             }
             g.cb(x, "conv_glu", il);
 
-            x = mtmd.impl.c.ggml_pad_ext(ctx0, x, conv_pad, conv_pad, 0, 0, 0, 0, 0, 0);
-            x = mtmd.impl.c.ggml_ssm_conv(ctx0, x, layer.conv_dw_w);
+            x = llama.impl.llama_c.ggml_pad_ext(ctx0, x, conv_pad, conv_pad, 0, 0, 0, 0, 0, 0);
+            x = llama.impl.llama_c.ggml_ssm_conv(ctx0, x, layer.conv_dw_w);
             g.cb(x, "conv_dw", il);
 
             // folded batch norm
-            x = mtmd.impl.c.ggml_add(ctx0, mtmd.impl.c.ggml_mul(ctx0, x, layer.conv_norm_w), layer.conv_norm_b);
-            x = mtmd.impl.c.ggml_silu(ctx0, x);
+            x = llama.impl.llama_c.ggml_add(ctx0, llama.impl.llama_c.ggml_mul(ctx0, x, layer.conv_norm_w), layer.conv_norm_b);
+            x = llama.impl.llama_c.ggml_silu(ctx0, x);
             g.cb(x, "conv_bn_silu", il);
 
             x = g.buildMm(layer.conv_pw2_w, x);
-            x = mtmd.impl.c.ggml_add(ctx0, x, layer.conv_pw2_b);
+            x = llama.impl.llama_c.ggml_add(ctx0, x, layer.conv_pw2_b);
             g.cb(x, "conv_pw2", il);
 
             cur = x;
         }
 
-        residual = mtmd.impl.c.ggml_add(ctx0, residual, cur);
+        residual = llama.impl.llama_c.ggml_add(ctx0, residual, cur);
 
         // ffn2 (half-step)
         {
@@ -178,7 +179,7 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
             ffn2 = g.buildFfn(ffn2, layer.ff_up_1_w, layer.ff_up_1_b, null, null, layer.ff_down_1_w, layer.ff_down_1_b, .silu, il);
             g.cb(ffn2, "ffn2_out", il);
 
-            residual = mtmd.impl.c.ggml_add(ctx0, residual, mtmd.impl.c.ggml_scale(ctx0, ffn2, 0.5));
+            residual = llama.impl.llama_c.ggml_add(ctx0, residual, llama.impl.llama_c.ggml_scale(ctx0, ffn2, 0.5));
         }
 
         cur = g.buildNorm(residual, layer.ln_2_w, layer.ln_2_b, .normal, g.eps, il);
@@ -190,7 +191,7 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
                 if (concat_result == null) {
                     concat_result = cur;
                 } else {
-                    concat_result = mtmd.impl.c.ggml_concat(ctx0, concat_result, cur, 0);
+                    concat_result = llama.impl.llama_c.ggml_concat(ctx0, concat_result, cur, 0);
                 }
                 const name = mtmd.impl.stringFormat(std.heap.c_allocator, "feature_layer_%d", .{il + 1}) catch mtmd.impl.abort("granite-speech.cpp", 192, "out of memory");
                 defer std.heap.c_allocator.free(name);
@@ -201,18 +202,18 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
         // CTC branch
         if (il + 1 == ctc_layer) {
             var mid = g.buildMm(model.ctc_out_w, cur);
-            mid = mtmd.impl.c.ggml_add(ctx0, mid, model.ctc_out_b);
-            mid = mtmd.impl.c.ggml_soft_max(ctx0, mid);
+            mid = llama.impl.llama_c.ggml_add(ctx0, mid, model.ctc_out_b);
+            mid = llama.impl.llama_c.ggml_soft_max(ctx0, mid);
             mid = g.buildMm(model.ctc_out_mid_w, mid);
-            mid = mtmd.impl.c.ggml_add(ctx0, mid, model.ctc_out_mid_b);
-            cur = mtmd.impl.c.ggml_add(ctx0, cur, mid);
+            mid = llama.impl.llama_c.ggml_add(ctx0, mid, model.ctc_out_mid_b);
+            cur = llama.impl.llama_c.ggml_add(ctx0, cur, mid);
             g.cb(cur, "ctc_branch", il);
         }
     }
 
     // Append final output to concatenated features if using feature concatenation
     if (use_feature_concat and concat_result != null) {
-        concat_result = mtmd.impl.c.ggml_concat(ctx0, concat_result, cur, 0);
+        concat_result = llama.impl.llama_c.ggml_concat(ctx0, concat_result, cur, 0);
         g.cb(concat_result, "concat_final", -1);
         cur = concat_result;
     }
@@ -231,17 +232,17 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
         const padded_proj = nblocks_proj * window_size;
 
         if (n_frames < padded_proj) {
-            cur = mtmd.impl.c.ggml_pad(ctx0, cur, 0, padded_proj - n_frames, 0, 0);
+            cur = llama.impl.llama_c.ggml_pad(ctx0, cur, 0, padded_proj - n_frames, 0, 0);
         }
 
-        const enc_windows = mtmd.impl.c.ggml_reshape_3d(ctx0, cur, proj_input_dim, window_size, nblocks_proj);
+        const enc_windows = llama.impl.llama_c.ggml_reshape_3d(ctx0, cur, proj_input_dim, window_size, nblocks_proj);
 
         const qf = &model.qf_proj_blocks.items[0];
         var queries = g.buildNorm(qf.qf_proj_query, qf.qf_proj_norm_w, qf.qf_proj_norm_b, .normal, proj_eps, -1);
         {
-            const q_3d = mtmd.impl.c.ggml_reshape_3d(ctx0, queries, n_embd, num_queries, 1);
-            const q_shape = mtmd.impl.c.ggml_new_tensor_3d(ctx0, mtmd.impl.c.GGML_TYPE_F32, n_embd, num_queries, nblocks_proj);
-            queries = mtmd.impl.c.ggml_repeat(ctx0, q_3d, q_shape);
+            const q_3d = llama.impl.llama_c.ggml_reshape_3d(ctx0, queries, n_embd, num_queries, 1);
+            const q_shape = llama.impl.llama_c.ggml_new_tensor_3d(ctx0, llama.impl.llama_c.GGML_TYPE_F32, n_embd, num_queries, nblocks_proj);
+            queries = llama.impl.llama_c.ggml_repeat(ctx0, q_3d, q_shape);
         }
 
         for (qf.qf_proj_layers.items, 0..) |*pl, pil| {
@@ -249,50 +250,50 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
 
             // self-attention
             {
-                var Q = mtmd.impl.c.ggml_add(ctx0, g.buildMm(pl.q_w, queries), pl.q_b);
-                var K = mtmd.impl.c.ggml_add(ctx0, g.buildMm(pl.k_w, queries), pl.k_b);
-                var V = mtmd.impl.c.ggml_add(ctx0, g.buildMm(pl.v_w, queries), pl.v_b);
+                var Q = llama.impl.llama_c.ggml_add(ctx0, g.buildMm(pl.q_w, queries), pl.q_b);
+                var K = llama.impl.llama_c.ggml_add(ctx0, g.buildMm(pl.k_w, queries), pl.k_b);
+                var V = llama.impl.llama_c.ggml_add(ctx0, g.buildMm(pl.v_w, queries), pl.v_b);
 
-                Q = mtmd.impl.c.ggml_reshape_4d(ctx0, Q, proj_d_head, proj_n_head, num_queries, nblocks_proj);
-                K = mtmd.impl.c.ggml_reshape_4d(ctx0, K, proj_d_head, proj_n_head, num_queries, nblocks_proj);
-                V = mtmd.impl.c.ggml_reshape_4d(ctx0, V, proj_d_head, proj_n_head, num_queries, nblocks_proj);
+                Q = llama.impl.llama_c.ggml_reshape_4d(ctx0, Q, proj_d_head, proj_n_head, num_queries, nblocks_proj);
+                K = llama.impl.llama_c.ggml_reshape_4d(ctx0, K, proj_d_head, proj_n_head, num_queries, nblocks_proj);
+                V = llama.impl.llama_c.ggml_reshape_4d(ctx0, V, proj_d_head, proj_n_head, num_queries, nblocks_proj);
 
                 var sa_out = g.buildAttn(pl.o_w, pl.o_b, Q, K, V, null, proj_kq_scale, jl, null);
-                sa_out = mtmd.impl.c.ggml_reshape_3d(ctx0, sa_out, n_embd, num_queries, nblocks_proj);
+                sa_out = llama.impl.llama_c.ggml_reshape_3d(ctx0, sa_out, n_embd, num_queries, nblocks_proj);
 
-                queries = g.buildNorm(mtmd.impl.c.ggml_add(ctx0, sa_out, queries), pl.ln_1_w, pl.ln_1_b, .normal, proj_eps, jl);
+                queries = g.buildNorm(llama.impl.llama_c.ggml_add(ctx0, sa_out, queries), pl.ln_1_w, pl.ln_1_b, .normal, proj_eps, jl);
             }
 
             // cross-attention
             {
-                var Q = mtmd.impl.c.ggml_add(ctx0, g.buildMm(pl.cross_attn_q_w, queries), pl.cross_attn_q_b);
-                var K = mtmd.impl.c.ggml_add(ctx0, g.buildMm(pl.cross_attn_k_w, enc_windows), pl.cross_attn_k_b);
-                var V = mtmd.impl.c.ggml_add(ctx0, g.buildMm(pl.cross_attn_v_w, enc_windows), pl.cross_attn_v_b);
+                var Q = llama.impl.llama_c.ggml_add(ctx0, g.buildMm(pl.cross_attn_q_w, queries), pl.cross_attn_q_b);
+                var K = llama.impl.llama_c.ggml_add(ctx0, g.buildMm(pl.cross_attn_k_w, enc_windows), pl.cross_attn_k_b);
+                var V = llama.impl.llama_c.ggml_add(ctx0, g.buildMm(pl.cross_attn_v_w, enc_windows), pl.cross_attn_v_b);
 
-                Q = mtmd.impl.c.ggml_reshape_4d(ctx0, Q, proj_d_head, proj_n_head, num_queries, nblocks_proj);
-                K = mtmd.impl.c.ggml_reshape_4d(ctx0, K, proj_d_head, proj_n_head, window_size, nblocks_proj);
-                V = mtmd.impl.c.ggml_reshape_4d(ctx0, V, proj_d_head, proj_n_head, window_size, nblocks_proj);
+                Q = llama.impl.llama_c.ggml_reshape_4d(ctx0, Q, proj_d_head, proj_n_head, num_queries, nblocks_proj);
+                K = llama.impl.llama_c.ggml_reshape_4d(ctx0, K, proj_d_head, proj_n_head, window_size, nblocks_proj);
+                V = llama.impl.llama_c.ggml_reshape_4d(ctx0, V, proj_d_head, proj_n_head, window_size, nblocks_proj);
 
                 var ca_out = g.buildAttn(pl.cross_attn_o_w, pl.cross_attn_o_b, Q, K, V, null, proj_kq_scale, jl, null);
-                ca_out = mtmd.impl.c.ggml_reshape_3d(ctx0, ca_out, n_embd, num_queries, nblocks_proj);
+                ca_out = llama.impl.llama_c.ggml_reshape_3d(ctx0, ca_out, n_embd, num_queries, nblocks_proj);
 
-                queries = g.buildNorm(mtmd.impl.c.ggml_add(ctx0, ca_out, queries), pl.cross_attn_norm_w, pl.cross_attn_norm_b, .normal, proj_eps, jl);
+                queries = g.buildNorm(llama.impl.llama_c.ggml_add(ctx0, ca_out, queries), pl.cross_attn_norm_w, pl.cross_attn_norm_b, .normal, proj_eps, jl);
             }
 
             // ffn
             {
                 const ffn_out = g.buildFfn(queries, pl.ff_up_w, pl.ff_up_b, null, null, pl.ff_down_w, pl.ff_down_b, .gelu, jl);
 
-                queries = g.buildNorm(mtmd.impl.c.ggml_add(ctx0, ffn_out, queries), pl.ln_2_w, pl.ln_2_b, .normal, proj_eps, jl);
+                queries = g.buildNorm(llama.impl.llama_c.ggml_add(ctx0, ffn_out, queries), pl.ln_2_w, pl.ln_2_b, .normal, proj_eps, jl);
             }
         }
 
-        cur = mtmd.impl.c.ggml_reshape_2d(ctx0, queries, n_embd, @as(i64, num_queries) * nblocks_proj);
-        cur = mtmd.impl.c.ggml_add(ctx0, g.buildMm(qf.qf_proj_linear_w, cur), qf.qf_proj_linear_b);
+        cur = llama.impl.llama_c.ggml_reshape_2d(ctx0, queries, n_embd, @as(i64, num_queries) * nblocks_proj);
+        cur = llama.impl.llama_c.ggml_add(ctx0, g.buildMm(qf.qf_proj_linear_w, cur), qf.qf_proj_linear_b);
         g.cb(cur, "projector_out", -1);
     }
 
-    mtmd.impl.c.ggml_build_forward_expand(g.gf, cur);
+    llama.impl.llama_c.ggml_build_forward_expand(g.gf, cur);
 
     return g.gf;
 }

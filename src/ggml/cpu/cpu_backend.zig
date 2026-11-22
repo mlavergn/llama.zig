@@ -35,7 +35,6 @@ const builtin = @import("builtin");
 /// The C `new`s these and mostly never frees them. libc's allocator is what
 /// a C entry point can reach without being handed one — the same reasoning
 /// as `backend_reg.zig` and `backend.zig`.
-const allocator = std.heap.c_allocator;
 
 // -----------------------------------------------------------------------------
 // The extra buffer types
@@ -46,7 +45,7 @@ const allocator = std.heap.c_allocator;
 /// Only the repack entry compiles on this target: the AMX, SpaceMIT and
 /// KleidiAI arms are behind `__AMX_INT8__`, `GGML_USE_CPU_RISCV64_SPACEMIT`
 /// and `GGML_USE_CPU_KLEIDIAI`, none of which this build defines.
-var extra_bufts: [2]ggml.impl.c.ggml_backend_buffer_type_t = .{ null, null };
+var extra_bufts: [2]ggml.impl.ggml_c.ggml_backend_buffer_type_t = .{ null, null };
 var extra_bufts_n: usize = 0;
 
 /// The C++ magic-static guard, written out — the same shape
@@ -73,7 +72,7 @@ fn ensureExtraBufts() void {
 /// @b1b770d90).
 ///
 /// Return: the extra buffer types, borrowed for the life of the process.
-pub fn getExtraBufferTypes() []const ggml.impl.c.ggml_backend_buffer_type_t {
+pub fn getExtraBufferTypes() []const ggml.impl.ggml_c.ggml_backend_buffer_type_t {
     ensureExtraBufts();
     return extra_bufts[0..extra_bufts_n];
 }
@@ -81,7 +80,7 @@ pub fn getExtraBufferTypes() []const ggml.impl.c.ggml_backend_buffer_type_t {
 /// Ports `ggml_backend_cpu_device_get_extra_buffers_type` (ggml-cpu.cpp:76
 /// @b1b770d90): the same list, null-terminated, as the proc-address export
 /// hands to `llama.cpp`.
-fn deviceGetExtraBuffersType(device: ggml.impl.c.ggml_backend_dev_t) callconv(.c) [*c]ggml.impl.c.ggml_backend_buffer_type_t {
+fn deviceGetExtraBuffersType(device: ggml.impl.ggml_c.ggml_backend_dev_t) callconv(.c) [*c]ggml.impl.ggml_c.ggml_backend_buffer_type_t {
     _ = device;
     ensureExtraBufts();
     // `extra_bufts` has a trailing null slot that `extra_bufts_n` excludes,
@@ -92,7 +91,7 @@ fn deviceGetExtraBuffersType(device: ggml.impl.c.ggml_backend_dev_t) callconv(.c
 
 /// Ports `ggml_backend_cpu_is_extra_buffer_type` (ggml-cpu.cpp:88
 /// @b1b770d90).
-fn isExtraBufferType(buft: ggml.impl.c.ggml_backend_buffer_type_t) bool {
+fn isExtraBufferType(buft: ggml.impl.ggml_c.ggml_backend_buffer_type_t) bool {
     for (getExtraBufferTypes()) |e| {
         if (e == buft) return true;
     }
@@ -105,50 +104,50 @@ fn isExtraBufferType(buft: ggml.impl.c.ggml_backend_buffer_type_t) bool {
 /// Ports `struct ggml_backend_cpu_context` (ggml-cpu.cpp:99 @b1b770d90).
 const Context = struct {
     n_threads: c_int,
-    threadpool: ggml.impl.c.ggml_threadpool_t,
+    threadpool: ggml.impl.ggml_c.ggml_threadpool_t,
     work_data: ?[*]u8,
     work_size: usize,
-    abort_callback: ggml.impl.c.ggml_abort_callback,
+    abort_callback: ggml.impl.ggml_c.ggml_abort_callback,
     abort_callback_data: ?*anyopaque,
     /// Take the reference path, skipping fused and vectorised kernels.
     use_ref: bool,
 };
 
 /// Ports `ggml_backend_cpu_get_name` (ggml-cpu.cpp:112 @b1b770d90).
-fn getName(backend: ggml.impl.c.ggml_backend_t) callconv(.c) [*c]const u8 {
+fn getName(backend: ggml.impl.ggml_c.ggml_backend_t) callconv(.c) [*c]const u8 {
     _ = backend;
     return "CPU";
 }
 
 /// Ports `ggml_backend_cpu_free` (ggml-cpu.cpp:118 @b1b770d90).
-fn backendFree(backend: ggml.impl.c.ggml_backend_t) callconv(.c) void {
-    const b = ggml.impl.one(ggml.impl.c.struct_ggml_backend, backend);
+fn backendFree(backend: ggml.impl.ggml_c.ggml_backend_t) callconv(.c) void {
+    const b = ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend, backend);
     const ctx: *Context = @ptrCast(@alignCast(b.context.?));
-    if (ctx.work_data) |w| allocator.free(w[0..ctx.work_size]);
-    allocator.destroy(ctx);
-    allocator.destroy(b);
+    if (ctx.work_data) |w| std.heap.c_allocator.free(w[0..ctx.work_size]);
+    std.heap.c_allocator.destroy(ctx);
+    std.heap.c_allocator.destroy(b);
 }
 
 /// Ports `struct ggml_backend_plan_cpu` (ggml-cpu.cpp:125 @b1b770d90).
 const PlanCpu = struct {
-    cplan: ggml.impl.c.struct_ggml_cplan,
+    cplan: ggml.impl.ggml_c.struct_ggml_cplan,
     cgraph: ggml.impl.CGraph,
 };
 
 /// Ports `ggml_backend_cpu_graph_plan_create` (ggml-cpu.cpp:130 @b1b770d90).
-fn graphPlanCreate(backend: ggml.impl.c.ggml_backend_t, cgraph: *const ggml.impl.CGraph) callconv(.c) ggml.impl.c.ggml_backend_graph_plan_t {
-    const b = ggml.impl.one(ggml.impl.c.struct_ggml_backend, backend);
+fn graphPlanCreate(backend: ggml.impl.ggml_c.ggml_backend_t, cgraph: *const ggml.impl.CGraph) callconv(.c) ggml.impl.ggml_c.ggml_backend_graph_plan_t {
+    const b = ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend, backend);
     const ctx: *Context = @ptrCast(@alignCast(b.context.?));
 
-    const plan = allocator.create(PlanCpu) catch return null;
+    const plan = std.heap.c_allocator.create(PlanCpu) catch return null;
 
-    plan.cplan = ggml.impl.c.ggml_graph_plan(@ptrCast(cgraph), ctx.n_threads, ctx.threadpool);
+    plan.cplan = ggml.impl.ggml_c.ggml_graph_plan(@ptrCast(cgraph), ctx.n_threads, ctx.threadpool);
     // The C's own comment: "FIXME: deep copy".
     plan.cgraph = cgraph.*;
 
     if (plan.cplan.work_size > 0) {
-        const buf = allocator.alloc(u8, plan.cplan.work_size) catch {
-            allocator.destroy(plan);
+        const buf = std.heap.c_allocator.alloc(u8, plan.cplan.work_size) catch {
+            std.heap.c_allocator.destroy(plan);
             return null;
         };
         plan.cplan.work_data = buf.ptr;
@@ -162,33 +161,33 @@ fn graphPlanCreate(backend: ggml.impl.c.ggml_backend_t, cgraph: *const ggml.impl
 }
 
 /// Ports `ggml_backend_cpu_graph_plan_free` (ggml-cpu.cpp:153 @b1b770d90).
-fn graphPlanFree(backend: ggml.impl.c.ggml_backend_t, plan_in: ggml.impl.c.ggml_backend_graph_plan_t) callconv(.c) void {
+fn graphPlanFree(backend: ggml.impl.ggml_c.ggml_backend_t, plan_in: ggml.impl.ggml_c.ggml_backend_graph_plan_t) callconv(.c) void {
     _ = backend;
     const plan: *PlanCpu = @ptrCast(@alignCast(plan_in.?));
-    if (plan.cplan.work_data) |w| allocator.free(w[0..plan.cplan.work_size]);
-    allocator.destroy(plan);
+    if (plan.cplan.work_data) |w| std.heap.c_allocator.free(w[0..plan.cplan.work_size]);
+    std.heap.c_allocator.destroy(plan);
 }
 
 /// Ports `ggml_backend_cpu_graph_plan_compute` (ggml-cpu.cpp:162 @b1b770d90).
-fn graphPlanCompute(backend: ggml.impl.c.ggml_backend_t, plan_in: ggml.impl.c.ggml_backend_graph_plan_t) callconv(.c) ggml.impl.c.enum_ggml_status {
+fn graphPlanCompute(backend: ggml.impl.ggml_c.ggml_backend_t, plan_in: ggml.impl.ggml_c.ggml_backend_graph_plan_t) callconv(.c) ggml.impl.ggml_c.enum_ggml_status {
     _ = backend;
     const plan: *PlanCpu = @ptrCast(@alignCast(plan_in.?));
-    return ggml.impl.c.ggml_graph_compute(@ptrCast(&plan.cgraph), &plan.cplan);
+    return ggml.impl.ggml_c.ggml_graph_compute(@ptrCast(&plan.cgraph), &plan.cplan);
 }
 
 /// Ports `ggml_backend_cpu_graph_compute` (ggml-cpu.cpp:170 @b1b770d90).
-fn graphCompute(backend: ggml.impl.c.ggml_backend_t, cgraph: *ggml.impl.CGraph) callconv(.c) ggml.impl.c.enum_ggml_status {
-    const b = ggml.impl.one(ggml.impl.c.struct_ggml_backend, backend);
+fn graphCompute(backend: ggml.impl.ggml_c.ggml_backend_t, cgraph: *ggml.impl.CGraph) callconv(.c) ggml.impl.ggml_c.enum_ggml_status {
+    const b = ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend, backend);
     const ctx: *Context = @ptrCast(@alignCast(b.context.?));
 
-    var cplan = ggml.impl.c.ggml_graph_plan(@ptrCast(cgraph), ctx.n_threads, ctx.threadpool);
+    var cplan = ggml.impl.ggml_c.ggml_graph_plan(@ptrCast(cgraph), ctx.n_threads, ctx.threadpool);
 
     if (ctx.work_size < cplan.work_size) {
-        if (ctx.work_data) |w| allocator.free(w[0..ctx.work_size]);
-        const buf = allocator.alloc(u8, cplan.work_size) catch {
+        if (ctx.work_data) |w| std.heap.c_allocator.free(w[0..ctx.work_size]);
+        const buf = std.heap.c_allocator.alloc(u8, cplan.work_size) catch {
             ctx.work_data = null;
             ctx.work_size = 0;
-            return ggml.impl.c.GGML_STATUS_ALLOC_FAILED;
+            return ggml.impl.ggml_c.GGML_STATUS_ALLOC_FAILED;
         };
         ctx.work_data = buf.ptr;
         ctx.work_size = cplan.work_size;
@@ -199,11 +198,11 @@ fn graphCompute(backend: ggml.impl.c.ggml_backend_t, cgraph: *ggml.impl.CGraph) 
     cplan.abort_callback_data = ctx.abort_callback_data;
     cplan.use_ref = ctx.use_ref;
 
-    return ggml.impl.c.ggml_graph_compute(@ptrCast(cgraph), &cplan);
+    return ggml.impl.ggml_c.ggml_graph_compute(@ptrCast(cgraph), &cplan);
 }
 
 /// Ports `ggml_backend_cpu_i` (ggml-cpu.cpp:193 @b1b770d90).
-const backend_i = ggml.impl.c.struct_ggml_backend_i{
+const backend_i = ggml.impl.ggml_c.struct_ggml_backend_i{
     .get_name = getName,
     .free = backendFree,
     .set_tensor_async = null,
@@ -223,9 +222,9 @@ const backend_i = ggml.impl.c.struct_ggml_backend_i{
 };
 
 /// Ports `ggml_backend_cpu_guid` (ggml-cpu.cpp:212 @b1b770d90).
-var cpu_guid: ggml.impl.c.ggml_guid = .{ 0xaa, 0x67, 0xc7, 0x43, 0x96, 0xe6, 0xa3, 0x8a, 0xe3, 0xaf, 0xea, 0x92, 0x36, 0xbc, 0xfc, 0x89 };
+var cpu_guid: ggml.impl.ggml_c.ggml_guid = .{ 0xaa, 0x67, 0xc7, 0x43, 0x96, 0xe6, 0xa3, 0x8a, 0xe3, 0xaf, 0xea, 0x92, 0x36, 0xbc, 0xfc, 0x89 };
 
-fn guid() ggml.impl.c.ggml_guid_t {
+fn guid() ggml.impl.ggml_c.ggml_guid_t {
     return &cpu_guid;
 }
 
@@ -233,13 +232,13 @@ fn guid() ggml.impl.c.ggml_guid_t {
 ///
 /// Return: a new CPU backend, or null if allocation failed. The caller owns
 /// it and frees it with `ggml_backend_free`.
-pub export fn ggml_backend_cpu_init() callconv(.c) ggml.impl.c.ggml_backend_t {
+pub fn ggml_backend_cpu_init() callconv(.c) ggml.impl.ggml_c.ggml_backend_t {
     // initialize CPU backend now to avoid slowing the first graph computation
     ggml.cpu.features.ggml_cpu_init();
 
-    const ctx = allocator.create(Context) catch return null;
+    const ctx = std.heap.c_allocator.create(Context) catch return null;
     ctx.* = .{
-        .n_threads = ggml.impl.c.GGML_DEFAULT_N_THREADS,
+        .n_threads = ggml.impl.ggml_c.GGML_DEFAULT_N_THREADS,
         .threadpool = null,
         .work_data = null,
         .work_size = 0,
@@ -248,60 +247,54 @@ pub export fn ggml_backend_cpu_init() callconv(.c) ggml.impl.c.ggml_backend_t {
         .use_ref = false,
     };
 
-    const backend = allocator.create(ggml.impl.c.struct_ggml_backend) catch {
-        allocator.destroy(ctx);
+    const backend = std.heap.c_allocator.create(ggml.impl.ggml_c.struct_ggml_backend) catch {
+        std.heap.c_allocator.destroy(ctx);
         return null;
     };
     backend.* = .{
         .guid = guid(),
         .iface = backend_i,
-        .device = ggml.impl.c.ggml_backend_reg_dev_get(ggml_backend_cpu_reg(), 0),
+        .device = ggml.impl.ggml_c.ggml_backend_reg_dev_get(ggml_backend_cpu_reg(), 0),
         .context = ctx,
     };
     return backend;
 }
 
 /// Ports `ggml_backend_is_cpu` (ggml-cpu.cpp:249 @b1b770d90).
-pub export fn ggml_backend_is_cpu(backend: ggml.impl.c.ggml_backend_t) callconv(.c) bool {
-    return backend != null and ggml.impl.c.ggml_guid_matches(ggml.impl.one(ggml.impl.c.struct_ggml_backend, backend).guid, guid());
+pub fn ggml_backend_is_cpu(backend: ggml.impl.ggml_c.ggml_backend_t) callconv(.c) bool {
+    return backend != null and ggml.impl.ggml_c.ggml_guid_matches(ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend, backend).guid, guid());
 }
 
-inline fn contextOf(backend_cpu: ggml.impl.c.ggml_backend_t) *Context {
+inline fn contextOf(backend_cpu: ggml.impl.ggml_c.ggml_backend_t) *Context {
     ggml.impl.assert(ggml_backend_is_cpu(backend_cpu), "ggml_backend_is_cpu(backend_cpu)");
-    return @ptrCast(@alignCast(ggml.impl.one(ggml.impl.c.struct_ggml_backend, backend_cpu).context.?));
+    return @ptrCast(@alignCast(ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend, backend_cpu).context.?));
 }
 
 /// Ports `ggml_backend_cpu_set_n_threads` (ggml-cpu.cpp:253 @b1b770d90).
-pub export fn ggml_backend_cpu_set_n_threads(backend_cpu: ggml.impl.c.ggml_backend_t, n_threads: c_int) callconv(.c) void {
+pub fn ggml_backend_cpu_set_n_threads(backend_cpu: ggml.impl.ggml_c.ggml_backend_t, n_threads: c_int) callconv(.c) void {
     contextOf(backend_cpu).n_threads = n_threads;
 }
 
 /// Ports `ggml_backend_cpu_set_threadpool` (ggml-cpu.cpp:260 @b1b770d90).
-pub export fn ggml_backend_cpu_set_threadpool(backend_cpu: ggml.impl.c.ggml_backend_t, threadpool: ggml.impl.c.ggml_threadpool_t) callconv(.c) void {
+pub fn ggml_backend_cpu_set_threadpool(backend_cpu: ggml.impl.ggml_c.ggml_backend_t, threadpool: ggml.impl.ggml_c.ggml_threadpool_t) callconv(.c) void {
     const ctx = contextOf(backend_cpu);
     if (ctx.threadpool != null and ctx.threadpool != threadpool) {
         // already had a different threadpool, pause/suspend it before switching
-        ggml.impl.c.ggml_threadpool_pause(ctx.threadpool);
+        ggml.impl.ggml_c.ggml_threadpool_pause(ctx.threadpool);
     }
     ctx.threadpool = threadpool;
 }
 
 /// Ports `ggml_backend_cpu_set_abort_callback` (ggml-cpu.cpp:272 @b1b770d90).
-pub export fn ggml_backend_cpu_set_abort_callback(backend_cpu: ggml.impl.c.ggml_backend_t, abort_callback: ggml.impl.c.ggml_abort_callback, abort_callback_data: ?*anyopaque) callconv(.c) void {
+pub fn ggml_backend_cpu_set_abort_callback(backend_cpu: ggml.impl.ggml_c.ggml_backend_t, abort_callback: ggml.impl.ggml_c.ggml_abort_callback, abort_callback_data: ?*anyopaque) callconv(.c) void {
     const ctx = contextOf(backend_cpu);
     ctx.abort_callback = abort_callback;
     ctx.abort_callback_data = abort_callback_data;
 }
 
 /// Ports `ggml_backend_cpu_set_use_ref` (ggml-cpu.cpp:280 @b1b770d90).
-pub export fn ggml_backend_cpu_set_use_ref(backend_cpu: ggml.impl.c.ggml_backend_t, use_ref: bool) callconv(.c) void {
+pub fn ggml_backend_cpu_set_use_ref(backend_cpu: ggml.impl.ggml_c.ggml_backend_t, use_ref: bool) callconv(.c) void {
     contextOf(backend_cpu).use_ref = use_ref;
-}
-
-comptime {
-    _ = isExtraBufferType;
-    _ = deviceGetExtraBuffersType;
-    _ = ggml.cpu.extra;
 }
 
 // -----------------------------------------------------------------------------
@@ -329,7 +322,7 @@ const DeviceContext = struct {
         // The C's `#ifdef __APPLE__`: iOS reads the brand string too.
         if (!builtin.os.tag.isDarwin()) return;
         var len: usize = self.description.len;
-        if (stdlib.libc.sysctlbyname("machdep.cpu.brand_string", &self.description, &len, null, 0) == 0 and len > 0) {
+        if (std.c.sysctlbyname("machdep.cpu.brand_string", &self.description, &len, null, 0) == 0 and len > 0) {
             // `len` counts the NUL the call wrote.
             self.description_len = len - 1;
             self.description[self.description_len] = 0;
@@ -345,11 +338,11 @@ const DeviceContext = struct {
     /// NULs -- or cut short, for a size under 3 -- which reads the same as
     /// stopping at the first NUL here.
     fn initWindows(self: *DeviceContext) void {
-        var key: ggml.win32.HKEY = undefined;
+        var key: std.os.windows.HKEY = undefined;
         if (ggml.win32.RegOpenKeyExA(ggml.win32.HKEY_LOCAL_MACHINE, "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", 0, ggml.win32.KEY_READ, &key) != ggml.win32.ERROR_SUCCESS) return;
         defer _ = ggml.win32.RegCloseKey(key);
 
-        var cpu_brand_size: ggml.win32.DWORD = 0;
+        var cpu_brand_size: std.os.windows.DWORD = 0;
         if (ggml.win32.RegQueryValueExA(key, "ProcessorNameString", null, null, null, &cpu_brand_size) != ggml.win32.ERROR_SUCCESS) return;
 
         // `description.resize(cpu_brand_size)`.
@@ -358,7 +351,7 @@ const DeviceContext = struct {
         @memset(self.description[self.description_len .. n + 1], 0);
         self.description_len = n;
 
-        var size: ggml.win32.DWORD = @intCast(n);
+        var size: std.os.windows.DWORD = @intCast(n);
         if (ggml.win32.RegQueryValueExA(key, "ProcessorNameString", null, null, &self.description, &size) == ggml.win32.ERROR_SUCCESS) {
             self.description[n] = 0;
         }
@@ -391,15 +384,15 @@ const DeviceContext = struct {
 const sc_phys_pages: c_int = if (builtin.os.tag.isDarwin()) 200 else 85;
 const sc_page_size: c_int = if (builtin.os.tag.isDarwin()) 29 else 30;
 
-fn deviceGetName(dev: ggml.impl.c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
+fn deviceGetName(dev: ggml.impl.ggml_c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
     _ = dev;
     return "CPU";
 }
 
 /// Ports `ggml_backend_cpu_device_get_description` (ggml-cpu.cpp:359
 /// @b1b770d90).
-fn deviceGetDescription(dev: ggml.impl.c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
-    const d = ggml.impl.one(ggml.impl.c.struct_ggml_backend_device, dev);
+fn deviceGetDescription(dev: ggml.impl.ggml_c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
+    const d = ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend_device, dev);
     const ctx: *DeviceContext = @ptrCast(@alignCast(d.context.?));
     return &ctx.description;
 }
@@ -407,7 +400,7 @@ fn deviceGetDescription(dev: ggml.impl.c.ggml_backend_dev_t) callconv(.c) [*c]co
 /// Ports `ggml_backend_cpu_device_get_memory` (ggml-cpu.cpp:365 @b1b770d90),
 /// both arms. Windows reports the physical memory available as free; every
 /// other platform reports all of it.
-fn deviceGetMemory(dev: ggml.impl.c.ggml_backend_dev_t, free: *usize, total: *usize) callconv(.c) void {
+fn deviceGetMemory(dev: ggml.impl.ggml_c.ggml_backend_dev_t, free: *usize, total: *usize) callconv(.c) void {
     _ = dev;
     if (comptime builtin.os.tag == .windows) {
         var status: ggml.win32.MEMORYSTATUSEX = undefined;
@@ -417,21 +410,21 @@ fn deviceGetMemory(dev: ggml.impl.c.ggml_backend_dev_t, free: *usize, total: *us
         free.* = status.ullAvailPhys;
         return;
     }
-    const pages = stdlib.libc.sysconf(sc_phys_pages);
-    const page_size = stdlib.libc.sysconf(sc_page_size);
+    const pages = std.c.sysconf(sc_phys_pages);
+    const page_size = std.c.sysconf(sc_page_size);
     total.* = @intCast(pages * page_size);
     // "free" system memory is ill-defined, for practical purposes assume
     // that all of it is free:
     free.* = total.*;
 }
 
-fn deviceGetType(dev: ggml.impl.c.ggml_backend_dev_t) callconv(.c) ggml.impl.c.enum_ggml_backend_dev_type {
+fn deviceGetType(dev: ggml.impl.ggml_c.ggml_backend_dev_t) callconv(.c) ggml.impl.ggml_c.enum_ggml_backend_dev_type {
     _ = dev;
-    return ggml.impl.c.GGML_BACKEND_DEVICE_TYPE_CPU;
+    return ggml.impl.ggml_c.GGML_BACKEND_DEVICE_TYPE_CPU;
 }
 
 /// Ports `ggml_backend_cpu_device_get_props` (ggml-cpu.cpp:390 @b1b770d90).
-fn deviceGetProps(dev: ggml.impl.c.ggml_backend_dev_t, props: *ggml.impl.c.struct_ggml_backend_dev_props) callconv(.c) void {
+fn deviceGetProps(dev: ggml.impl.ggml_c.ggml_backend_dev_t, props: *ggml.impl.ggml_c.struct_ggml_backend_dev_props) callconv(.c) void {
     props.name = deviceGetName(dev);
     props.description = deviceGetDescription(dev);
     props.type = deviceGetType(dev);
@@ -445,21 +438,21 @@ fn deviceGetProps(dev: ggml.impl.c.ggml_backend_dev_t, props: *ggml.impl.c.struc
     };
 }
 
-fn deviceInitBackend(dev: ggml.impl.c.ggml_backend_dev_t, params: [*c]const u8) callconv(.c) ggml.impl.c.ggml_backend_t {
+fn deviceInitBackend(dev: ggml.impl.ggml_c.ggml_backend_dev_t, params: [*c]const u8) callconv(.c) ggml.impl.ggml_c.ggml_backend_t {
     _ = dev;
     _ = params;
     return ggml_backend_cpu_init();
 }
 
-fn deviceGetBufferType(dev: ggml.impl.c.ggml_backend_dev_t) callconv(.c) ggml.impl.c.ggml_backend_buffer_type_t {
+fn deviceGetBufferType(dev: ggml.impl.ggml_c.ggml_backend_dev_t) callconv(.c) ggml.impl.ggml_c.ggml_backend_buffer_type_t {
     _ = dev;
-    return ggml.impl.c.ggml_backend_cpu_buffer_type();
+    return ggml.impl.ggml_c.ggml_backend_cpu_buffer_type();
 }
 
-fn deviceBufferFromHostPtr(dev: ggml.impl.c.ggml_backend_dev_t, ptr: ?*anyopaque, size: usize, max_tensor_size: usize) callconv(.c) ggml.impl.c.ggml_backend_buffer_t {
+fn deviceBufferFromHostPtr(dev: ggml.impl.ggml_c.ggml_backend_dev_t, ptr: ?*anyopaque, size: usize, max_tensor_size: usize) callconv(.c) ggml.impl.ggml_c.ggml_backend_buffer_t {
     _ = dev;
     _ = max_tensor_size;
-    return ggml.impl.c.ggml_backend_cpu_buffer_from_ptr(ptr, size);
+    return ggml.impl.ggml_c.ggml_backend_cpu_buffer_from_ptr(ptr, size);
 }
 
 /// Ports `ggml_backend_cpu_device_supports_op` (ggml-cpu.cpp:424 @b1b770d90).
@@ -468,11 +461,11 @@ fn deviceBufferFromHostPtr(dev: ggml.impl.c.ggml_backend_dev_t, ptr: ?*anyopaque
 /// Ports nothing by itself — the C writes `const struct ggml_tensor * src0
 /// = op->src[0];`, which is a plain copy that may be null. This is that,
 /// plus the `[*c]` narrowing Zig 0.16 needs before any `.ne[i]` on it.
-inline fn srcOf(p: [*c]ggml.impl.c.ggml_tensor) ?*const ggml.impl.c.ggml_tensor {
-    return if (p == null) null else ggml.impl.one(ggml.impl.c.ggml_tensor, p);
+inline fn srcOf(p: [*c]ggml.impl.ggml_c.ggml_tensor) ?*const ggml.impl.ggml_c.ggml_tensor {
+    return if (p == null) null else ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, p);
 }
 
-fn deviceSupportsOp(dev: ggml.impl.c.ggml_backend_dev_t, op: *const ggml.impl.c.ggml_tensor) callconv(.c) bool {
+fn deviceSupportsOp(dev: ggml.impl.ggml_c.ggml_backend_dev_t, op: *const ggml.impl.ggml_c.ggml_tensor) callconv(.c) bool {
     // The C copies the two raw pointers up front and lets each arm below
     // assume its own are non-null. Both must stay **optional** here: a
     // leaf weight reaches this with `op == GGML_OP_NONE` and no sources at
@@ -487,8 +480,8 @@ fn deviceSupportsOp(dev: ggml.impl.c.ggml_backend_dev_t, op: *const ggml.impl.c.
     const src0 = srcOf(op.src[0]);
     const src1 = srcOf(op.src[1]);
 
-    if (op.op == ggml.impl.c.GGML_OP_NONE or op.op == ggml.impl.c.GGML_OP_RESHAPE or op.op == ggml.impl.c.GGML_OP_VIEW or
-        op.op == ggml.impl.c.GGML_OP_PERMUTE or op.op == ggml.impl.c.GGML_OP_TRANSPOSE)
+    if (op.op == ggml.impl.ggml_c.GGML_OP_NONE or op.op == ggml.impl.ggml_c.GGML_OP_RESHAPE or op.op == ggml.impl.ggml_c.GGML_OP_VIEW or
+        op.op == ggml.impl.ggml_c.GGML_OP_PERMUTE or op.op == ggml.impl.ggml_c.GGML_OP_TRANSPOSE)
     {
         return true;
     }
@@ -506,48 +499,48 @@ fn deviceSupportsOp(dev: ggml.impl.c.ggml_backend_dev_t, op: *const ggml.impl.c.
     }
 
     switch (op.op) {
-        ggml.impl.c.GGML_OP_CPY, ggml.impl.c.GGML_OP_SET_ROWS => {
+        ggml.impl.ggml_c.GGML_OP_CPY, ggml.impl.ggml_c.GGML_OP_SET_ROWS => {
             // missing type_traits.from_float
-            return op.type != ggml.impl.c.GGML_TYPE_IQ3_XXS and op.type != ggml.impl.c.GGML_TYPE_IQ3_S and
-                op.type != ggml.impl.c.GGML_TYPE_IQ2_XXS and op.type != ggml.impl.c.GGML_TYPE_IQ2_XS and
-                op.type != ggml.impl.c.GGML_TYPE_IQ2_S and op.type != ggml.impl.c.GGML_TYPE_IQ1_S and
-                op.type != ggml.impl.c.GGML_TYPE_IQ1_M;
+            return op.type != ggml.impl.ggml_c.GGML_TYPE_IQ3_XXS and op.type != ggml.impl.ggml_c.GGML_TYPE_IQ3_S and
+                op.type != ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS and op.type != ggml.impl.ggml_c.GGML_TYPE_IQ2_XS and
+                op.type != ggml.impl.ggml_c.GGML_TYPE_IQ2_S and op.type != ggml.impl.ggml_c.GGML_TYPE_IQ1_S and
+                op.type != ggml.impl.ggml_c.GGML_TYPE_IQ1_M;
         },
-        ggml.impl.c.GGML_OP_MUL_MAT => {
-            if (ggml.impl.getOpParamsI32(op, 1) == ggml.impl.c.GGML_HINT_SRC0_IS_HADAMARD and
-                src0.?.type == ggml.impl.c.GGML_TYPE_F32 and op.type == ggml.impl.c.GGML_TYPE_F32)
+        ggml.impl.ggml_c.GGML_OP_MUL_MAT => {
+            if (ggml.impl.getOpParamsI32(op, 1) == ggml.impl.ggml_c.GGML_HINT_SRC0_IS_HADAMARD and
+                src0.?.type == ggml.impl.ggml_c.GGML_TYPE_F32 and op.type == ggml.impl.ggml_c.GGML_TYPE_F32)
             {
-                return src1.?.type == ggml.impl.c.GGML_TYPE_F32 or src1.?.type == ggml.impl.c.GGML_TYPE_F16;
+                return src1.?.type == ggml.impl.ggml_c.GGML_TYPE_F32 or src1.?.type == ggml.impl.ggml_c.GGML_TYPE_F16;
             }
             // F16 or BF16 in src1 is widened into the F32 work buffer
-            return src1.?.type == ggml.impl.c.GGML_TYPE_F32 or
-                src1.?.type == ggml.impl.c.ggml_get_type_traits_cpu(src0.?.type).*.vec_dot_type or
-                ((src1.?.type == ggml.impl.c.GGML_TYPE_F16 or src1.?.type == ggml.impl.c.GGML_TYPE_BF16) and
-                    ggml.impl.c.ggml_get_type_traits_cpu(src0.?.type).*.vec_dot_type == ggml.impl.c.GGML_TYPE_F32);
+            return src1.?.type == ggml.impl.ggml_c.GGML_TYPE_F32 or
+                src1.?.type == ggml.impl.ggml_c.ggml_get_type_traits_cpu(src0.?.type).*.vec_dot_type or
+                ((src1.?.type == ggml.impl.ggml_c.GGML_TYPE_F16 or src1.?.type == ggml.impl.ggml_c.GGML_TYPE_BF16) and
+                    ggml.impl.ggml_c.ggml_get_type_traits_cpu(src0.?.type).*.vec_dot_type == ggml.impl.ggml_c.GGML_TYPE_F32);
         },
-        ggml.impl.c.GGML_OP_SOFT_MAX_BACK => {
-            if (src0.?.type != ggml.impl.c.GGML_TYPE_F32 or src1.?.type != ggml.impl.c.GGML_TYPE_F32) return false;
+        ggml.impl.ggml_c.GGML_OP_SOFT_MAX_BACK => {
+            if (src0.?.type != ggml.impl.ggml_c.GGML_TYPE_F32 or src1.?.type != ggml.impl.ggml_c.GGML_TYPE_F32) return false;
             var max_bias: f32 = 0.0;
             const params: [*]const f32 = @ptrCast(&op.op_params);
             @memcpy(@as([*]u8, @ptrCast(&max_bias))[0..4], @as([*]const u8, @ptrCast(params + 1))[0..4]);
             return max_bias == 0.0;
         },
-        ggml.impl.c.GGML_OP_IM2COL_BACK => {
-            return src0.?.type == ggml.impl.c.GGML_TYPE_F32 and
-                (src1.?.type == ggml.impl.c.GGML_TYPE_F32 or src1.?.type == ggml.impl.c.GGML_TYPE_F16);
+        ggml.impl.ggml_c.GGML_OP_IM2COL_BACK => {
+            return src0.?.type == ggml.impl.ggml_c.GGML_TYPE_F32 and
+                (src1.?.type == ggml.impl.ggml_c.GGML_TYPE_F32 or src1.?.type == ggml.impl.ggml_c.GGML_TYPE_F16);
         },
-        ggml.impl.c.GGML_OP_GET_ROWS_BACK => {
-            return src0.?.type == ggml.impl.c.GGML_TYPE_F32 or src0.?.type == ggml.impl.c.GGML_TYPE_F16;
+        ggml.impl.ggml_c.GGML_OP_GET_ROWS_BACK => {
+            return src0.?.type == ggml.impl.ggml_c.GGML_TYPE_F32 or src0.?.type == ggml.impl.ggml_c.GGML_TYPE_F16;
         },
-        ggml.impl.c.GGML_OP_OUT_PROD => {
-            return (src0.?.type == ggml.impl.c.GGML_TYPE_F32 or
-                ((src0.?.type == ggml.impl.c.GGML_TYPE_F16 or ggml.impl.c.ggml_is_quantized(src0.?.type)) and
+        ggml.impl.ggml_c.GGML_OP_OUT_PROD => {
+            return (src0.?.type == ggml.impl.ggml_c.GGML_TYPE_F32 or
+                ((src0.?.type == ggml.impl.ggml_c.GGML_TYPE_F16 or ggml.impl.ggml_c.ggml_is_quantized(src0.?.type)) and
                     src0.?.ne[2] == src1.?.ne[2] and src0.?.ne[3] == src1.?.ne[3])) and
-                src1.?.type == ggml.impl.c.GGML_TYPE_F32 and op.type == ggml.impl.c.GGML_TYPE_F32;
+                src1.?.type == ggml.impl.ggml_c.GGML_TYPE_F32 and op.type == ggml.impl.ggml_c.GGML_TYPE_F32;
         },
-        ggml.impl.c.GGML_OP_CONV_2D => return ggml.impl.c.ggml_is_contiguous(src0.?),
-        ggml.impl.c.GGML_OP_SSM_SCAN => {
-            return ggml.impl.getOpParamsI32(op, 0) == 1 or ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[3]).ne[0] == 1;
+        ggml.impl.ggml_c.GGML_OP_CONV_2D => return ggml.impl.ggml_c.ggml_is_contiguous(src0.?),
+        ggml.impl.ggml_c.GGML_OP_SSM_SCAN => {
+            return ggml.impl.getOpParamsI32(op, 0) == 1 or ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[3]).ne[0] == 1;
         },
         else => return true,
     }
@@ -555,13 +548,13 @@ fn deviceSupportsOp(dev: ggml.impl.c.ggml_backend_dev_t, op: *const ggml.impl.c.
 
 /// Ports `ggml_backend_cpu_device_supports_buft` (ggml-cpu.cpp:490
 /// @b1b770d90).
-fn deviceSupportsBuft(dev: ggml.impl.c.ggml_backend_dev_t, buft: ggml.impl.c.ggml_backend_buffer_type_t) callconv(.c) bool {
+fn deviceSupportsBuft(dev: ggml.impl.ggml_c.ggml_backend_dev_t, buft: ggml.impl.ggml_c.ggml_backend_buffer_type_t) callconv(.c) bool {
     _ = dev;
-    return ggml.impl.c.ggml_backend_buft_is_host(buft) or isExtraBufferType(buft);
+    return ggml.impl.ggml_c.ggml_backend_buft_is_host(buft) or isExtraBufferType(buft);
 }
 
 /// Ports `ggml_backend_cpu_device_i` (ggml-cpu.cpp:495 @b1b770d90).
-const device_i = ggml.impl.c.struct_ggml_backend_device_i{
+const device_i = ggml.impl.ggml_c.struct_ggml_backend_device_i{
     .get_name = deviceGetName,
     .get_description = deviceGetDescription,
     .get_memory = @ptrCast(&deviceGetMemory),
@@ -582,22 +575,22 @@ const device_i = ggml.impl.c.struct_ggml_backend_device_i{
 // -----------------------------------------------------------------------------
 // The registration
 
-fn regGetName(reg: ggml.impl.c.ggml_backend_reg_t) callconv(.c) [*c]const u8 {
+fn regGetName(reg: ggml.impl.ggml_c.ggml_backend_reg_t) callconv(.c) [*c]const u8 {
     _ = reg;
     return "CPU";
 }
 
-fn regGetDeviceCount(reg: ggml.impl.c.ggml_backend_reg_t) callconv(.c) usize {
+fn regGetDeviceCount(reg: ggml.impl.ggml_c.ggml_backend_reg_t) callconv(.c) usize {
     _ = reg;
     return 1;
 }
 
 var device_ctx: DeviceContext = .{};
-var cpu_device: ggml.impl.c.struct_ggml_backend_device = undefined;
+var cpu_device: ggml.impl.ggml_c.struct_ggml_backend_device = undefined;
 var device_ready = std.atomic.Value(bool).init(false);
 var device_mutex: stdlib.sync.Mutex = .{};
 
-fn ensureDevice(reg: ggml.impl.c.ggml_backend_reg_t) void {
+fn ensureDevice(reg: ggml.impl.ggml_c.ggml_backend_reg_t) void {
     if (device_ready.load(.acquire)) return;
     device_mutex.lock();
     defer device_mutex.unlock();
@@ -612,7 +605,7 @@ fn ensureDevice(reg: ggml.impl.c.ggml_backend_reg_t) void {
 /// The C's two `static` locals are initialised on first call; `std.once`
 /// is the same guarantee, and the device's `reg` back-pointer is captured
 /// the same way.
-fn regGetDevice(reg: ggml.impl.c.ggml_backend_reg_t, index: usize) callconv(.c) ggml.impl.c.ggml_backend_dev_t {
+fn regGetDevice(reg: ggml.impl.ggml_c.ggml_backend_reg_t, index: usize) callconv(.c) ggml.impl.ggml_c.ggml_backend_dev_t {
     ggml.impl.assert(index == 0, "index == 0");
     ensureDevice(reg);
     return &cpu_device;
@@ -624,7 +617,7 @@ fn regGetDevice(reg: ggml.impl.c.ggml_backend_reg_t, index: usize) callconv(.c) 
 /// the x86, RISC-V, POWER, s390x and WASM arms are all compiled out. SVE,
 /// SME and MATMUL_INT8 stay because they are runtime checks on ARM even
 /// though this build does not select them.
-var features: [10]ggml.impl.c.ggml_backend_feature = undefined;
+var features: [10]ggml.impl.ggml_c.ggml_backend_feature = undefined;
 var features_n: usize = 0;
 var features_ready = std.atomic.Value(bool).init(false);
 var features_mutex: stdlib.sync.Mutex = .{};
@@ -640,28 +633,28 @@ fn ensureFeatures() void {
     defer features_mutex.unlock();
     if (features_ready.load(.acquire)) return;
     ggml.cpu.features.ggml_cpu_init();
-    if (ggml.impl.c.ggml_cpu_has_neon() != 0) pushFeature("NEON", "1");
-    if (ggml.impl.c.ggml_cpu_has_arm_fma() != 0) pushFeature("ARM_FMA", "1");
-    if (ggml.impl.c.ggml_cpu_has_fp16_va() != 0) pushFeature("FP16_VA", "1");
-    if (ggml.impl.c.ggml_cpu_has_matmul_int8() != 0) pushFeature("MATMUL_INT8", "1");
-    if (ggml.impl.c.ggml_cpu_has_sve() != 0) pushFeature("SVE", "1");
-    if (ggml.impl.c.ggml_cpu_has_dotprod() != 0) pushFeature("DOTPROD", "1");
-    if (ggml.impl.c.ggml_cpu_has_sme() != 0) pushFeature("SME", "1");
-    if (ggml.impl.c.ggml_cpu_has_llamafile() != 0) pushFeature("LLAMAFILE", "1");
+    if (ggml.impl.ggml_c.ggml_cpu_has_neon() != 0) pushFeature("NEON", "1");
+    if (ggml.impl.ggml_c.ggml_cpu_has_arm_fma() != 0) pushFeature("ARM_FMA", "1");
+    if (ggml.impl.ggml_c.ggml_cpu_has_fp16_va() != 0) pushFeature("FP16_VA", "1");
+    if (ggml.impl.ggml_c.ggml_cpu_has_matmul_int8() != 0) pushFeature("MATMUL_INT8", "1");
+    if (ggml.impl.ggml_c.ggml_cpu_has_sve() != 0) pushFeature("SVE", "1");
+    if (ggml.impl.ggml_c.ggml_cpu_has_dotprod() != 0) pushFeature("DOTPROD", "1");
+    if (ggml.impl.ggml_c.ggml_cpu_has_sme() != 0) pushFeature("SME", "1");
+    if (ggml.impl.ggml_c.ggml_cpu_has_llamafile() != 0) pushFeature("LLAMAFILE", "1");
     pushFeature("ACCELERATE", "1");
     pushFeature("REPACK", "1");
     pushFeature(null, null);
     features_ready.store(true, .release);
 }
 
-fn regGetFeatures(reg: ggml.impl.c.ggml_backend_reg_t) callconv(.c) [*c]ggml.impl.c.ggml_backend_feature {
+fn regGetFeatures(reg: ggml.impl.ggml_c.ggml_backend_reg_t) callconv(.c) [*c]ggml.impl.ggml_c.ggml_backend_feature {
     _ = reg;
     ensureFeatures();
     return &features;
 }
 
 /// Ports `ggml_backend_cpu_get_proc_address` (ggml-cpu.cpp:659 @b1b770d90).
-fn regGetProcAddress(reg: ggml.impl.c.ggml_backend_reg_t, name: [*c]const u8) callconv(.c) ?*anyopaque {
+fn regGetProcAddress(reg: ggml.impl.ggml_c.ggml_backend_reg_t, name: [*c]const u8) callconv(.c) ?*anyopaque {
     _ = reg;
     const n = std.mem.span(@as([*:0]const u8, @ptrCast(name)));
     const table = .{
@@ -669,12 +662,12 @@ fn regGetProcAddress(reg: ggml.impl.c.ggml_backend_reg_t, name: [*c]const u8) ca
         .{ "ggml_backend_dev_get_extra_bufts", @as(?*anyopaque, @ptrCast(@constCast(&deviceGetExtraBuffersType))) },
         .{ "ggml_backend_get_features", @as(?*anyopaque, @ptrCast(@constCast(&regGetFeatures))) },
         .{ "ggml_backend_set_abort_callback", @as(?*anyopaque, @ptrCast(@constCast(&ggml_backend_cpu_set_abort_callback))) },
-        .{ "ggml_backend_cpu_numa_init", @as(?*anyopaque, @ptrCast(@constCast(&ggml.impl.c.ggml_numa_init))) },
-        .{ "ggml_backend_cpu_is_numa", @as(?*anyopaque, @ptrCast(@constCast(&ggml.impl.c.ggml_is_numa))) },
+        .{ "ggml_backend_cpu_numa_init", @as(?*anyopaque, @ptrCast(@constCast(&ggml.impl.ggml_c.ggml_numa_init))) },
+        .{ "ggml_backend_cpu_is_numa", @as(?*anyopaque, @ptrCast(@constCast(&ggml.impl.ggml_c.ggml_is_numa))) },
         .{ "ggml_backend_cpu_set_use_ref", @as(?*anyopaque, @ptrCast(@constCast(&ggml_backend_cpu_set_use_ref))) },
         // threadpool - the C's own TODO: move to ggml-base
-        .{ "ggml_threadpool_new", @as(?*anyopaque, @ptrCast(@constCast(&ggml.impl.c.ggml_threadpool_new))) },
-        .{ "ggml_threadpool_free", @as(?*anyopaque, @ptrCast(@constCast(&ggml.impl.c.ggml_threadpool_free))) },
+        .{ "ggml_threadpool_new", @as(?*anyopaque, @ptrCast(@constCast(&ggml.impl.ggml_c.ggml_threadpool_new))) },
+        .{ "ggml_threadpool_free", @as(?*anyopaque, @ptrCast(@constCast(&ggml.impl.ggml_c.ggml_threadpool_free))) },
         .{ "ggml_backend_cpu_set_threadpool", @as(?*anyopaque, @ptrCast(@constCast(&ggml_backend_cpu_set_threadpool))) },
     };
     inline for (table) |entry| {
@@ -684,15 +677,15 @@ fn regGetProcAddress(reg: ggml.impl.c.ggml_backend_reg_t, name: [*c]const u8) ca
 }
 
 /// Ports `ggml_backend_cpu_reg_i` (ggml-cpu.cpp:700 @b1b770d90).
-const reg_i = ggml.impl.c.struct_ggml_backend_reg_i{
+const reg_i = ggml.impl.ggml_c.struct_ggml_backend_reg_i{
     .get_name = regGetName,
     .get_device_count = regGetDeviceCount,
     .get_device = regGetDevice,
     .get_proc_address = regGetProcAddress,
 };
 
-var cpu_reg = ggml.impl.c.struct_ggml_backend_reg{
-    .api_version = ggml.impl.c.GGML_BACKEND_API_VERSION,
+var cpu_reg = ggml.impl.ggml_c.struct_ggml_backend_reg{
+    .api_version = ggml.impl.ggml_c.GGML_BACKEND_API_VERSION,
     .iface = reg_i,
     .context = null,
 };
@@ -700,7 +693,7 @@ var cpu_reg = ggml.impl.c.struct_ggml_backend_reg{
 /// Ports `ggml_backend_cpu_reg` (ggml-cpu.cpp:707 @b1b770d90).
 ///
 /// Return: the CPU registration, a process-lifetime singleton.
-pub export fn ggml_backend_cpu_reg() callconv(.c) ggml.impl.c.ggml_backend_reg_t {
+pub fn ggml_backend_cpu_reg() callconv(.c) ggml.impl.ggml_c.ggml_backend_reg_t {
     // init CPU feature detection
     ggml.cpu.features.ggml_cpu_init();
     return &cpu_reg;

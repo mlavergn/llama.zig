@@ -12,12 +12,10 @@ const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
 
-const Allocator = std.mem.Allocator;
-
 const gen_prefix = "<|im_start|>assistant\n";
 
 const Build = struct {
-    a: Allocator,
+    a: std.mem.Allocator,
     inputs: *const common_chat.template.GenerationParams,
     supports_reasoning: bool,
     extract_reasoning: bool,
@@ -170,7 +168,7 @@ const Build = struct {
 };
 
 const Starts = struct {
-    a: Allocator,
+    a: std.mem.Allocator,
     list: std.ArrayList([]const u8),
 
     fn add(self: *Starts, _: usize, t: *json.Value) common_chat.exception.Error!void {
@@ -182,7 +180,7 @@ const Starts = struct {
 /// Ports `common_chat_params_init_qwen3_coder` (qwen3-coder.cpp:3 @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
-pub fn init(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
+pub fn init(a: std.mem.Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
     var data: common_chat.params.ChatParams = .{};
 
     data.prompt = try common_chat.template.directApplyImpl(a, tmpl, inputs, null, null, null);

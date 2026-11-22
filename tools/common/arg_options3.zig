@@ -17,10 +17,10 @@
 //! `common_json`, reached as `cli_fit`'s `json`.
 
 const std = @import("std");
+const llama = @import("llama");
 const mod = @import("module.zig");
 const cli_fit = @import("cli_fit");
 const stdlib = @import("stdlib");
-const c = @import("tools_h");
 
 const S = [:0]const u8;
 
@@ -248,7 +248,7 @@ pub fn add(ctx: *mod.arg.Context) !void {
     try ctx.add((mod.arg.Arg{ .args = &.{ "--rerank", "--reranking" }, .help = try ctx.fmt("enable reranking endpoint on server (default: %s)", .{@as([*:0]const u8, "disabled")}), .handler = .{ .void_ = struct {
         fn f(q: *mod.params.Params) !void {
             q.embedding = true;
-            q.pooling_type = c.LLAMA_POOLING_TYPE_RANK;
+            q.pooling_type = llama.impl.llama_c.LLAMA_POOLING_TYPE_RANK;
         }
     }.f } }).setExamples(&.{.server}).setEnv("LLAMA_ARG_RERANKING"));
     // arg.cpp:3540

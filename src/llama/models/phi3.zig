@@ -114,7 +114,7 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
         var residual = inpL;
-        var cur: *llama.impl.c.ggml_tensor = undefined;
+        var cur: *llama.impl.llama_c.ggml_tensor = undefined;
 
         // Self-attention.
         {
@@ -133,16 +133,16 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
             b.cb(Kcur, "Kcur", il);
             b.cb(Vcur, "Vcur", il);
 
-            Qcur = llama.impl.c.ggml_scale(ctx, Qcur, 1.0 / stdlib.libm.sqrtfInt(n_embd_head));
+            Qcur = llama.impl.llama_c.ggml_scale(ctx, Qcur, 1.0 / stdlib.libm.sqrtfInt(n_embd_head));
             b.cb(Qcur, "Qcur", il);
 
             cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0, il);
         }
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            residual = llama.impl.c.ggml_get_rows(ctx, residual, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            residual = llama.impl.llama_c.ggml_get_rows(ctx, residual, inp_out_ids);
         }
-        cur = llama.impl.c.ggml_add(ctx, cur, residual);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, residual);
         residual = cur;
 
         cur = b.buildNorm(cur, layer.ffn_norm, layer.ffn_norm_b, .rms, il);
@@ -168,7 +168,7 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
             }, il);
             b.cb(cur, "ffn_moe_out", il);
         }
-        cur = llama.impl.c.ggml_add(ctx, residual, cur);
+        cur = llama.impl.llama_c.ggml_add(ctx, residual, cur);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
@@ -185,7 +185,7 @@ fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const ll
 
     if (model.output_b) |ob| {
         b.cb(cur, "result_output_no_bias", -1);
-        cur = llama.impl.c.ggml_add(ctx, cur, ob);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ob);
     }
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;

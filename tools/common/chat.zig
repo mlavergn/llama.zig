@@ -22,9 +22,9 @@
 //! (capabilities, role workarounds, the auto-parser) is not ported.
 
 const std = @import("std");
+const llama = @import("llama");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const c = @import("tools_h");
 
 /// `CHATML_TEMPLATE_SRC` (chat.cpp:792 @b1b770d90).
 const chatml_template_src =
@@ -85,18 +85,18 @@ pub const Templates = struct {
     /// Ports `common_chat_templates_init` (chat.cpp:916 @b1b770d90).
     ///
     /// Return: the templates, every string `a`'s.
-    pub fn init(a: std.mem.Allocator, model: ?*const c.llama_model, chat_template_override: []const u8) !Templates {
+    pub fn init(a: std.mem.Allocator, model: ?*const llama.impl.llama_c.llama_model, chat_template_override: []const u8) !Templates {
         var default_template_src: []const u8 = "";
         var template_tool_use_src: []const u8 = "";
 
         var has_explicit_template = chat_template_override.len != 0;
         if (chat_template_override.len == 0) {
-            if (model == null) _ = c.ggml_abort("chat.cpp", 925, "GGML_ASSERT(%s) failed", "model != nullptr");
-            if (c.llama_model_chat_template(model, null)) |str| {
+            if (model == null) _ = llama.impl.llama_c.ggml_abort("chat.cpp", 925, "GGML_ASSERT(%s) failed", "model != nullptr");
+            if (llama.api.model.llama_model_chat_template(model, null)) |str| {
                 default_template_src = std.mem.span(str);
                 has_explicit_template = true;
             }
-            if (c.llama_model_chat_template(model, "tool_use")) |str| {
+            if (llama.api.model.llama_model_chat_template(model, "tool_use")) |str| {
                 template_tool_use_src = std.mem.span(str);
                 has_explicit_template = true;
             }
@@ -135,11 +135,11 @@ pub const Templates = struct {
         var add_bos = false;
         var add_eos = false;
         if (model != null) {
-            const vocab = c.llama_model_get_vocab(model);
-            token_bos = try getToken(a, vocab, c.llama_vocab_bos(vocab), "BOS", "bos_token", default_template_src, template_tool_use_src);
-            token_eos = try getToken(a, vocab, c.llama_vocab_eos(vocab), "EOS", "eos_token", default_template_src, template_tool_use_src);
-            add_bos = c.llama_vocab_get_add_bos(vocab);
-            add_eos = c.llama_vocab_get_add_eos(vocab);
+            const vocab = llama.api.model.llama_model_get_vocab(model);
+            token_bos = try getToken(a, vocab, llama.api.vocab.llama_vocab_bos(vocab), "BOS", "bos_token", default_template_src, template_tool_use_src);
+            token_eos = try getToken(a, vocab, llama.api.vocab.llama_vocab_eos(vocab), "EOS", "eos_token", default_template_src, template_tool_use_src);
+            add_bos = llama.api.vocab.llama_vocab_get_add_bos(vocab);
+            add_eos = llama.api.vocab.llama_vocab_get_add_eos(vocab);
         }
         return .{
             .add_bos = add_bos,
@@ -154,8 +154,8 @@ pub const Templates = struct {
 
     /// The lambda of `common_chat_templates_init` named `get_token` (chat.cpp:976
     /// @b1b770d90).
-    fn getToken(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, token: c.llama_token, comptime name: [*:0]const u8, jinja_variable_name: []const u8, default_src: []const u8, tool_use_src: []const u8) ![]const u8 {
-        if (token == c.LLAMA_TOKEN_NULL) {
+    fn getToken(a: std.mem.Allocator, vocab: ?*const llama.impl.llama_c.llama_vocab, token: llama.impl.llama_c.llama_token, comptime name: [*:0]const u8, jinja_variable_name: []const u8, default_src: []const u8, tool_use_src: []const u8) ![]const u8 {
+        if (token == llama.impl.llama_c.LLAMA_TOKEN_NULL) {
             if (std.mem.indexOf(u8, default_src, jinja_variable_name) != null or
                 std.mem.indexOf(u8, tool_use_src, jinja_variable_name) != null)
             {
@@ -173,7 +173,7 @@ pub const Templates = struct {
     /// Return: the prompt, `a`'s.
     fn applyLegacy(self: *const Templates, a: std.mem.Allocator, messages: []const Msg, add_generation_prompt: bool) ![]const u8 {
         var alloc_size: usize = 0;
-        const chat = try a.alloc(c.llama_chat_message, messages.len);
+        const chat = try a.alloc(llama.impl.llama_c.llama_chat_message, messages.len);
         for (messages, 0..) |msg, i| {
             chat[i] = .{
                 .role = (try a.dupeSentinel(u8, msg.role, 0)).ptr,
@@ -187,7 +187,7 @@ pub const Templates = struct {
 
         // run the first time to get the total output length
         const src = try a.dupeSentinel(u8, self.default_src, 0);
-        var res = c.llama_chat_apply_template(src.ptr, chat.ptr, chat.len, add_generation_prompt, buf.ptr, @intCast(buf.len));
+        var res = llama.api.llama.llama_chat_apply_template(src.ptr, chat.ptr, chat.len, add_generation_prompt, buf.ptr, @intCast(buf.len));
 
         // error: chat template is not supported
         if (res < 0) {
@@ -198,7 +198,7 @@ pub const Templates = struct {
         // if it turns out that our buffer is too small, we resize it
         if (@as(usize, @intCast(res)) > buf.len) {
             buf = try a.realloc(buf, @intCast(res));
-            res = c.llama_chat_apply_template(src.ptr, chat.ptr, chat.len, add_generation_prompt, buf.ptr, @intCast(buf.len));
+            res = llama.api.llama.llama_chat_apply_template(src.ptr, chat.ptr, chat.len, add_generation_prompt, buf.ptr, @intCast(buf.len));
         }
 
         // for safety, we check the result again

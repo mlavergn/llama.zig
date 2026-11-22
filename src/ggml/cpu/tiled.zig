@@ -265,7 +265,7 @@ fn unpackQ2K(rows: [*]const ggml.quants.blocks.Q2_K, row_stride: i64, n_rows: c_
 /// `lut` in `tiled_unpack_src0` for `block_iq4_xs`: `kvalues_iq4nl + 128`.
 const iq4_lut: [16]u8 = blk: {
     var t: [16]u8 = undefined;
-    for (0..16) |k| t[k] = @intCast(@as(i32, ggml.impl.c.kvalues_iq4nl[k]) + 128);
+    for (0..16) |k| t[k] = @intCast(@as(i32, ggml.impl.ggml_c.kvalues_iq4nl[k]) + 128);
     break :blk t;
 };
 
@@ -325,8 +325,8 @@ fn unpackIq2Xxs(rows: [*]const ggml.quants.blocks.IQ2_XXS, row_stride: i64, n_ro
                 const aux1 = readU32(qs + 8 * ib32 + 4);
                 tile.scales[s_off + ib32] = @intCast(2 * (aux1 >> 28) + 1);
                 for (0..4) |l| {
-                    g[l] = ggml.impl.c.iq2xxs_grid[@as(u8, @truncate(aux0 >> @intCast(8 * l)))];
-                    signs4[l] = ggml.impl.c.ksigns_iq2xs[(aux1 >> @intCast(7 * l)) & 127];
+                    g[l] = ggml.impl.ggml_c.iq2xxs_grid[@as(u8, @truncate(aux0 >> @intCast(8 * l)))];
+                    signs4[l] = ggml.impl.ggml_c.ksigns_iq2xs[(aux1 >> @intCast(7 * l)) & 127];
                 }
                 ggml.cpu.tiled_kernel.unpkSign32(g, &signs4, tile.q[q_off + 32 * ib32 ..].ptr);
             }
@@ -348,13 +348,13 @@ fn unpackIq2Xs(rows: [*]const ggml.quants.blocks.IQ2_XS, row_stride: i64, n_rows
 
             var g: [4]u64 = undefined;
             var signs4: [4]u8 = undefined;
-            for (0..ggml.impl.c.QK_K / 32) |ib32| {
+            for (0..ggml.impl.ggml_c.QK_K / 32) |ib32| {
                 tile.scales[s_off + 2 * ib32 + 0] = 2 * @as(i32, x.scales[ib32] & 0xf) + 1;
                 tile.scales[s_off + 2 * ib32 + 1] = 2 * @as(i32, x.scales[ib32] >> 4) + 1;
                 const q = x.qs[4 * ib32 ..];
                 for (0..4) |l| {
-                    g[l] = ggml.impl.c.iq2xs_grid[q[l] & 511];
-                    signs4[l] = ggml.impl.c.ksigns_iq2xs[q[l] >> 9];
+                    g[l] = ggml.impl.ggml_c.iq2xs_grid[q[l] & 511];
+                    signs4[l] = ggml.impl.ggml_c.ksigns_iq2xs[q[l] >> 9];
                 }
                 ggml.cpu.tiled_kernel.unpkSign32(g, &signs4, tile.q[q_off + 32 * ib32 ..].ptr);
             }
@@ -376,14 +376,14 @@ fn unpackIq2S(rows: [*]const ggml.quants.blocks.IQ2_S, row_stride: i64, n_rows: 
             tile.d[d_off] = fp16(x.d) * 0.125;
 
             var qs: [*]const u8 = &x.qs;
-            var signs: [*]const u8 = x.qs[ggml.impl.c.QK_K / 8 ..].ptr;
+            var signs: [*]const u8 = x.qs[ggml.impl.ggml_c.QK_K / 8 ..].ptr;
             var g: [4]u64 = undefined;
-            for (0..ggml.impl.c.QK_K / 32) |ib32| {
+            for (0..ggml.impl.ggml_c.QK_K / 32) |ib32| {
                 tile.scales[s_off + 2 * ib32 + 0] = 2 * @as(i32, x.scales[ib32] & 0xf) + 1;
                 tile.scales[s_off + 2 * ib32 + 1] = 2 * @as(i32, x.scales[ib32] >> 4) + 1;
                 for (0..4) |l| {
                     const hb: u32 = (@as(u32, x.qh[ib32]) << @intCast(8 - 2 * l)) & 0x300;
-                    g[l] = ggml.impl.c.iq2s_grid[qs[l] | hb];
+                    g[l] = ggml.impl.ggml_c.iq2s_grid[qs[l] | hb];
                 }
                 ggml.cpu.tiled_kernel.unpkSign32(g, signs, tile.q[q_off + 32 * ib32 ..].ptr);
                 qs += 4;
@@ -406,16 +406,16 @@ fn unpackIq3Xxs(rows: [*]const ggml.quants.blocks.IQ3_XXS, row_stride: i64, n_ro
             tile.d[d_off] = fp16(x.d) * 0.25;
 
             var qs: [*]const u8 = &x.qs;
-            const scales_and_signs: [*]const u8 = x.qs[ggml.impl.c.QK_K / 4 ..].ptr;
+            const scales_and_signs: [*]const u8 = x.qs[ggml.impl.ggml_c.QK_K / 4 ..].ptr;
             var g: [4]u64 = undefined;
             var signs4: [4]u8 = undefined;
-            for (0..ggml.impl.c.QK_K / 32) |ib32| {
+            for (0..ggml.impl.ggml_c.QK_K / 32) |ib32| {
                 const aux32 = readU32(scales_and_signs + 4 * ib32);
                 tile.scales[s_off + ib32] = @intCast(2 * (aux32 >> 28) + 1);
                 for (0..4) |l| {
                     // bytes 8*l .. 8*l+7: low entry e1 (4 values) then high entry e2 (4 values)
-                    g[l] = @as(u64, ggml.impl.c.iq3xxs_grid[qs[2 * l + 1]]) << 32 | ggml.impl.c.iq3xxs_grid[qs[2 * l + 0]];
-                    signs4[l] = ggml.impl.c.ksigns_iq2xs[(aux32 >> @intCast(7 * l)) & 127];
+                    g[l] = @as(u64, ggml.impl.ggml_c.iq3xxs_grid[qs[2 * l + 1]]) << 32 | ggml.impl.ggml_c.iq3xxs_grid[qs[2 * l + 0]];
+                    signs4[l] = ggml.impl.ggml_c.ksigns_iq2xs[(aux32 >> @intCast(7 * l)) & 127];
                 }
                 ggml.cpu.tiled_kernel.unpkSign32(g, &signs4, tile.q[q_off + 32 * ib32 ..].ptr);
                 qs += 8;
@@ -440,7 +440,7 @@ fn unpackIq3S(rows: [*]const ggml.quants.blocks.IQ3_S, row_stride: i64, n_rows: 
             var qh: [*]const u8 = &x.qh;
             var signs: [*]const u8 = &x.signs;
             var ib32: usize = 0;
-            while (ib32 < ggml.impl.c.QK_K / 32) : (ib32 += 2) {
+            while (ib32 < ggml.impl.ggml_c.QK_K / 32) : (ib32 += 2) {
                 tile.scales[s_off + ib32 + 0] = 1 + 2 * @as(i32, x.scales[ib32 / 2] & 0xf);
                 tile.scales[s_off + ib32 + 1] = 1 + 2 * @as(i32, x.scales[ib32 / 2] >> 4);
                 for (0..2) |h| {
@@ -448,8 +448,8 @@ fn unpackIq3S(rows: [*]const ggml.quants.blocks.IQ3_S, row_stride: i64, n_rows: 
                     for (0..4) |l| {
                         const qhv: u32 = qh[h];
                         // bytes 8*l .. 8*l+7: low entry e1 (4 values) then high entry e2 (4 values)
-                        g[l] = @as(u64, ggml.impl.c.iq3s_grid[qs[2 * l + 1] | ((qhv << @intCast(7 - 2 * l)) & 256)]) << 32 |
-                            ggml.impl.c.iq3s_grid[qs[2 * l + 0] | ((qhv << @intCast(8 - 2 * l)) & 256)];
+                        g[l] = @as(u64, ggml.impl.ggml_c.iq3s_grid[qs[2 * l + 1] | ((qhv << @intCast(7 - 2 * l)) & 256)]) << 32 |
+                            ggml.impl.ggml_c.iq3s_grid[qs[2 * l + 0] | ((qhv << @intCast(8 - 2 * l)) & 256)];
                     }
                     ggml.cpu.tiled_kernel.unpkSign32(g, signs, tile.q[q_off + (ib32 + h) * 32 ..].ptr);
                     qs += 8;
@@ -475,12 +475,12 @@ fn unpackIq1S(rows: [*]const ggml.quants.blocks.IQ1_S, row_stride: i64, n_rows: 
             tile.d[d_off] = fp16(x.d) * 0.125;
 
             var qs: [*]const u8 = &x.qs;
-            for (0..ggml.impl.c.QK_K / 32) |ib| {
+            for (0..ggml.impl.ggml_c.QK_K / 32) |ib| {
                 const hw: u16 = x.qh[ib];
                 tile.scales[s_off + ib] = 2 * @as(i32, (hw >> 12) & 7) + 1;
                 const delta: i8 = if (hw & 0x8000 != 0) -1 else 1;
                 for (0..4) |l| {
-                    const entry: u64 = ggml.impl.c.iq1s_grid[qs[l] | (@as(u32, (hw >> @intCast(3 * l)) & 7) << 8)];
+                    const entry: u64 = ggml.impl.ggml_c.iq1s_grid[qs[l] | (@as(u32, (hw >> @intCast(3 * l)) & 7) << 8)];
                     const bytes: [8]u8 = @bitCast(std.mem.nativeToLittle(u64, entry));
                     ggml.cpu.tiled_kernel.unpkTern8(&bytes, delta, tile.q[q_off + 32 * ib + 8 * l ..].ptr);
                 }
@@ -509,7 +509,7 @@ fn unpackIq1M(rows: [*]const ggml.quants.blocks.IQ1_M, row_stride: i64, n_rows: 
 
             var qs: [*]const u8 = &x.qs;
             var qh: [*]const u8 = &x.qh;
-            for (0..ggml.impl.c.QK_K / 32) |ib| {
+            for (0..ggml.impl.ggml_c.QK_K / 32) |ib| {
                 const hw = sc[ib / 2];
                 const sh: u4 = @intCast(6 * (ib % 2));
                 tile.scales[s_off + 2 * ib + 0] = 2 * @as(i32, (hw >> sh) & 7) + 1;
@@ -526,7 +526,7 @@ fn unpackIq1M(rows: [*]const ggml.quants.blocks.IQ1_M, row_stride: i64, n_rows: 
                     if (qh[1] & 0x08 != 0) -1 else 1, if (qh[1] & 0x80 != 0) -1 else 1,
                 };
                 for (0..4) |l| {
-                    const entry: u64 = ggml.impl.c.iq1s_grid[idx[l]];
+                    const entry: u64 = ggml.impl.ggml_c.iq1s_grid[idx[l]];
                     const bytes: [8]u8 = @bitCast(std.mem.nativeToLittle(u64, entry));
                     ggml.cpu.tiled_kernel.unpkTern8(&bytes, delta[l], tile.q[q_off + 32 * ib + 8 * l ..].ptr);
                 }
@@ -615,7 +615,7 @@ fn matmulForced() bool {
 /// Ports `ggml_tiled_supported` (tiled.cpp:605 @b1b770d90), the arm under
 /// `__AVX512VNNI__ || __AVX2__ || __AVX__`, and `ggml_tiled_supported`
 /// (tiled.cpp:598 @b1b770d90), the stub every other build compiles.
-fn tiledSupported(src0: *const ggml.impl.c.ggml_tensor, src1: *const ggml.impl.c.ggml_tensor) bool {
+fn tiledSupported(src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor) bool {
     // The C goes on to refuse a `src1` that is neither F32 nor a contiguous
     // Q8_K, after the `switch` below -- dead code there, since every arm of
     // the `switch` returns, and not compiled here (Zig rejects unreachable
@@ -631,19 +631,19 @@ fn tiledSupported(src0: *const ggml.impl.c.ggml_tensor, src1: *const ggml.impl.c
 
     // Supported quant types for src0
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_Q6_K,
-        ggml.impl.c.GGML_TYPE_Q5_K,
-        ggml.impl.c.GGML_TYPE_Q4_K,
-        ggml.impl.c.GGML_TYPE_Q3_K,
-        ggml.impl.c.GGML_TYPE_Q2_K,
-        ggml.impl.c.GGML_TYPE_IQ4_XS,
-        ggml.impl.c.GGML_TYPE_IQ2_XXS,
-        ggml.impl.c.GGML_TYPE_IQ2_XS,
-        ggml.impl.c.GGML_TYPE_IQ2_S,
-        ggml.impl.c.GGML_TYPE_IQ3_XXS,
-        ggml.impl.c.GGML_TYPE_IQ3_S,
-        ggml.impl.c.GGML_TYPE_IQ1_S,
-        ggml.impl.c.GGML_TYPE_IQ1_M,
+        ggml.impl.ggml_c.GGML_TYPE_Q6_K,
+        ggml.impl.ggml_c.GGML_TYPE_Q5_K,
+        ggml.impl.ggml_c.GGML_TYPE_Q4_K,
+        ggml.impl.ggml_c.GGML_TYPE_Q3_K,
+        ggml.impl.ggml_c.GGML_TYPE_Q2_K,
+        ggml.impl.ggml_c.GGML_TYPE_IQ4_XS,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XS,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_S,
+        ggml.impl.ggml_c.GGML_TYPE_IQ3_XXS,
+        ggml.impl.ggml_c.GGML_TYPE_IQ3_S,
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_S,
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_M,
         => return true,
         else => return false,
     }
@@ -664,8 +664,8 @@ fn wsSize() usize {
 ///
 /// Return: the work-buffer bytes to reserve: 64 for alignment plus a slot
 /// per thread, or 0 when the tiled path cannot take the node.
-pub export fn ggml_tiled_wdata_size(n_tasks: c_int, dst: *const ggml.impl.c.ggml_tensor) callconv(.c) usize {
-    if (!tiledSupported(ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]), ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]))) {
+pub fn ggml_tiled_wdata_size(n_tasks: c_int, dst: *const ggml.impl.ggml_c.ggml_tensor) callconv(.c) usize {
+    if (!tiledSupported(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]), ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]))) {
         return 0; // unsupported, don't allocate
     }
     return 64 + @as(usize, @intCast(n_tasks)) * wsSize();
@@ -748,7 +748,7 @@ fn storeWindowScatter(buf: [*]const f32, n_src0: c_int, n_src1: c_int, buf_strid
 /// One `tiled_matmul_dispatch` instantiation: the `src0` type, its block,
 /// and the kernel constants.
 const Format = struct {
-    t: ggml.impl.c.enum_ggml_type,
+    t: ggml.impl.ggml_c.enum_ggml_type,
     B: type,
     SUBBLK: usize,
     HAS_MIN: bool,
@@ -756,55 +756,55 @@ const Format = struct {
     ACTBIAS: bool,
 };
 
-fn fmt(comptime t: ggml.impl.c.enum_ggml_type, comptime B: type, comptime SUBBLK: usize, comptime HAS_MIN: bool, comptime BIAS: i32, comptime ACTBIAS: bool) Format {
+fn fmt(comptime t: ggml.impl.ggml_c.enum_ggml_type, comptime B: type, comptime SUBBLK: usize, comptime HAS_MIN: bool, comptime BIAS: i32, comptime ACTBIAS: bool) Format {
     return .{ .t = t, .B = B, .SUBBLK = SUBBLK, .HAS_MIN = HAS_MIN, .BIAS = BIAS, .ACTBIAS = ACTBIAS };
 }
 
 /// The constants of `ggml_tiled_matmul_type_dispatch` (tiled.cpp:1164
 /// @b1b770d90), by `src0` type.
-fn formatOf(comptime t: ggml.impl.c.enum_ggml_type) Format {
+fn formatOf(comptime t: ggml.impl.ggml_c.enum_ggml_type) Format {
     return switch (t) {
-        ggml.impl.c.GGML_TYPE_Q6_K => fmt(t, ggml.quants.blocks.Q6_K, 16, false, 32, true),
-        ggml.impl.c.GGML_TYPE_Q5_K => fmt(t, ggml.quants.blocks.Q5_K, 32, true, 0, false),
-        ggml.impl.c.GGML_TYPE_Q4_K => fmt(t, ggml.quants.blocks.Q4_K, 32, true, 0, false),
-        ggml.impl.c.GGML_TYPE_Q3_K => fmt(t, ggml.quants.blocks.Q3_K, 16, false, 4, true),
-        ggml.impl.c.GGML_TYPE_Q2_K => fmt(t, ggml.quants.blocks.Q2_K, 16, true, 0, false),
-        ggml.impl.c.GGML_TYPE_IQ4_XS => fmt(t, ggml.quants.blocks.IQ4_XS, 32, false, 128, false),
-        ggml.impl.c.GGML_TYPE_IQ2_XXS => fmt(t, ggml.quants.blocks.IQ2_XXS, 32, false, 128, true),
-        ggml.impl.c.GGML_TYPE_IQ2_XS => fmt(t, ggml.quants.blocks.IQ2_XS, 16, false, 128, true),
-        ggml.impl.c.GGML_TYPE_IQ2_S => fmt(t, ggml.quants.blocks.IQ2_S, 16, false, 128, true),
-        ggml.impl.c.GGML_TYPE_IQ3_XXS => fmt(t, ggml.quants.blocks.IQ3_XXS, 32, false, 128, true),
-        ggml.impl.c.GGML_TYPE_IQ3_S => fmt(t, ggml.quants.blocks.IQ3_S, 32, false, 128, true),
-        ggml.impl.c.GGML_TYPE_IQ1_S => fmt(t, ggml.quants.blocks.IQ1_S, 32, false, 128, true),
-        ggml.impl.c.GGML_TYPE_IQ1_M => fmt(t, ggml.quants.blocks.IQ1_M, 16, false, 128, true),
+        ggml.impl.ggml_c.GGML_TYPE_Q6_K => fmt(t, ggml.quants.blocks.Q6_K, 16, false, 32, true),
+        ggml.impl.ggml_c.GGML_TYPE_Q5_K => fmt(t, ggml.quants.blocks.Q5_K, 32, true, 0, false),
+        ggml.impl.ggml_c.GGML_TYPE_Q4_K => fmt(t, ggml.quants.blocks.Q4_K, 32, true, 0, false),
+        ggml.impl.ggml_c.GGML_TYPE_Q3_K => fmt(t, ggml.quants.blocks.Q3_K, 16, false, 4, true),
+        ggml.impl.ggml_c.GGML_TYPE_Q2_K => fmt(t, ggml.quants.blocks.Q2_K, 16, true, 0, false),
+        ggml.impl.ggml_c.GGML_TYPE_IQ4_XS => fmt(t, ggml.quants.blocks.IQ4_XS, 32, false, 128, false),
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS => fmt(t, ggml.quants.blocks.IQ2_XXS, 32, false, 128, true),
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XS => fmt(t, ggml.quants.blocks.IQ2_XS, 16, false, 128, true),
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_S => fmt(t, ggml.quants.blocks.IQ2_S, 16, false, 128, true),
+        ggml.impl.ggml_c.GGML_TYPE_IQ3_XXS => fmt(t, ggml.quants.blocks.IQ3_XXS, 32, false, 128, true),
+        ggml.impl.ggml_c.GGML_TYPE_IQ3_S => fmt(t, ggml.quants.blocks.IQ3_S, 32, false, 128, true),
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_S => fmt(t, ggml.quants.blocks.IQ1_S, 32, false, 128, true),
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_M => fmt(t, ggml.quants.blocks.IQ1_M, 16, false, 128, true),
         else => @compileError("not a tiled format"),
     };
 }
 
 /// The thirteen `src0` types, in `ggml_tiled_matmul_type_dispatch`'s order.
-pub const tiled_types = [_]ggml.impl.c.enum_ggml_type{
-    ggml.impl.c.GGML_TYPE_Q6_K,  ggml.impl.c.GGML_TYPE_Q5_K,    ggml.impl.c.GGML_TYPE_Q4_K,    ggml.impl.c.GGML_TYPE_Q3_K,
-    ggml.impl.c.GGML_TYPE_Q2_K,  ggml.impl.c.GGML_TYPE_IQ4_XS,  ggml.impl.c.GGML_TYPE_IQ2_XXS, ggml.impl.c.GGML_TYPE_IQ2_XS,
-    ggml.impl.c.GGML_TYPE_IQ2_S, ggml.impl.c.GGML_TYPE_IQ3_XXS, ggml.impl.c.GGML_TYPE_IQ3_S,   ggml.impl.c.GGML_TYPE_IQ1_S,
-    ggml.impl.c.GGML_TYPE_IQ1_M,
+pub const tiled_types = [_]ggml.impl.ggml_c.enum_ggml_type{
+    ggml.impl.ggml_c.GGML_TYPE_Q6_K,  ggml.impl.ggml_c.GGML_TYPE_Q5_K,    ggml.impl.ggml_c.GGML_TYPE_Q4_K,    ggml.impl.ggml_c.GGML_TYPE_Q3_K,
+    ggml.impl.ggml_c.GGML_TYPE_Q2_K,  ggml.impl.ggml_c.GGML_TYPE_IQ4_XS,  ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS, ggml.impl.ggml_c.GGML_TYPE_IQ2_XS,
+    ggml.impl.ggml_c.GGML_TYPE_IQ2_S, ggml.impl.ggml_c.GGML_TYPE_IQ3_XXS, ggml.impl.ggml_c.GGML_TYPE_IQ3_S,   ggml.impl.ggml_c.GGML_TYPE_IQ1_S,
+    ggml.impl.ggml_c.GGML_TYPE_IQ1_M,
 };
 
 /// The C's `tiled_unpack_src0` overload for `f`'s block type.
 inline fn unpackFn(comptime f: Format) *const fn ([*]const f.B, i64, c_int, *ggml.cpu.tiled_kernel.TileSrc0, c_int) void {
     return switch (f.t) {
-        ggml.impl.c.GGML_TYPE_Q6_K => unpackQ6K,
-        ggml.impl.c.GGML_TYPE_Q5_K => unpackQ5K,
-        ggml.impl.c.GGML_TYPE_Q4_K => unpackQ4K,
-        ggml.impl.c.GGML_TYPE_Q3_K => unpackQ3K,
-        ggml.impl.c.GGML_TYPE_Q2_K => unpackQ2K,
-        ggml.impl.c.GGML_TYPE_IQ4_XS => unpackIq4Xs,
-        ggml.impl.c.GGML_TYPE_IQ2_XXS => unpackIq2Xxs,
-        ggml.impl.c.GGML_TYPE_IQ2_XS => unpackIq2Xs,
-        ggml.impl.c.GGML_TYPE_IQ2_S => unpackIq2S,
-        ggml.impl.c.GGML_TYPE_IQ3_XXS => unpackIq3Xxs,
-        ggml.impl.c.GGML_TYPE_IQ3_S => unpackIq3S,
-        ggml.impl.c.GGML_TYPE_IQ1_S => unpackIq1S,
-        ggml.impl.c.GGML_TYPE_IQ1_M => unpackIq1M,
+        ggml.impl.ggml_c.GGML_TYPE_Q6_K => unpackQ6K,
+        ggml.impl.ggml_c.GGML_TYPE_Q5_K => unpackQ5K,
+        ggml.impl.ggml_c.GGML_TYPE_Q4_K => unpackQ4K,
+        ggml.impl.ggml_c.GGML_TYPE_Q3_K => unpackQ3K,
+        ggml.impl.ggml_c.GGML_TYPE_Q2_K => unpackQ2K,
+        ggml.impl.ggml_c.GGML_TYPE_IQ4_XS => unpackIq4Xs,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS => unpackIq2Xxs,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XS => unpackIq2Xs,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_S => unpackIq2S,
+        ggml.impl.ggml_c.GGML_TYPE_IQ3_XXS => unpackIq3Xxs,
+        ggml.impl.ggml_c.GGML_TYPE_IQ3_S => unpackIq3S,
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_S => unpackIq1S,
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_M => unpackIq1M,
         else => @compileError("not a tiled format"),
     };
 }
@@ -818,8 +818,8 @@ inline fn unpackFn(comptime f: Format) *const fn ([*]const f.B, i64, c_int, *ggm
 fn mmidGemmWindow(
     comptime a: ggml.cpu.tiled_kernel.Arm,
     comptime f: Format,
-    dst: *ggml.impl.c.ggml_tensor,
-    src0: *const ggml.impl.c.ggml_tensor,
+    dst: *ggml.impl.ggml_c.ggml_tensor,
+    src0: *const ggml.impl.ggml_c.ggml_tensor,
     src0_cur: [*]const u8,
     r: i64,
     k: i64,
@@ -902,14 +902,14 @@ fn mulMatIdOneExpert(
     comptime a: ggml.cpu.tiled_kernel.Arm,
     comptime f: Format,
     params: *const ggml.cpu.defs.ComputeParams,
-    dst: *ggml.impl.c.ggml_tensor,
+    dst: *ggml.impl.ggml_c.ggml_tensor,
     cur_a: i64,
     cne1: i64,
     expert_rows: [*]const i32,
     scratch: [*]u8,
 ) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
     const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
@@ -962,7 +962,7 @@ fn mulMatOneChunk(
     comptime a: ggml.cpu.tiled_kernel.Arm,
     comptime f: Format,
     params: *const ggml.cpu.defs.ComputeParams,
-    dst: *ggml.impl.c.ggml_tensor,
+    dst: *ggml.impl.ggml_c.ggml_tensor,
     ir0_start: i64,
     ir0_end: i64,
     ir1_start: i64,
@@ -970,8 +970,8 @@ fn mulMatOneChunk(
     ws: *ggml.cpu.tiled_kernel.Ws,
 ) void {
     const unpack = unpackFn(f);
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
     const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
@@ -1090,9 +1090,9 @@ fn mulMatOneChunk(
 /// `q8_K`, a barrier, then chunks of up to 256x256 handed out by the
 /// threadpool's counter, the chunk size halved until there are four per
 /// thread.
-fn mulMatDriver(comptime a: ggml.cpu.tiled_kernel.Arm, comptime f: Format, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+fn mulMatDriver(comptime a: ggml.cpu.tiled_kernel.Arm, comptime f: Format, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
     const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
@@ -1124,7 +1124,7 @@ fn mulMatDriver(comptime a: ggml.cpu.tiled_kernel.Arm, comptime f: Format, param
         const nbw2 = nbw1 * @as(usize, @intCast(l.ne11));
         const nbw3 = nbw2 * @as(usize, @intCast(l.ne12));
 
-        ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+        ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
 
         for (0..@intCast(l.ne13)) |j13| {
             for (0..@intCast(l.ne12)) |j12| {
@@ -1204,14 +1204,14 @@ fn mulMatDriver(comptime a: ggml.cpu.tiled_kernel.Arm, comptime f: Format, param
 fn typeDispatch(
     comptime a: ggml.cpu.tiled_kernel.Arm,
     params: *const ggml.cpu.defs.ComputeParams,
-    dst: *ggml.impl.c.ggml_tensor,
+    dst: *ggml.impl.ggml_c.ggml_tensor,
     expert_rows: ?[*]const i32,
     cur_a: i64,
     cne1: i64,
     scratch: ?[*]u8,
 ) bool {
     inline for (tiled_types) |t| {
-        if (ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]).type == t) {
+        if (ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]).type == t) {
             const f = comptime formatOf(t);
             if (expert_rows) |er| {
                 mulMatIdOneExpert(a, f, params, dst, cur_a, cne1, er, scratch.?);
@@ -1238,11 +1238,11 @@ fn minBatch(rows: i64) bool {
 ///
 /// Return: true when the whole op was computed here; false to fall through
 /// to the `vec_dot` path, always so off x86.
-pub export fn ggml_compute_forward_mul_mat_tiled(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) bool {
+pub fn ggml_compute_forward_mul_mat_tiled(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) bool {
     // --use-ref means bail out and go back to vec_dot reference impl
     if (params.use_ref) return false;
-    if (!tiledSupported(ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]), ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]))) return false;
-    if (!minBatch(ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]).ne[1])) return false;
+    if (!tiledSupported(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]), ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]))) return false;
+    if (!minBatch(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]).ne[1])) return false;
     return typeDispatch(ggml.cpu.tiled_kernel.arm, params, dst, null, 0, 0, null);
 }
 
@@ -1258,16 +1258,16 @@ pub export fn ggml_compute_forward_mul_mat_tiled(params: *const ggml.cpu.defs.Co
 /// - `scratch`: the per-thread workspaces `ggml_tiled_wdata_size` reserved.
 ///
 /// Return: true when the expert was computed here.
-pub export fn ggml_compute_forward_mul_mat_id_tiled(
+pub fn ggml_compute_forward_mul_mat_id_tiled(
     params: *const ggml.cpu.defs.ComputeParams,
-    dst: *ggml.impl.c.ggml_tensor,
+    dst: *ggml.impl.ggml_c.ggml_tensor,
     cur_a: i64,
     cne1: i64,
     expert_rows: [*]const i32,
     scratch: [*]u8,
 ) callconv(.c) bool {
     if (params.use_ref) return false;
-    if (!tiledSupported(ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]), ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]))) return false;
+    if (!tiledSupported(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]), ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]))) return false;
     // profitability is per expert: the rows routed to this expert
     if (!minBatch(cne1)) return false;
     return typeDispatch(ggml.cpu.tiled_kernel.arm, params, dst, expert_rows, cur_a, cne1, scratch);
@@ -1282,11 +1282,11 @@ test {
 
 test "off x86 the tiled path declines and reserves nothing" {
     if (comptime ggml.cpu.tiled_kernel.arm != .scalar) return error.SkipZigTest;
-    var src0 = std.mem.zeroes(ggml.impl.c.ggml_tensor);
-    var src1 = std.mem.zeroes(ggml.impl.c.ggml_tensor);
-    src0.type = ggml.impl.c.GGML_TYPE_Q4_K;
-    src1.type = ggml.impl.c.GGML_TYPE_F32;
-    var dst = std.mem.zeroes(ggml.impl.c.ggml_tensor);
+    var src0 = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
+    var src1 = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
+    src0.type = ggml.impl.ggml_c.GGML_TYPE_Q4_K;
+    src1.type = ggml.impl.ggml_c.GGML_TYPE_F32;
+    var dst = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
     dst.src[0] = &src0;
     dst.src[1] = &src1;
     try std.testing.expectEqual(@as(usize, 0), ggml_tiled_wdata_size(4, &dst));
@@ -1299,21 +1299,21 @@ test "narrowKExtent divides ne00 and fits the budget" {
 }
 
 /// Random bytes as one block of `t`, with a modest finite fp16 scale.
-fn randomBlock(t: ggml.impl.c.enum_ggml_type, block: []u8, rand: std.Random) void {
+fn randomBlock(t: ggml.impl.ggml_c.enum_ggml_type, block: []u8, rand: std.Random) void {
     rand.bytes(block);
     const scale: u16 = 0x3000 | (rand.int(u16) & 0x03ff);
     switch (t) {
-        ggml.impl.c.GGML_TYPE_IQ1_M => {
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_M => {
             const sc: *align(1) [4]u16 = @ptrCast(block[block.len - 8 ..]);
             for (0..4) |w| sc[w] = (sc[w] & 0x0fff) | (@as(u16, @truncate(scale >> @intCast(4 * w))) << 12);
         },
-        ggml.impl.c.GGML_TYPE_Q2_K, ggml.impl.c.GGML_TYPE_Q3_K, ggml.impl.c.GGML_TYPE_Q6_K => {
+        ggml.impl.ggml_c.GGML_TYPE_Q2_K, ggml.impl.ggml_c.GGML_TYPE_Q3_K, ggml.impl.ggml_c.GGML_TYPE_Q6_K => {
             // `d` (and Q2_K's `dmin`) sit at the end of the block.
-            const tail = if (t == ggml.impl.c.GGML_TYPE_Q2_K) block.len - 4 else block.len - 2;
+            const tail = if (t == ggml.impl.ggml_c.GGML_TYPE_Q2_K) block.len - 4 else block.len - 2;
             std.mem.writeInt(u16, block[tail..][0..2], scale, .little);
-            if (t == ggml.impl.c.GGML_TYPE_Q2_K) std.mem.writeInt(u16, block[tail + 2 ..][0..2], scale ^ 0x0100, .little);
+            if (t == ggml.impl.ggml_c.GGML_TYPE_Q2_K) std.mem.writeInt(u16, block[tail + 2 ..][0..2], scale ^ 0x0100, .little);
         },
-        ggml.impl.c.GGML_TYPE_Q4_K, ggml.impl.c.GGML_TYPE_Q5_K => {
+        ggml.impl.ggml_c.GGML_TYPE_Q4_K, ggml.impl.ggml_c.GGML_TYPE_Q5_K => {
             std.mem.writeInt(u16, block[0..2], scale, .little);
             std.mem.writeInt(u16, block[2..4], scale ^ 0x0100, .little);
         },
@@ -1321,8 +1321,8 @@ fn randomBlock(t: ggml.impl.c.enum_ggml_type, block: []u8, rand: std.Random) voi
     }
 }
 
-fn testTensor(t: ggml.impl.c.enum_ggml_type, ne: [4]i64, data: *anyopaque) ggml.impl.c.ggml_tensor {
-    var x = std.mem.zeroes(ggml.impl.c.ggml_tensor);
+fn testTensor(t: ggml.impl.ggml_c.enum_ggml_type, ne: [4]i64, data: *anyopaque) ggml.impl.ggml_c.ggml_tensor {
+    var x = std.mem.zeroes(ggml.impl.ggml_c.ggml_tensor);
     x.type = t;
     x.ne = ne;
     x.nb[0] = ggml.types.ggml_type_size(t);
@@ -1333,7 +1333,7 @@ fn testTensor(t: ggml.impl.c.enum_ggml_type, ne: [4]i64, data: *anyopaque) ggml.
     return x;
 }
 
-fn vecDotRow(t: ggml.impl.c.enum_ggml_type, n: i64, x: *const anyopaque, y: *const anyopaque) f32 {
+fn vecDotRow(t: ggml.impl.ggml_c.enum_ggml_type, n: i64, x: *const anyopaque, y: *const anyopaque) f32 {
     var out: f32 = undefined;
     ggml.cpu.traits.table[@intCast(t)].vec_dot.?(@intCast(n), &out, 0, x, 0, y, 0, 1);
     return out;
@@ -1343,9 +1343,9 @@ fn vecDotRow(t: ggml.impl.c.enum_ggml_type, n: i64, x: *const anyopaque, y: *con
 /// element to `vec_dot` on the same `q8_K` rows. Different summation
 /// orders, so a tolerance; a wrong row, column, slab or tail is off by the
 /// size of the answer.
-fn checkMulMat(comptime a: ggml.cpu.tiled_kernel.Arm, comptime t: ggml.impl.c.enum_ggml_type, ne00: i64, ne01: i64, ne11: i64, rand: std.Random) !void {
+fn checkMulMat(comptime a: ggml.cpu.tiled_kernel.Arm, comptime t: ggml.impl.ggml_c.enum_ggml_type, ne00: i64, ne01: i64, ne11: i64, rand: std.Random) !void {
     const alloc = std.testing.allocator;
-    const nblk: usize = @intCast(@divExact(ne00, ggml.impl.c.QK_K));
+    const nblk: usize = @intCast(@divExact(ne00, ggml.impl.ggml_c.QK_K));
     const bsize = ggml.types.ggml_type_size(t);
     const row_bytes = bsize * nblk;
 
@@ -1358,15 +1358,15 @@ fn checkMulMat(comptime a: ggml.cpu.tiled_kernel.Arm, comptime t: ggml.impl.c.en
     for (x1) |*v| v.* = rand.float(f32) * 2 - 1;
 
     var src0 = testTensor(t, .{ ne00, ne01, 1, 1 }, w0.ptr);
-    var src1 = testTensor(ggml.impl.c.GGML_TYPE_F32, .{ ne00, ne11, 1, 1 }, x1.ptr);
+    var src1 = testTensor(ggml.impl.ggml_c.GGML_TYPE_F32, .{ ne00, ne11, 1, 1 }, x1.ptr);
     const out = try alloc.alloc(f32, @intCast(ne01 * ne11));
     defer alloc.free(out);
     @memset(out, std.math.nan(f32));
-    var dst = testTensor(ggml.impl.c.GGML_TYPE_F32, .{ ne01, ne11, 1, 1 }, out.ptr);
+    var dst = testTensor(ggml.impl.ggml_c.GGML_TYPE_F32, .{ ne01, ne11, 1, 1 }, out.ptr);
     dst.src[0] = &src0;
     dst.src[1] = &src1;
 
-    const nbw1 = ggml.types.ggml_row_size(ggml.impl.c.GGML_TYPE_Q8_K, ne00);
+    const nbw1 = ggml.types.ggml_row_size(ggml.impl.ggml_c.GGML_TYPE_Q8_K, ne00);
     const wsize = stdlib.num.pad(usize, nbw1 * @as(usize, @intCast(ne11)), 64) + 64 + ggml.cpu.tiled_kernel.ws_slot;
     const work = try alloc.alignedAlloc(u8, .@"64", wsize);
     defer alloc.free(work);
@@ -1413,7 +1413,7 @@ test "the MUL_MAT_ID expert path agrees with vec_dot" {
     const rand = prng.random();
     const alloc = std.testing.allocator;
     inline for (.{ ggml.cpu.tiled_kernel.Arm.scalar, ggml.cpu.tiled_kernel.Arm.avx2, ggml.cpu.tiled_kernel.Arm.vnni }) |a| {
-        inline for (.{ ggml.impl.c.GGML_TYPE_Q4_K, ggml.impl.c.GGML_TYPE_Q6_K, ggml.impl.c.GGML_TYPE_IQ4_XS, ggml.impl.c.GGML_TYPE_IQ2_XS }) |t| {
+        inline for (.{ ggml.impl.ggml_c.GGML_TYPE_Q4_K, ggml.impl.ggml_c.GGML_TYPE_Q6_K, ggml.impl.ggml_c.GGML_TYPE_IQ4_XS, ggml.impl.ggml_c.GGML_TYPE_IQ2_XS }) |t| {
             const ne00: i64 = 512;
             const ne01: i64 = 80;
             const n_as: i64 = 2;
@@ -1429,15 +1429,15 @@ test "the MUL_MAT_ID expert path agrees with vec_dot" {
 
             var dummy: f32 = 0;
             var src0 = testTensor(t, .{ ne00, ne01, n_as, 1 }, w0.ptr);
-            var src1 = testTensor(ggml.impl.c.GGML_TYPE_F32, .{ ne00, ne11, ne12, 1 }, &dummy);
+            var src1 = testTensor(ggml.impl.ggml_c.GGML_TYPE_F32, .{ ne00, ne11, ne12, 1 }, &dummy);
             const out = try alloc.alloc(f32, @intCast(ne01 * 2 * ne12));
             defer alloc.free(out);
             @memset(out, std.math.nan(f32));
-            var dst = testTensor(ggml.impl.c.GGML_TYPE_F32, .{ ne01, 2, ne12, 1 }, out.ptr);
+            var dst = testTensor(ggml.impl.ggml_c.GGML_TYPE_F32, .{ ne01, 2, ne12, 1 }, out.ptr);
             dst.src[0] = &src0;
             dst.src[1] = &src1;
 
-            const nbw1 = ggml.types.ggml_row_size(ggml.impl.c.GGML_TYPE_Q8_K, ne00);
+            const nbw1 = ggml.types.ggml_row_size(ggml.impl.ggml_c.GGML_TYPE_Q8_K, ne00);
             const n_q8: usize = @intCast(ne11 * ne12);
             const scratch_off = stdlib.num.pad(usize, n_q8 * nbw1, 64);
             const work = try alloc.alignedAlloc(u8, .@"64", scratch_off + ggml.cpu.tiled_kernel.ws_slot);
@@ -1445,7 +1445,7 @@ test "the MUL_MAT_ID expert path agrees with vec_dot" {
             var row: [512]f32 = undefined;
             for (0..n_q8) |i| {
                 for (&row) |*v| v.* = rand.float(f32) * 2 - 1;
-                ggml.cpu.traits.table[ggml.impl.c.GGML_TYPE_Q8_K].from_float.?(&row, work.ptr + i * nbw1, ne00);
+                ggml.cpu.traits.table[ggml.impl.ggml_c.GGML_TYPE_Q8_K].from_float.?(&row, work.ptr + i * nbw1, ne00);
             }
 
             // ten routed rows (narrow), then all 26 (standard)

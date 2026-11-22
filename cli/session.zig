@@ -48,7 +48,7 @@
 const std = @import("std");
 const mod = @import("module.zig");
 const llama = @import("llama");
-const fit = @import("cli_fit");
+const cli_fit = @import("cli_fit");
 
 /// Failures that are worth telling apart from each other.
 ///
@@ -96,13 +96,13 @@ pub const TurnOptions = struct {
     /// Tokens printed with their special spelling; every other control token
     /// prints as nothing, as the server's `accept_special_token` decides
     /// (tools/server/server-context.cpp:4837 @b1b770d90).
-    preserved: []const llama.impl.c.llama_token = &.{},
+    preserved: []const llama.impl.llama_c.llama_token = &.{},
     /// Stop strings: the reply ends where one appears, and it is not sent.
     stops: []const []const u8 = &.{},
     /// The reasoning budget sampler, applied before the chain and accepting
     /// every generated token first, as `common_sampler` holds its `rbudget`.
     /// Owned by the caller.
-    rbudget: ?*llama.impl.c.llama_sampler = null,
+    rbudget: ?*llama.impl.llama_c.llama_sampler = null,
 };
 
 /// Where a chat turn's reply goes, a piece at a time: text the server would
@@ -118,17 +118,17 @@ pub const Session = struct {
     const Self = @This();
 
     allocator: std.mem.Allocator,
-    model: *llama.impl.c.llama_model,
-    vocab: *const llama.impl.c.llama_vocab,
-    ctx: *llama.impl.c.llama_context,
-    sampler: *llama.impl.c.llama_sampler,
+    model: *llama.impl.llama_c.llama_model,
+    vocab: *const llama.impl.llama_c.llama_vocab,
+    ctx: *llama.impl.llama_c.llama_context,
+    sampler: *llama.impl.llama_c.llama_sampler,
     /// The grammar sampler, kept apart from the chain as upstream's
     /// `common_sampler` keeps its `grmr`: null without `--grammar` or
     /// `--json-schema`. See `sampleNext`.
-    grammar: ?*llama.impl.c.llama_sampler = null,
+    grammar: ?*llama.impl.llama_c.llama_sampler = null,
     /// The candidate array `sampleNext` builds from the logits when a
     /// grammar is set: `common_sampler`'s `cur`.
-    candidates: std.ArrayList(llama.impl.c.llama_token_data) = .empty,
+    candidates: std.ArrayList(llama.impl.llama_c.llama_token_data) = .empty,
     /// The CPU backend's persistent threadpool, attached to `ctx`.
     ///
     /// Without one, every `ggml_graph_compute` builds a disposable pool --
@@ -139,7 +139,7 @@ pub const Session = struct {
     /// one thread. Upstream's CLI attaches one in `common_threadpools`'s `init`
     /// (common/common.cpp:1808 @b1b770d90). Null if creation failed, which leaves
     /// libllama's per-call pools, as upstream does.
-    threadpool: ?*llama.impl.c.struct_ggml_threadpool = null,
+    threadpool: ?*llama.impl.llama_c.struct_ggml_threadpool = null,
     /// Borrowed from the caller's `Args`; not owned.
     settings: mod.args.Args,
     /// Tokens currently held in the KV cache, in order.
@@ -147,7 +147,7 @@ pub const Session = struct {
     /// `generateTurn` diffs the next turn's prompt against this to find how
     /// much of the cache it can keep, so a conversation does not re-decode its
     /// whole history every turn.
-    decoded: std.ArrayList(llama.impl.c.llama_token) = .empty,
+    decoded: std.ArrayList(llama.impl.llama_c.llama_token) = .empty,
     /// Why the most recent `generate` or `generateTurn` ended.
     last_stop: Stop = .eog,
     /// Where `generateTurn` reports how much of the cache each turn kept;
@@ -177,9 +177,9 @@ pub const Session = struct {
         /// `common_params::tensor_buft_overrides`, padded with empty entries
         /// to `llama_max_tensor_buft_overrides` (common/arg.cpp:952
         /// @b1b770d90).
-        tensor_buft_overrides: []llama.impl.c.llama_model_tensor_buft_override,
+        tensor_buft_overrides: []llama.impl.llama_c.llama_model_tensor_buft_override,
         /// The regexes the overrides point at.
-        patterns: fit.Patterns,
+        patterns: cli_fit.Patterns,
     };
 
     /// Loads a model and builds the context and sampler chain, first
@@ -199,7 +199,7 @@ pub const Session = struct {
         const load = try allocator.create(LoadBuffers);
         errdefer allocator.destroy(load);
         load.* = .{
-            .tensor_buft_overrides = try allocator.alloc(llama.impl.c.llama_model_tensor_buft_override, llama.api.llama.llama_max_tensor_buft_overrides()),
+            .tensor_buft_overrides = try allocator.alloc(llama.impl.llama_c.llama_model_tensor_buft_override, llama.api.llama.llama_max_tensor_buft_overrides()),
             .patterns = try .init(allocator),
         };
         errdefer allocator.free(load.tensor_buft_overrides);
@@ -251,10 +251,10 @@ pub const Session = struct {
         if (settings.fit) {
             // The status is not consulted, as upstream does not: a failed fit
             // leaves the parameters as far as it got, and loading goes ahead.
-            _ = try fit.fitParams(
+            _ = try cli_fit.fitParams(
                 allocator,
                 &load.patterns,
-                .{ .verbosity = fit.Log.level_error, .out = err },
+                .{ .verbosity = cli_fit.Log.level_error, .out = err },
                 &.{model_path.ptr},
                 @ptrCast(&model_params),
                 @ptrCast(&ctx_params),
@@ -263,7 +263,7 @@ pub const Session = struct {
                 &settings.fit_target,
                 settings.fit_min_ctx,
                 null,
-                llama.impl.c.GGML_LOG_LEVEL_ERROR,
+                llama.impl.llama_c.GGML_LOG_LEVEL_ERROR,
             );
         }
 
@@ -280,11 +280,11 @@ pub const Session = struct {
         // and `n_threads_batch` are always equal here; upstream makes a
         // second only when the two differ. `ggml_threadpool_params_init`
         // supplies upstream's defaults, polling level 50 included.
-        var tpp: llama.impl.c.struct_ggml_threadpool_params = undefined;
-        llama.impl.c.ggml_threadpool_params_init(&tpp, llama.api.context.llama_n_threads(ctx));
-        const threadpool = llama.impl.c.ggml_threadpool_new(&tpp);
+        var tpp: llama.impl.llama_c.struct_ggml_threadpool_params = undefined;
+        llama.impl.llama_c.ggml_threadpool_params_init(&tpp, llama.api.context.llama_n_threads(ctx));
+        const threadpool = llama.impl.llama_c.ggml_threadpool_new(&tpp);
         if (threadpool) |tp| llama.api.context.llama_attach_threadpool(ctx, tp, null);
-        errdefer if (threadpool) |tp| llama.impl.c.ggml_threadpool_free(tp);
+        errdefer if (threadpool) |tp| llama.impl.llama_c.ggml_threadpool_free(tp);
 
         const sampler = try buildSampler(settings, vocab);
         errdefer llama.sampler.core.llama_sampler_free(sampler);
@@ -293,7 +293,7 @@ pub const Session = struct {
         // that does not parse fails the sampler, and with it the run. The
         // output-format prefill that follows there needs the chat template's
         // generation prompt, which a raw completion does not have.
-        var grammar: ?*llama.impl.c.llama_sampler = null;
+        var grammar: ?*llama.impl.llama_c.llama_sampler = null;
         if (settings.grammar.len != 0) {
             const text = try allocator.dupeSentinel(u8, settings.grammar, 0);
             defer allocator.free(text);
@@ -331,7 +331,7 @@ pub const Session = struct {
         llama.sampler.core.llama_sampler_free(self.sampler);
         llama.api.context.llama_free(self.ctx);
         // After the context: it holds the pool until it is freed.
-        if (self.threadpool) |tp| llama.impl.c.ggml_threadpool_free(tp);
+        if (self.threadpool) |tp| llama.impl.llama_c.ggml_threadpool_free(tp);
         llama.api.model.llama_model_free(self.model);
         self.load.patterns.deinit();
         self.allocator.free(self.load.tensor_buft_overrides);
@@ -345,7 +345,7 @@ pub const Session = struct {
     /// - `prompt`: text to tokenize.
     ///
     /// Return: a newly allocated token slice the caller frees.
-    pub fn tokenize(self: *Self, prompt: []const u8) ![]llama.impl.c.llama_token {
+    pub fn tokenize(self: *Self, prompt: []const u8) ![]llama.impl.llama_c.llama_token {
         return self.tokenizeText(prompt, .{});
     }
 
@@ -376,7 +376,7 @@ pub const Session = struct {
         self: *Self,
         text: []const u8,
         opts: TokenizeOptions,
-    ) ![]llama.impl.c.llama_token {
+    ) ![]llama.impl.llama_c.llama_token {
         // Negative return means "too small, and this is how many I need", so
         // the first call sizes the buffer rather than guessing.
         const probe = llama.api.vocab.llama_tokenize(
@@ -390,7 +390,7 @@ pub const Session = struct {
         );
         const n_max: usize = @intCast(if (probe < 0) -probe else probe);
 
-        const tokens = try self.allocator.alloc(llama.impl.c.llama_token, n_max);
+        const tokens = try self.allocator.alloc(llama.impl.llama_c.llama_token, n_max);
         errdefer self.allocator.free(tokens);
 
         const n = llama.api.vocab.llama_tokenize(
@@ -423,8 +423,8 @@ pub const Session = struct {
     /// - `segments`: the rendered prompt, from `chat.Template.applySegments`.
     ///
     /// Return: the tokens, owned by the caller.
-    pub fn tokenizeSegments(self: *Self, segments: []const mod.chat.Segment) ![]llama.impl.c.llama_token {
-        var out: std.ArrayList(llama.impl.c.llama_token) = .empty;
+    pub fn tokenizeSegments(self: *Self, segments: []const mod.chat.Segment) ![]llama.impl.llama_c.llama_token {
+        var out: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
         errdefer out.deinit(self.allocator);
 
         for (segments) |seg| {
@@ -473,7 +473,7 @@ pub const Session = struct {
     /// - `rbudget`: the turn's reasoning budget, or null.
     ///
     /// Return: the token.
-    fn sampleNext(self: *Self, rbudget: ?*llama.impl.c.llama_sampler) !llama.impl.c.llama_token {
+    fn sampleNext(self: *Self, rbudget: ?*llama.impl.llama_c.llama_sampler) !llama.impl.llama_c.llama_token {
         const grmr = self.grammar;
         if (grmr == null and rbudget == null) return llama.sampler.chain.llama_sampler_sample(self.sampler, self.ctx, -1);
 
@@ -485,8 +485,8 @@ pub const Session = struct {
 
         if (grmr) |g| {
             // grammar-based rejection sampling
-            var single: llama.impl.c.llama_token_data = .{ .id = id, .logit = 1.0, .p = 0.0 };
-            var single_arr: llama.impl.c.llama_token_data_array = .{ .data = &single, .size = 1, .selected = -1, .sorted = false };
+            var single: llama.impl.llama_c.llama_token_data = .{ .id = id, .logit = 1.0, .p = 0.0 };
+            var single_arr: llama.impl.llama_c.llama_token_data_array = .{ .data = &single, .size = 1, .selected = -1, .sorted = false };
             llama.sampler.core.llama_sampler_apply(g, &single_arr);
             if (single_arr.data[0].logit == -std.math.inf(f32)) {
                 try self.setLogits();
@@ -518,7 +518,7 @@ pub const Session = struct {
         }
     }
 
-    fn candidateArray(self: *Self) llama.impl.c.llama_token_data_array {
+    fn candidateArray(self: *Self) llama.impl.llama_c.llama_token_data_array {
         return .{ .data = self.candidates.items.ptr, .size = self.candidates.items.len, .selected = -1, .sorted = false };
     }
 
@@ -541,7 +541,7 @@ pub const Session = struct {
     /// Return: the number of tokens generated.
     pub fn generateTokens(
         self: *Self,
-        prompt_tokens: []llama.impl.c.llama_token,
+        prompt_tokens: []llama.impl.llama_c.llama_token,
         display: []const u8,
         w: *std.Io.Writer,
     ) !usize {
@@ -559,7 +559,7 @@ pub const Session = struct {
         // `llama_batch_get_one` borrows rather than copies, and the batch built
         // at the end of one iteration is not read until the decode at the top
         // of the next -- so the sampled token must outlive the loop body.
-        var id: llama.impl.c.llama_token = undefined;
+        var id: llama.impl.llama_c.llama_token = undefined;
         var batch = llama.api.batch.llama_batch_get_one(tokens.ptr, @intCast(tokens.len));
 
         var generated: usize = 0;
@@ -667,7 +667,7 @@ pub const Session = struct {
         defer text.deinit(self.allocator);
         var n_sent: usize = 0;
 
-        var id: llama.impl.c.llama_token = undefined;
+        var id: llama.impl.llama_c.llama_token = undefined;
         var batch = llama.api.batch.llama_batch_get_one(@constCast(suffix.ptr), @intCast(suffix.len));
 
         var generated: usize = 0;
@@ -682,7 +682,7 @@ pub const Session = struct {
             }
             generated += 1;
 
-            const special = std.mem.findScalar(llama.impl.c.llama_token, opts.preserved, id) != null;
+            const special = std.mem.findScalar(llama.impl.llama_c.llama_token, opts.preserved, id) != null;
             var piece: [256]u8 = undefined;
             const n = llama.api.vocab.llama_token_to_piece(self.vocab, id, &piece, piece.len, 0, special);
             const token_str = piece[0..@intCast(@max(n, 0))];
@@ -884,19 +884,19 @@ pub const Timings = struct {
 /// Return: nothing. Decode failures are ignored: a warmup is an optimisation,
 /// and a model that cannot decode this will fail loudly on the real prompt a
 /// moment later with a better error.
-fn warmUp(model: *llama.impl.c.llama_model, ctx: *llama.impl.c.llama_context, vocab: *const llama.impl.c.llama_vocab, n_batch: i32) void {
-    var tmp: [2]llama.impl.c.llama_token = undefined;
+fn warmUp(model: *llama.impl.llama_c.llama_model, ctx: *llama.impl.llama_c.llama_context, vocab: *const llama.impl.llama_c.llama_vocab, n_batch: i32) void {
+    var tmp: [2]llama.impl.llama_c.llama_token = undefined;
     var n: usize = 0;
 
     // Some models (e.g. T5) have no BOS, and Qwen has no BOS either -- hence
     // the fallback to token 0 rather than assuming one exists.
     const bos = llama.api.vocab.llama_vocab_bos(vocab);
     const eos = llama.api.vocab.llama_vocab_eos(vocab);
-    if (bos != llama.impl.c.LLAMA_TOKEN_NULL) {
+    if (bos != llama.impl.llama_c.LLAMA_TOKEN_NULL) {
         tmp[n] = bos;
         n += 1;
     }
-    if (eos != llama.impl.c.LLAMA_TOKEN_NULL) {
+    if (eos != llama.impl.llama_c.LLAMA_TOKEN_NULL) {
         tmp[n] = eos;
         n += 1;
     }
@@ -908,7 +908,7 @@ fn warmUp(model: *llama.impl.c.llama_model, ctx: *llama.impl.c.llama_context, vo
     if (llama.api.model.llama_model_has_encoder(model)) {
         _ = llama.api.context.llama_encode(ctx, llama.api.batch.llama_batch_get_one(&tmp, @intCast(n)));
         var start = llama.api.model.llama_model_decoder_start_token(model);
-        if (start == llama.impl.c.LLAMA_TOKEN_NULL) start = bos;
+        if (start == llama.impl.llama_c.LLAMA_TOKEN_NULL) start = bos;
         tmp[0] = start;
         n = 1;
     }
@@ -956,7 +956,7 @@ fn warmUp(model: *llama.impl.c.llama_model, ctx: *llama.impl.c.llama_context, vo
 /// - `vocab`: the model's vocabulary; the penalty sampler needs its size.
 ///
 /// Return: the chain, owned by the caller.
-fn buildSampler(settings: mod.args.Args, vocab: *const llama.impl.c.llama_vocab) !*llama.impl.c.llama_sampler {
+fn buildSampler(settings: mod.args.Args, vocab: *const llama.impl.llama_c.llama_vocab) !*llama.impl.llama_c.llama_sampler {
     var params = llama.api.llama.llama_sampler_chain_default_params();
     // Upstream measures its own sampler timings; we have no use for them.
     params.no_perf = true;

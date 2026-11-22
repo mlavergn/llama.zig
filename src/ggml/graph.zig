@@ -58,7 +58,7 @@ const stdlib = @import("stdlib");
 ///
 /// Return: the first prime in the table that is at least `min_sz`, or
 /// `min_sz | 1` when `min_sz` exceeds every prime listed.
-pub export fn ggml_hash_size(min_sz: usize) usize {
+pub fn ggml_hash_size(min_sz: usize) callconv(.c) usize {
     // next primes after powers of two
     const primes = [_]usize{
         2,        3,        5,        11,        17,        37,        67,         131,
@@ -85,11 +85,11 @@ pub export fn ggml_hash_size(min_sz: usize) usize {
 ///
 /// Return: a set sized to the next prime at or above `size`, owning two heap
 /// allocations. The caller frees it with `ggml_hash_set_free`.
-pub export fn ggml_hash_set_new(size: usize) mod.impl.HashSet {
+pub fn ggml_hash_set_new(size: usize) callconv(.c) mod.impl.HashSet {
     const n = ggml_hash_size(size);
     return .{
         .size = n,
-        .keys = @ptrCast(@alignCast(mod.impl.ggmlMalloc(@sizeOf(*mod.impl.c.ggml_tensor) * n))),
+        .keys = @ptrCast(@alignCast(mod.impl.ggmlMalloc(@sizeOf(*mod.impl.ggml_c.ggml_tensor) * n))),
         .used = @ptrCast(@alignCast(mod.impl.ggmlCalloc(mod.impl.bitsetSize(n), @sizeOf(mod.impl.Bitset)))),
     };
 }
@@ -98,12 +98,12 @@ pub export fn ggml_hash_set_new(size: usize) mod.impl.HashSet {
 ///
 /// Clears only the used bits. The keys are left as they are: a slot is
 /// unreadable until its bit is set again, so there is nothing to scrub.
-pub export fn ggml_hash_set_reset(hash_set: *mod.impl.HashSet) void {
+pub fn ggml_hash_set_reset(hash_set: *mod.impl.HashSet) callconv(.c) void {
     @memset(hash_set.used[0..mod.impl.bitsetSize(hash_set.size)], 0);
 }
 
 /// Ports `ggml_hash_set_free` (ggml.c:6605 @b1b770d90).
-pub export fn ggml_hash_set_free(hash_set: *mod.impl.HashSet) void {
+pub fn ggml_hash_set_free(hash_set: *mod.impl.HashSet) callconv(.c) void {
     std.c.free(@ptrCast(hash_set.used));
     std.c.free(@ptrCast(hash_set.keys));
 }
@@ -140,13 +140,13 @@ fn graphNbytes(size: usize, grads: bool) usize {
     // nothing but is kept for the line-by-line reading.
     var p: usize = 1024;
     _ = incrPtrAligned(&p, @sizeOf(mod.impl.CGraph), 1);
-    _ = incrPtrAligned(&p, size * @sizeOf(*mod.impl.c.ggml_tensor), @sizeOf(*mod.impl.c.ggml_tensor)); // nodes
-    _ = incrPtrAligned(&p, size * @sizeOf(*mod.impl.c.ggml_tensor), @sizeOf(*mod.impl.c.ggml_tensor)); // leafs
+    _ = incrPtrAligned(&p, size * @sizeOf(*mod.impl.ggml_c.ggml_tensor), @sizeOf(*mod.impl.ggml_c.ggml_tensor)); // nodes
+    _ = incrPtrAligned(&p, size * @sizeOf(*mod.impl.ggml_c.ggml_tensor), @sizeOf(*mod.impl.ggml_c.ggml_tensor)); // leafs
     _ = incrPtrAligned(&p, hash_size * @sizeOf(i32), @sizeOf(i32)); // use_counts
-    _ = incrPtrAligned(&p, hash_size * @sizeOf(*mod.impl.c.ggml_tensor), @sizeOf(*mod.impl.c.ggml_tensor)); // hash keys
+    _ = incrPtrAligned(&p, hash_size * @sizeOf(*mod.impl.ggml_c.ggml_tensor), @sizeOf(*mod.impl.ggml_c.ggml_tensor)); // hash keys
     if (grads) {
-        _ = incrPtrAligned(&p, hash_size * @sizeOf(*mod.impl.c.ggml_tensor), @sizeOf(*mod.impl.c.ggml_tensor)); // grads
-        _ = incrPtrAligned(&p, hash_size * @sizeOf(*mod.impl.c.ggml_tensor), @sizeOf(*mod.impl.c.ggml_tensor)); // grad_accs
+        _ = incrPtrAligned(&p, hash_size * @sizeOf(*mod.impl.ggml_c.ggml_tensor), @sizeOf(*mod.impl.ggml_c.ggml_tensor)); // grads
+        _ = incrPtrAligned(&p, hash_size * @sizeOf(*mod.impl.ggml_c.ggml_tensor), @sizeOf(*mod.impl.ggml_c.ggml_tensor)); // grad_accs
     }
     _ = incrPtrAligned(&p, mod.impl.bitsetSize(hash_size) * @sizeOf(mod.impl.Bitset), @sizeOf(mod.impl.Bitset));
 
@@ -154,13 +154,13 @@ fn graphNbytes(size: usize, grads: bool) usize {
 }
 
 /// Ports `ggml_graph_overhead_custom` (ggml.c:7415 @b1b770d90).
-pub export fn ggml_graph_overhead_custom(size: usize, grads: bool) usize {
-    return mod.types.object_size + stdlib.num.pad(usize, graphNbytes(size, grads), mod.impl.c.GGML_MEM_ALIGN);
+pub fn ggml_graph_overhead_custom(size: usize, grads: bool) callconv(.c) usize {
+    return mod.types.object_size + stdlib.num.pad(usize, graphNbytes(size, grads), mod.impl.ggml_c.GGML_MEM_ALIGN);
 }
 
 /// Ports `ggml_graph_overhead` (ggml.c:7419 @b1b770d90).
-pub export fn ggml_graph_overhead() usize {
-    return ggml_graph_overhead_custom(mod.impl.c.GGML_DEFAULT_GRAPH_SIZE, false);
+pub fn ggml_graph_overhead() callconv(.c) usize {
+    return ggml_graph_overhead_custom(mod.impl.ggml_c.GGML_DEFAULT_GRAPH_SIZE, false);
 }
 
 /// Ports `ggml_new_graph_custom` (ggml.c:7423 @b1b770d90).
@@ -173,9 +173,9 @@ pub export fn ggml_graph_overhead() usize {
 ///   rather than `size` long.
 ///
 /// Return: the new graph, owned by `ctx` and invalid once `ctx` is freed.
-pub export fn ggml_new_graph_custom(ctx: *mod.context.Context, size: usize, grads: bool) *mod.impl.CGraph {
+pub fn ggml_new_graph_custom(ctx: *mod.context.Context, size: usize, grads: bool) callconv(.c) *mod.impl.CGraph {
     const obj_size = graphNbytes(size, grads);
-    const obj = mod.context.newObject(ctx, mod.impl.c.GGML_OBJECT_TYPE_GRAPH, obj_size).?;
+    const obj = mod.context.newObject(ctx, mod.impl.ggml_c.GGML_OBJECT_TYPE_GRAPH, obj_size).?;
     const cgraph: *mod.impl.CGraph = @ptrCast(@alignCast(@as([*]u8, @ptrCast(ctx.mem_buffer.?)) + obj.offs));
 
     // the size of the hash table is doubled since it needs to hold both nodes and leafs
@@ -183,12 +183,12 @@ pub export fn ggml_new_graph_custom(ctx: *mod.context.Context, size: usize, grad
 
     var p: usize = @intFromPtr(cgraph) + @sizeOf(mod.impl.CGraph);
 
-    const nodes_ptr = incrPtrAligned(&p, size * @sizeOf(*mod.impl.c.ggml_tensor), @sizeOf(*mod.impl.c.ggml_tensor));
-    const leafs_ptr = incrPtrAligned(&p, size * @sizeOf(*mod.impl.c.ggml_tensor), @sizeOf(*mod.impl.c.ggml_tensor));
+    const nodes_ptr = incrPtrAligned(&p, size * @sizeOf(*mod.impl.ggml_c.ggml_tensor), @sizeOf(*mod.impl.ggml_c.ggml_tensor));
+    const leafs_ptr = incrPtrAligned(&p, size * @sizeOf(*mod.impl.ggml_c.ggml_tensor), @sizeOf(*mod.impl.ggml_c.ggml_tensor));
     const use_counts_ptr = incrPtrAligned(&p, hash_size * @sizeOf(i32), @sizeOf(i32));
-    const hash_keys_ptr = incrPtrAligned(&p, hash_size * @sizeOf(*mod.impl.c.ggml_tensor), @sizeOf(*mod.impl.c.ggml_tensor));
-    const grads_ptr = if (grads) incrPtrAligned(&p, hash_size * @sizeOf(*mod.impl.c.ggml_tensor), @sizeOf(*mod.impl.c.ggml_tensor)) else 0;
-    const grad_accs_ptr = if (grads) incrPtrAligned(&p, hash_size * @sizeOf(*mod.impl.c.ggml_tensor), @sizeOf(*mod.impl.c.ggml_tensor)) else 0;
+    const hash_keys_ptr = incrPtrAligned(&p, hash_size * @sizeOf(*mod.impl.ggml_c.ggml_tensor), @sizeOf(*mod.impl.ggml_c.ggml_tensor));
+    const grads_ptr = if (grads) incrPtrAligned(&p, hash_size * @sizeOf(*mod.impl.ggml_c.ggml_tensor), @sizeOf(*mod.impl.ggml_c.ggml_tensor)) else 0;
+    const grad_accs_ptr = if (grads) incrPtrAligned(&p, hash_size * @sizeOf(*mod.impl.ggml_c.ggml_tensor), @sizeOf(*mod.impl.ggml_c.ggml_tensor)) else 0;
 
     const hash_used = incrPtrAligned(&p, mod.impl.bitsetSize(hash_size) * @sizeOf(mod.impl.Bitset), @sizeOf(mod.impl.Bitset));
 
@@ -223,8 +223,8 @@ pub export fn ggml_new_graph_custom(ctx: *mod.context.Context, size: usize, grad
 }
 
 /// Ports `ggml_new_graph` (ggml.c:7468 @b1b770d90).
-pub export fn ggml_new_graph(ctx: *mod.context.Context) *mod.impl.CGraph {
-    return ggml_new_graph_custom(ctx, mod.impl.c.GGML_DEFAULT_GRAPH_SIZE, false);
+pub fn ggml_new_graph(ctx: *mod.context.Context) callconv(.c) *mod.impl.CGraph {
+    return ggml_new_graph_custom(ctx, mod.impl.ggml_c.GGML_DEFAULT_GRAPH_SIZE, false);
 }
 
 /// Ports `ggml_graph_view` (ggml.c:7472 @b1b770d90).
@@ -233,7 +233,7 @@ pub export fn ggml_new_graph(ctx: *mod.context.Context) *mod.impl.CGraph {
 /// `size` is zero, which marks it as unable to accept new nodes; gradients are
 /// dropped because they are indexed by the hash set, and a view that shared
 /// the parent's set would alias its gradient array.
-pub export fn ggml_graph_view(cgraph0: *mod.impl.CGraph, first: c_int, last: c_int) mod.impl.CGraph {
+pub fn ggml_graph_view(cgraph0: *mod.impl.CGraph, first: c_int, last: c_int) callconv(.c) mod.impl.CGraph {
     return .{
         .size = 0,
         .n_nodes = last - first,
@@ -255,7 +255,7 @@ pub export fn ggml_graph_view(cgraph0: *mod.impl.CGraph, first: c_int, last: c_i
 /// every key `src` had in use. The slots will not line up between the two
 /// sets -- they depend on the table size -- so use counts and gradients are
 /// translated slot by slot rather than copied wholesale.
-pub export fn ggml_graph_cpy(src: *mod.impl.CGraph, dst: *mod.impl.CGraph) void {
+pub fn ggml_graph_cpy(src: *mod.impl.CGraph, dst: *mod.impl.CGraph) callconv(.c) void {
     mod.impl.assert(dst.size >= src.n_leafs, "dst->size >= src->n_leafs");
     mod.impl.assert(dst.size >= src.n_nodes, "dst->size >= src->n_nodes");
     mod.impl.assert(dst.visited_hash_set.size >= src.visited_hash_set.size, "dst->visited_hash_set.size >= src->visited_hash_set.size");
@@ -303,7 +303,7 @@ pub export fn ggml_graph_cpy(src: *mod.impl.CGraph, dst: *mod.impl.CGraph) void 
 }
 
 /// Ports `ggml_graph_dup` (ggml.c:7537 @b1b770d90).
-pub export fn ggml_graph_dup(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, force_grads: bool) *mod.impl.CGraph {
+pub fn ggml_graph_dup(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, force_grads: bool) callconv(.c) *mod.impl.CGraph {
     const result = ggml_new_graph_custom(ctx, @intCast(cgraph.size), cgraph.grads != null or force_grads);
     ggml_graph_cpy(cgraph, result);
     return result;
@@ -315,7 +315,7 @@ pub export fn ggml_graph_dup(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph
 /// tensor's, which is seeded to one -- differentiating a loss with respect to
 /// itself. AdamW momenta are cleared too, since they live in the node's own
 /// sources rather than in the graph.
-pub export fn ggml_graph_reset(cgraph: ?*mod.impl.CGraph) void {
+pub fn ggml_graph_reset(cgraph: ?*mod.impl.CGraph) callconv(.c) void {
     const g = cgraph orelse return;
     mod.impl.assert(g.grads != null, "cgraph->grads != NULL");
 
@@ -323,16 +323,16 @@ pub export fn ggml_graph_reset(cgraph: ?*mod.impl.CGraph) void {
         const node = g.nodes[i].?;
         const grad_acc = ggml_graph_get_grad_acc(g, node);
 
-        if (node.op == mod.impl.c.GGML_OP_OPT_STEP_ADAMW) {
+        if (node.op == mod.impl.ggml_c.GGML_OP_OPT_STEP_ADAMW) {
             // clear momenta
-            _ = mod.ops.ggml_set_zero(mod.impl.one(mod.impl.c.ggml_tensor, node.src[2]));
-            _ = mod.ops.ggml_set_zero(mod.impl.one(mod.impl.c.ggml_tensor, node.src[3]));
+            _ = mod.ops.ggml_set_zero(mod.impl.one(mod.impl.ggml_c.ggml_tensor, node.src[2]));
+            _ = mod.ops.ggml_set_zero(mod.impl.one(mod.impl.ggml_c.ggml_tensor, node.src[3]));
         }
 
         // initial gradients of loss should be 1, 0 otherwise
         if (grad_acc) |acc| {
-            if ((node.flags & mod.impl.c.GGML_TENSOR_FLAG_LOSS) != 0) {
-                mod.impl.assert(acc.type == mod.impl.c.GGML_TYPE_F32, "grad_acc->type == GGML_TYPE_F32");
+            if ((node.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_LOSS) != 0) {
+                mod.impl.assert(acc.type == mod.impl.ggml_c.GGML_TYPE_F32, "grad_acc->type == GGML_TYPE_F32");
                 mod.impl.assert(mod.types.ggml_is_scalar(acc), "ggml_is_scalar(grad_acc)");
 
                 const onef: f32 = 1.0;
@@ -350,7 +350,7 @@ pub export fn ggml_graph_reset(cgraph: ?*mod.impl.CGraph) void {
 }
 
 /// Ports `ggml_graph_clear` (ggml.c:7592 @b1b770d90).
-pub export fn ggml_graph_clear(cgraph: *mod.impl.CGraph) void {
+pub fn ggml_graph_clear(cgraph: *mod.impl.CGraph) callconv(.c) void {
     cgraph.n_leafs = 0;
     cgraph.n_nodes = 0;
     ggml_hash_set_reset(&cgraph.visited_hash_set);
@@ -360,14 +360,14 @@ pub export fn ggml_graph_clear(cgraph: *mod.impl.CGraph) void {
 // Reading a graph
 
 /// Ports `ggml_graph_size` (ggml.c:7598 @b1b770d90).
-pub export fn ggml_graph_size(cgraph: *mod.impl.CGraph) c_int {
+pub fn ggml_graph_size(cgraph: *mod.impl.CGraph) callconv(.c) c_int {
     return cgraph.size;
 }
 
 /// Ports `ggml_graph_node` (ggml.c:7602 @b1b770d90).
 ///
 /// A negative `i` counts back from the end, so `-1` is the last node.
-pub export fn ggml_graph_node(cgraph: *mod.impl.CGraph, i: c_int) *mod.impl.c.ggml_tensor {
+pub fn ggml_graph_node(cgraph: *mod.impl.CGraph, i: c_int) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     if (i < 0) {
         mod.impl.assert(cgraph.n_nodes + i >= 0, "cgraph->n_nodes + i >= 0");
         return cgraph.nodes[@intCast(cgraph.n_nodes + i)].?;
@@ -378,12 +378,12 @@ pub export fn ggml_graph_node(cgraph: *mod.impl.CGraph, i: c_int) *mod.impl.c.gg
 }
 
 /// Ports `ggml_graph_nodes` (ggml.c:7612 @b1b770d90).
-pub export fn ggml_graph_nodes(cgraph: *mod.impl.CGraph) [*c]?*mod.impl.c.ggml_tensor {
+pub fn ggml_graph_nodes(cgraph: *mod.impl.CGraph) callconv(.c) [*c]?*mod.impl.ggml_c.ggml_tensor {
     return cgraph.nodes;
 }
 
 /// Ports `ggml_graph_n_nodes` (ggml.c:7616 @b1b770d90).
-pub export fn ggml_graph_n_nodes(cgraph: *mod.impl.CGraph) c_int {
+pub fn ggml_graph_n_nodes(cgraph: *mod.impl.CGraph) callconv(.c) c_int {
     return cgraph.n_nodes;
 }
 
@@ -391,7 +391,7 @@ pub export fn ggml_graph_n_nodes(cgraph: *mod.impl.CGraph) c_int {
 ///
 /// Appends without visiting parents, so the caller is asserting the sources
 /// are already in the graph.
-pub export fn ggml_graph_add_node(cgraph: *mod.impl.CGraph, tensor: *mod.impl.c.ggml_tensor) void {
+pub fn ggml_graph_add_node(cgraph: *mod.impl.CGraph, tensor: *mod.impl.ggml_c.ggml_tensor) callconv(.c) void {
     mod.impl.assert(cgraph.size > cgraph.n_nodes, "cgraph->size > cgraph->n_nodes");
     cgraph.nodes[@intCast(cgraph.n_nodes)] = tensor;
     cgraph.n_nodes += 1;
@@ -403,7 +403,7 @@ pub export fn ggml_graph_add_node(cgraph: *mod.impl.CGraph, tensor: *mod.impl.c.
 ///
 /// Return: the first tensor whose name matches, or null. Borrowed from the
 /// graph.
-pub export fn ggml_graph_get_tensor(cgraph: *const mod.impl.CGraph, name: [*:0]const u8) ?*mod.impl.c.ggml_tensor {
+pub fn ggml_graph_get_tensor(cgraph: *const mod.impl.CGraph, name: [*:0]const u8) callconv(.c) ?*mod.impl.ggml_c.ggml_tensor {
     for (0..@intCast(cgraph.n_leafs)) |i| {
         const leaf = cgraph.leafs[i].?;
         if (std.mem.orderZ(u8, @ptrCast(&leaf.name), name) == .eq) return leaf;
@@ -421,7 +421,7 @@ pub export fn ggml_graph_get_tensor(cgraph: *const mod.impl.CGraph, name: [*:0]c
 ///
 /// Three conditions, all required: the key was found, its slot is in use, and
 /// the graph has gradients at all.
-pub export fn ggml_graph_get_grad(cgraph: *const mod.impl.CGraph, node: *const mod.impl.c.ggml_tensor) ?*mod.impl.c.ggml_tensor {
+pub fn ggml_graph_get_grad(cgraph: *const mod.impl.CGraph, node: *const mod.impl.ggml_c.ggml_tensor) callconv(.c) ?*mod.impl.ggml_c.ggml_tensor {
     const igrad = mod.impl.hashFind(&cgraph.visited_hash_set, node);
     return if (igrad != mod.impl.hashset_full and
         mod.impl.bitsetGet(cgraph.visited_hash_set.used, igrad) and
@@ -429,7 +429,7 @@ pub export fn ggml_graph_get_grad(cgraph: *const mod.impl.CGraph, node: *const m
 }
 
 /// Ports `ggml_graph_get_grad_acc` (ggml.c:7651 @b1b770d90).
-pub export fn ggml_graph_get_grad_acc(cgraph: *const mod.impl.CGraph, node: *const mod.impl.c.ggml_tensor) ?*mod.impl.c.ggml_tensor {
+pub fn ggml_graph_get_grad_acc(cgraph: *const mod.impl.CGraph, node: *const mod.impl.ggml_c.ggml_tensor) callconv(.c) ?*mod.impl.ggml_c.ggml_tensor {
     const igrad = mod.impl.hashFind(&cgraph.visited_hash_set, node);
     return if (igrad != mod.impl.hashset_full and
         mod.impl.bitsetGet(cgraph.visited_hash_set.used, igrad) and
@@ -453,9 +453,9 @@ pub export fn ggml_graph_get_grad_acc(cgraph: *const mod.impl.CGraph, node: *con
 ///   `ggml_build_forward_order` exists to do.
 ///
 /// Return: `node`'s slot in the visited hash set.
-fn visitParents(cgraph: *mod.impl.CGraph, node: *mod.impl.c.ggml_tensor, compute: bool) usize {
-    if (node.op != mod.impl.c.GGML_OP_NONE and compute) {
-        node.flags |= mod.impl.c.GGML_TENSOR_FLAG_COMPUTE;
+fn visitParents(cgraph: *mod.impl.CGraph, node: *mod.impl.ggml_c.ggml_tensor, compute: bool) usize {
+    if (node.op != mod.impl.ggml_c.GGML_OP_NONE and compute) {
+        node.flags |= mod.impl.ggml_c.GGML_TENSOR_FLAG_COMPUTE;
     }
 
     const node_hash_pos = mod.impl.hashFind(&cgraph.visited_hash_set, node);
@@ -468,10 +468,10 @@ fn visitParents(cgraph: *mod.impl.CGraph, node: *mod.impl.c.ggml_tensor, compute
             // A subtree first reached without `compute` may be reached again
             // with it, and the flag has to spread even though the nodes are
             // already recorded.
-            for (0..mod.impl.c.GGML_MAX_SRC) |i| {
+            for (0..mod.impl.ggml_c.GGML_MAX_SRC) |i| {
                 if (node.src[i] != null) {
-                    const src = mod.impl.one(mod.impl.c.ggml_tensor, node.src[i]);
-                    if ((src.flags & mod.impl.c.GGML_TENSOR_FLAG_COMPUTE) == 0) {
+                    const src = mod.impl.one(mod.impl.ggml_c.ggml_tensor, node.src[i]);
+                    if ((src.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_COMPUTE) == 0) {
                         _ = visitParents(cgraph, src, true);
                     }
                 }
@@ -486,22 +486,22 @@ fn visitParents(cgraph: *mod.impl.CGraph, node: *mod.impl.c.ggml_tensor, compute
     mod.impl.bitsetSet(cgraph.visited_hash_set.used, node_hash_pos);
     cgraph.use_counts[node_hash_pos] = 0;
 
-    for (0..mod.impl.c.GGML_MAX_SRC) |i| {
+    for (0..mod.impl.ggml_c.GGML_MAX_SRC) |i| {
         const k = switch (cgraph.order) {
             mod.impl.eval_order_left_to_right => i,
-            mod.impl.eval_order_right_to_left => mod.impl.c.GGML_MAX_SRC - 1 - i,
+            mod.impl.eval_order_right_to_left => mod.impl.ggml_c.GGML_MAX_SRC - 1 - i,
             else => i, // unknown order, just fall back to using i
         };
 
         if (node.src[k] != null) {
-            const src_hash_pos = visitParents(cgraph, mod.impl.one(mod.impl.c.ggml_tensor, node.src[k]), compute);
+            const src_hash_pos = visitParents(cgraph, mod.impl.one(mod.impl.ggml_c.ggml_tensor, node.src[k]), compute);
 
             // Update the use count for this operand.
             cgraph.use_counts[src_hash_pos] += 1;
         }
     }
 
-    if (node.op == mod.impl.c.GGML_OP_NONE and (node.flags & mod.impl.c.GGML_TENSOR_FLAG_PARAM) == 0) {
+    if (node.op == mod.impl.ggml_c.GGML_OP_NONE and (node.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_PARAM) == 0) {
         // reached a leaf node, not part of the gradient graph (e.g. a constant)
         mod.impl.assert(cgraph.n_leafs < cgraph.size, "cgraph->n_leafs < cgraph->size");
 
@@ -526,7 +526,7 @@ fn visitParents(cgraph: *mod.impl.CGraph, node: *mod.impl.c.ggml_tensor, compute
 }
 
 /// Ports `ggml_build_forward_impl` (ggml.c:7250 @b1b770d90).
-fn buildForwardImpl(cgraph: *mod.impl.CGraph, tensor: *mod.impl.c.ggml_tensor, expand: bool, compute: bool) void {
+fn buildForwardImpl(cgraph: *mod.impl.CGraph, tensor: *mod.impl.ggml_c.ggml_tensor, expand: bool, compute: bool) void {
     if (!expand) {
         ggml_graph_clear(cgraph);
     }
@@ -551,12 +551,12 @@ fn buildForwardImpl(cgraph: *mod.impl.CGraph, tensor: *mod.impl.c.ggml_tensor, e
 /// without being evaluated.
 ///
 /// Return: `tensors[idx]`, borrowed from the caller's array.
-pub export fn ggml_build_forward_select(
+pub fn ggml_build_forward_select(
     cgraph: *mod.impl.CGraph,
-    tensors: [*c]?*mod.impl.c.ggml_tensor,
+    tensors: [*c]?*mod.impl.ggml_c.ggml_tensor,
     n_tensors: c_int,
     idx: c_int,
-) *mod.impl.c.ggml_tensor {
+) callconv(.c) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(idx >= 0 and idx < n_tensors, "idx >= 0 && idx < n_tensors");
 
     for (0..@intCast(n_tensors)) |i| {
@@ -569,7 +569,7 @@ pub export fn ggml_build_forward_select(
 /// Ports `ggml_build_forward_expand` (ggml.c:7283 @b1b770d90).
 ///
 /// The normal entry point: add `tensor` and everything it depends on.
-pub export fn ggml_build_forward_expand(cgraph: *mod.impl.CGraph, tensor: *mod.impl.c.ggml_tensor) void {
+pub fn ggml_build_forward_expand(cgraph: *mod.impl.CGraph, tensor: *mod.impl.ggml_c.ggml_tensor) callconv(.c) void {
     buildForwardImpl(cgraph, tensor, true, true);
 }
 
@@ -577,7 +577,7 @@ pub export fn ggml_build_forward_expand(cgraph: *mod.impl.CGraph, tensor: *mod.i
 ///
 /// Records the subtree without marking it for computation, fixing its place in
 /// the evaluation order for a later `ggml_build_forward_expand`.
-pub export fn ggml_build_forward_order(cgraph: *mod.impl.CGraph, tensor: *mod.impl.c.ggml_tensor) void {
+pub fn ggml_build_forward_order(cgraph: *mod.impl.CGraph, tensor: *mod.impl.ggml_c.ggml_tensor) callconv(.c) void {
     buildForwardImpl(cgraph, tensor, true, false);
 }
 
@@ -592,7 +592,7 @@ pub export fn ggml_build_forward_order(cgraph: *mod.impl.CGraph, tensor: *mod.im
 // to include whatever they just built.
 
 /// Ports `ggml_add_or_set` (ggml.c:6661 @b1b770d90).
-fn addOrSet(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, isrc: usize, tensor: *mod.impl.c.ggml_tensor) void {
+fn addOrSet(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, isrc: usize, tensor: *mod.impl.ggml_c.ggml_tensor) void {
     const src = cgraph.visited_hash_set.keys[isrc].?;
     if (cgraph.grads[isrc]) |g| {
         cgraph.grads[isrc] = mod.ops.addImpl(ctx, g, tensor, cgraph.grad_accs[isrc] != null);
@@ -608,7 +608,7 @@ fn accOrSet(
     ctx: *mod.context.Context,
     cgraph: *mod.impl.CGraph,
     isrc: usize,
-    tensor: *mod.impl.c.ggml_tensor,
+    tensor: *mod.impl.ggml_c.ggml_tensor,
     nb1: usize,
     nb2: usize,
     nb3: usize,
@@ -628,7 +628,7 @@ fn accOrSet(
 }
 
 /// Ports `ggml_sub_or_set` (ggml.c:6698 @b1b770d90).
-fn subOrSet(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, isrc: usize, tensor: *mod.impl.c.ggml_tensor) void {
+fn subOrSet(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, isrc: usize, tensor: *mod.impl.ggml_c.ggml_tensor) void {
     const src = cgraph.visited_hash_set.keys[isrc].?;
     if (cgraph.grads[isrc]) |g| {
         cgraph.grads[isrc] = mod.ops.subImpl(ctx, g, tensor, cgraph.grad_accs[isrc] != null);
@@ -655,9 +655,9 @@ fn computeBackward(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, i: c_int
     const tensor = cgraph.nodes[@intCast(i)].?;
     const grad = ggml_graph_get_grad(cgraph, tensor) orelse return;
 
-    const src0: ?*mod.impl.c.ggml_tensor = if (tensor.src[0] != null) mod.impl.one(mod.impl.c.ggml_tensor, tensor.src[0]) else null;
-    const src1: ?*mod.impl.c.ggml_tensor = if (tensor.src[1] != null) mod.impl.one(mod.impl.c.ggml_tensor, tensor.src[1]) else null;
-    const src2: ?*mod.impl.c.ggml_tensor = if (tensor.src[2] != null) mod.impl.one(mod.impl.c.ggml_tensor, tensor.src[2]) else null;
+    const src0: ?*mod.impl.ggml_c.ggml_tensor = if (tensor.src[0] != null) mod.impl.one(mod.impl.ggml_c.ggml_tensor, tensor.src[0]) else null;
+    const src1: ?*mod.impl.ggml_c.ggml_tensor = if (tensor.src[1] != null) mod.impl.one(mod.impl.ggml_c.ggml_tensor, tensor.src[1]) else null;
+    const src2: ?*mod.impl.ggml_c.ggml_tensor = if (tensor.src[2] != null) mod.impl.one(mod.impl.ggml_c.ggml_tensor, tensor.src[2]) else null;
     const hash_set = &cgraph.visited_hash_set;
     const isrc0 = if (src0) |s| mod.impl.hashFind(hash_set, s) else mod.impl.hashset_full;
     const isrc1 = if (src1) |s| mod.impl.hashFind(hash_set, s) else mod.impl.hashset_full;
@@ -667,10 +667,10 @@ fn computeBackward(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, i: c_int
     const src2_needs_grads = src2 != null and isrc2 != mod.impl.hashset_full and mod.impl.bitsetGet(hash_set.used, isrc2) and grads_needed[isrc2];
 
     switch (tensor.op) {
-        mod.impl.c.GGML_OP_DUP => {
+        mod.impl.ggml_c.GGML_OP_DUP => {
             if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, grad);
         },
-        mod.impl.c.GGML_OP_ADD => {
+        mod.impl.ggml_c.GGML_OP_ADD => {
             if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, grad);
             if (src1_needs_grads) {
                 var tmp = grad;
@@ -680,7 +680,7 @@ fn computeBackward(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, i: c_int
                 addOrSet(ctx, cgraph, isrc1, tmp);
             }
         },
-        mod.impl.c.GGML_OP_ACC => {
+        mod.impl.ggml_c.GGML_OP_ACC => {
             if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, grad);
             if (src1_needs_grads) {
                 const nb1: usize = @intCast(mod.impl.getOpParamsI32(tensor, 0));
@@ -704,11 +704,11 @@ fn computeBackward(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, i: c_int
                 addOrSet(ctx, cgraph, isrc1, mod.ops.ggml_reshape(ctx, mod.ops.ggml_cont(ctx, tensor_grad_view), src1.?));
             }
         },
-        mod.impl.c.GGML_OP_SUB => {
+        mod.impl.ggml_c.GGML_OP_SUB => {
             if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, grad);
             if (src1_needs_grads) subOrSet(ctx, cgraph, isrc1, grad);
         },
-        mod.impl.c.GGML_OP_MUL => {
+        mod.impl.ggml_c.GGML_OP_MUL => {
             if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_mul(ctx, grad, src1.?));
             if (src1_needs_grads) {
                 var tmp = mod.ops.ggml_mul(ctx, src0.?, grad);
@@ -718,49 +718,49 @@ fn computeBackward(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, i: c_int
                 addOrSet(ctx, cgraph, isrc1, tmp);
             }
         },
-        mod.impl.c.GGML_OP_DIV => {
+        mod.impl.ggml_c.GGML_OP_DIV => {
             if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_div(ctx, grad, src1.?));
             if (src1_needs_grads) subOrSet(ctx, cgraph, isrc1, mod.ops.ggml_mul(ctx, grad, mod.ops.ggml_div(ctx, tensor, src1.?)));
         },
-        mod.impl.c.GGML_OP_SQR => {
+        mod.impl.ggml_c.GGML_OP_SQR => {
             if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_scale(ctx, mod.ops.ggml_mul(ctx, src0.?, grad), 2.0));
         },
-        mod.impl.c.GGML_OP_SQRT => {
+        mod.impl.ggml_c.GGML_OP_SQRT => {
             if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_scale(ctx, mod.ops.ggml_div(ctx, grad, tensor), 0.5));
         },
-        mod.impl.c.GGML_OP_LOG => {
+        mod.impl.ggml_c.GGML_OP_LOG => {
             if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_div(ctx, grad, src0.?));
         },
-        mod.impl.c.GGML_OP_SIN => {
+        mod.impl.ggml_c.GGML_OP_SIN => {
             if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_mul(ctx, grad, mod.ops.ggml_cos(ctx, src0.?)));
         },
-        mod.impl.c.GGML_OP_COS => {
+        mod.impl.ggml_c.GGML_OP_COS => {
             if (src0_needs_grads) subOrSet(ctx, cgraph, isrc0, mod.ops.ggml_mul(ctx, grad, mod.ops.ggml_sin(ctx, src0.?)));
         },
-        mod.impl.c.GGML_OP_SUM => {
+        mod.impl.ggml_c.GGML_OP_SUM => {
             if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_repeat(ctx, grad, src0.?));
         },
-        mod.impl.c.GGML_OP_SUM_ROWS => {
+        mod.impl.ggml_c.GGML_OP_SUM_ROWS => {
             if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_repeat(ctx, grad, src0.?));
         },
-        mod.impl.c.GGML_OP_MEAN => {
+        mod.impl.ggml_c.GGML_OP_MEAN => {
             if (src0_needs_grads) {
                 addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_repeat(ctx, mod.ops.scaleImpl(ctx, grad, 1.0 / @as(f32, @floatFromInt(src0.?.ne[0])), 0.0, false), src0.?));
             }
         },
-        mod.impl.c.GGML_OP_REPEAT => {
+        mod.impl.ggml_c.GGML_OP_REPEAT => {
             if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_repeat_back(ctx, grad, src0.?));
         },
-        mod.impl.c.GGML_OP_REPEAT_BACK => {
+        mod.impl.ggml_c.GGML_OP_REPEAT_BACK => {
             if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_repeat(ctx, grad, src0.?));
         },
-        mod.impl.c.GGML_OP_RMS_NORM => {
+        mod.impl.ggml_c.GGML_OP_RMS_NORM => {
             if (src0_needs_grads) {
                 const eps = mod.impl.getOpParamsF32(tensor, 0);
                 addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_rms_norm_back(ctx, grad, src0.?, eps));
             }
         },
-        mod.impl.c.GGML_OP_MUL_MAT => {
+        mod.impl.ggml_c.GGML_OP_MUL_MAT => {
             // https://cs231n.github.io/optimization-2/#staged
             //   tensor.shape [m,p,qq,rr]
             //   src0.shape   [n,m,q1,r1]
@@ -790,19 +790,19 @@ fn computeBackward(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, i: c_int
                 addOrSet(ctx, cgraph, isrc1, mod.ops.ggml_out_prod(ctx, src0.?, mod.ops.ggml_transpose(ctx, grad)));
             }
         },
-        mod.impl.c.GGML_OP_SCALE => {
+        mod.impl.ggml_c.GGML_OP_SCALE => {
             if (src0_needs_grads) {
                 const s = mod.impl.getOpParamsF32(tensor, 0);
                 addOrSet(ctx, cgraph, isrc0, mod.ops.scaleImpl(ctx, grad, s, 0.0, false));
             }
         },
-        mod.impl.c.GGML_OP_SET => {
+        mod.impl.ggml_c.GGML_OP_SET => {
             const nb1: usize = @intCast(mod.impl.getOpParamsI32(tensor, 0));
             const nb2: usize = @intCast(mod.impl.getOpParamsI32(tensor, 1));
             const nb3: usize = @intCast(mod.impl.getOpParamsI32(tensor, 2));
             const offset: usize = @intCast(mod.impl.getOpParamsI32(tensor, 3));
 
-            var tensor_grad_view: ?*mod.impl.c.ggml_tensor = null;
+            var tensor_grad_view: ?*mod.impl.ggml_c.ggml_tensor = null;
 
             if (src0_needs_grads or src1_needs_grads) {
                 mod.impl.assert(src0.?.type == tensor.type, "src0->type == tensor->type");
@@ -832,13 +832,13 @@ fn computeBackward(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, i: c_int
                 addOrSet(ctx, cgraph, isrc1, mod.ops.ggml_reshape(ctx, mod.ops.ggml_cont(ctx, tensor_grad_view.?), src1.?));
             }
         },
-        mod.impl.c.GGML_OP_CPY => {
+        mod.impl.ggml_c.GGML_OP_CPY => {
             // cpy overwrites the value of src1 with src0 and returns view(src1),
             // which is mathematically tensor = src0*1 + src1*0. So src0's
             // gradient passes through and src1's is zero -- a no-op.
             if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_reshape(ctx, grad, src0.?));
         },
-        mod.impl.c.GGML_OP_CONT => {
+        mod.impl.ggml_c.GGML_OP_CONT => {
             // same as cpy
             if (src0_needs_grads) {
                 mod.impl.assert(cgraph.grads[isrc0] == null or mod.types.ggml_is_contiguous(cgraph.grads[isrc0].?), "!cgraph->grads[isrc0] || ggml_is_contiguous(cgraph->grads[isrc0])");
@@ -847,13 +847,13 @@ fn computeBackward(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, i: c_int
                 addOrSet(ctx, cgraph, isrc0, if (mod.types.ggml_are_same_shape(tensor, src0.?)) grad else mod.ops.ggml_reshape(ctx, grad, src0.?));
             }
         },
-        mod.impl.c.GGML_OP_RESHAPE => {
+        mod.impl.ggml_c.GGML_OP_RESHAPE => {
             if (src0_needs_grads) {
                 const grad_cont = if (mod.types.ggml_is_contiguous(grad)) grad else mod.ops.ggml_cont(ctx, grad);
                 addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_reshape(ctx, grad_cont, src0.?));
             }
         },
-        mod.impl.c.GGML_OP_VIEW => {
+        mod.impl.ggml_c.GGML_OP_VIEW => {
             if (src0_needs_grads) {
                 // A view's offset is a `size_t` written over the first two
                 // i32 slots, not an i32 -- reading it as one would truncate
@@ -884,7 +884,7 @@ fn computeBackward(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, i: c_int
                 accOrSet(ctx, cgraph, isrc0, grad, nb1, nb2, nb3, offset);
             }
         },
-        mod.impl.c.GGML_OP_PERMUTE => {
+        mod.impl.ggml_c.GGML_OP_PERMUTE => {
             if (src0_needs_grads) {
                 // Invert the permutation: whichever slot each axis landed in
                 // going forward is where it comes back from.
@@ -900,19 +900,19 @@ fn computeBackward(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, i: c_int
                 addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_permute(ctx, grad, axb[0], axb[1], axb[2], axb[3]));
             }
         },
-        mod.impl.c.GGML_OP_TRANSPOSE => {
+        mod.impl.ggml_c.GGML_OP_TRANSPOSE => {
             if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_transpose(ctx, grad));
         },
-        mod.impl.c.GGML_OP_GET_ROWS => {
+        mod.impl.ggml_c.GGML_OP_GET_ROWS => {
             if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_get_rows_back(ctx, grad, src1.?, src0.?));
             // src1 holds row indices, which are not differentiable: no-op.
         },
-        mod.impl.c.GGML_OP_TRI => {
+        mod.impl.ggml_c.GGML_OP_TRI => {
             if (src0_needs_grads) {
                 addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_tri(ctx, grad, @intCast(mod.impl.getOpParamsI32(tensor, 0))));
             }
         },
-        mod.impl.c.GGML_OP_SOFT_MAX => {
+        mod.impl.ggml_c.GGML_OP_SOFT_MAX => {
             if (src0_needs_grads) {
                 const scale = mod.impl.getOpParamsF32(tensor, 0);
                 const max_bias = mod.impl.getOpParamsF32(tensor, 1);
@@ -920,7 +920,7 @@ fn computeBackward(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, i: c_int
             }
             mod.impl.assert(src1 == null or !src1_needs_grads, "backward pass for softmax mask not implemented");
         },
-        mod.impl.c.GGML_OP_ROPE => {
+        mod.impl.ggml_c.GGML_OP_ROPE => {
             if (src0_needs_grads) {
                 const n_dims = mod.impl.getOpParamsI32(tensor, 1);
                 const mode = mod.impl.getOpParamsI32(tensor, 2);
@@ -945,7 +945,7 @@ fn computeBackward(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, i: c_int
             }
             mod.impl.assert(src2 == null or !src2_needs_grads, "gradients for freq factors not implemented");
         },
-        mod.impl.c.GGML_OP_IM2COL => {
+        mod.impl.ggml_c.GGML_OP_IM2COL => {
             if (src1_needs_grads) {
                 const s0 = mod.impl.getOpParamsI32(tensor, 0);
                 const s1 = mod.impl.getOpParamsI32(tensor, 1);
@@ -958,9 +958,9 @@ fn computeBackward(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, i: c_int
                 addOrSet(ctx, cgraph, isrc1, mod.ops.ggml_im2col_back(ctx, grad, src0.?, &src1.?.ne, s0, s1, p0, p1, d0, d1, is_2d));
             }
         },
-        mod.impl.c.GGML_OP_POOL_2D => {
+        mod.impl.ggml_c.GGML_OP_POOL_2D => {
             if (src0_needs_grads) {
-                const op: mod.impl.c.enum_ggml_op_pool = @intCast(mod.impl.getOpParamsI32(tensor, 0));
+                const op: mod.impl.ggml_c.enum_ggml_op_pool = @intCast(mod.impl.getOpParamsI32(tensor, 0));
                 const k0 = mod.impl.getOpParamsI32(tensor, 1);
                 const k1 = mod.impl.getOpParamsI32(tensor, 2);
                 const s0 = mod.impl.getOpParamsI32(tensor, 3);
@@ -980,29 +980,29 @@ fn computeBackward(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, i: c_int
         // reads a unary op out of op_params they never wrote. Neither is
         // differentiable and neither is reachable from a training graph; the
         // fallthrough is reproduced rather than corrected.
-        mod.impl.c.GGML_OP_WIN_PART, mod.impl.c.GGML_OP_WIN_UNPART, mod.impl.c.GGML_OP_UNARY => {
+        mod.impl.ggml_c.GGML_OP_WIN_PART, mod.impl.ggml_c.GGML_OP_WIN_UNPART, mod.impl.ggml_c.GGML_OP_UNARY => {
             switch (mod.types.ggml_get_unary_op(tensor)) {
-                mod.impl.c.GGML_UNARY_OP_ABS => {
+                mod.impl.ggml_c.GGML_UNARY_OP_ABS => {
                     if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_mul(ctx, mod.ops.unary.sgn(ctx, src0.?), grad));
                 },
-                mod.impl.c.GGML_UNARY_OP_SGN => {}, // piecewise constant: no-op
-                mod.impl.c.GGML_UNARY_OP_NEG => {
+                mod.impl.ggml_c.GGML_UNARY_OP_SGN => {}, // piecewise constant: no-op
+                mod.impl.ggml_c.GGML_UNARY_OP_NEG => {
                     if (src0_needs_grads) subOrSet(ctx, cgraph, isrc0, grad);
                 },
-                mod.impl.c.GGML_UNARY_OP_STEP => {}, // piecewise constant: no-op
-                mod.impl.c.GGML_UNARY_OP_RELU => {
+                mod.impl.ggml_c.GGML_UNARY_OP_STEP => {}, // piecewise constant: no-op
+                mod.impl.ggml_c.GGML_UNARY_OP_RELU => {
                     if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_mul(ctx, mod.ops.unary.step(ctx, src0.?), grad));
                 },
-                mod.impl.c.GGML_UNARY_OP_SILU => {
+                mod.impl.ggml_c.GGML_UNARY_OP_SILU => {
                     if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_silu_back(ctx, grad, src0.?));
                 },
-                mod.impl.c.GGML_UNARY_OP_EXP => {
+                mod.impl.ggml_c.GGML_UNARY_OP_EXP => {
                     if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_mul(ctx, tensor, grad));
                 },
-                mod.impl.c.GGML_UNARY_OP_EXPM1 => {
+                mod.impl.ggml_c.GGML_UNARY_OP_EXPM1 => {
                     if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_mul(ctx, grad, mod.ops.unary.exp(ctx, src0.?)));
                 },
-                mod.impl.c.GGML_UNARY_OP_SOFTPLUS => {
+                mod.impl.ggml_c.GGML_UNARY_OP_SOFTPLUS => {
                     if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_mul(ctx, grad, mod.ops.unary.sigmoid(ctx, src0.?)));
                 },
                 else => {
@@ -1014,13 +1014,13 @@ fn computeBackward(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, i: c_int
                 },
             }
         },
-        mod.impl.c.GGML_OP_CROSS_ENTROPY_LOSS => {
+        mod.impl.ggml_c.GGML_OP_CROSS_ENTROPY_LOSS => {
             if (src0_needs_grads) addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_cross_entropy_loss_back(ctx, grad, src0.?, src1.?));
             mod.impl.assert(!src1_needs_grads, "backward pass for labels not implemented");
         },
-        mod.impl.c.GGML_OP_GLU => {
+        mod.impl.ggml_c.GGML_OP_GLU => {
             switch (mod.types.ggml_get_glu_op(tensor)) {
-                mod.impl.c.GGML_GLU_OP_SWIGLU => {
+                mod.impl.ggml_c.GGML_GLU_OP_SWIGLU => {
                     if (src0_needs_grads) {
                         mod.impl.assert(src1 != null, "backward pass only implemented for split swiglu");
                         addOrSet(ctx, cgraph, isrc0, mod.ops.ggml_silu_back(ctx, mod.ops.ggml_mul(ctx, grad, src1.?), src0.?));
@@ -1030,7 +1030,7 @@ fn computeBackward(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, i: c_int
                 else => mod.impl.abort("unsupported glu op for backward pass"),
             }
         },
-        mod.impl.c.GGML_OP_NONE => {}, // no-op
+        mod.impl.ggml_c.GGML_OP_NONE => {}, // no-op
         else => {
             mod.impl.logError("%s: unsupported ggml op for backward pass: %s\n", .{
                 "ggml_compute_backward",
@@ -1060,7 +1060,7 @@ fn computeBackward(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, i: c_int
 /// - `cgraph`: graph holding the forward pass, extended in place.
 /// - `grad_accs`: optional per-node accumulators; null lets ggml allocate them
 ///   for loss tensors only.
-pub export fn ggml_build_backward_expand(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, grad_accs: [*c]?*mod.impl.c.ggml_tensor) void {
+pub fn ggml_build_backward_expand(ctx: *mod.context.Context, cgraph: *mod.impl.CGraph, grad_accs: [*c]?*mod.impl.ggml_c.ggml_tensor) callconv(.c) void {
     mod.impl.assert(cgraph.n_nodes > 0, "cgraph->n_nodes > 0");
     mod.impl.assert(cgraph.grads != null, "cgraph->grads");
     mod.impl.assert(cgraph.grad_accs != null, "cgraph->grad_accs");
@@ -1077,8 +1077,8 @@ pub export fn ggml_build_backward_expand(ctx: *mod.context.Context, cgraph: *mod
         var any_loss = false;
         for (0..@intCast(n_nodes_f)) |i| {
             const node = cgraph.nodes[i].?;
-            any_params = any_params or (node.flags & mod.impl.c.GGML_TENSOR_FLAG_PARAM) != 0;
-            any_loss = any_loss or (node.flags & mod.impl.c.GGML_TENSOR_FLAG_LOSS) != 0;
+            any_params = any_params or (node.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_PARAM) != 0;
+            any_loss = any_loss or (node.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_LOSS) != 0;
         }
         mod.impl.assert(any_params, "no trainable parameters found, did you forget to call ggml_set_param?");
         mod.impl.assert(any_loss, "no training loss found, did you forget to call ggml_set_loss?");
@@ -1087,41 +1087,41 @@ pub export fn ggml_build_backward_expand(ctx: *mod.context.Context, cgraph: *mod
     for (0..@intCast(n_nodes_f)) |i| {
         const node = cgraph.nodes[i].?;
 
-        if (node.type == mod.impl.c.GGML_TYPE_I32) continue;
+        if (node.type == mod.impl.ggml_c.GGML_TYPE_I32) continue;
 
-        var node_needs_grad = (node.flags & mod.impl.c.GGML_TENSOR_FLAG_PARAM) != 0 or (node.flags & mod.impl.c.GGML_TENSOR_FLAG_LOSS) != 0;
-        var ignore_src: [mod.impl.c.GGML_MAX_SRC]bool = @splat(false);
+        var node_needs_grad = (node.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_PARAM) != 0 or (node.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_LOSS) != 0;
+        var ignore_src: [mod.impl.ggml_c.GGML_MAX_SRC]bool = @splat(false);
         switch (node.op) {
             // gradients in node->src[0] for one reason or another have no
             // effect on output gradients
-            mod.impl.c.GGML_OP_IM2COL, mod.impl.c.GGML_OP_IM2COL_BACK => ignore_src[0] = true, // only used for its shape
-            mod.impl.c.GGML_OP_UNARY => {
+            mod.impl.ggml_c.GGML_OP_IM2COL, mod.impl.ggml_c.GGML_OP_IM2COL_BACK => ignore_src[0] = true, // only used for its shape
+            mod.impl.ggml_c.GGML_OP_UNARY => {
                 // SGN and STEP unary ops are piecewise constant
                 const uop = mod.types.ggml_get_unary_op(node);
-                if (uop == mod.impl.c.GGML_UNARY_OP_SGN or uop == mod.impl.c.GGML_UNARY_OP_STEP) ignore_src[0] = true;
+                if (uop == mod.impl.ggml_c.GGML_UNARY_OP_SGN or uop == mod.impl.ggml_c.GGML_UNARY_OP_STEP) ignore_src[0] = true;
             },
             // gradients in node->src[1] for one reason or another have no
             // effect on output gradients
-            mod.impl.c.GGML_OP_CPY, // gradients in CPY target are irrelevant
-            mod.impl.c.GGML_OP_GET_ROWS, // row indices not differentiable
-            mod.impl.c.GGML_OP_GET_ROWS_BACK, // same as for GET_ROWS
-            mod.impl.c.GGML_OP_ROPE, // positions not differentiable
+            mod.impl.ggml_c.GGML_OP_CPY, // gradients in CPY target are irrelevant
+            mod.impl.ggml_c.GGML_OP_GET_ROWS, // row indices not differentiable
+            mod.impl.ggml_c.GGML_OP_GET_ROWS_BACK, // same as for GET_ROWS
+            mod.impl.ggml_c.GGML_OP_ROPE, // positions not differentiable
             => ignore_src[1] = true,
             else => {},
         }
-        for (0..mod.impl.c.GGML_MAX_SRC) |j| {
+        for (0..mod.impl.ggml_c.GGML_MAX_SRC) |j| {
             if (node.src[j] == null) continue;
-            const src = mod.impl.one(mod.impl.c.ggml_tensor, node.src[j]);
+            const src = mod.impl.one(mod.impl.ggml_c.ggml_tensor, node.src[j]);
             if (ignore_src[j] or !grads_needed[mod.impl.hashFind(&cgraph.visited_hash_set, src)]) continue;
-            mod.impl.assert(src.type == mod.impl.c.GGML_TYPE_F32 or src.type == mod.impl.c.GGML_TYPE_F16, "node->src[j]->type == GGML_TYPE_F32 || node->src[j]->type == GGML_TYPE_F16");
+            mod.impl.assert(src.type == mod.impl.ggml_c.GGML_TYPE_F32 or src.type == mod.impl.ggml_c.GGML_TYPE_F16, "node->src[j]->type == GGML_TYPE_F32 || node->src[j]->type == GGML_TYPE_F16");
             node_needs_grad = true;
             break;
         }
         if (!node_needs_grad) continue;
 
         // inplace operations are currently not supported
-        mod.impl.assert(node.view_src == null or node.op == mod.impl.c.GGML_OP_CPY or node.op == mod.impl.c.GGML_OP_SET_ROWS or node.op == mod.impl.c.GGML_OP_VIEW or
-            node.op == mod.impl.c.GGML_OP_RESHAPE or node.op == mod.impl.c.GGML_OP_PERMUTE or node.op == mod.impl.c.GGML_OP_TRANSPOSE, "!node->view_src || ...");
+        mod.impl.assert(node.view_src == null or node.op == mod.impl.ggml_c.GGML_OP_CPY or node.op == mod.impl.ggml_c.GGML_OP_SET_ROWS or node.op == mod.impl.ggml_c.GGML_OP_VIEW or
+            node.op == mod.impl.ggml_c.GGML_OP_RESHAPE or node.op == mod.impl.ggml_c.GGML_OP_PERMUTE or node.op == mod.impl.ggml_c.GGML_OP_TRANSPOSE, "!node->view_src || ...");
 
         const ihash = mod.impl.hashFind(&cgraph.visited_hash_set, node);
         mod.impl.assert(ihash != mod.impl.hashset_full, "ihash != GGML_HASHSET_FULL");
@@ -1129,9 +1129,9 @@ pub export fn ggml_build_backward_expand(ctx: *mod.context.Context, cgraph: *mod
         if (grad_accs != null and grad_accs[i] != null) {
             cgraph.grad_accs[ihash] = grad_accs[i];
             cgraph.grads[ihash] = cgraph.grad_accs[ihash];
-        } else if ((node.flags & mod.impl.c.GGML_TENSOR_FLAG_LOSS) != 0) {
+        } else if ((node.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_LOSS) != 0) {
             // loss tensors always need a gradient accumulator
-            cgraph.grad_accs[ihash] = mod.context.ggml_new_tensor(ctx, mod.impl.c.GGML_TYPE_F32, mod.impl.c.GGML_MAX_DIMS, &node.ne);
+            cgraph.grad_accs[ihash] = mod.context.ggml_new_tensor(ctx, mod.impl.ggml_c.GGML_TYPE_F32, mod.impl.ggml_c.GGML_MAX_DIMS, &node.ne);
             cgraph.grads[ihash] = cgraph.grad_accs[ihash];
         }
         grads_needed[ihash] = true;
@@ -1157,7 +1157,7 @@ pub export fn ggml_build_backward_expand(ctx: *mod.context.Context, cgraph: *mod
 /// Return: the position of `tensor` within `idxs`, or -1. A node index past
 /// the end of the graph also yields -1, which is how a caller's stale index
 /// is rejected rather than trusted.
-fn nodeListFindTensor(cgraph: *const mod.impl.CGraph, idxs: [*c]const c_int, count: c_int, tensor: *const mod.impl.c.ggml_tensor) c_int {
+fn nodeListFindTensor(cgraph: *const mod.impl.CGraph, idxs: [*c]const c_int, count: c_int, tensor: *const mod.impl.ggml_c.ggml_tensor) c_int {
     mod.impl.assert(idxs != null, "cgraph && idxs");
     for (0..@intCast(count)) |i| {
         const node_idx = idxs[i];
@@ -1172,10 +1172,10 @@ fn nodeListFindTensor(cgraph: *const mod.impl.CGraph, idxs: [*c]const c_int, cou
 ///
 /// A weight: it lives in a buffer marked as weights and is not a trainable
 /// parameter, so it cannot change during this graph's execution.
-fn isConstant(tensor: *const mod.impl.c.ggml_tensor) bool {
+fn isConstant(tensor: *const mod.impl.ggml_c.ggml_tensor) bool {
     return tensor.buffer != null and
-        mod.backend.ggml_backend_buffer_get_usage(tensor.buffer) == mod.impl.c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS and
-        (tensor.flags & mod.impl.c.GGML_TENSOR_FLAG_PARAM) == 0;
+        mod.backend.ggml_backend_buffer_get_usage(tensor.buffer) == mod.impl.ggml_c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS and
+        (tensor.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_PARAM) == 0;
 }
 
 /// Ports `ggml_can_fuse_subgraph_ext` (ggml.c:7706 @b1b770d90).
@@ -1188,14 +1188,14 @@ fn isConstant(tensor: *const mod.impl.c.ggml_tensor) bool {
 /// - `num_outputs`: length of `outputs`.
 ///
 /// Return: true when the run can be replaced by a single fused kernel.
-pub export fn ggml_can_fuse_subgraph_ext(
+pub fn ggml_can_fuse_subgraph_ext(
     cgraph: *const mod.impl.CGraph,
     node_idxs: [*c]const c_int,
     count: c_int,
-    ops_wanted: [*c]const mod.impl.c.enum_ggml_op,
+    ops_wanted: [*c]const mod.impl.ggml_c.enum_ggml_op,
     outputs: [*c]const c_int,
     num_outputs: c_int,
-) bool {
+) callconv(.c) bool {
     mod.impl.assert(outputs != null and num_outputs > 0, "outputs && num_outputs > 0");
 
     for (0..@intCast(count)) |i| {
@@ -1205,20 +1205,20 @@ pub export fn ggml_can_fuse_subgraph_ext(
 
         if (node.op != ops_wanted[i]) return false;
 
-        if ((node.flags & mod.impl.c.GGML_TENSOR_FLAG_COMPUTE) == 0) return false;
+        if ((node.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_COMPUTE) == 0) return false;
 
         // A declared output may be read from anywhere, so the checks below
         // do not apply to it.
         if (nodeListFindTensor(cgraph, outputs, num_outputs, node) != -1) continue;
 
-        if ((node.flags & mod.impl.c.GGML_TENSOR_FLAG_OUTPUT) != 0) return false;
+        if ((node.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_OUTPUT) != 0) return false;
 
         // Every use of this node must be inside the run, or fusing it would
         // discard a value someone else still reads.
         var subgraph_uses: i32 = 0;
         for (i + 1..@intCast(count)) |j| {
             const other_node = cgraph.nodes[@intCast(node_idxs[j])].?;
-            for (0..mod.impl.c.GGML_MAX_SRC) |src_idx| {
+            for (0..mod.impl.ggml_c.GGML_MAX_SRC) |src_idx| {
                 if (other_node.src[src_idx] == node) subgraph_uses += 1;
             }
         }
@@ -1230,7 +1230,7 @@ pub export fn ggml_can_fuse_subgraph_ext(
         // weight tensors, which are constant for this graph execution.
         var view_src = node.view_src;
         while (view_src != null) {
-            const vs = mod.impl.one(mod.impl.c.ggml_tensor, view_src);
+            const vs = mod.impl.one(mod.impl.ggml_c.ggml_tensor, view_src);
             if (nodeListFindTensor(cgraph, node_idxs, count, vs) == -1 and !isConstant(vs)) return false;
             view_src = vs.view_src;
         }
@@ -1269,7 +1269,7 @@ pub fn nodeHasNUses(cgraph: *const mod.impl.CGraph, node_idx: c_int, n_uses: i32
     if (node.view_src != null) return false;
 
     // The caller asked for this node's output, so it has to survive.
-    if ((node.flags & mod.impl.c.GGML_TENSOR_FLAG_OUTPUT) != 0) return false;
+    if ((node.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_OUTPUT) != 0) return false;
 
     return true;
 }
@@ -1286,7 +1286,7 @@ pub fn nodeHasNUses(cgraph: *const mod.impl.CGraph, node_idx: c_int, n_uses: i32
 pub fn canFuseExt(
     cgraph: *const mod.impl.CGraph,
     node_idxs: []const c_int,
-    ops_wanted: []const mod.impl.c.enum_ggml_op,
+    ops_wanted: []const mod.impl.ggml_c.enum_ggml_op,
     num_ops: usize,
 ) bool {
     for (0..num_ops) |i| {
@@ -1294,7 +1294,7 @@ pub fn canFuseExt(
 
         const node = cgraph.nodes[@intCast(node_idxs[i])].?;
         if (node.op != ops_wanted[i]) return false;
-        if ((node.flags & mod.impl.c.GGML_TENSOR_FLAG_COMPUTE) == 0) return false;
+        if ((node.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_COMPUTE) == 0) return false;
 
         // Every node but the last must feed only the next one.
         if (i < num_ops - 1 and !nodeHasNUses(cgraph, node_idxs[i], 1)) return false;
@@ -1318,7 +1318,7 @@ pub fn canFuseExt(
 /// - `ops_wanted`: the op each node in the run must have; at most 32.
 ///
 /// Return: true when the run can be replaced by a single fused kernel.
-pub fn canFuse(cgraph: *const mod.impl.CGraph, node_idx: c_int, ops_wanted: []const mod.impl.c.enum_ggml_op) bool {
+pub fn canFuse(cgraph: *const mod.impl.CGraph, node_idx: c_int, ops_wanted: []const mod.impl.ggml_c.enum_ggml_op) bool {
     std.debug.assert(ops_wanted.len < 32);
 
     if (node_idx + @as(c_int, @intCast(ops_wanted.len)) > cgraph.n_nodes) return false;
@@ -1340,7 +1340,7 @@ pub fn canFuse(cgraph: *const mod.impl.CGraph, node_idx: c_int, ops_wanted: []co
 /// - `outputs`: the nodes of the run whose results may be used outside it.
 ///
 /// Return: true when the run can be computed as one fused subgraph.
-pub fn canFuseSubgraph(cgraph: *const mod.impl.CGraph, node_idx: c_int, ops_wanted: []const mod.impl.c.enum_ggml_op, outputs: []const c_int) bool {
+pub fn canFuseSubgraph(cgraph: *const mod.impl.CGraph, node_idx: c_int, ops_wanted: []const mod.impl.ggml_c.enum_ggml_op, outputs: []const c_int) bool {
     mod.impl.assert(ops_wanted.len < 32, "count < 32");
     if (node_idx + @as(c_int, @intCast(ops_wanted.len)) > cgraph.n_nodes) return false;
 
@@ -1366,7 +1366,7 @@ pub fn checkEdges(cgraph: *const mod.impl.CGraph, start_idx: c_int, edges: []con
 // Printing
 
 /// Ports `ggml_graph_print` (ggml.c:7656 @b1b770d90).
-pub export fn ggml_graph_print(cgraph: *const mod.impl.CGraph) void {
+pub fn ggml_graph_print(cgraph: *const mod.impl.CGraph) callconv(.c) void {
     mod.impl.logInfo("=== GRAPH ===\n", .{});
 
     mod.impl.logInfo("n_nodes = %d\n", .{cgraph.n_nodes});
@@ -1379,7 +1379,7 @@ pub export fn ggml_graph_print(cgraph: *const mod.impl.CGraph) void {
             node.ne[1],
             node.ne[2],
             mod.types.ggml_op_name(node.op),
-            if ((node.flags & mod.impl.c.GGML_TENSOR_FLAG_PARAM) != 0)
+            if ((node.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_PARAM) != 0)
                 @as([*:0]const u8, "x")
             else if (ggml_graph_get_grad(cgraph, node) != null) "g" else " ",
         });
@@ -1406,7 +1406,7 @@ pub export fn ggml_graph_print(cgraph: *const mod.impl.CGraph) void {
 /// A null graph returns true, which is what makes the colour choice in
 /// `ggml_graph_dump_dot` treat "no forward graph supplied" as "everything is
 /// in it".
-fn graphFind(cgraph: ?*const mod.impl.CGraph, node: *const mod.impl.c.ggml_tensor) bool {
+fn graphFind(cgraph: ?*const mod.impl.CGraph, node: *const mod.impl.ggml_c.ggml_tensor) bool {
     const g = cgraph orelse return true;
 
     for (0..@intCast(g.n_nodes)) |i| {
@@ -1417,7 +1417,7 @@ fn graphFind(cgraph: ?*const mod.impl.CGraph, node: *const mod.impl.c.ggml_tenso
 }
 
 /// Ports `ggml_graph_get_parent` (ggml.c:7780 @b1b770d90).
-fn graphGetParent(cgraph: *const mod.impl.CGraph, node: *const mod.impl.c.ggml_tensor) ?*mod.impl.c.ggml_tensor {
+fn graphGetParent(cgraph: *const mod.impl.CGraph, node: *const mod.impl.ggml_c.ggml_tensor) ?*mod.impl.ggml_c.ggml_tensor {
     for (0..@intCast(cgraph.n_nodes)) |i| {
         const parent = cgraph.nodes[i].?;
         if (ggml_graph_get_grad(cgraph, parent) == node) return parent;
@@ -1427,14 +1427,14 @@ fn graphGetParent(cgraph: *const mod.impl.CGraph, node: *const mod.impl.c.ggml_t
 }
 
 /// Ports `ggml_graph_dump_dot_node_edge` (ggml.c:7793 @b1b770d90).
-fn dumpDotNodeEdge(fp: *std.c.FILE, gb: *const mod.impl.CGraph, node: *mod.impl.c.ggml_tensor, parent: *mod.impl.c.ggml_tensor, label: [*:0]const u8) void {
+fn dumpDotNodeEdge(fp: *std.c.FILE, gb: *const mod.impl.CGraph, node: *mod.impl.ggml_c.ggml_tensor, parent: *mod.impl.ggml_c.ggml_tensor, label: [*:0]const u8) void {
     const gparent = graphGetParent(gb, node);
     const gparent0 = graphGetParent(gb, parent);
     _ = stdlib.libc.fprintf(fp, "  \"%p\" -> \"%p\" [ arrowhead = %s; style = %s; label = \"%s\"; ]\n", if (gparent0) |g| g else parent, if (gparent) |g| g else node, if (gparent != null) @as([*:0]const u8, "empty") else "vee", if (gparent != null) @as([*:0]const u8, "dashed") else "solid", label);
 }
 
 /// Ports `ggml_graph_dump_dot_leaf_edge` (ggml.c:7804 @b1b770d90).
-fn dumpDotLeafEdge(fp: *std.c.FILE, node: *mod.impl.c.ggml_tensor, parent: *mod.impl.c.ggml_tensor, label: [*:0]const u8) void {
+fn dumpDotLeafEdge(fp: *std.c.FILE, node: *mod.impl.ggml_c.ggml_tensor, parent: *mod.impl.ggml_c.ggml_tensor, label: [*:0]const u8) void {
     _ = stdlib.libc.fprintf(fp, "  \"%p\" -> \"%p\" [ label = \"%s\"; ]\n", parent, node, label);
 }
 
@@ -1449,7 +1449,7 @@ fn dumpDotLeafEdge(fp: *std.c.FILE, node: *mod.impl.c.ggml_tensor, parent: *mod.
 /// - `gb`: the graph to draw, typically the backward one.
 /// - `cgraph`: the forward graph, used only to pick colours. May be null.
 /// - `filename`: written through `ggml_fopen`, truncating.
-pub export fn ggml_graph_dump_dot(gb: *const mod.impl.CGraph, cgraph: ?*const mod.impl.CGraph, filename: [*:0]const u8) void {
+pub fn ggml_graph_dump_dot(gb: *const mod.impl.CGraph, cgraph: ?*const mod.impl.CGraph, filename: [*:0]const u8) callconv(.c) void {
     var color: [16]u8 = undefined;
 
     const fp = mod.runtime.ggml_fopen(filename, "w");
@@ -1468,7 +1468,7 @@ pub export fn ggml_graph_dump_dot(gb: *const mod.impl.CGraph, cgraph: ?*const mo
         // node's record, not on its own.
         if (graphGetParent(gb, node) != null) continue;
 
-        if ((node.flags & mod.impl.c.GGML_TENSOR_FLAG_PARAM) != 0) {
+        if ((node.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_PARAM) != 0) {
             _ = stdlib.libc.snprintf(&color, color.len, "yellow");
         } else if (grad != null) {
             if (graphFind(cgraph, node)) {
@@ -1531,11 +1531,11 @@ pub export fn ggml_graph_dump_dot(gb: *const mod.impl.CGraph, cgraph: ?*const mo
     for (0..@intCast(gb.n_nodes)) |i| {
         const node = gb.nodes[i].?;
 
-        for (0..mod.impl.c.GGML_MAX_SRC) |j| {
+        for (0..mod.impl.ggml_c.GGML_MAX_SRC) |j| {
             if (node.src[j] != null) {
                 var label: [16]u8 = undefined;
                 _ = stdlib.libc.snprintf(&label, label.len, "src %d", @as(c_int, @intCast(j)));
-                dumpDotNodeEdge(f, gb, node, mod.impl.one(mod.impl.c.ggml_tensor, node.src[j]), @ptrCast(&label));
+                dumpDotNodeEdge(f, gb, node, mod.impl.one(mod.impl.ggml_c.ggml_tensor, node.src[j]), @ptrCast(&label));
             }
         }
     }
@@ -1543,11 +1543,11 @@ pub export fn ggml_graph_dump_dot(gb: *const mod.impl.CGraph, cgraph: ?*const mo
     for (0..@intCast(gb.n_leafs)) |i| {
         const node = gb.leafs[i].?;
 
-        for (0..mod.impl.c.GGML_MAX_SRC) |j| {
+        for (0..mod.impl.ggml_c.GGML_MAX_SRC) |j| {
             if (node.src[j] != null) {
                 var label: [16]u8 = undefined;
                 _ = stdlib.libc.snprintf(&label, label.len, "src %d", @as(c_int, @intCast(j)));
-                dumpDotLeafEdge(f, node, mod.impl.one(mod.impl.c.ggml_tensor, node.src[j]), @ptrCast(&label));
+                dumpDotLeafEdge(f, node, mod.impl.one(mod.impl.ggml_c.ggml_tensor, node.src[j]), @ptrCast(&label));
             }
         }
     }

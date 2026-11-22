@@ -75,7 +75,7 @@ pub const Threadpool = struct {
     cond: stdlib.sync.Condition,
 
     cgraph: ?*const ggml.impl.CGraph,
-    cplan: ?*const ggml.impl.c.ggml_cplan,
+    cplan: ?*const ggml.impl.ggml_c.ggml_cplan,
 
     /// Holds both the graph counter and the active thread count: the low
     /// `n_threads_bits` are the thread count, the rest a monotonic graph id.
@@ -96,7 +96,7 @@ pub const Threadpool = struct {
     prio: i32,
     poll: u32,
 
-    ec: ggml.impl.c.enum_ggml_status,
+    ec: ggml.impl.ggml_c.enum_ggml_status,
 };
 
 /// Ports `struct ggml_compute_state` (ggml-cpu.c:517 @b1b770d90), the per-thread half of
@@ -106,7 +106,7 @@ pub const ComputeState = struct {
     last_graph: c_int,
     pending: bool,
 
-    cpumask: [ggml.impl.c.GGML_MAX_N_THREADS]bool,
+    cpumask: [ggml.impl.ggml_c.GGML_MAX_N_THREADS]bool,
     threadpool: *Threadpool,
     ith: c_int,
 };
@@ -155,7 +155,7 @@ pub const UnaryLocals = struct {
     /// - `dst`: the result, supplying the unsuffixed names.
     ///
     /// Return: the sixteen locals, by value.
-    pub fn of(src0: *const ggml.impl.c.ggml_tensor, dst: *const ggml.impl.c.ggml_tensor) UnaryLocals {
+    pub fn of(src0: *const ggml.impl.ggml_c.ggml_tensor, dst: *const ggml.impl.ggml_c.ggml_tensor) UnaryLocals {
         return .{
             .ne00 = src0.ne[0],
             .ne01 = src0.ne[1],
@@ -222,7 +222,7 @@ pub const TernaryLocals = struct {
     /// - `dst`: the result, supplying the unsuffixed names.
     ///
     /// Return: the thirty-two locals, by value.
-    pub fn of(src0: *const ggml.impl.c.ggml_tensor, src1: *const ggml.impl.c.ggml_tensor, src2: *const ggml.impl.c.ggml_tensor, dst: *const ggml.impl.c.ggml_tensor) TernaryLocals {
+    pub fn of(src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, src2: *const ggml.impl.ggml_c.ggml_tensor, dst: *const ggml.impl.ggml_c.ggml_tensor) TernaryLocals {
         return .{
             .ne00 = src0.ne[0],
             .ne01 = src0.ne[1],
@@ -301,7 +301,7 @@ pub const BinaryLocals = struct {
     /// - `dst`: the result, supplying the unsuffixed names.
     ///
     /// Return: the twenty-four locals, by value.
-    pub fn of(src0: *const ggml.impl.c.ggml_tensor, src1: *const ggml.impl.c.ggml_tensor, dst: *const ggml.impl.c.ggml_tensor) BinaryLocals {
+    pub fn of(src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, dst: *const ggml.impl.ggml_c.ggml_tensor) BinaryLocals {
         return .{
             .ne00 = src0.ne[0],
             .ne01 = src0.ne[1],

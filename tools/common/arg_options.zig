@@ -24,9 +24,9 @@
 //! handler's error.
 
 const std = @import("std");
+const llama = @import("llama");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const c = @import("tools_h");
 
 /// `"true"` or `"false"`, as `%s` takes them.
 fn tf(b: bool) [*:0]const u8 {
@@ -122,7 +122,7 @@ pub fn parseCsvRow(a: std.mem.Allocator, input: []const u8) !std.ArrayList([:0]c
 }
 
 /// Ports `parse_cpu_range` (common/common.cpp:333 @b1b770d90).
-pub fn parseCpuRange(range: []const u8, boolmask: *[c.GGML_MAX_N_THREADS]bool) !bool {
+pub fn parseCpuRange(range: []const u8, boolmask: *[llama.impl.llama_c.GGML_MAX_N_THREADS]bool) !bool {
     const func = "parse_cpu_range";
     const dash_loc = std.mem.indexOfScalar(u8, range, '-') orelse {
         mod.log.comErr(func, "%s", .{@as([*:0]const u8, "Format of CPU range is invalid! Expected [<start>]-[<end>].\n")});
@@ -134,17 +134,17 @@ pub fn parseCpuRange(range: []const u8, boolmask: *[c.GGML_MAX_N_THREADS]bool) !
 
     if (dash_loc != 0) {
         start_i = try mod.arg.stoull(range[0..dash_loc]);
-        if (start_i >= c.GGML_MAX_N_THREADS) {
+        if (start_i >= llama.impl.llama_c.GGML_MAX_N_THREADS) {
             mod.log.comErr(func, "%s", .{@as([*:0]const u8, "Start index out of bounds!\n")});
             return false;
         }
     }
 
     if (dash_loc == range.len - 1) {
-        end_i = c.GGML_MAX_N_THREADS - 1;
+        end_i = llama.impl.llama_c.GGML_MAX_N_THREADS - 1;
     } else {
         end_i = try mod.arg.stoull(range[dash_loc + 1 ..]);
-        if (end_i >= c.GGML_MAX_N_THREADS) {
+        if (end_i >= llama.impl.llama_c.GGML_MAX_N_THREADS) {
             mod.log.comErr(func, "%s", .{@as([*:0]const u8, "End index out of bounds!\n")});
             return false;
         }
@@ -156,7 +156,7 @@ pub fn parseCpuRange(range: []const u8, boolmask: *[c.GGML_MAX_N_THREADS]bool) !
 }
 
 /// Ports `parse_cpu_mask` (common/common.cpp:370 @b1b770d90).
-pub fn parseCpuMask(mask: []const u8, boolmask: *[c.GGML_MAX_N_THREADS]bool) bool {
+pub fn parseCpuMask(mask: []const u8, boolmask: *[llama.impl.llama_c.GGML_MAX_N_THREADS]bool) bool {
     // Discard potential 0x prefix
     var start_i: usize = 0;
     if (mask.len >= 2 and std.mem.eql(u8, mask[0..2], "0x")) start_i = 2;
@@ -197,7 +197,7 @@ pub fn parseCpuMask(mask: []const u8, boolmask: *[c.GGML_MAX_N_THREADS]bool) boo
 /// `common_sampler_types_from_names`, ported in `sampling.zig`, into the
 /// parameters' arena.
 fn samplerTypesFromNames(p: *mod.params.Params, names: []const []const u8) !std.ArrayList(mod.params.SamplerType) {
-    return std.ArrayList(mod.params.SamplerType).fromOwnedSlice(try @import("sampling.zig").typesFromNames(p.arena, names));
+    return std.ArrayList(mod.params.SamplerType).fromOwnedSlice(try mod.sampling.typesFromNames(p.arena, names));
 }
 
 /// `samplerTypesFromNames`, for `common_init_sampler_from_model`.
@@ -206,7 +206,7 @@ pub const samplerTypesFromNamesPub = samplerTypesFromNames;
 /// `common_sampler_types_from_chars`, ported in `sampling.zig`, into the
 /// parameters' arena.
 fn samplerTypesFromChars(p: *mod.params.Params, chars: []const u8) !std.ArrayList(mod.params.SamplerType) {
-    return std.ArrayList(mod.params.SamplerType).fromOwnedSlice(try @import("sampling.zig").typesFromChars(p.arena, chars));
+    return std.ArrayList(mod.params.SamplerType).fromOwnedSlice(try mod.sampling.typesFromChars(p.arena, chars));
 }
 
 /// `params.sampling.dry_sequence_breakers` as option 54's help lists them:
@@ -253,7 +253,7 @@ fn addPart1(ctx: *mod.arg.Context) !void {
     // arg.cpp:1461
     try ctx.add(.{ .args = &.{"--version"}, .help = "show version and build info", .handler = .{ .void_ = struct {
         fn f(_: *mod.params.Params) !void {
-            mod.build_info.print(c.llama_version(), stdlib.stdio.stderr());
+            mod.build_info.print(llama.api.llama.llama_version(), stdlib.stdio.stderr());
             stdlib.stdio.exit(0);
         }
     }.f } });
@@ -306,7 +306,7 @@ fn addPart1(ctx: *mod.arg.Context) !void {
     // arg.cpp:1574
     try ctx.add(.{ .args = &.{"--prio"}, .value_hint = "N", .help = try ctx.fmt("set process/thread priority : low(-1), normal(0), medium(1), high(2), realtime(3) (default: %d)\n", .{@as(c_int, @intCast(p.cpuparams.priority))}), .handler = .{ .int = struct {
         fn f(q: *mod.params.Params, prio: c_int) !void {
-            if (prio < c.GGML_SCHED_PRIO_LOW or prio > c.GGML_SCHED_PRIO_REALTIME) return mod.arg.throwStr("invalid value");
+            if (prio < llama.impl.llama_c.GGML_SCHED_PRIO_LOW or prio > llama.impl.llama_c.GGML_SCHED_PRIO_REALTIME) return mod.arg.throwStr("invalid value");
             q.cpuparams.priority = @intCast(prio);
         }
     }.f } });
@@ -460,14 +460,14 @@ fn addPart1(ctx: *mod.arg.Context) !void {
         }
     }.f } }).setExamples(&.{ .imatrix, .perplexity, .retrieval }));
     // arg.cpp:1766
-    try ctx.add((mod.arg.Arg{ .args = &.{ "-fa", "--flash-attn" }, .value_hint = "[on|off|auto]", .help = try ctx.fmt("set Flash Attention use ('on', 'off', or 'auto', default: '%s')", .{c.llama_flash_attn_type_name(p.flash_attn_type)}), .handler = .{ .string = struct {
+    try ctx.add((mod.arg.Arg{ .args = &.{ "-fa", "--flash-attn" }, .value_hint = "[on|off|auto]", .help = try ctx.fmt("set Flash Attention use ('on', 'off', or 'auto', default: '%s')", .{llama.api.llama.llama_flash_attn_type_name(p.flash_attn_type)}), .handler = .{ .string = struct {
         fn f(q: *mod.params.Params, value: S) !void {
             if (mod.arg.isTruthy(value)) {
-                q.flash_attn_type = c.LLAMA_FLASH_ATTN_TYPE_ENABLED;
+                q.flash_attn_type = llama.impl.llama_c.LLAMA_FLASH_ATTN_TYPE_ENABLED;
             } else if (mod.arg.isFalsey(value)) {
-                q.flash_attn_type = c.LLAMA_FLASH_ATTN_TYPE_DISABLED;
+                q.flash_attn_type = llama.impl.llama_c.LLAMA_FLASH_ATTN_TYPE_DISABLED;
             } else if (mod.arg.isAutoy(value)) {
-                q.flash_attn_type = c.LLAMA_FLASH_ATTN_TYPE_AUTO;
+                q.flash_attn_type = llama.impl.llama_c.LLAMA_FLASH_ATTN_TYPE_AUTO;
             } else {
                 return mod.arg.throw("error: unknown value for --flash-attn: '%s'\n", .{value.ptr});
             }
@@ -577,7 +577,7 @@ fn addPart1(ctx: *mod.arg.Context) !void {
         }
     }.f } }).setSampling());
     // arg.cpp:2005
-    try ctx.add((mod.arg.Arg{ .args = &.{ "-s", "--seed" }, .value_hint = "SEED", .help = try ctx.fmt("RNG seed (default: %d, use random seed for %d)", .{ @as(c_uint, p.sampling.seed), @as(c_uint, c.LLAMA_DEFAULT_SEED) }), .handler = .{ .string = struct {
+    try ctx.add((mod.arg.Arg{ .args = &.{ "-s", "--seed" }, .value_hint = "SEED", .help = try ctx.fmt("RNG seed (default: %d, use random seed for %d)", .{ @as(c_uint, p.sampling.seed), @as(c_uint, llama.impl.llama_c.LLAMA_DEFAULT_SEED) }), .handler = .{ .string = struct {
         fn f(q: *mod.params.Params, value: S) !void {
             q.sampling.seed = @truncate(try mod.arg.stoul(value));
         }
@@ -813,15 +813,15 @@ fn addPart1(ctx: *mod.arg.Context) !void {
     try ctx.add((mod.arg.Arg{ .args = &.{"--pooling"}, .value_hint = "{none,mean,cls,last,rank}", .help = "pooling type for embeddings, use model default if unspecified", .handler = .{ .string = struct {
         fn f(q: *mod.params.Params, value: S) !void {
             if (std.mem.eql(u8, value, "none")) {
-                q.pooling_type = c.LLAMA_POOLING_TYPE_NONE;
+                q.pooling_type = llama.impl.llama_c.LLAMA_POOLING_TYPE_NONE;
             } else if (std.mem.eql(u8, value, "mean")) {
-                q.pooling_type = c.LLAMA_POOLING_TYPE_MEAN;
+                q.pooling_type = llama.impl.llama_c.LLAMA_POOLING_TYPE_MEAN;
             } else if (std.mem.eql(u8, value, "cls")) {
-                q.pooling_type = c.LLAMA_POOLING_TYPE_CLS;
+                q.pooling_type = llama.impl.llama_c.LLAMA_POOLING_TYPE_CLS;
             } else if (std.mem.eql(u8, value, "last")) {
-                q.pooling_type = c.LLAMA_POOLING_TYPE_LAST;
+                q.pooling_type = llama.impl.llama_c.LLAMA_POOLING_TYPE_LAST;
             } else if (std.mem.eql(u8, value, "rank")) {
-                q.pooling_type = c.LLAMA_POOLING_TYPE_RANK;
+                q.pooling_type = llama.impl.llama_c.LLAMA_POOLING_TYPE_RANK;
             } else return mod.arg.throwStr("invalid value");
         }
     }.f } }).setExamples(&.{ .embedding, .retrieval, .server, .debug }).setEnv("LLAMA_ARG_POOLING"));
@@ -829,7 +829,7 @@ fn addPart1(ctx: *mod.arg.Context) !void {
 
 /// Option 62's parse: `ss >> key >> sign` then the rest of the line as the
 /// bias, `+` or `-` only.
-fn parseLogitBias(value: []const u8) ?c.llama_logit_bias {
+fn parseLogitBias(value: []const u8) ?llama.impl.llama_c.llama_logit_bias {
     var i: usize = 0;
     while (i < value.len and std.ascii.isWhitespace(value[i])) i += 1;
     const key_start = i;
@@ -852,9 +852,9 @@ fn parseLogitBias(value: []const u8) ?c.llama_logit_bias {
 /// Adds every option, in the C's order.
 pub fn addAll(ctx: *mod.arg.Context) !void {
     try addPart1(ctx);
-    try @import("arg_options2.zig").add(ctx);
-    try @import("arg_options3.zig").add(ctx);
-    try @import("arg_options4.zig").add(ctx);
+    try mod.arg_options2.add(ctx);
+    try mod.arg_options3.add(ctx);
+    try mod.arg_options4.add(ctx);
 }
 
 // -----------------------------------------------------------------------------

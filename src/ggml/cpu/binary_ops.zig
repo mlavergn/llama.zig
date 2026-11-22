@@ -161,13 +161,13 @@ fn applyBinaryOp(
     comptime Src1: type,
     comptime Dst: type,
     params: *const ggml.cpu.defs.ComputeParams,
-    dst: *ggml.impl.c.ggml_tensor,
+    dst: *ggml.impl.ggml_c.ggml_tensor,
 ) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
     ggml.impl.assert(
-        ggml.impl.c.ggml_can_repeat(src1, src0) and ggml.impl.c.ggml_are_same_shape(src0, dst),
+        ggml.impl.ggml_c.ggml_can_repeat(src1, src0) and ggml.impl.ggml_c.ggml_are_same_shape(src0, dst),
         "ggml_can_repeat(src1, src0) && ggml_are_same_shape(src0, dst)",
     );
 
@@ -177,7 +177,7 @@ fn applyBinaryOp(
     ggml.impl.assert(l.nb00 == @sizeOf(Src0), "nb00 == sizeof(src0_t)");
 
     const ir0, const ir1 = ggml.cpu.ops.common.getThreadRange(params, src0);
-    const is_src1_contiguous_rows = ggml.impl.c.ggml_is_contiguous_rows(src1);
+    const is_src1_contiguous_rows = ggml.impl.ggml_c.ggml_is_contiguous_rows(src1);
 
     // The C++ picks the vDSP routine here, by comparing the template's `op`
     // pointer; `Op.vdsp` makes the same choice at compile time. The type guard
@@ -240,52 +240,52 @@ fn applyBinaryOp(
 /// The seven supported type triples, in the C's order. Anything else aborts,
 /// as the C does — the TODO above it in the C++ about using the traits table
 /// instead is reproduced as written rather than acted on.
-fn binaryOp(comptime op: Op, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+fn binaryOp(comptime op: Op, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    const F16 = ggml.impl.c.ggml_fp16_t;
-    const BF16 = ggml.impl.c.ggml_bf16_t;
+    const F16 = ggml.impl.ggml_c.ggml_fp16_t;
+    const BF16 = ggml.impl.ggml_c.ggml_bf16_t;
 
-    if (src0.type == ggml.impl.c.GGML_TYPE_F32 and src1.type == ggml.impl.c.GGML_TYPE_F32 and dst.type == ggml.impl.c.GGML_TYPE_F32) {
+    if (src0.type == ggml.impl.ggml_c.GGML_TYPE_F32 and src1.type == ggml.impl.ggml_c.GGML_TYPE_F32 and dst.type == ggml.impl.ggml_c.GGML_TYPE_F32) {
         applyBinaryOp(op, f32, f32, f32, params, dst); // all f32
-    } else if (src0.type == ggml.impl.c.GGML_TYPE_F16 and src1.type == ggml.impl.c.GGML_TYPE_F16 and dst.type == ggml.impl.c.GGML_TYPE_F16) {
+    } else if (src0.type == ggml.impl.ggml_c.GGML_TYPE_F16 and src1.type == ggml.impl.ggml_c.GGML_TYPE_F16 and dst.type == ggml.impl.ggml_c.GGML_TYPE_F16) {
         applyBinaryOp(op, F16, F16, F16, params, dst); // all f16
-    } else if (src0.type == ggml.impl.c.GGML_TYPE_BF16 and src1.type == ggml.impl.c.GGML_TYPE_BF16 and dst.type == ggml.impl.c.GGML_TYPE_BF16) {
+    } else if (src0.type == ggml.impl.ggml_c.GGML_TYPE_BF16 and src1.type == ggml.impl.ggml_c.GGML_TYPE_BF16 and dst.type == ggml.impl.ggml_c.GGML_TYPE_BF16) {
         applyBinaryOp(op, BF16, BF16, BF16, params, dst); // all bf16
-    } else if (src0.type == ggml.impl.c.GGML_TYPE_BF16 and src1.type == ggml.impl.c.GGML_TYPE_F32 and dst.type == ggml.impl.c.GGML_TYPE_BF16) {
+    } else if (src0.type == ggml.impl.ggml_c.GGML_TYPE_BF16 and src1.type == ggml.impl.ggml_c.GGML_TYPE_F32 and dst.type == ggml.impl.ggml_c.GGML_TYPE_BF16) {
         applyBinaryOp(op, BF16, f32, BF16, params, dst);
-    } else if (src0.type == ggml.impl.c.GGML_TYPE_BF16 and src1.type == ggml.impl.c.GGML_TYPE_F32 and dst.type == ggml.impl.c.GGML_TYPE_F32) {
+    } else if (src0.type == ggml.impl.ggml_c.GGML_TYPE_BF16 and src1.type == ggml.impl.ggml_c.GGML_TYPE_F32 and dst.type == ggml.impl.ggml_c.GGML_TYPE_F32) {
         applyBinaryOp(op, BF16, f32, f32, params, dst);
-    } else if (src0.type == ggml.impl.c.GGML_TYPE_F16 and src1.type == ggml.impl.c.GGML_TYPE_F32 and dst.type == ggml.impl.c.GGML_TYPE_F16) {
+    } else if (src0.type == ggml.impl.ggml_c.GGML_TYPE_F16 and src1.type == ggml.impl.ggml_c.GGML_TYPE_F32 and dst.type == ggml.impl.ggml_c.GGML_TYPE_F16) {
         applyBinaryOp(op, F16, f32, F16, params, dst);
-    } else if (src0.type == ggml.impl.c.GGML_TYPE_F16 and src1.type == ggml.impl.c.GGML_TYPE_F32 and dst.type == ggml.impl.c.GGML_TYPE_F32) {
+    } else if (src0.type == ggml.impl.ggml_c.GGML_TYPE_F16 and src1.type == ggml.impl.ggml_c.GGML_TYPE_F32 and dst.type == ggml.impl.ggml_c.GGML_TYPE_F32) {
         applyBinaryOp(op, F16, f32, f32, params, dst);
     } else {
         ggml.impl.logError(
             "%s: unsupported types: dst: %s, src0: %s, src1: %s\n",
-            .{ "binary_op", ggml.impl.c.ggml_type_name(dst.type), ggml.impl.c.ggml_type_name(src0.type), ggml.impl.c.ggml_type_name(src1.type) },
+            .{ "binary_op", ggml.impl.ggml_c.ggml_type_name(dst.type), ggml.impl.ggml_c.ggml_type_name(src0.type), ggml.impl.ggml_c.ggml_type_name(src1.type) },
         );
         ggml.impl.abort("unsupported types");
     }
 }
 
 /// Ports `ggml_compute_forward_add_non_quantized` (binary-ops.cpp:140 @b1b770d90).
-pub export fn ggml_compute_forward_add_non_quantized(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+pub fn ggml_compute_forward_add_non_quantized(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
     binaryOp(.add, params, dst);
 }
 
 /// Ports `ggml_compute_forward_sub` (binary-ops.cpp:144 @b1b770d90).
-pub export fn ggml_compute_forward_sub(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+pub fn ggml_compute_forward_sub(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
     binaryOp(.sub, params, dst);
 }
 
 /// Ports `ggml_compute_forward_mul` (binary-ops.cpp:148 @b1b770d90).
-pub export fn ggml_compute_forward_mul(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+pub fn ggml_compute_forward_mul(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
     binaryOp(.mul, params, dst);
 }
 
 /// Ports `ggml_compute_forward_div` (binary-ops.cpp:152 @b1b770d90).
-pub export fn ggml_compute_forward_div(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+pub fn ggml_compute_forward_div(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
     binaryOp(.div, params, dst);
 }

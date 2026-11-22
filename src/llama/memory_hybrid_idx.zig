@@ -213,14 +213,14 @@ pub const MemoryHybridIdx = struct {
     pub fn create(
         model: *const mod.model.Model,
         no_alloc: bool,
-        type_k: mod.impl.c.enum_ggml_type,
-        type_v: mod.impl.c.enum_ggml_type,
+        type_k: mod.impl.llama_c.enum_ggml_type,
+        type_v: mod.impl.llama_c.enum_ggml_type,
         v_trans: bool,
         kv_size: u32,
         n_swa: u32,
         swa_type: mod.hparams.SwaType,
-        type_r: mod.impl.c.enum_ggml_type,
-        type_s: mod.impl.c.enum_ggml_type,
+        type_r: mod.impl.llama_c.enum_ggml_type,
+        type_s: mod.impl.llama_c.enum_ggml_type,
         rs_size: u32,
         n_seq_max: u32,
         n_rs_seq: u32,
@@ -242,7 +242,7 @@ pub const MemoryHybridIdx = struct {
             const hp = &model.hparams;
             @memset(&self.hparams_idx.n_head_kv_arr, 1);
             self.hparams_idx.n_embd_head_k_full = hp.indexer_head_size *% (if (hp.indexer_kpool > 0) hp.indexer_kpool_row else 1);
-            self.hparams_idx.rope_type = mod.impl.c.LLAMA_ROPE_TYPE_NONE;
+            self.hparams_idx.rope_type = mod.impl.llama_c.LLAMA_ROPE_TYPE_NONE;
             // MLA-shaped, so the cache stores no V tensors.
             self.hparams_idx.n_embd_head_k_mla_impl = hp.indexer_head_size;
             self.hparams_idx.n_embd_head_v_mla_impl = hp.indexer_head_size;
@@ -772,13 +772,13 @@ fn streamsPerUbatch(sinfos: []const mod.kv_cache.SlotInfo) std.ArrayList(u32) {
 /// layer seen two ways -- the per-token part of each row (glm5-next: key |
 /// gate, qwen4exp: key) and the pooled key after it.
 pub const KpoolAccess = struct {
-    ctx: *mod.impl.c.ggml_context,
-    key_gate: *mod.impl.c.ggml_tensor,
-    pooled: *mod.impl.c.ggml_tensor,
+    ctx: *mod.impl.llama_c.ggml_context,
+    key_gate: *mod.impl.llama_c.ggml_tensor,
+    pooled: *mod.impl.llama_c.ggml_tensor,
 
     /// Ports the constructor of `kpool_access`
     /// (llama-memory-hybrid-idx.cpp:572 @b1b770d90).
-    fn init(ctx: *mod.impl.c.ggml_context, k: *mod.impl.c.ggml_tensor, n_embd: i64) KpoolAccess {
+    fn init(ctx: *mod.impl.llama_c.ggml_context, k: *mod.impl.llama_c.ggml_tensor, n_embd: i64) KpoolAccess {
         const n_tok = k.ne[0] - n_embd;
         mod.impl.assert(n_tok > 0 and @rem(n_tok, n_embd) == 0, "llama-memory-hybrid-idx.cpp", 575, "n_tok > 0 && n_tok % n_embd == 0");
 
@@ -788,24 +788,24 @@ pub const KpoolAccess = struct {
         // the whole storage.
         return .{
             .ctx = ctx,
-            .key_gate = mod.impl.c.ggml_view_2d(ctx, k, n_tok, n_cells, k.nb[1], 0),
-            .pooled = mod.impl.c.ggml_view_2d(ctx, k, n_embd, n_cells, k.nb[1], mod.impl.c.ggml_row_size(k.type, n_tok)),
+            .key_gate = mod.impl.llama_c.ggml_view_2d(ctx, k, n_tok, n_cells, k.nb[1], 0),
+            .pooled = mod.impl.llama_c.ggml_view_2d(ctx, k, n_embd, n_cells, k.nb[1], mod.impl.llama_c.ggml_row_size(k.type, n_tok)),
         };
     }
 
     /// Ports `kpool_access`'s `gather_key_gate` (llama-memory-hybrid-idx.cpp:585 @b1b770d90).
-    pub fn gatherKeyGate(self: KpoolAccess, idxs: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-        return mod.impl.c.ggml_get_rows(self.ctx, self.key_gate, idxs);
+    pub fn gatherKeyGate(self: KpoolAccess, idxs: *mod.impl.llama_c.ggml_tensor) *mod.impl.llama_c.ggml_tensor {
+        return mod.impl.llama_c.ggml_get_rows(self.ctx, self.key_gate, idxs);
     }
 
     /// Ports `kpool_access`'s `scatter_pooled` (llama-memory-hybrid-idx.cpp:589 @b1b770d90).
-    pub fn scatterPooled(self: KpoolAccess, values: *mod.impl.c.ggml_tensor, idxs: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-        return mod.impl.c.ggml_set_rows(self.ctx, self.pooled, values, idxs);
+    pub fn scatterPooled(self: KpoolAccess, values: *mod.impl.llama_c.ggml_tensor, idxs: *mod.impl.llama_c.ggml_tensor) *mod.impl.llama_c.ggml_tensor {
+        return mod.impl.llama_c.ggml_set_rows(self.ctx, self.pooled, values, idxs);
     }
 
     /// Ports `kpool_access`'s `gather_pooled` (llama-memory-hybrid-idx.cpp:593 @b1b770d90).
-    pub fn gatherPooled(self: KpoolAccess, idxs: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
-        return mod.impl.c.ggml_get_rows(self.ctx, self.pooled, idxs);
+    pub fn gatherPooled(self: KpoolAccess, idxs: *mod.impl.llama_c.ggml_tensor) *mod.impl.llama_c.ggml_tensor {
+        return mod.impl.llama_c.ggml_get_rows(self.ctx, self.pooled, idxs);
     }
 };
 
@@ -1013,7 +1013,7 @@ pub const HybridIdxContext = struct {
 
     /// Ports `llama_memory_hybrid_idx_context`'s `get_kpool_access`
     /// (llama-memory-hybrid-idx.cpp:597 @b1b770d90).
-    pub fn getKpoolAccess(self: *const HybridIdxContext, ctx: *mod.impl.c.ggml_context, il: i32, n_embd: i64) KpoolAccess {
+    pub fn getKpoolAccess(self: *const HybridIdxContext, ctx: *mod.impl.llama_c.ggml_context, il: i32, n_embd: i64) KpoolAccess {
         mod.impl.assert(self.mem != null and self.mem.?.getMemIdx() != null, "llama-memory-hybrid-idx.cpp", 599, "mem != nullptr && mem->get_mem_idx() != nullptr");
         return KpoolAccess.init(ctx, self.mem.?.getMemIdx().?.getKStorage(il), n_embd);
     }
@@ -1186,22 +1186,22 @@ pub const HybridIdxContext = struct {
     ///   member's M-RoPE position, for keys rotated at pooling time
     pub fn setInputKpool(
         self: *const HybridIdxContext,
-        pool_cells: *mod.impl.c.ggml_tensor,
-        pool_idxs: *mod.impl.c.ggml_tensor,
-        pool_mask: *mod.impl.c.ggml_tensor,
-        tail_idxs: *mod.impl.c.ggml_tensor,
-        sel_mask: ?*mod.impl.c.ggml_tensor,
-        new_pool_idxs: *mod.impl.c.ggml_tensor,
-        new_pool_rep: ?*mod.impl.c.ggml_tensor,
+        pool_cells: *mod.impl.llama_c.ggml_tensor,
+        pool_idxs: *mod.impl.llama_c.ggml_tensor,
+        pool_mask: *mod.impl.llama_c.ggml_tensor,
+        tail_idxs: *mod.impl.llama_c.ggml_tensor,
+        sel_mask: ?*mod.impl.llama_c.ggml_tensor,
+        new_pool_idxs: *mod.impl.llama_c.ggml_tensor,
+        new_pool_rep: ?*mod.impl.llama_c.ggml_tensor,
         ubatch: *const mod.batch.Ubatch,
-        new_pool_pos: ?*mod.impl.c.ggml_tensor,
+        new_pool_pos: ?*mod.impl.llama_c.ggml_tensor,
     ) void {
         const f = "llama-memory-hybrid-idx.cpp";
         mod.impl.assert(self.mem != null and self.mem.?.getMemIdx() != null, f, 732, "mem != nullptr && mem->get_mem_idx() != nullptr");
-        mod.impl.assert(mod.impl.c.ggml_backend_buffer_is_host(pool_cells.buffer), f, 733, "ggml_backend_buffer_is_host(pool_cells->buffer)");
-        mod.impl.assert(mod.impl.c.ggml_backend_buffer_is_host(pool_idxs.buffer), f, 734, "ggml_backend_buffer_is_host(pool_idxs->buffer)");
-        mod.impl.assert(mod.impl.c.ggml_backend_buffer_is_host(pool_mask.buffer), f, 735, "ggml_backend_buffer_is_host(pool_mask->buffer)");
-        mod.impl.assert(mod.impl.c.ggml_backend_buffer_is_host(tail_idxs.buffer), f, 736, "ggml_backend_buffer_is_host(tail_idxs->buffer)");
+        mod.impl.assert(mod.impl.llama_c.ggml_backend_buffer_is_host(pool_cells.buffer), f, 733, "ggml_backend_buffer_is_host(pool_cells->buffer)");
+        mod.impl.assert(mod.impl.llama_c.ggml_backend_buffer_is_host(pool_idxs.buffer), f, 734, "ggml_backend_buffer_is_host(pool_idxs->buffer)");
+        mod.impl.assert(mod.impl.llama_c.ggml_backend_buffer_is_host(pool_mask.buffer), f, 735, "ggml_backend_buffer_is_host(pool_mask->buffer)");
+        mod.impl.assert(mod.impl.llama_c.ggml_backend_buffer_is_host(tail_idxs.buffer), f, 736, "ggml_backend_buffer_is_host(tail_idxs->buffer)");
 
         const mem = self.mem.?;
         const m_idx = mem.getMemIdx().?;
@@ -1225,13 +1225,13 @@ pub const HybridIdxContext = struct {
         mod.impl.assert(pool_mask.ne[0] == n_pool and pool_mask.ne[1] == n_tokens, f, 754, "pool_mask->ne[0] == (int64_t) n_pool && pool_mask->ne[1] == (int64_t) n_tokens");
         mod.impl.assert(tail_idxs.ne[0] == @as(i64, kpool) - 1 and tail_idxs.ne[1] == n_tokens, f, 755, "tail_idxs->ne[0] == (int64_t) kpool - 1 && tail_idxs->ne[1] == (int64_t) n_tokens");
         mod.impl.assert(pool_idxs.ne[0] == kpool and pool_idxs.ne[1] == n_pool, f, 756, "pool_idxs->ne[0] == (int64_t) kpool && pool_idxs->ne[1] == (int64_t) n_pool");
-        mod.impl.assert(mod.impl.c.ggml_backend_buffer_is_host(new_pool_idxs.buffer), f, 757, "ggml_backend_buffer_is_host(new_pool_idxs->buffer)");
-        mod.impl.assert(mod.impl.c.ggml_nelements(new_pool_idxs) == kpool * n_new_g, f, 758, "ggml_nelements(new_pool_idxs) == (int64_t) kpool*n_new_g");
+        mod.impl.assert(mod.impl.llama_c.ggml_backend_buffer_is_host(new_pool_idxs.buffer), f, 757, "ggml_backend_buffer_is_host(new_pool_idxs->buffer)");
+        mod.impl.assert(mod.impl.llama_c.ggml_nelements(new_pool_idxs) == kpool * n_new_g, f, 758, "ggml_nelements(new_pool_idxs) == (int64_t) kpool*n_new_g");
         // the graph always scatters the fresh pooled keys back into the cache
-        mod.impl.assert(new_pool_rep != null and mod.impl.c.ggml_backend_buffer_is_host(new_pool_rep.?.buffer), f, 760, "new_pool_rep != nullptr && ggml_backend_buffer_is_host(new_pool_rep->buffer)");
+        mod.impl.assert(new_pool_rep != null and mod.impl.llama_c.ggml_backend_buffer_is_host(new_pool_rep.?.buffer), f, 760, "new_pool_rep != nullptr && ggml_backend_buffer_is_host(new_pool_rep->buffer)");
         mod.impl.assert(new_pool_rep.?.ne[0] == n_new_g, f, 761, "new_pool_rep->ne[0] == (int64_t) n_new_g");
         if (new_pool_pos) |npp| {
-            mod.impl.assert(mod.impl.c.ggml_backend_buffer_is_host(npp.buffer), f, 763, "ggml_backend_buffer_is_host(new_pool_pos->buffer)");
+            mod.impl.assert(mod.impl.llama_c.ggml_backend_buffer_is_host(npp.buffer), f, 763, "ggml_backend_buffer_is_host(new_pool_pos->buffer)");
             mod.impl.assert(npp.ne[0] == 4 * @as(i64, n_new_g), f, 764, "new_pool_pos->ne[0] == 4*(int64_t) n_new_g");
         }
 
@@ -1287,8 +1287,8 @@ pub const HybridIdxContext = struct {
         // Pools per token in the selection.
         var n_top: u32 = 0;
         if (sel_mask) |g| {
-            mod.impl.assert(mod.impl.c.ggml_backend_buffer_is_host(g.buffer), f, 812, "ggml_backend_buffer_is_host(sel_mask->buffer)");
-            mod.impl.assert(g.type == mod.impl.c.GGML_TYPE_F32, f, 813, "sel_mask->type == GGML_TYPE_F32");
+            mod.impl.assert(mod.impl.llama_c.ggml_backend_buffer_is_host(g.buffer), f, 812, "ggml_backend_buffer_is_host(sel_mask->buffer)");
+            mod.impl.assert(g.type == mod.impl.llama_c.GGML_TYPE_F32, f, 813, "sel_mask->type == GGML_TYPE_F32");
             mod.impl.assert(g.ne[3] == n_tokens and g.ne[1] == 1 and g.ne[2] == 1, f, 814, "sel_mask->ne[3] == (int64_t) n_tokens && sel_mask->ne[1] == 1 && sel_mask->ne[2] == 1");
             n_sel = @intCast(g.ne[0]);
             // the tail slots, when selected, are the n_sel % kpool != 0 remainder
@@ -1390,8 +1390,8 @@ pub const HybridIdxContext = struct {
         // ends at or before it.
         const Fill = struct {
             fn run(comptime T: type, data: [*]T, ctx: anytype) void {
-                const keep: T = if (T == u16) mod.impl.c.ggml_fp32_to_fp16(0.0) else 0.0;
-                const drop: T = if (T == u16) mod.impl.c.ggml_fp32_to_fp16(-std.math.inf(f32)) else -std.math.inf(f32);
+                const keep: T = if (T == u16) mod.impl.llama_c.ggml_fp32_to_fp16(0.0) else 0.0;
+                const drop: T = if (T == u16) mod.impl.llama_c.ggml_fp32_to_fp16(-std.math.inf(f32)) else -std.math.inf(f32);
 
                 for (0..ctx.n_tokens) |i| {
                     const s: usize = @intCast(ctx.ubatch.seq_id[i][0]);
@@ -1443,7 +1443,7 @@ pub const HybridIdxContext = struct {
             .n_top = n_top,
             .n_sel = @as(usize, n_sel),
         };
-        if (pool_mask.type == mod.impl.c.GGML_TYPE_F16) {
+        if (pool_mask.type == mod.impl.llama_c.GGML_TYPE_F16) {
             Fill.run(u16, @ptrCast(@alignCast(pool_mask.data)), fill_ctx);
         } else {
             Fill.run(f32, @ptrCast(@alignCast(pool_mask.data)), fill_ctx);

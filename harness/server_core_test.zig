@@ -15,27 +15,23 @@ const builtin = @import("builtin");
 const llama_server = @import("llama_server");
 const llama_h = @import("llama_h");
 
-const context = llama_server.context;
-const tc = llama_server.tools_common;
-const c = tc.c;
-
 // `refAllDecls` analyzes declarations, not function bodies: only a function
 // whose address is taken is compiled. These are the entry points a
 // consumer calls, so a change that breaks one fails here, not in zigllm.
 test "the in-process API compiles" {
-    const SC = context.ServerContext;
-    const Reader = context.Reader;
+    const SC = llama_server.context.ServerContext;
+    const Reader = llama_server.context.Reader;
     inline for (.{
-        &SC.init,                                 &SC.deinit,                                &SC.loadModel,
-        &SC.startLoop,                            &SC.terminate,                             &SC.getLlamaContext,
-        &SC.setStateCallback,                     &SC.getMeta,                               &context.installChat,
-        &Reader.init,                             &Reader.deinit,                            &Reader.getNewId,
-        &Reader.postTask,                         &Reader.postTasks,                         &Reader.hasNext,
-        &Reader.stop,                             &llama_server.task.Task.arenaAlloc,        &llama_server.task.Task.deinit,
-        &llama_server.result.Result.toJson,       &llama_server.result.Result.destroy,       &llama_server.tokens.tokenizeInputPrompts,
-        &llama_server.schema.evalLlamaCmplSchema, &llama_server.convert.responsesToChatcmpl, &llama_server.convert.anthropicToOai,
-        &llama_server.decision.groupTasks,        &tc.arg.parse,                             &tc.common.init,
-        &tc.params.Params.init,
+        &SC.init,                                      &SC.deinit,                                &SC.loadModel,
+        &SC.startLoop,                                 &SC.terminate,                             &SC.getLlamaContext,
+        &SC.setStateCallback,                          &SC.getMeta,                               &llama_server.context.installChat,
+        &Reader.init,                                  &Reader.deinit,                            &Reader.getNewId,
+        &Reader.postTask,                              &Reader.postTasks,                         &Reader.hasNext,
+        &Reader.stop,                                  &llama_server.task.Task.arenaAlloc,        &llama_server.task.Task.deinit,
+        &llama_server.result.Result.toJson,            &llama_server.result.Result.destroy,       &llama_server.tokens.tokenizeInputPrompts,
+        &llama_server.schema.evalLlamaCmplSchema,      &llama_server.convert.responsesToChatcmpl, &llama_server.convert.anthropicToOai,
+        &llama_server.decision.groupTasks,             &llama_server.tools_common.arg.parse,      &llama_server.tools_common.common.init,
+        &llama_server.tools_common.params.Params.init,
     }) |f| std.mem.doNotOptimizeAway(f);
     // POSIX only for now: MCP, the server-side tools, `subproc`'s waiter
     // (a self-pipe), and the chat parser, whose media loading fetches URLs
@@ -55,8 +51,8 @@ test "the in-process API compiles" {
 // Two translations of `llama.h` would give a consumer two incompatible
 // `*llama_model`: the exported `llama_h` must be the server core's.
 test "llama_h is the translation the server core speaks" {
-    try std.testing.expect(llama_h.llama_model == c.llama_model);
-    try std.testing.expect(llama_h.mtmd_context == c.mtmd_context);
+    try std.testing.expect(llama_h.llama_model == llama_server.tools_common.c.llama_model);
+    try std.testing.expect(llama_h.mtmd_context == llama_server.tools_common.c.mtmd_context);
 }
 
 /// A one-layer `llama` model with random weights and an SPM vocabulary of
@@ -78,16 +74,16 @@ const TinyModel = struct {
     /// Return: nothing; `error.OutOfMemory`, or `error.WriteFailed` when
     /// `gguf_write_to_file` fails.
     fn write(gpa: std.mem.Allocator, path: [:0]const u8) !void {
-        const meta = c.gguf_init_empty().?;
-        defer c.gguf_free(meta);
-        c.gguf_set_val_str(meta, "general.architecture", "llama");
-        c.gguf_set_val_u32(meta, "llama.context_length", n_ctx_train);
-        c.gguf_set_val_u32(meta, "llama.embedding_length", n_embd);
-        c.gguf_set_val_u32(meta, "llama.block_count", 1);
-        c.gguf_set_val_u32(meta, "llama.feed_forward_length", n_ff);
-        c.gguf_set_val_u32(meta, "llama.attention.head_count", n_head);
-        c.gguf_set_val_u32(meta, "llama.attention.head_count_kv", n_head);
-        c.gguf_set_val_f32(meta, "llama.attention.layer_norm_rms_epsilon", 1e-5);
+        const meta = llama_server.tools_common.c.gguf_init_empty().?;
+        defer llama_server.tools_common.c.gguf_free(meta);
+        llama_server.tools_common.c.gguf_set_val_str(meta, "general.architecture", "llama");
+        llama_server.tools_common.c.gguf_set_val_u32(meta, "llama.context_length", n_ctx_train);
+        llama_server.tools_common.c.gguf_set_val_u32(meta, "llama.embedding_length", n_embd);
+        llama_server.tools_common.c.gguf_set_val_u32(meta, "llama.block_count", 1);
+        llama_server.tools_common.c.gguf_set_val_u32(meta, "llama.feed_forward_length", n_ff);
+        llama_server.tools_common.c.gguf_set_val_u32(meta, "llama.attention.head_count", n_head);
+        llama_server.tools_common.c.gguf_set_val_u32(meta, "llama.attention.head_count_kv", n_head);
+        llama_server.tools_common.c.gguf_set_val_f32(meta, "llama.attention.layer_norm_rms_epsilon", 1e-5);
 
         var arena = std.heap.ArenaAllocator.init(gpa);
         defer arena.deinit();
@@ -103,13 +99,13 @@ const TinyModel = struct {
         types[2] = 3;
         for (3..n_vocab) |i| texts[i] = try std.fmt.allocPrintSentinel(a, "<t{d}>", .{i}, 0);
         for (&scores, 0..) |*s, i| s.* = -@as(f32, @floatFromInt(i));
-        c.gguf_set_val_str(meta, "tokenizer.ggml.model", "llama");
-        c.gguf_set_arr_str(meta, "tokenizer.ggml.tokens", &texts, n_vocab);
-        c.gguf_set_arr_data(meta, "tokenizer.ggml.scores", c.GGUF_TYPE_FLOAT32, &scores, n_vocab);
-        c.gguf_set_arr_data(meta, "tokenizer.ggml.token_type", c.GGUF_TYPE_INT32, &types, n_vocab);
-        c.gguf_set_val_u32(meta, "tokenizer.ggml.unknown_token_id", 0);
-        c.gguf_set_val_u32(meta, "tokenizer.ggml.bos_token_id", 1);
-        c.gguf_set_val_u32(meta, "tokenizer.ggml.eos_token_id", 2);
+        llama_server.tools_common.c.gguf_set_val_str(meta, "tokenizer.ggml.model", "llama");
+        llama_server.tools_common.c.gguf_set_arr_str(meta, "tokenizer.ggml.tokens", &texts, n_vocab);
+        llama_server.tools_common.c.gguf_set_arr_data(meta, "tokenizer.ggml.scores", llama_server.tools_common.c.GGUF_TYPE_FLOAT32, &scores, n_vocab);
+        llama_server.tools_common.c.gguf_set_arr_data(meta, "tokenizer.ggml.token_type", llama_server.tools_common.c.GGUF_TYPE_INT32, &types, n_vocab);
+        llama_server.tools_common.c.gguf_set_val_u32(meta, "tokenizer.ggml.unknown_token_id", 0);
+        llama_server.tools_common.c.gguf_set_val_u32(meta, "tokenizer.ggml.bos_token_id", 1);
+        llama_server.tools_common.c.gguf_set_val_u32(meta, "tokenizer.ggml.eos_token_id", 2);
 
         const tensors = [_]struct { name: [:0]const u8, ne0: i64, ne1: i64 }{
             .{ .name = "token_embd.weight", .ne0 = n_embd, .ne1 = n_vocab },
@@ -127,12 +123,12 @@ const TinyModel = struct {
         };
         var n_floats: usize = 0;
         for (tensors) |t| n_floats += @intCast(t.ne0 * t.ne1);
-        const g = c.ggml_init(.{ .mem_size = n_floats * @sizeOf(f32) + tensors.len * c.ggml_tensor_overhead(), .mem_buffer = null, .no_alloc = false }).?;
-        defer c.ggml_free(g);
+        const g = llama_server.tools_common.c.ggml_init(.{ .mem_size = n_floats * @sizeOf(f32) + tensors.len * llama_server.tools_common.c.ggml_tensor_overhead(), .mem_buffer = null, .no_alloc = false }).?;
+        defer llama_server.tools_common.c.ggml_free(g);
         var lcg: u32 = 12345;
         for (tensors) |t| {
-            const x = if (t.ne1 == 1) c.ggml_new_tensor_1d(g, c.GGML_TYPE_F32, t.ne0) else c.ggml_new_tensor_2d(g, c.GGML_TYPE_F32, t.ne0, t.ne1);
-            _ = c.ggml_set_name(x, t.name);
+            const x = if (t.ne1 == 1) llama_server.tools_common.c.ggml_new_tensor_1d(g, llama_server.tools_common.c.GGML_TYPE_F32, t.ne0) else llama_server.tools_common.c.ggml_new_tensor_2d(g, llama_server.tools_common.c.GGML_TYPE_F32, t.ne0, t.ne1);
+            _ = llama_server.tools_common.c.ggml_set_name(x, t.name);
             const norm = std.mem.indexOf(u8, t.name, "norm") != null;
             const data: [*]f32 = @ptrCast(@alignCast(x.*.data));
             for (data[0..@intCast(t.ne0 * t.ne1)]) |*d| {
@@ -140,9 +136,9 @@ const TinyModel = struct {
                 const r = @as(f32, @floatFromInt((lcg >> 8) & 0xffff)) / 65536.0 - 0.5;
                 d.* = if (norm) 1.0 + r * 0.2 else r * 0.5;
             }
-            c.gguf_add_tensor(meta, x);
+            llama_server.tools_common.c.gguf_add_tensor(meta, x);
         }
-        if (!c.gguf_write_to_file(meta, path.ptr, false)) return error.WriteFailed;
+        if (!llama_server.tools_common.c.gguf_write_to_file(meta, path.ptr, false)) return error.WriteFailed;
     }
 };
 
@@ -156,7 +152,7 @@ const NeverStop = struct {
 // parse arguments, load, run the loop on its own thread, tokenize, build a
 // task from the request body, post it and wait for its result.
 test "a completion runs in-process: load, post, wait for the result" {
-    const gpa = context.gpa;
+    const gpa = std.heap.c_allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const path = try std.fmt.allocPrintSentinel(gpa, ".zig-cache/tmp/{s}/tiny.gguf", .{&tmp.sub_path}, 0);
@@ -166,22 +162,22 @@ test "a completion runs in-process: load, post, wait for the result" {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const a = arena.allocator();
-    tc.common.init();
-    context.installChat();
-    var params = try tc.params.Params.init(a);
+    llama_server.tools_common.common.init();
+    llama_server.context.installChat();
+    var params = try llama_server.tools_common.params.Params.init(a);
     const argv = [_][:0]const u8{ "llama-server-core", "-m", path, "-c", "128", "-np", "1", "-ngl", "0", "--fit", "off", "-t", "2", "--no-warmup", "--log-disable" };
-    try std.testing.expect(try tc.arg.parse(&argv, &params, .server, null));
-    c.llama_backend_init();
-    defer c.llama_backend_free();
+    try std.testing.expect(try llama_server.tools_common.arg.parse(&argv, &params, .server, null));
+    llama_server.tools_common.c.llama_backend_init();
+    defer llama_server.tools_common.c.llama_backend_free();
 
-    var ctx = try context.ServerContext.init();
+    var ctx = try llama_server.context.ServerContext.init();
     defer ctx.deinit();
     try std.testing.expect(try ctx.loadModel(&params));
     const meta = try ctx.getMeta(a);
     try std.testing.expectEqual(@as(i32, TinyModel.n_vocab), meta.model_vocab_n_tokens);
 
     const loop = try std.Thread.spawn(.{}, struct {
-        fn run(s: *context.ServerContext) void {
+        fn run(s: *llama_server.context.ServerContext) void {
             s.startLoop() catch {};
         }
     }.run, .{&ctx});
@@ -190,7 +186,7 @@ test "a completion runs in-process: load, post, wait for the result" {
         loop.join();
     }
 
-    var reader = try context.Reader.init(gpa, &ctx.impl.queue_tasks, &ctx.impl.queue_results, context.http_polling_seconds);
+    var reader = try llama_server.context.Reader.init(gpa, &ctx.impl.queue_tasks, &ctx.impl.queue_results, llama_server.context.http_polling_seconds);
     defer reader.deinit();
 
     // eos is ignored: random weights would otherwise end the reply early

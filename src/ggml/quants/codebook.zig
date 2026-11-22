@@ -58,23 +58,23 @@ var iq2_data: [4]Iq2Entry = @splat(.{});
 /// Ports `iq2_data_index` (ggml-quants.c:2849 @b1b770d90).
 ///
 /// `iq1_s` and `iq1_m` share slot 2: they index the same 2048-entry codebook.
-fn iq2DataIndex(t: ggml.impl.c.enum_ggml_type) usize {
+fn iq2DataIndex(t: ggml.impl.ggml_c.enum_ggml_type) usize {
     return switch (t) {
-        ggml.impl.c.GGML_TYPE_IQ2_XXS => 0,
-        ggml.impl.c.GGML_TYPE_IQ2_XS => 1,
-        ggml.impl.c.GGML_TYPE_IQ1_S, ggml.impl.c.GGML_TYPE_IQ1_M => 2,
-        ggml.impl.c.GGML_TYPE_IQ2_S => 3,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS => 0,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XS => 1,
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_S, ggml.impl.ggml_c.GGML_TYPE_IQ1_M => 2,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_S => 3,
         else => ggml.impl.abort("iq2_data_index: unsupported type"),
     };
 }
 
 /// Ports `iq2_grid_size` (ggml-quants.c:2856 @b1b770d90).
-fn iq2GridSize(t: ggml.impl.c.enum_ggml_type) usize {
+fn iq2GridSize(t: ggml.impl.ggml_c.enum_ggml_type) usize {
     return switch (t) {
-        ggml.impl.c.GGML_TYPE_IQ2_XXS => 256,
-        ggml.impl.c.GGML_TYPE_IQ2_XS => 512,
-        ggml.impl.c.GGML_TYPE_IQ1_S, ggml.impl.c.GGML_TYPE_IQ1_M => ngrid_iq1s,
-        ggml.impl.c.GGML_TYPE_IQ2_S => 1024,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS => 256,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XS => 512,
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_S, ggml.impl.ggml_c.GGML_TYPE_IQ1_M => ngrid_iq1s,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_S => 1024,
         else => ggml.impl.abort("iq2_grid_size: unsupported type"),
     };
 }
@@ -111,7 +111,7 @@ inline fn unpackPositions(bits: u16, pos: *[8]i8) void {
 /// Ports `iq2xs_init_impl` (ggml-quants.c:2869 @b1b770d90).
 ///
 /// Idempotent: returns immediately if this type's codebook is already built.
-pub export fn iq2xs_init_impl(t: ggml.impl.c.enum_ggml_type) void {
+pub fn iq2xs_init_impl(t: ggml.impl.ggml_c.enum_ggml_type) callconv(.c) void {
     const gindex = iq2DataIndex(t);
     const grid_size = iq2GridSize(t);
     if (iq2_data[gindex].grid != null) return;
@@ -120,15 +120,15 @@ pub export fn iq2xs_init_impl(t: ggml.impl.c.enum_ggml_type) void {
     // neighbours: the loop below stops after `nwant` distinct distances, so
     // the list length varies with how many entries tie at each distance.
     const nwant: i32 = switch (t) {
-        ggml.impl.c.GGML_TYPE_IQ1_S, ggml.impl.c.GGML_TYPE_IQ1_M => 3,
-        ggml.impl.c.GGML_TYPE_IQ2_S => 1,
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_S, ggml.impl.ggml_c.GGML_TYPE_IQ1_M => 3,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_S => 1,
         else => 2,
     };
 
     const kgrid: []const u16 = switch (t) {
-        ggml.impl.c.GGML_TYPE_IQ2_XXS => &ggml.quants.grids.kgrid_2bit_256,
-        ggml.impl.c.GGML_TYPE_IQ2_XS => &ggml.quants.grids.kgrid_2bit_512,
-        ggml.impl.c.GGML_TYPE_IQ1_S, ggml.impl.c.GGML_TYPE_IQ1_M => &ggml.quants.grids.kgrid_1bit_2048,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS => &ggml.quants.grids.kgrid_2bit_256,
+        ggml.impl.ggml_c.GGML_TYPE_IQ2_XS => &ggml.quants.grids.kgrid_2bit_512,
+        ggml.impl.ggml_c.GGML_TYPE_IQ1_S, ggml.impl.ggml_c.GGML_TYPE_IQ1_M => &ggml.quants.grids.kgrid_1bit_2048,
         else => &ggml.quants.grids.kgrid_2bit_1024,
     };
 
@@ -268,7 +268,7 @@ fn fillNeighbours(pattern: usize, grid: [*]u64, grid_size: usize, dists: [*]Dist
 }
 
 /// Ports `iq2xs_free_impl` (ggml-quants.c:3276 @b1b770d90).
-pub export fn iq2xs_free_impl(t: ggml.impl.c.enum_ggml_type) void {
+pub fn iq2xs_free_impl(t: ggml.impl.ggml_c.enum_ggml_type) callconv(.c) void {
     const gindex = iq2DataIndex(t);
     if (iq2_data[gindex].grid) |g| {
         std.c.free(g);
@@ -281,15 +281,15 @@ pub export fn iq2xs_free_impl(t: ggml.impl.c.enum_ggml_type) void {
 }
 
 /// The built codebook for one type, for the quantizers.
-pub fn iq2Grid(t: ggml.impl.c.enum_ggml_type) [*]const u64 {
+pub fn iq2Grid(t: ggml.impl.ggml_c.enum_ggml_type) [*]const u64 {
     return iq2_data[iq2DataIndex(t)].grid.?;
 }
 
-pub fn iq2Map(t: ggml.impl.c.enum_ggml_type) [*]const i32 {
+pub fn iq2Map(t: ggml.impl.ggml_c.enum_ggml_type) [*]const i32 {
     return iq2_data[iq2DataIndex(t)].map.?;
 }
 
-pub fn iq2Neighbours(t: ggml.impl.c.enum_ggml_type) [*]const u16 {
+pub fn iq2Neighbours(t: ggml.impl.ggml_c.enum_ggml_type) [*]const u16 {
     return iq2_data[iq2DataIndex(t)].neighbours.?;
 }
 
@@ -331,7 +331,7 @@ inline fn unpackPositions3(bits: u16, pos: *[4]i8) void {
 }
 
 /// Ports `iq3xs_init_impl` (ggml-quants.c:3719 @b1b770d90).
-pub export fn iq3xs_init_impl(grid_size_in: c_int) void {
+pub fn iq3xs_init_impl(grid_size_in: c_int) callconv(.c) void {
     const gindex = iq3DataIndex(grid_size_in);
     if (iq3_data[gindex].grid != null) return;
 
@@ -453,7 +453,7 @@ fn walkNeighbours(dists: [*]Dist, grid_size: usize, nwant: i32, out: ?[*]u16, lo
 }
 
 /// Ports `iq3xs_free_impl` (ggml-quants.c:3920 @b1b770d90).
-pub export fn iq3xs_free_impl(grid_size: c_int) void {
+pub fn iq3xs_free_impl(grid_size: c_int) callconv(.c) void {
     const gindex = iq3DataIndex(grid_size);
     if (iq3_data[gindex].grid) |g| {
         std.c.free(g);
@@ -488,15 +488,15 @@ test {
 test "the codebooks build, are idempotent, and free cleanly" {
     // Building twice must not leak or rebuild: `ggml_quantize_init` is called
     // on every quantize, so the early-out is load-bearing rather than tidy.
-    iq2xs_init_impl(ggml.impl.c.GGML_TYPE_IQ2_XXS);
-    const first = iq2Grid(ggml.impl.c.GGML_TYPE_IQ2_XXS);
-    iq2xs_init_impl(ggml.impl.c.GGML_TYPE_IQ2_XXS);
-    try std.testing.expectEqual(first, iq2Grid(ggml.impl.c.GGML_TYPE_IQ2_XXS));
+    iq2xs_init_impl(ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS);
+    const first = iq2Grid(ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS);
+    iq2xs_init_impl(ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS);
+    try std.testing.expectEqual(first, iq2Grid(ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS));
 
     // Every codebook entry decodes to odd values in 1..7, and the map finds
     // each one exactly.
-    const grid = iq2Grid(ggml.impl.c.GGML_TYPE_IQ2_XXS);
-    const map = iq2Map(ggml.impl.c.GGML_TYPE_IQ2_XXS);
+    const grid = iq2Grid(ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS);
+    const map = iq2Map(ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS);
     for (0..256) |i| {
         const pos: *const [8]i8 = @ptrCast(&grid[i]);
         var index: u16 = 0;
@@ -507,18 +507,18 @@ test "the codebooks build, are idempotent, and free cleanly" {
         try std.testing.expectEqual(@as(i32, @intCast(i)), map[index]);
     }
 
-    iq2xs_free_impl(ggml.impl.c.GGML_TYPE_IQ2_XXS);
+    iq2xs_free_impl(ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS);
     // Freeing twice is safe, which `ggml_quantize_free` relies on: it frees
     // every codebook unconditionally, built or not.
-    iq2xs_free_impl(ggml.impl.c.GGML_TYPE_IQ2_XXS);
+    iq2xs_free_impl(ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS);
 }
 
 test "a pattern with no exact entry gets a non-empty neighbour list" {
-    iq2xs_init_impl(ggml.impl.c.GGML_TYPE_IQ2_XXS);
-    defer iq2xs_free_impl(ggml.impl.c.GGML_TYPE_IQ2_XXS);
+    iq2xs_init_impl(ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS);
+    defer iq2xs_free_impl(ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS);
 
-    const map = iq2Map(ggml.impl.c.GGML_TYPE_IQ2_XXS);
-    const neighbours = iq2Neighbours(ggml.impl.c.GGML_TYPE_IQ2_XXS);
+    const map = iq2Map(ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS);
+    const neighbours = iq2Neighbours(ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS);
 
     var checked: usize = 0;
     for (0..43692) |i| {

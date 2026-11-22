@@ -42,15 +42,15 @@ fn triCuda(
     nb1: i64,
     nb2: i64,
     nb3: i64,
-    ttype: ggml.impl.c.enum_ggml_tri_type,
+    ttype: ggml.impl.ggml_c.enum_ggml_tri_type,
     stream: ggml.cuda.common.cu.cudaStream_t,
 ) void {
     const block_dims: ggml.cuda.kernels.Dim3 = .{ .x = block_size };
     const grid_dims: ggml.cuda.kernels.Dim3 = .{ .x = uint(ne01), .y = uint(ne02), .z = uint(ne03) };
     const type_size: usize = @sizeOf(T);
 
-    const add_to_split: c_int = if (ttype == ggml.impl.c.GGML_TRI_TYPE_LOWER_DIAG or ttype == ggml.impl.c.GGML_TRI_TYPE_UPPER) 1 else 0;
-    const prefix_keep = (ttype == ggml.impl.c.GGML_TRI_TYPE_LOWER or ttype == ggml.impl.c.GGML_TRI_TYPE_LOWER_DIAG);
+    const add_to_split: c_int = if (ttype == ggml.impl.ggml_c.GGML_TRI_TYPE_LOWER_DIAG or ttype == ggml.impl.ggml_c.GGML_TRI_TYPE_UPPER) 1 else 0;
+    const prefix_keep = (ttype == ggml.impl.ggml_c.GGML_TRI_TYPE_LOWER or ttype == ggml.impl.ggml_c.GGML_TRI_TYPE_LOWER_DIAG);
 
     const p: ggml.cuda.kernels.LaunchParams = .{ .grid = grid_dims, .block = block_dims, .stream = stream };
     const args = .{
@@ -79,11 +79,11 @@ fn triCuda(
 }
 
 /// Ports `ggml_cuda_op_tri` (tri.cu:94 @b1b770d90).
-pub fn opTri(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn opTri(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
     const stream = ctx.stream();
 
-    const ttype: ggml.impl.c.enum_ggml_tri_type = @intCast(ggml.impl.getOpParamsI32(dst, 0));
+    const ttype: ggml.impl.ggml_c.enum_ggml_tri_type = @intCast(ggml.impl.getOpParamsI32(dst, 0));
 
     ggml.impl.assert(src0.type == dst.type, "src0->type == dst->type");
 
@@ -93,10 +93,10 @@ pub fn opTri(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void
     };
 
     switch (src0.type) {
-        inline ggml.impl.c.GGML_TYPE_F32, ggml.impl.c.GGML_TYPE_F16, ggml.impl.c.GGML_TYPE_BF16 => |t| {
+        inline ggml.impl.ggml_c.GGML_TYPE_F32, ggml.impl.ggml_c.GGML_TYPE_F16, ggml.impl.ggml_c.GGML_TYPE_BF16 => |t| {
             const T = switch (t) {
-                ggml.impl.c.GGML_TYPE_F32 => f32,
-                ggml.impl.c.GGML_TYPE_F16 => ggml.cuda.kernels.half,
+                ggml.impl.ggml_c.GGML_TYPE_F32 => f32,
+                ggml.impl.ggml_c.GGML_TYPE_F16 => ggml.cuda.kernels.half,
                 else => ggml.cuda.kernels.bf16,
             };
             triCuda(T, src0.data, dst.data, src0.ne[0], src0.ne[1], src0.ne[2], src0.ne[3], nb[0], nb[1], nb[2], nb[3], nb[4], nb[5], nb[6], nb[7], ttype, stream);

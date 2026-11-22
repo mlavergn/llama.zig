@@ -114,7 +114,7 @@ inline fn expandQh(comptime table: *const [256]u64, qh: u32) [2]ggml.cpu.quants.
 /// One-bit weights: each bit selects `+y` or `-y`. The sign vector is built by
 /// expanding four bytes of bits through `table_b2b_0`, shifting the `0x10`
 /// down to 1, then mapping `{0,1}` to `{-1,+1}` with `2*v - 1`.
-pub export fn ggml_vec_dot_q1_0_q8_0(
+pub fn ggml_vec_dot_q1_0_q8_0(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -123,8 +123,8 @@ pub export fn ggml_vec_dot_q1_0_q8_0(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    const qk = ggml.impl.c.QK1_0;
+) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK1_0;
     const nb = @divTrunc(n, qk);
 
     std.debug.assert(@rem(n, qk) == 0);
@@ -184,7 +184,7 @@ const tbl_idx_hi: ggml.cpu.quants.arch.neon.u8x16 = .{ 4, 4, 4, 4, 5, 5, 5, 5, 6
 const shift_vals: ggml.cpu.quants.arch.neon.i8x16 = .{ 0, -2, -4, -6, 0, -2, -4, -6, 0, -2, -4, -6, 0, -2, -4, -6 };
 
 /// Ports `ggml_vec_dot_q2_0_q8_0` (arch/arm/quants.c:222 @b1b770d90).
-pub export fn ggml_vec_dot_q2_0_q8_0(
+pub fn ggml_vec_dot_q2_0_q8_0(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -193,8 +193,8 @@ pub export fn ggml_vec_dot_q2_0_q8_0(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    const qk = ggml.impl.c.QK2_0;
+) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK2_0;
     const nb = @divTrunc(n, qk);
 
     std.debug.assert(@rem(n, qk) == 0);
@@ -249,7 +249,7 @@ pub export fn ggml_vec_dot_q2_0_q8_0(
 
 /// Ports `ggml_vec_dot_q4_0_q8_0` (arch/arm/quants.c:300 @b1b770d90), the `__ARM_NEON`
 /// arm at line 527.
-pub export fn ggml_vec_dot_q4_0_q8_0(
+pub fn ggml_vec_dot_q4_0_q8_0(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -258,8 +258,8 @@ pub export fn ggml_vec_dot_q4_0_q8_0(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    const qk = ggml.impl.c.QK8_0;
+) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK8_0;
     const nb = @divTrunc(n, qk);
 
     std.debug.assert(@rem(n, qk) == 0);
@@ -336,7 +336,7 @@ pub export fn ggml_vec_dot_q4_0_q8_0(
 /// Like `q4_0` without the bias of eight, plus the per-block minimum times the
 /// right operand's sum. `summs` accumulates as a scalar across the whole
 /// vector loop and is added last, after both accumulators.
-pub export fn ggml_vec_dot_q4_1_q8_1(
+pub fn ggml_vec_dot_q4_1_q8_1(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -345,8 +345,8 @@ pub export fn ggml_vec_dot_q4_1_q8_1(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    const qk = ggml.impl.c.QK8_1;
+) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK8_1;
     const nb = @divTrunc(n, qk);
 
     std.debug.assert(@rem(n, qk) == 0);
@@ -421,7 +421,7 @@ pub export fn ggml_vec_dot_q4_1_q8_1(
 /// rather than arithmetic. Note the scale: the C reaches for
 /// `GGML_E8M0_TO_FP32_HALF`, the arithmetic form, where `nvfp4` below uses the
 /// *table* form for its own scale.
-pub export fn ggml_vec_dot_mxfp4_q8_0(
+pub fn ggml_vec_dot_mxfp4_q8_0(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -430,18 +430,18 @@ pub export fn ggml_vec_dot_mxfp4_q8_0(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
+) callconv(.c) void {
     std.debug.assert(nrc == 1);
-    std.debug.assert(@rem(n, ggml.impl.c.QK_MXFP4) == 0);
-    comptime std.debug.assert(ggml.impl.c.QK_MXFP4 == ggml.impl.c.QK8_0);
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_MXFP4) == 0);
+    comptime std.debug.assert(ggml.impl.ggml_c.QK_MXFP4 == ggml.impl.ggml_c.QK8_0);
     _ = .{ bs, bx, by };
 
     const x = as(ggml.quants.blocks.MXFP4, vx);
     const y = as(ggml.quants.blocks.Q8_0, vy);
 
-    const nb = @divTrunc(n, ggml.impl.c.QK_MXFP4);
+    const nb = @divTrunc(n, ggml.impl.ggml_c.QK_MXFP4);
 
-    const values: ggml.cpu.quants.arch.neon.i8x16 = ggml.impl.c.kvalues_mxfp4;
+    const values: ggml.cpu.quants.arch.neon.i8x16 = ggml.impl.ggml_c.kvalues_mxfp4;
 
     // `sumf` accumulates one fused term per iteration -- see the note on
     // `iq4_nl`, which shares this shape and where the ordering was pinned
@@ -478,9 +478,9 @@ pub export fn ggml_vec_dot_mxfp4_q8_0(
         const d = f(y[ib].d) * ggml.impl.e8m0ToFp32Half(x[ib].e);
         var sumi1: i32 = 0;
         var sumi2: i32 = 0;
-        for (0..ggml.impl.c.QK_MXFP4 / 2) |j| {
-            sumi1 += @as(i32, y[ib].qs[j]) * ggml.impl.c.kvalues_mxfp4[x[ib].qs[j] & 0xf];
-            sumi2 += @as(i32, y[ib].qs[j + ggml.impl.c.QK_MXFP4 / 2]) * ggml.impl.c.kvalues_mxfp4[x[ib].qs[j] >> 4];
+        for (0..ggml.impl.ggml_c.QK_MXFP4 / 2) |j| {
+            sumi1 += @as(i32, y[ib].qs[j]) * ggml.impl.ggml_c.kvalues_mxfp4[x[ib].qs[j] & 0xf];
+            sumi2 += @as(i32, y[ib].qs[j + ggml.impl.ggml_c.QK_MXFP4 / 2]) * ggml.impl.ggml_c.kvalues_mxfp4[x[ib].qs[j] >> 4];
         }
         sumf = @mulAdd(f32, d, @as(f32, @floatFromInt(sumi1 + sumi2)), sumf);
     }
@@ -499,7 +499,7 @@ pub export fn ggml_vec_dot_mxfp4_q8_0(
 /// kernel calls `ggml_ue4m3_to_fp32`. The table is filled by `ggml_cpu_init`,
 /// so a caller that has never run a graph gets zeros -- which is exactly what
 /// the first capture of this kernel's goldens recorded.
-pub export fn ggml_vec_dot_nvfp4_q8_0(
+pub fn ggml_vec_dot_nvfp4_q8_0(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -508,17 +508,17 @@ pub export fn ggml_vec_dot_nvfp4_q8_0(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
+) callconv(.c) void {
     std.debug.assert(nrc == 1);
-    std.debug.assert(@rem(n, ggml.impl.c.QK_NVFP4) == 0);
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK_NVFP4) == 0);
     _ = .{ bs, bx, by };
 
     const x = as(ggml.quants.blocks.NVFP4, vx);
     const y = as(ggml.quants.blocks.Q8_0, vy);
 
-    const nb = @divTrunc(n, ggml.impl.c.QK_NVFP4);
+    const nb = @divTrunc(n, ggml.impl.ggml_c.QK_NVFP4);
 
-    const values: ggml.cpu.quants.arch.neon.i8x16 = ggml.impl.c.kvalues_mxfp4;
+    const values: ggml.cpu.quants.arch.neon.i8x16 = ggml.impl.ggml_c.kvalues_mxfp4;
 
     var acc: ggml.cpu.quants.arch.neon.f32x4 = @splat(0.0);
 
@@ -587,7 +587,7 @@ inline fn cpuUe4m3ToFp32(x: u8) f32 {
 ///
 /// The fifth bit and the bias of 16 are folded into one subtract through
 /// `table_b2b_1` -- see the note there.
-pub export fn ggml_vec_dot_q5_0_q8_0(
+pub fn ggml_vec_dot_q5_0_q8_0(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -596,12 +596,12 @@ pub export fn ggml_vec_dot_q5_0_q8_0(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    const qk = ggml.impl.c.QK8_0;
+) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK8_0;
     const nb = @divTrunc(n, qk);
 
     std.debug.assert(@rem(n, qk) == 0);
-    comptime std.debug.assert(ggml.impl.c.QK8_0 == ggml.impl.c.QK5_0);
+    comptime std.debug.assert(ggml.impl.ggml_c.QK8_0 == ggml.impl.ggml_c.QK5_0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
@@ -685,7 +685,7 @@ pub export fn ggml_vec_dot_q5_0_q8_0(
 /// Unlike `q4_1`, the two blocks' minimum terms go into **separate**
 /// accumulators, `summs0` and `summs1`, and are added in that order at the
 /// end. Merging them changes the result.
-pub export fn ggml_vec_dot_q5_1_q8_1(
+pub fn ggml_vec_dot_q5_1_q8_1(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -694,12 +694,12 @@ pub export fn ggml_vec_dot_q5_1_q8_1(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    const qk = ggml.impl.c.QK8_1;
+) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK8_1;
     const nb = @divTrunc(n, qk);
 
     std.debug.assert(@rem(n, qk) == 0);
-    comptime std.debug.assert(ggml.impl.c.QK8_1 == ggml.impl.c.QK5_1);
+    comptime std.debug.assert(ggml.impl.ggml_c.QK8_1 == ggml.impl.ggml_c.QK5_1);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
@@ -782,7 +782,7 @@ pub export fn ggml_vec_dot_q5_1_q8_1(
 }
 
 /// Ports `ggml_vec_dot_q8_0_q8_0` (arch/arm/quants.c:1153 @b1b770d90).
-pub export fn ggml_vec_dot_q8_0_q8_0(
+pub fn ggml_vec_dot_q8_0_q8_0(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -791,8 +791,8 @@ pub export fn ggml_vec_dot_q8_0_q8_0(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
-    const qk = ggml.impl.c.QK8_0;
+) callconv(.c) void {
+    const qk = ggml.impl.ggml_c.QK8_0;
     const nb = @divTrunc(n, qk);
 
     std.debug.assert(@rem(n, qk) == 0);
@@ -857,7 +857,7 @@ pub export fn ggml_vec_dot_q8_0_q8_0(
 ///
 /// The same shape as `mxfp4`, over `kvalues_iq4nl` and with an fp16 delta in
 /// place of the e8m0 exponent.
-pub export fn ggml_vec_dot_iq4_nl_q8_0(
+pub fn ggml_vec_dot_iq4_nl_q8_0(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -866,18 +866,18 @@ pub export fn ggml_vec_dot_iq4_nl_q8_0(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
+) callconv(.c) void {
     std.debug.assert(nrc == 1);
-    std.debug.assert(@rem(n, ggml.impl.c.QK4_NL) == 0);
-    comptime std.debug.assert(ggml.impl.c.QK4_NL == ggml.impl.c.QK8_0);
+    std.debug.assert(@rem(n, ggml.impl.ggml_c.QK4_NL) == 0);
+    comptime std.debug.assert(ggml.impl.ggml_c.QK4_NL == ggml.impl.ggml_c.QK8_0);
     _ = .{ bs, bx, by };
 
     const x = as(ggml.quants.blocks.IQ4_NL, vx);
     const y = as(ggml.quants.blocks.Q8_0, vy);
 
-    const nb = @divTrunc(n, ggml.impl.c.QK4_NL);
+    const nb = @divTrunc(n, ggml.impl.ggml_c.QK4_NL);
 
-    const values: ggml.cpu.quants.arch.neon.i8x16 = ggml.impl.c.kvalues_iq4nl;
+    const values: ggml.cpu.quants.arch.neon.i8x16 = ggml.impl.ggml_c.kvalues_iq4nl;
 
     // Two fused multiply-adds per iteration, not `sumf += A + B`.
     //
@@ -931,9 +931,9 @@ pub export fn ggml_vec_dot_iq4_nl_q8_0(
         const d = f(y[ib].d) * f(x[ib].d);
         var sumi1: i32 = 0;
         var sumi2: i32 = 0;
-        for (0..ggml.impl.c.QK4_NL / 2) |j| {
-            sumi1 += @as(i32, y[ib].qs[j]) * ggml.impl.c.kvalues_iq4nl[x[ib].qs[j] & 0xf];
-            sumi2 += @as(i32, y[ib].qs[j + ggml.impl.c.QK4_NL / 2]) * ggml.impl.c.kvalues_iq4nl[x[ib].qs[j] >> 4];
+        for (0..ggml.impl.ggml_c.QK4_NL / 2) |j| {
+            sumi1 += @as(i32, y[ib].qs[j]) * ggml.impl.ggml_c.kvalues_iq4nl[x[ib].qs[j] & 0xf];
+            sumi2 += @as(i32, y[ib].qs[j + ggml.impl.ggml_c.QK4_NL / 2]) * ggml.impl.ggml_c.kvalues_iq4nl[x[ib].qs[j] >> 4];
         }
         sumf = @mulAdd(f32, d, @as(f32, @floatFromInt(sumi1 + sumi2)), sumf);
     }
@@ -951,43 +951,43 @@ test {
 const golden = if (ggml.cpu.features.golden_generic) ggml.cpu.quants.arch.golden_generic else ggml.cpu.quants.arch.golden;
 
 test "q1_0 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q1_0_q8_0, ggml.impl.c.GGML_TYPE_Q1_0, ggml.impl.c.GGML_TYPE_Q8_0, golden.q1_0);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q1_0_q8_0, ggml.impl.ggml_c.GGML_TYPE_Q1_0, ggml.impl.ggml_c.GGML_TYPE_Q8_0, golden.q1_0);
 }
 
 test "q2_0 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q2_0_q8_0, ggml.impl.c.GGML_TYPE_Q2_0, ggml.impl.c.GGML_TYPE_Q8_0, golden.q2_0);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q2_0_q8_0, ggml.impl.ggml_c.GGML_TYPE_Q2_0, ggml.impl.ggml_c.GGML_TYPE_Q8_0, golden.q2_0);
 }
 
 test "q4_0 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q4_0_q8_0, ggml.impl.c.GGML_TYPE_Q4_0, ggml.impl.c.GGML_TYPE_Q8_0, golden.q4_0);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q4_0_q8_0, ggml.impl.ggml_c.GGML_TYPE_Q4_0, ggml.impl.ggml_c.GGML_TYPE_Q8_0, golden.q4_0);
 }
 
 test "q4_1 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q4_1_q8_1, ggml.impl.c.GGML_TYPE_Q4_1, ggml.impl.c.GGML_TYPE_Q8_1, golden.q4_1);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q4_1_q8_1, ggml.impl.ggml_c.GGML_TYPE_Q4_1, ggml.impl.ggml_c.GGML_TYPE_Q8_1, golden.q4_1);
 }
 
 test "mxfp4 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_mxfp4_q8_0, ggml.impl.c.GGML_TYPE_MXFP4, ggml.impl.c.GGML_TYPE_Q8_0, golden.mxfp4);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_mxfp4_q8_0, ggml.impl.ggml_c.GGML_TYPE_MXFP4, ggml.impl.ggml_c.GGML_TYPE_Q8_0, golden.mxfp4);
 }
 
 test "nvfp4 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_nvfp4_q8_0, ggml.impl.c.GGML_TYPE_NVFP4, ggml.impl.c.GGML_TYPE_Q8_0, golden.nvfp4);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_nvfp4_q8_0, ggml.impl.ggml_c.GGML_TYPE_NVFP4, ggml.impl.ggml_c.GGML_TYPE_Q8_0, golden.nvfp4);
 }
 
 test "q5_0 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q5_0_q8_0, ggml.impl.c.GGML_TYPE_Q5_0, ggml.impl.c.GGML_TYPE_Q8_0, golden.q5_0);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q5_0_q8_0, ggml.impl.ggml_c.GGML_TYPE_Q5_0, ggml.impl.ggml_c.GGML_TYPE_Q8_0, golden.q5_0);
 }
 
 test "q5_1 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q5_1_q8_1, ggml.impl.c.GGML_TYPE_Q5_1, ggml.impl.c.GGML_TYPE_Q8_1, golden.q5_1);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q5_1_q8_1, ggml.impl.ggml_c.GGML_TYPE_Q5_1, ggml.impl.ggml_c.GGML_TYPE_Q8_1, golden.q5_1);
 }
 
 test "q8_0 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q8_0_q8_0, ggml.impl.c.GGML_TYPE_Q8_0, ggml.impl.c.GGML_TYPE_Q8_0, golden.q8_0);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q8_0_q8_0, ggml.impl.ggml_c.GGML_TYPE_Q8_0, ggml.impl.ggml_c.GGML_TYPE_Q8_0, golden.q8_0);
 }
 
 test "iq4_nl dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq4_nl_q8_0, ggml.impl.c.GGML_TYPE_IQ4_NL, ggml.impl.c.GGML_TYPE_Q8_0, golden.iq4_nl);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq4_nl_q8_0, ggml.impl.ggml_c.GGML_TYPE_IQ4_NL, ggml.impl.ggml_c.GGML_TYPE_Q8_0, golden.iq4_nl);
 }
 
 test "the two bit-expansion tables are complements" {

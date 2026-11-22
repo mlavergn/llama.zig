@@ -48,10 +48,10 @@ pub fn expertGatingFuncName(ty: u32) [:0]const u8 {
 /// Ports `LLAMA_ROPE_SCALING_TYPES` (llama-model.cpp:1169 @b1b770d90), in
 /// the map's key order.
 const rope_scaling_types = [_]struct { c_int, [:0]const u8 }{
-    .{ mod.impl.c.LLAMA_ROPE_SCALING_TYPE_NONE, "none" },
-    .{ mod.impl.c.LLAMA_ROPE_SCALING_TYPE_LINEAR, "linear" },
-    .{ mod.impl.c.LLAMA_ROPE_SCALING_TYPE_YARN, "yarn" },
-    .{ mod.impl.c.LLAMA_ROPE_SCALING_TYPE_LONGROPE, "longrope" },
+    .{ mod.impl.llama_c.LLAMA_ROPE_SCALING_TYPE_NONE, "none" },
+    .{ mod.impl.llama_c.LLAMA_ROPE_SCALING_TYPE_LINEAR, "linear" },
+    .{ mod.impl.llama_c.LLAMA_ROPE_SCALING_TYPE_YARN, "yarn" },
+    .{ mod.impl.llama_c.LLAMA_ROPE_SCALING_TYPE_LONGROPE, "longrope" },
 };
 
 /// Ports `llama_rope_scaling_type_name` (llama-model.cpp:1176 @b1b770d90).
@@ -66,7 +66,7 @@ pub fn ropeScalingTypeName(ty: c_int, exc: *mod.impl.Exception) mod.impl.Thrown!
 /// Ports `llama_rope_scaling_type_from_string` (llama-model.cpp:1180 @b1b770d90).
 pub fn ropeScalingTypeFromString(name: []const u8) c_int {
     for (rope_scaling_types) |e| if (std.mem.eql(u8, e[1], name)) return e[0];
-    return mod.impl.c.LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED;
+    return mod.impl.llama_c.LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED;
 }
 
 /// Ports `LLAMA_ROPE_SECTION_ORDERS` (llama-model.cpp:1190 @b1b770d90), in
@@ -96,20 +96,20 @@ fn ropeSectionOrderFromString(name: []const u8) c_int {
 /// the transformers names of a classifier head's activation; `gelu` is the
 /// exact (erf) one.
 const cls_act_types_from_string = [_]struct { []const u8, c_int }{
-    .{ "gelu", mod.impl.c.GGML_UNARY_OP_GELU_ERF },
-    .{ "silu", mod.impl.c.GGML_UNARY_OP_SILU },
-    .{ "tanh", mod.impl.c.GGML_UNARY_OP_TANH },
+    .{ "gelu", mod.impl.llama_c.GGML_UNARY_OP_GELU_ERF },
+    .{ "silu", mod.impl.llama_c.GGML_UNARY_OP_SILU },
+    .{ "tanh", mod.impl.llama_c.GGML_UNARY_OP_TANH },
 };
 
 /// Ports `llama_model_default_params` (llama-model.cpp:3553 @b1b770d90).
-pub fn defaultParams() mod.impl.c.llama_model_params {
+pub fn defaultParams() mod.impl.llama_c.llama_model_params {
     return .{
         .devices = null,
         .tensor_buft_overrides = null,
         .n_gpu_layers = -1,
-        .split_mode = mod.impl.c.LLAMA_SPLIT_MODE_LAYER,
-        .load_mode = mod.impl.c.LLAMA_LOAD_MODE_AUTO,
-        .lazy_mode = mod.impl.c.LLAMA_LAZY_MODE_AUTO,
+        .split_mode = mod.impl.llama_c.LLAMA_SPLIT_MODE_LAYER,
+        .load_mode = mod.impl.llama_c.LLAMA_LOAD_MODE_AUTO,
+        .lazy_mode = mod.impl.llama_c.LLAMA_LAZY_MODE_AUTO,
         .main_gpu = 0,
         .tensor_split = null,
         .progress_callback = null,
@@ -128,513 +128,513 @@ pub fn defaultParams() mod.impl.c.llama_model_params {
 /// Ports `llama_layer_posnet` (llama-model.h:172 @b1b770d90).
 pub const LayerPosnet = struct {
     // resnet
-    norm1: ?*mod.impl.c.ggml_tensor = null,
-    norm1_b: ?*mod.impl.c.ggml_tensor = null,
+    norm1: ?*mod.impl.llama_c.ggml_tensor = null,
+    norm1_b: ?*mod.impl.llama_c.ggml_tensor = null,
 
-    conv1: ?*mod.impl.c.ggml_tensor = null,
-    conv1_b: ?*mod.impl.c.ggml_tensor = null,
+    conv1: ?*mod.impl.llama_c.ggml_tensor = null,
+    conv1_b: ?*mod.impl.llama_c.ggml_tensor = null,
 
-    norm2: ?*mod.impl.c.ggml_tensor = null,
-    norm2_b: ?*mod.impl.c.ggml_tensor = null,
+    norm2: ?*mod.impl.llama_c.ggml_tensor = null,
+    norm2_b: ?*mod.impl.llama_c.ggml_tensor = null,
 
-    conv2: ?*mod.impl.c.ggml_tensor = null,
-    conv2_b: ?*mod.impl.c.ggml_tensor = null,
+    conv2: ?*mod.impl.llama_c.ggml_tensor = null,
+    conv2_b: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // attention
-    attn_norm: ?*mod.impl.c.ggml_tensor = null,
-    attn_norm_b: ?*mod.impl.c.ggml_tensor = null,
+    attn_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_norm_b: ?*mod.impl.llama_c.ggml_tensor = null,
 
-    attn_q: ?*mod.impl.c.ggml_tensor = null,
-    attn_q_b: ?*mod.impl.c.ggml_tensor = null,
+    attn_q: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_q_b: ?*mod.impl.llama_c.ggml_tensor = null,
 
-    attn_k: ?*mod.impl.c.ggml_tensor = null,
-    attn_k_b: ?*mod.impl.c.ggml_tensor = null,
+    attn_k: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_k_b: ?*mod.impl.llama_c.ggml_tensor = null,
 
-    attn_v: ?*mod.impl.c.ggml_tensor = null,
-    attn_v_b: ?*mod.impl.c.ggml_tensor = null,
+    attn_v: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_v_b: ?*mod.impl.llama_c.ggml_tensor = null,
 
-    attn_o: ?*mod.impl.c.ggml_tensor = null,
-    attn_o_b: ?*mod.impl.c.ggml_tensor = null,
+    attn_o: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_o_b: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // normalize
-    norm: ?*mod.impl.c.ggml_tensor = null,
-    norm_b: ?*mod.impl.c.ggml_tensor = null,
+    norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    norm_b: ?*mod.impl.llama_c.ggml_tensor = null,
 };
 
 /// Ports `llama_layer_convnext` (llama-model.h:207 @b1b770d90).
 pub const LayerConvnext = struct {
-    dw: ?*mod.impl.c.ggml_tensor = null,
-    dw_b: ?*mod.impl.c.ggml_tensor = null,
+    dw: ?*mod.impl.llama_c.ggml_tensor = null,
+    dw_b: ?*mod.impl.llama_c.ggml_tensor = null,
 
-    norm: ?*mod.impl.c.ggml_tensor = null,
-    norm_b: ?*mod.impl.c.ggml_tensor = null,
+    norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    norm_b: ?*mod.impl.llama_c.ggml_tensor = null,
 
-    pw1: ?*mod.impl.c.ggml_tensor = null,
-    pw1_b: ?*mod.impl.c.ggml_tensor = null,
+    pw1: ?*mod.impl.llama_c.ggml_tensor = null,
+    pw1_b: ?*mod.impl.llama_c.ggml_tensor = null,
 
-    pw2: ?*mod.impl.c.ggml_tensor = null,
-    pw2_b: ?*mod.impl.c.ggml_tensor = null,
+    pw2: ?*mod.impl.llama_c.ggml_tensor = null,
+    pw2_b: ?*mod.impl.llama_c.ggml_tensor = null,
 
-    gamma: ?*mod.impl.c.ggml_tensor = null,
+    gamma: ?*mod.impl.llama_c.ggml_tensor = null,
 };
 
 /// Ports `llama_layer_shortconv` (llama-model.h:223 @b1b770d90).
 pub const LayerShortconv = struct {
-    in_proj: ?*mod.impl.c.ggml_tensor = null,
-    conv: ?*mod.impl.c.ggml_tensor = null,
-    out_proj: ?*mod.impl.c.ggml_tensor = null,
+    in_proj: ?*mod.impl.llama_c.ggml_tensor = null,
+    conv: ?*mod.impl.llama_c.ggml_tensor = null,
+    out_proj: ?*mod.impl.llama_c.ggml_tensor = null,
 };
 
 /// Ports `llama_layer_nextn` (llama-model.h:229 @b1b770d90).
 pub const LayerNextn = struct {
-    eh_proj: ?*mod.impl.c.ggml_tensor = null,
-    eh_proj_s: ?*mod.impl.c.ggml_tensor = null,
-    eh_proj_in_s: ?*mod.impl.c.ggml_tensor = null,
-    embed_tokens: ?*mod.impl.c.ggml_tensor = null,
-    enorm: ?*mod.impl.c.ggml_tensor = null,
-    hnorm: ?*mod.impl.c.ggml_tensor = null,
-    shared_head_head: ?*mod.impl.c.ggml_tensor = null,
-    shared_head_head_s: ?*mod.impl.c.ggml_tensor = null,
-    shared_head_head_in_s: ?*mod.impl.c.ggml_tensor = null,
-    shared_head_norm: ?*mod.impl.c.ggml_tensor = null,
+    eh_proj: ?*mod.impl.llama_c.ggml_tensor = null,
+    eh_proj_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    eh_proj_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    embed_tokens: ?*mod.impl.llama_c.ggml_tensor = null,
+    enorm: ?*mod.impl.llama_c.ggml_tensor = null,
+    hnorm: ?*mod.impl.llama_c.ggml_tensor = null,
+    shared_head_head: ?*mod.impl.llama_c.ggml_tensor = null,
+    shared_head_head_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    shared_head_head_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    shared_head_norm: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // qwen4exp: the MTP block collapses its hyper-connection streams with its own mixer
-    hc_head_norm: ?*mod.impl.c.ggml_tensor = null,
-    hc_head_down: ?*mod.impl.c.ggml_tensor = null,
-    hc_head_up: ?*mod.impl.c.ggml_tensor = null,
+    hc_head_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_head_down: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_head_up: ?*mod.impl.llama_c.ggml_tensor = null,
 };
 
 /// Ports `llama_layer_switch_lora` (llama-model.h:247 @b1b770d90).
 pub const LayerSwitchLora = struct {
-    a_q: ?*mod.impl.c.ggml_tensor = null,
-    b_q: ?*mod.impl.c.ggml_tensor = null,
-    a_k: ?*mod.impl.c.ggml_tensor = null,
-    b_k: ?*mod.impl.c.ggml_tensor = null,
-    a_v: ?*mod.impl.c.ggml_tensor = null,
-    b_v: ?*mod.impl.c.ggml_tensor = null,
-    a_o: ?*mod.impl.c.ggml_tensor = null,
-    b_o: ?*mod.impl.c.ggml_tensor = null,
+    a_q: ?*mod.impl.llama_c.ggml_tensor = null,
+    b_q: ?*mod.impl.llama_c.ggml_tensor = null,
+    a_k: ?*mod.impl.llama_c.ggml_tensor = null,
+    b_k: ?*mod.impl.llama_c.ggml_tensor = null,
+    a_v: ?*mod.impl.llama_c.ggml_tensor = null,
+    b_v: ?*mod.impl.llama_c.ggml_tensor = null,
+    a_o: ?*mod.impl.llama_c.ggml_tensor = null,
+    b_o: ?*mod.impl.llama_c.ggml_tensor = null,
 
-    a_gate: ?*mod.impl.c.ggml_tensor = null,
-    b_gate: ?*mod.impl.c.ggml_tensor = null,
-    a_up: ?*mod.impl.c.ggml_tensor = null,
-    b_up: ?*mod.impl.c.ggml_tensor = null,
-    a_down: ?*mod.impl.c.ggml_tensor = null,
-    b_down: ?*mod.impl.c.ggml_tensor = null,
+    a_gate: ?*mod.impl.llama_c.ggml_tensor = null,
+    b_gate: ?*mod.impl.llama_c.ggml_tensor = null,
+    a_up: ?*mod.impl.llama_c.ggml_tensor = null,
+    b_up: ?*mod.impl.llama_c.ggml_tensor = null,
+    a_down: ?*mod.impl.llama_c.ggml_tensor = null,
+    b_down: ?*mod.impl.llama_c.ggml_tensor = null,
 };
 
 /// Ports `llama_layer` (llama-model.h:265 @b1b770d90): one member for
 /// every tensor any architecture names, in the C++'s order.
 pub const Layer = struct {
     // normalization
-    attn_norm: ?*mod.impl.c.ggml_tensor = null,
-    attn_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    attn_norm_2: ?*mod.impl.c.ggml_tensor = null,
-    attn_norm_2_b: ?*mod.impl.c.ggml_tensor = null,
-    attn_q_norm: ?*mod.impl.c.ggml_tensor = null,
-    attn_q_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    attn_k_norm: ?*mod.impl.c.ggml_tensor = null,
-    attn_k_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    attn_out_norm: ?*mod.impl.c.ggml_tensor = null,
-    attn_out_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    attn_q_a_norm: ?*mod.impl.c.ggml_tensor = null,
-    attn_kv_a_norm: ?*mod.impl.c.ggml_tensor = null,
-    attn_sub_norm: ?*mod.impl.c.ggml_tensor = null,
-    attn_post_norm: ?*mod.impl.c.ggml_tensor = null,
-    ffn_sub_norm: ?*mod.impl.c.ggml_tensor = null,
-    attn_norm_cross: ?*mod.impl.c.ggml_tensor = null,
-    attn_norm_enc: ?*mod.impl.c.ggml_tensor = null,
-    ssm_norm: ?*mod.impl.c.ggml_tensor = null,
-    ssm_dt_norm: ?*mod.impl.c.ggml_tensor = null,
-    ssm_b_norm: ?*mod.impl.c.ggml_tensor = null,
-    ssm_c_norm: ?*mod.impl.c.ggml_tensor = null,
+    attn_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_norm_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_norm_2: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_norm_2_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_q_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_q_norm_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_k_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_k_norm_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_out_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_out_norm_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_q_a_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_kv_a_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_sub_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_post_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_sub_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_norm_cross: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_norm_enc: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_dt_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_b_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_c_norm: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // attention
-    wq: ?*mod.impl.c.ggml_tensor = null,
-    wk: ?*mod.impl.c.ggml_tensor = null,
-    wv: ?*mod.impl.c.ggml_tensor = null,
-    k_cache_s: ?*mod.impl.c.ggml_tensor = null,
-    v_cache_s: ?*mod.impl.c.ggml_tensor = null,
-    wo: ?*mod.impl.c.ggml_tensor = null,
-    wqkv: ?*mod.impl.c.ggml_tensor = null,
-    wg: ?*mod.impl.c.ggml_tensor = null,
-    wq_a: ?*mod.impl.c.ggml_tensor = null,
-    wq_b: ?*mod.impl.c.ggml_tensor = null,
-    wkv_a_mqa: ?*mod.impl.c.ggml_tensor = null,
-    wkv_b: ?*mod.impl.c.ggml_tensor = null,
-    wkv: ?*mod.impl.c.ggml_tensor = null,
-    wk_b: ?*mod.impl.c.ggml_tensor = null,
-    wv_b: ?*mod.impl.c.ggml_tensor = null,
-    wqkv_b: ?*mod.impl.c.ggml_tensor = null,
-    wo_a: ?*mod.impl.c.ggml_tensor = null,
-    wo_b: ?*mod.impl.c.ggml_tensor = null,
-    wq_cross: ?*mod.impl.c.ggml_tensor = null,
-    wk_cross: ?*mod.impl.c.ggml_tensor = null,
-    wv_cross: ?*mod.impl.c.ggml_tensor = null,
-    wo_cross: ?*mod.impl.c.ggml_tensor = null,
-    wq_enc: ?*mod.impl.c.ggml_tensor = null,
-    wk_enc: ?*mod.impl.c.ggml_tensor = null,
-    wv_enc: ?*mod.impl.c.ggml_tensor = null,
-    wo_enc: ?*mod.impl.c.ggml_tensor = null,
-    wqkv_gate: ?*mod.impl.c.ggml_tensor = null,
-    wqkv_gate_b: ?*mod.impl.c.ggml_tensor = null,
+    wq: ?*mod.impl.llama_c.ggml_tensor = null,
+    wk: ?*mod.impl.llama_c.ggml_tensor = null,
+    wv: ?*mod.impl.llama_c.ggml_tensor = null,
+    k_cache_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    v_cache_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    wo: ?*mod.impl.llama_c.ggml_tensor = null,
+    wqkv: ?*mod.impl.llama_c.ggml_tensor = null,
+    wg: ?*mod.impl.llama_c.ggml_tensor = null,
+    wq_a: ?*mod.impl.llama_c.ggml_tensor = null,
+    wq_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    wkv_a_mqa: ?*mod.impl.llama_c.ggml_tensor = null,
+    wkv_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    wkv: ?*mod.impl.llama_c.ggml_tensor = null,
+    wk_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    wv_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    wqkv_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    wo_a: ?*mod.impl.llama_c.ggml_tensor = null,
+    wo_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    wq_cross: ?*mod.impl.llama_c.ggml_tensor = null,
+    wk_cross: ?*mod.impl.llama_c.ggml_tensor = null,
+    wv_cross: ?*mod.impl.llama_c.ggml_tensor = null,
+    wo_cross: ?*mod.impl.llama_c.ggml_tensor = null,
+    wq_enc: ?*mod.impl.llama_c.ggml_tensor = null,
+    wk_enc: ?*mod.impl.llama_c.ggml_tensor = null,
+    wv_enc: ?*mod.impl.llama_c.ggml_tensor = null,
+    wo_enc: ?*mod.impl.llama_c.ggml_tensor = null,
+    wqkv_gate: ?*mod.impl.llama_c.ggml_tensor = null,
+    wqkv_gate_b: ?*mod.impl.llama_c.ggml_tensor = null,
     // K2 Horizon MoVA
-    attn_v_gate: ?*mod.impl.c.ggml_tensor = null,
-    attn_v_gate_b: ?*mod.impl.c.ggml_tensor = null,
-    attn_v_exps: ?*mod.impl.c.ggml_tensor = null,
+    attn_v_gate: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_v_gate_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_v_exps: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // relative position bias
-    attn_rel_b: ?*mod.impl.c.ggml_tensor = null,
-    attn_rel_b_enc: ?*mod.impl.c.ggml_tensor = null,
-    attn_rel_b_cross: ?*mod.impl.c.ggml_tensor = null,
+    attn_rel_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_rel_b_enc: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_rel_b_cross: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // normalization
-    ffn_norm: ?*mod.impl.c.ggml_tensor = null,
-    ffn_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    ffn_post_norm: ?*mod.impl.c.ggml_tensor = null,
-    ffn_post_norm_1: ?*mod.impl.c.ggml_tensor = null, // gemma4
-    ffn_post_norm_2: ?*mod.impl.c.ggml_tensor = null, // gemma4
-    ffn_pre_norm_2: ?*mod.impl.c.ggml_tensor = null, // gemma4
-    ffn_norm_ada_down: ?*mod.impl.c.ggml_tensor = null, // voxtral realtime
-    ffn_norm_ada_up: ?*mod.impl.c.ggml_tensor = null, // voxtral realtime
-    layer_out_norm: ?*mod.impl.c.ggml_tensor = null,
-    layer_out_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    ffn_norm_exps: ?*mod.impl.c.ggml_tensor = null,
-    ffn_norm_enc: ?*mod.impl.c.ggml_tensor = null,
+    ffn_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_norm_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_post_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_post_norm_1: ?*mod.impl.llama_c.ggml_tensor = null, // gemma4
+    ffn_post_norm_2: ?*mod.impl.llama_c.ggml_tensor = null, // gemma4
+    ffn_pre_norm_2: ?*mod.impl.llama_c.ggml_tensor = null, // gemma4
+    ffn_norm_ada_down: ?*mod.impl.llama_c.ggml_tensor = null, // voxtral realtime
+    ffn_norm_ada_up: ?*mod.impl.llama_c.ggml_tensor = null, // voxtral realtime
+    layer_out_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    layer_out_norm_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_norm_exps: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_norm_enc: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // ff
-    ffn_gate: ?*mod.impl.c.ggml_tensor = null, // w1
-    ffn_down: ?*mod.impl.c.ggml_tensor = null, // w2
-    ffn_up: ?*mod.impl.c.ggml_tensor = null, // w3
-    ffn_gate_enc: ?*mod.impl.c.ggml_tensor = null,
-    ffn_down_enc: ?*mod.impl.c.ggml_tensor = null,
-    ffn_up_enc: ?*mod.impl.c.ggml_tensor = null,
+    ffn_gate: ?*mod.impl.llama_c.ggml_tensor = null, // w1
+    ffn_down: ?*mod.impl.llama_c.ggml_tensor = null, // w2
+    ffn_up: ?*mod.impl.llama_c.ggml_tensor = null, // w3
+    ffn_gate_enc: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_down_enc: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_up_enc: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // ff MoE
-    ffn_gate_inp: ?*mod.impl.c.ggml_tensor = null,
-    ffn_gate_inp_s: ?*mod.impl.c.ggml_tensor = null, // gemma4
-    ffn_gate_exps: ?*mod.impl.c.ggml_tensor = null,
-    ffn_down_exps: ?*mod.impl.c.ggml_tensor = null,
-    ffn_up_exps: ?*mod.impl.c.ggml_tensor = null,
-    ffn_gate_up_exps: ?*mod.impl.c.ggml_tensor = null,
-    ffn_gate_inp_b: ?*mod.impl.c.ggml_tensor = null,
-    ffn_gate_exps_b: ?*mod.impl.c.ggml_tensor = null,
-    ffn_down_exps_b: ?*mod.impl.c.ggml_tensor = null,
-    ffn_up_exps_b: ?*mod.impl.c.ggml_tensor = null,
-    ffn_gate_up_exps_b: ?*mod.impl.c.ggml_tensor = null,
+    ffn_gate_inp: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_gate_inp_s: ?*mod.impl.llama_c.ggml_tensor = null, // gemma4
+    ffn_gate_exps: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_down_exps: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_up_exps: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_gate_up_exps: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_gate_inp_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_gate_exps_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_down_exps_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_up_exps_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_gate_up_exps_b: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // ff MoE per-expert scales (NVFP4 per-tensor scale2)
-    ffn_gate_exps_s: ?*mod.impl.c.ggml_tensor = null,
-    ffn_down_exps_s: ?*mod.impl.c.ggml_tensor = null,
-    ffn_up_exps_s: ?*mod.impl.c.ggml_tensor = null,
+    ffn_gate_exps_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_down_exps_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_up_exps_s: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // ff MoE latent proj
-    ffn_latent_down: ?*mod.impl.c.ggml_tensor = null,
-    ffn_latent_up: ?*mod.impl.c.ggml_tensor = null,
+    ffn_latent_down: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_latent_up: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // ff MoE norms around the experts, in latent space
-    ffn_pre_exp_norm: ?*mod.impl.c.ggml_tensor = null,
-    ffn_post_exp_norm: ?*mod.impl.c.ggml_tensor = null,
+    ffn_pre_exp_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_post_exp_norm: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // norm preserving residual coefficients
-    attn_resid_alpha: ?*mod.impl.c.ggml_tensor = null,
-    attn_resid_beta: ?*mod.impl.c.ggml_tensor = null,
-    ffn_resid_alpha: ?*mod.impl.c.ggml_tensor = null,
-    ffn_resid_beta: ?*mod.impl.c.ggml_tensor = null,
+    attn_resid_alpha: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_resid_beta: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_resid_alpha: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_resid_beta: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // value residual mix
-    attn_vres_lambda: ?*mod.impl.c.ggml_tensor = null,
+    attn_vres_lambda: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // ff shared expert (shexp)
-    ffn_gate_inp_shexp: ?*mod.impl.c.ggml_tensor = null,
-    ffn_gate_shexp: ?*mod.impl.c.ggml_tensor = null,
-    ffn_down_shexp: ?*mod.impl.c.ggml_tensor = null,
-    ffn_up_shexp: ?*mod.impl.c.ggml_tensor = null,
+    ffn_gate_inp_shexp: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_gate_shexp: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_down_shexp: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_up_shexp: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // ff adjugate experts (chexps)
-    ffn_gate_chexps: ?*mod.impl.c.ggml_tensor = null,
-    ffn_down_chexps: ?*mod.impl.c.ggml_tensor = null,
-    ffn_up_chexps: ?*mod.impl.c.ggml_tensor = null,
+    ffn_gate_chexps: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_down_chexps: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_up_chexps: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // ff bias
-    ffn_gate_b: ?*mod.impl.c.ggml_tensor = null,
-    ffn_down_b: ?*mod.impl.c.ggml_tensor = null, // b2
-    ffn_up_b: ?*mod.impl.c.ggml_tensor = null, // b3
-    ffn_act: ?*mod.impl.c.ggml_tensor = null,
-    ffn_exp_probs_b: ?*mod.impl.c.ggml_tensor = null,
-    ffn_exp_probs_b_vl: ?*mod.impl.c.ggml_tensor = null, // deepseek4 vision (bias for image tokens)
-    ffn_gate_tid2eid: ?*mod.impl.c.ggml_tensor = null,
+    ffn_gate_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_down_b: ?*mod.impl.llama_c.ggml_tensor = null, // b2
+    ffn_up_b: ?*mod.impl.llama_c.ggml_tensor = null, // b3
+    ffn_act: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_exp_probs_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_exp_probs_b_vl: ?*mod.impl.llama_c.ggml_tensor = null, // deepseek4 vision (bias for image tokens)
+    ffn_gate_tid2eid: ?*mod.impl.llama_c.ggml_tensor = null,
 
-    dflash_attn_conv_base: ?*mod.impl.c.ggml_tensor = null,
-    dflash_attn_conv_proj: ?*mod.impl.c.ggml_tensor = null,
-    dflash_ffn_conv_base: ?*mod.impl.c.ggml_tensor = null,
-    dflash_ffn_conv_proj: ?*mod.impl.c.ggml_tensor = null,
+    dflash_attn_conv_base: ?*mod.impl.llama_c.ggml_tensor = null,
+    dflash_attn_conv_proj: ?*mod.impl.llama_c.ggml_tensor = null,
+    dflash_ffn_conv_base: ?*mod.impl.llama_c.ggml_tensor = null,
+    dflash_ffn_conv_proj: ?*mod.impl.llama_c.ggml_tensor = null,
 
-    lilicorr_attn_norm: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_mlp_norm: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_attn_in_proj: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_attn_in_proj_b: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_attn_out_proj: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_attn_out_proj_b: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_attn_out_proj_s: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_mlp_0: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_mlp_0_b: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_mlp_0_s: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_mlp_2: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_mlp_2_b: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_mlp_2_s: ?*mod.impl.c.ggml_tensor = null,
+    lilicorr_attn_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_mlp_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_attn_in_proj: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_attn_in_proj_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_attn_out_proj: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_attn_out_proj_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_attn_out_proj_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_mlp_0: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_mlp_0_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_mlp_0_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_mlp_2: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_mlp_2_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_mlp_2_s: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // mamba proj
-    ssm_in: ?*mod.impl.c.ggml_tensor = null,
-    ssm_x: ?*mod.impl.c.ggml_tensor = null,
-    ssm_dt: ?*mod.impl.c.ggml_tensor = null,
-    ssm_out: ?*mod.impl.c.ggml_tensor = null,
+    ssm_in: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_x: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_dt: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_out: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // mamba
-    ssm_conv1d: ?*mod.impl.c.ggml_tensor = null,
-    ssm_a: ?*mod.impl.c.ggml_tensor = null,
-    ssm_d: ?*mod.impl.c.ggml_tensor = null,
+    ssm_conv1d: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_a: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_d: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // mamba bias
-    ssm_conv1d_b: ?*mod.impl.c.ggml_tensor = null,
-    ssm_dt_b: ?*mod.impl.c.ggml_tensor = null,
+    ssm_conv1d_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_dt_b: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // qwen3next
-    ssm_beta_alpha: ?*mod.impl.c.ggml_tensor = null,
+    ssm_beta_alpha: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // qwen3.5
-    ssm_alpha: ?*mod.impl.c.ggml_tensor = null,
+    ssm_alpha: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // rwkv
-    time_mix_w1: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_w2: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_lerp_x: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_lerp_w: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_lerp_k: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_lerp_v: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_lerp_r: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_lerp_g: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_lerp_fused: ?*mod.impl.c.ggml_tensor = null,
+    time_mix_w1: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_w2: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_lerp_x: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_lerp_w: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_lerp_k: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_lerp_v: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_lerp_r: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_lerp_g: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_lerp_fused: ?*mod.impl.llama_c.ggml_tensor = null,
 
-    time_mix_first: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_decay: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_decay_w1: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_decay_w2: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_key: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_key_b: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_value: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_value_b: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_receptance: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_receptance_b: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_gate: ?*mod.impl.c.ggml_tensor = null,
+    time_mix_first: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_decay: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_decay_w1: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_decay_w2: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_key: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_key_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_value: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_value_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_receptance: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_receptance_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_gate: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // rwkv7
-    time_mix_w0: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_a0: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_a1: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_a2: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_v0: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_v1: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_v2: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_g1: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_g2: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_k_k: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_k_a: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_r_k: ?*mod.impl.c.ggml_tensor = null,
+    time_mix_w0: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_a0: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_a1: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_a2: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_v0: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_v1: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_v2: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_g1: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_g2: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_k_k: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_k_a: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_r_k: ?*mod.impl.llama_c.ggml_tensor = null,
 
-    time_mix_ln: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_ln_b: ?*mod.impl.c.ggml_tensor = null,
-    time_mix_output: ?*mod.impl.c.ggml_tensor = null,
+    time_mix_ln: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_ln_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    time_mix_output: ?*mod.impl.llama_c.ggml_tensor = null,
 
-    channel_mix_lerp_k: ?*mod.impl.c.ggml_tensor = null,
-    channel_mix_lerp_r: ?*mod.impl.c.ggml_tensor = null,
+    channel_mix_lerp_k: ?*mod.impl.llama_c.ggml_tensor = null,
+    channel_mix_lerp_r: ?*mod.impl.llama_c.ggml_tensor = null,
 
-    channel_mix_key: ?*mod.impl.c.ggml_tensor = null,
-    channel_mix_receptance: ?*mod.impl.c.ggml_tensor = null,
-    channel_mix_value: ?*mod.impl.c.ggml_tensor = null,
+    channel_mix_key: ?*mod.impl.llama_c.ggml_tensor = null,
+    channel_mix_receptance: ?*mod.impl.llama_c.ggml_tensor = null,
+    channel_mix_value: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // long rope factors
-    rope_long: ?*mod.impl.c.ggml_tensor = null,
-    rope_short: ?*mod.impl.c.ggml_tensor = null,
-    rope_freqs: ?*mod.impl.c.ggml_tensor = null,
+    rope_long: ?*mod.impl.llama_c.ggml_tensor = null,
+    rope_short: ?*mod.impl.llama_c.ggml_tensor = null,
+    rope_freqs: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // bitnet scale
-    wq_s: ?*mod.impl.c.ggml_tensor = null,
-    wk_s: ?*mod.impl.c.ggml_tensor = null,
-    wv_s: ?*mod.impl.c.ggml_tensor = null,
-    wo_s: ?*mod.impl.c.ggml_tensor = null,
-    wqkv_s: ?*mod.impl.c.ggml_tensor = null,
-    wqkv_gate_s: ?*mod.impl.c.ggml_tensor = null,
-    ffn_gate_s: ?*mod.impl.c.ggml_tensor = null,
-    ffn_up_s: ?*mod.impl.c.ggml_tensor = null,
-    ffn_down_s: ?*mod.impl.c.ggml_tensor = null,
-    ffn_gate_shexp_s: ?*mod.impl.c.ggml_tensor = null,
-    ffn_up_shexp_s: ?*mod.impl.c.ggml_tensor = null,
-    ffn_down_shexp_s: ?*mod.impl.c.ggml_tensor = null,
-    ssm_in_s: ?*mod.impl.c.ggml_tensor = null,
-    ssm_out_s: ?*mod.impl.c.ggml_tensor = null,
-    ssm_alpha_s: ?*mod.impl.c.ggml_tensor = null,
-    ssm_beta_s: ?*mod.impl.c.ggml_tensor = null,
+    wq_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    wk_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    wv_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    wo_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    wqkv_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    wqkv_gate_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_gate_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_up_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_down_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_gate_shexp_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_up_shexp_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_down_shexp_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_out_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_alpha_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_beta_s: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // input scales
-    wq_in_s: ?*mod.impl.c.ggml_tensor = null,
-    wk_in_s: ?*mod.impl.c.ggml_tensor = null,
-    wv_in_s: ?*mod.impl.c.ggml_tensor = null,
-    wo_in_s: ?*mod.impl.c.ggml_tensor = null,
-    wqkv_in_s: ?*mod.impl.c.ggml_tensor = null,
-    wqkv_gate_in_s: ?*mod.impl.c.ggml_tensor = null,
-    ffn_gate_in_s: ?*mod.impl.c.ggml_tensor = null,
-    ffn_up_in_s: ?*mod.impl.c.ggml_tensor = null,
-    ffn_down_in_s: ?*mod.impl.c.ggml_tensor = null,
-    ffn_gate_exps_in_s: ?*mod.impl.c.ggml_tensor = null,
-    ffn_down_exps_in_s: ?*mod.impl.c.ggml_tensor = null,
-    ffn_up_exps_in_s: ?*mod.impl.c.ggml_tensor = null,
-    ffn_gate_shexp_in_s: ?*mod.impl.c.ggml_tensor = null,
-    ffn_up_shexp_in_s: ?*mod.impl.c.ggml_tensor = null,
-    ffn_down_shexp_in_s: ?*mod.impl.c.ggml_tensor = null,
-    ssm_in_in_s: ?*mod.impl.c.ggml_tensor = null,
-    ssm_out_in_s: ?*mod.impl.c.ggml_tensor = null,
-    ssm_alpha_in_s: ?*mod.impl.c.ggml_tensor = null,
-    ssm_beta_in_s: ?*mod.impl.c.ggml_tensor = null,
+    wq_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    wk_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    wv_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    wo_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    wqkv_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    wqkv_gate_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_gate_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_up_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_down_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_gate_exps_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_down_exps_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_up_exps_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_gate_shexp_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_up_shexp_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_down_shexp_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_in_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_out_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_alpha_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_beta_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // altup & laurel
-    per_layer_inp_gate: ?*mod.impl.c.ggml_tensor = null,
-    per_layer_proj: ?*mod.impl.c.ggml_tensor = null,
-    per_layer_post_norm: ?*mod.impl.c.ggml_tensor = null,
-    altup_correct_coef: ?*mod.impl.c.ggml_tensor = null,
-    altup_correct_scale: ?*mod.impl.c.ggml_tensor = null,
-    altup_predict_coef: ?*mod.impl.c.ggml_tensor = null,
-    altup_router: ?*mod.impl.c.ggml_tensor = null,
-    altup_router_norm: ?*mod.impl.c.ggml_tensor = null,
-    laurel_l: ?*mod.impl.c.ggml_tensor = null,
-    laurel_r: ?*mod.impl.c.ggml_tensor = null,
-    laurel_post_norm: ?*mod.impl.c.ggml_tensor = null,
+    per_layer_inp_gate: ?*mod.impl.llama_c.ggml_tensor = null,
+    per_layer_proj: ?*mod.impl.llama_c.ggml_tensor = null,
+    per_layer_post_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    altup_correct_coef: ?*mod.impl.llama_c.ggml_tensor = null,
+    altup_correct_scale: ?*mod.impl.llama_c.ggml_tensor = null,
+    altup_predict_coef: ?*mod.impl.llama_c.ggml_tensor = null,
+    altup_router: ?*mod.impl.llama_c.ggml_tensor = null,
+    altup_router_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    laurel_l: ?*mod.impl.llama_c.ggml_tensor = null,
+    laurel_r: ?*mod.impl.llama_c.ggml_tensor = null,
+    laurel_post_norm: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // openai-moe
-    attn_sinks: ?*mod.impl.c.ggml_tensor = null,
+    attn_sinks: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // DeepSeek-V4
-    attn_kv_norm: ?*mod.impl.c.ggml_tensor = null,
-    hc_attn_fn: ?*mod.impl.c.ggml_tensor = null,
-    hc_attn_base: ?*mod.impl.c.ggml_tensor = null,
-    hc_attn_scale: ?*mod.impl.c.ggml_tensor = null,
-    hc_ffn_fn: ?*mod.impl.c.ggml_tensor = null,
-    hc_ffn_base: ?*mod.impl.c.ggml_tensor = null,
-    hc_ffn_scale: ?*mod.impl.c.ggml_tensor = null,
-    attn_comp_wkv: ?*mod.impl.c.ggml_tensor = null,
-    attn_comp_wgate: ?*mod.impl.c.ggml_tensor = null,
-    attn_comp_ape: ?*mod.impl.c.ggml_tensor = null,
-    attn_comp_norm: ?*mod.impl.c.ggml_tensor = null,
-    indexer_comp_wkv: ?*mod.impl.c.ggml_tensor = null,
-    indexer_comp_wgate: ?*mod.impl.c.ggml_tensor = null,
-    indexer_comp_ape: ?*mod.impl.c.ggml_tensor = null,
-    indexer_comp_norm: ?*mod.impl.c.ggml_tensor = null,
+    attn_kv_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_attn_fn: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_attn_base: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_attn_scale: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_ffn_fn: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_ffn_base: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_ffn_scale: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_comp_wkv: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_comp_wgate: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_comp_ape: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_comp_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    indexer_comp_wkv: ?*mod.impl.llama_c.ggml_tensor = null,
+    indexer_comp_wgate: ?*mod.impl.llama_c.ggml_tensor = null,
+    indexer_comp_ape: ?*mod.impl.llama_c.ggml_tensor = null,
+    indexer_comp_norm: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // cogvlm
-    visexp_attn_wqkv: ?*mod.impl.c.ggml_tensor = null,
-    visexp_attn_wo: ?*mod.impl.c.ggml_tensor = null,
-    visexp_ffn_gate: ?*mod.impl.c.ggml_tensor = null,
-    visexp_ffn_down: ?*mod.impl.c.ggml_tensor = null,
-    visexp_ffn_up: ?*mod.impl.c.ggml_tensor = null,
+    visexp_attn_wqkv: ?*mod.impl.llama_c.ggml_tensor = null,
+    visexp_attn_wo: ?*mod.impl.llama_c.ggml_tensor = null,
+    visexp_ffn_gate: ?*mod.impl.llama_c.ggml_tensor = null,
+    visexp_ffn_down: ?*mod.impl.llama_c.ggml_tensor = null,
+    visexp_ffn_up: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // xIELU activation parameters for Apertus
-    ffn_act_alpha_n: ?*mod.impl.c.ggml_tensor = null,
-    ffn_act_alpha_p: ?*mod.impl.c.ggml_tensor = null,
-    ffn_act_beta: ?*mod.impl.c.ggml_tensor = null,
-    ffn_act_eps: ?*mod.impl.c.ggml_tensor = null,
+    ffn_act_alpha_n: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_act_alpha_p: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_act_beta: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_act_eps: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // Kimi Linear KDA (using ssm_ prefix for consistency)
     // Note: ssm_dt_b already exists above (mamba bias), reused for Kimi dt_bias
-    ssm_q_conv: ?*mod.impl.c.ggml_tensor = null,
-    ssm_k_conv: ?*mod.impl.c.ggml_tensor = null,
-    ssm_v_conv: ?*mod.impl.c.ggml_tensor = null,
-    ssm_f_a: ?*mod.impl.c.ggml_tensor = null,
-    ssm_f_b: ?*mod.impl.c.ggml_tensor = null,
-    ssm_beta: ?*mod.impl.c.ggml_tensor = null,
-    ssm_g_a: ?*mod.impl.c.ggml_tensor = null,
-    ssm_g_b: ?*mod.impl.c.ggml_tensor = null,
-    ssm_o_norm: ?*mod.impl.c.ggml_tensor = null,
+    ssm_q_conv: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_k_conv: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_v_conv: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_f_a: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_f_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_beta: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_g_a: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_g_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    ssm_o_norm: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // kimi-k3
-    ssm_g: ?*mod.impl.c.ggml_tensor = null, // full-rank KDA gate (replaces ssm_g_a/ssm_g_b)
-    attn_res_score: ?*mod.impl.c.ggml_tensor = null, // fused res_norm*res_proj, pre-attention
-    ffn_res_score: ?*mod.impl.c.ggml_tensor = null, // fused res_norm*res_proj, pre-FFN
-    ffn_routed_down: ?*mod.impl.c.ggml_tensor = null, // latent MoE: n_embd -> n_expert_latent
-    ffn_routed_up: ?*mod.impl.c.ggml_tensor = null, // latent MoE: n_expert_latent -> n_embd
-    ffn_routed_norm: ?*mod.impl.c.ggml_tensor = null,
+    ssm_g: ?*mod.impl.llama_c.ggml_tensor = null, // full-rank KDA gate (replaces ssm_g_a/ssm_g_b)
+    attn_res_score: ?*mod.impl.llama_c.ggml_tensor = null, // fused res_norm*res_proj, pre-attention
+    ffn_res_score: ?*mod.impl.llama_c.ggml_tensor = null, // fused res_norm*res_proj, pre-FFN
+    ffn_routed_down: ?*mod.impl.llama_c.ggml_tensor = null, // latent MoE: n_embd -> n_expert_latent
+    ffn_routed_up: ?*mod.impl.llama_c.ggml_tensor = null, // latent MoE: n_expert_latent -> n_embd
+    ffn_routed_norm: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // DSA (deepseek sparse attention)
-    indexer_k_norm: ?*mod.impl.c.ggml_tensor = null,
-    indexer_k_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    indexer_proj: ?*mod.impl.c.ggml_tensor = null,
-    indexer_attn_k: ?*mod.impl.c.ggml_tensor = null,
-    indexer_attn_q_b: ?*mod.impl.c.ggml_tensor = null, // note: for lora a/b, not bias
-    indexer_q_norm: ?*mod.impl.c.ggml_tensor = null,
-    indexer_q_norm_b: ?*mod.impl.c.ggml_tensor = null,
+    indexer_k_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    indexer_k_norm_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    indexer_proj: ?*mod.impl.llama_c.ggml_tensor = null,
+    indexer_attn_k: ?*mod.impl.llama_c.ggml_tensor = null,
+    indexer_attn_q_b: ?*mod.impl.llama_c.ggml_tensor = null, // note: for lora a/b, not bias
+    indexer_q_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    indexer_q_norm_b: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // SSMax: per-head query scale s * log(pos + 1) + b
-    attn_ssmax_s: ?*mod.impl.c.ggml_tensor = null,
-    attn_ssmax_b: ?*mod.impl.c.ggml_tensor = null,
-    indexer_ssmax_s: ?*mod.impl.c.ggml_tensor = null,
-    indexer_ssmax_b: ?*mod.impl.c.ggml_tensor = null,
+    attn_ssmax_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_ssmax_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    indexer_ssmax_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    indexer_ssmax_b: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // glm5-next k-pool indexer
-    indexer_kpool_gate: ?*mod.impl.c.ggml_tensor = null,
-    indexer_kpool_ape: ?*mod.impl.c.ggml_tensor = null,
+    indexer_kpool_gate: ?*mod.impl.llama_c.ggml_tensor = null,
+    indexer_kpool_ape: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // deepseek41
-    engram_kv: ?*mod.impl.c.ggml_tensor = null,
-    engram_gate: ?*mod.impl.c.ggml_tensor = null, // q_weight*k_weight folded
+    engram_kv: ?*mod.impl.llama_c.ggml_tensor = null,
+    engram_gate: ?*mod.impl.llama_c.ggml_tensor = null, // q_weight*k_weight folded
 
     // MSA
-    index_q_proj: ?*mod.impl.c.ggml_tensor = null,
-    index_k_proj: ?*mod.impl.c.ggml_tensor = null,
-    index_q_norm: ?*mod.impl.c.ggml_tensor = null,
-    index_k_norm: ?*mod.impl.c.ggml_tensor = null,
+    index_q_proj: ?*mod.impl.llama_c.ggml_tensor = null,
+    index_k_proj: ?*mod.impl.llama_c.ggml_tensor = null,
+    index_q_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    index_k_norm: ?*mod.impl.llama_c.ggml_tensor = null,
 
-    hc_attn_norm: ?*mod.impl.c.ggml_tensor = null,
-    hc_attn_down: ?*mod.impl.c.ggml_tensor = null,
-    hc_attn_up: ?*mod.impl.c.ggml_tensor = null,
-    hc_attn_inject: ?*mod.impl.c.ggml_tensor = null,
-    hc_ffn_norm: ?*mod.impl.c.ggml_tensor = null,
-    hc_ffn_down: ?*mod.impl.c.ggml_tensor = null,
-    hc_ffn_up: ?*mod.impl.c.ggml_tensor = null,
-    hc_ffn_inject: ?*mod.impl.c.ggml_tensor = null,
-    hc_attn_down_inject: ?*mod.impl.c.ggml_tensor = null, // [hc_attn_down | hc_attn_inject] in one weight
-    hc_ffn_down_inject: ?*mod.impl.c.ggml_tensor = null, // [hc_ffn_down | hc_ffn_inject] in one weight
-    wqkv_z: ?*mod.impl.c.ggml_tensor = null, // [wqkv | wqkv_gate] in one weight
-    ssm_beta_alpha_cat: ?*mod.impl.c.ggml_tensor = null, // [ssm_beta | ssm_alpha] in one weight, unlike the grouped ssm_beta_alpha
+    hc_attn_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_attn_down: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_attn_up: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_attn_inject: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_ffn_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_ffn_down: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_ffn_up: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_ffn_inject: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_attn_down_inject: ?*mod.impl.llama_c.ggml_tensor = null, // [hc_attn_down | hc_attn_inject] in one weight
+    hc_ffn_down_inject: ?*mod.impl.llama_c.ggml_tensor = null, // [hc_ffn_down | hc_ffn_inject] in one weight
+    wqkv_z: ?*mod.impl.llama_c.ggml_tensor = null, // [wqkv | wqkv_gate] in one weight
+    ssm_beta_alpha_cat: ?*mod.impl.llama_c.ggml_tensor = null, // [ssm_beta | ssm_alpha] in one weight, unlike the grouped ssm_beta_alpha
 
-    ple_key: ?*mod.impl.c.ggml_tensor = null,
-    ple_value: ?*mod.impl.c.ggml_tensor = null,
-    ple_norm_key: ?*mod.impl.c.ggml_tensor = null,
-    ple_norm_query: ?*mod.impl.c.ggml_tensor = null,
-    ple_norm_conv: ?*mod.impl.c.ggml_tensor = null,
-    ple_conv1d: ?*mod.impl.c.ggml_tensor = null,
+    ple_key: ?*mod.impl.llama_c.ggml_tensor = null,
+    ple_value: ?*mod.impl.llama_c.ggml_tensor = null,
+    ple_norm_key: ?*mod.impl.llama_c.ggml_tensor = null,
+    ple_norm_query: ?*mod.impl.llama_c.ggml_tensor = null,
+    ple_norm_conv: ?*mod.impl.llama_c.ggml_tensor = null,
+    ple_conv1d: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // gemma4 layer output scale, reused for talkie embedding skip scale
-    out_scale: ?*mod.impl.c.ggml_tensor = null,
+    out_scale: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // metis16 per-pass hyper-connection mixes, attention pass LoRA, expert route embeddings
-    hc_attn_mix: ?*mod.impl.c.ggml_tensor = null,
-    hc_attn_read: ?*mod.impl.c.ggml_tensor = null,
-    hc_attn_write: ?*mod.impl.c.ggml_tensor = null,
-    hc_ffn_mix: ?*mod.impl.c.ggml_tensor = null,
-    hc_ffn_read: ?*mod.impl.c.ggml_tensor = null,
-    hc_ffn_write: ?*mod.impl.c.ggml_tensor = null,
-    attn_pass_lora_down: ?*mod.impl.c.ggml_tensor = null,
-    attn_pass_lora_up: ?*mod.impl.c.ggml_tensor = null,
-    attn_pass_gate: ?*mod.impl.c.ggml_tensor = null,
-    ffn_exp_embd: ?*mod.impl.c.ggml_tensor = null,
+    hc_attn_mix: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_attn_read: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_attn_write: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_ffn_mix: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_ffn_read: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_ffn_write: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_pass_lora_down: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_pass_lora_up: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_pass_gate: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_exp_embd: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // limite
-    attn_ve_gate: ?*mod.impl.c.ggml_tensor = null,
-    attn_xsa_alpha: ?*mod.impl.c.ggml_tensor = null,
-    attn_resid_scale: ?*mod.impl.c.ggml_tensor = null,
-    ffn_resid_scale: ?*mod.impl.c.ggml_tensor = null,
-    mudd_down: ?*mod.impl.c.ggml_tensor = null,
-    mudd_up: ?*mod.impl.c.ggml_tensor = null,
-    mudd_up_b: ?*mod.impl.c.ggml_tensor = null,
+    attn_ve_gate: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_xsa_alpha: ?*mod.impl.llama_c.ggml_tensor = null,
+    attn_resid_scale: ?*mod.impl.llama_c.ggml_tensor = null,
+    ffn_resid_scale: ?*mod.impl.llama_c.ggml_tensor = null,
+    mudd_down: ?*mod.impl.llama_c.ggml_tensor = null,
+    mudd_up: ?*mod.impl.llama_c.ggml_tensor = null,
+    mudd_up_b: ?*mod.impl.llama_c.ggml_tensor = null,
 
     posnet: LayerPosnet = .{},
 
@@ -651,31 +651,31 @@ pub const Layer = struct {
 /// Mirrors `llama_device` (llama-model.h:687 @b1b770d90).
 pub const Device = struct {
     is_meta: bool,
-    dev: mod.impl.c.ggml_backend_dev_t,
+    dev: mod.impl.llama_c.ggml_backend_dev_t,
 };
 
 /// `llama_model::impl`'s `layer_dev` (llama-model.cpp:1377 @b1b770d90): the
 /// device a layer is on and the buffer types it may use.
 pub const LayerDev = struct {
-    dev: mod.impl.c.ggml_backend_dev_t = null,
+    dev: mod.impl.llama_c.ggml_backend_dev_t = null,
     buft_list: ?*mod.loader.BuftList = null,
 };
 
 /// A tensor context and the backend buffers holding its tensors' data.
 pub const CtxBufs = struct {
-    ctx: *mod.impl.c.ggml_context,
-    bufs: std.ArrayList(mod.impl.c.ggml_backend_buffer_t) = .empty,
+    ctx: *mod.impl.llama_c.ggml_context,
+    bufs: std.ArrayList(mod.impl.llama_c.ggml_backend_buffer_t) = .empty,
 };
 
 /// A GPU device's buffer types, `gpu_buft_list`'s entries.
 const GpuBufts = struct {
-    dev: mod.impl.c.ggml_backend_dev_t,
+    dev: mod.impl.llama_c.ggml_backend_dev_t,
     list: *mod.loader.BuftList,
 };
 
 /// One entry of `memory_breakdown`, in buffer-type pointer order.
 pub const BuftSize = struct {
-    buft: mod.impl.c.ggml_backend_buffer_type_t,
+    buft: mod.impl.llama_c.ggml_backend_buffer_type_t,
     size: usize,
 };
 
@@ -683,9 +683,9 @@ pub const BuftSize = struct {
 /// transform of a folded weight, applied to the matmul input -- an optional
 /// sign flip, then the normalized block Hadamard rotation.
 pub const HadamardTransform = struct {
-    rot: *mod.impl.c.ggml_tensor,
+    rot: *mod.impl.llama_c.ggml_tensor,
     /// Null for the identity sign mode.
-    signs: ?*mod.impl.c.ggml_tensor = null,
+    signs: ?*mod.impl.llama_c.ggml_tensor = null,
 
     /// When `perm_rep > 1`, the input is permuted from the tiled head order
     /// `[hd, nk, rep]` to the grouped order `[hd, rep, nk]` before the signs
@@ -714,7 +714,7 @@ pub const HadamardTransform = struct {
 /// `llama_hadamard_rotations` (llama-model.h:735 @b1b770d90): a weight to
 /// its transform. Only looked up, so any order stands in for the C++'s
 /// `std::unordered_map`.
-pub const HadamardRotations = std.AutoHashMapUnmanaged(*const mod.impl.c.ggml_tensor, HadamardTransform);
+pub const HadamardRotations = std.AutoHashMapUnmanaged(*const mod.impl.llama_c.ggml_tensor, HadamardTransform);
 
 /// Ports `llama_hadamard` (llama-model.h:737 @b1b770d90): the folded weights
 /// of a `prism.hadamard` model.
@@ -771,7 +771,7 @@ pub const RopeParams = struct {
     n_rot: i32 = 0,
     /// The first rotated dim in a cached K head.
     n_offs: i32 = 0,
-    type: i32 = mod.impl.c.LLAMA_ROPE_TYPE_NONE,
+    type: i32 = mod.impl.llama_c.LLAMA_ROPE_TYPE_NONE,
     n_ctx_orig: i32 = 0,
 
     freq_base: f32 = 0.0,
@@ -781,9 +781,9 @@ pub const RopeParams = struct {
     beta_fast: f32 = 0.0,
     beta_slow: f32 = 0.0,
 
-    factors: ?*mod.impl.c.ggml_tensor = null,
+    factors: ?*mod.impl.llama_c.ggml_tensor = null,
     /// The K norm weight applied after RoPE: a K-shift has to undo it.
-    k_norm: ?*mod.impl.c.ggml_tensor = null,
+    k_norm: ?*mod.impl.llama_c.ggml_tensor = null,
 };
 
 /// `llama_model`, as far as `print_info`.
@@ -797,9 +797,9 @@ pub const RopeParams = struct {
 pub const PrecPolicy = struct {
     /// Keyed by the weight `res->src[0]`: the accumulation type the op
     /// should use. Unused upstream for now, and never filled.
-    prec_acc: std.AutoArrayHashMapUnmanaged(*const mod.impl.c.ggml_tensor, mod.impl.c.enum_ggml_prec) = .empty,
+    prec_acc: std.AutoArrayHashMapUnmanaged(*const mod.impl.llama_c.ggml_tensor, mod.impl.llama_c.enum_ggml_prec) = .empty,
     /// Keyed by the weight `res->src[0]`: the activation precision.
-    prec_src1: std.AutoArrayHashMapUnmanaged(*const mod.impl.c.ggml_tensor, mod.impl.c.enum_ggml_prec) = .empty,
+    prec_src1: std.AutoArrayHashMapUnmanaged(*const mod.impl.llama_c.ggml_tensor, mod.impl.llama_c.enum_ggml_prec) = .empty,
 
     pub fn deinit(self: *PrecPolicy) void {
         self.prec_acc.deinit(std.heap.c_allocator);
@@ -810,11 +810,11 @@ pub const PrecPolicy = struct {
     /// a matrix product's activation precision, from its weight.
     ///
     /// Return: whether a precision was set.
-    pub fn apply(self: *const PrecPolicy, res: ?*mod.impl.c.ggml_tensor) bool {
+    pub fn apply(self: *const PrecPolicy, res: ?*mod.impl.llama_c.ggml_tensor) bool {
         const r = res orelse return false;
         const w = r.src[0] orelse return false;
         const prec = self.prec_src1.get(w) orelse return false;
-        return mod.impl.c.ggml_prec_set_src(r, prec, 1);
+        return mod.impl.llama_c.ggml_prec_set_src(r, prec, 1);
     }
 
     /// Ports `llama_prec_policy`'s `load` (llama-model.cpp:1404 @b1b770d90):
@@ -830,18 +830,18 @@ pub const PrecPolicy = struct {
         const ctx = ml.meta.ctx;
         const key = ml.meta.name(.general_tensor_extra_prec_a4);
         const kid = ml.meta.findNamed(key.slice());
-        if (kid < 0 or mod.impl.c.gguf_get_kv_type(ctx, kid) != mod.impl.c.GGUF_TYPE_ARRAY or mod.impl.c.gguf_get_arr_type(ctx, kid) != mod.impl.c.GGUF_TYPE_BOOL) {
+        if (kid < 0 or mod.impl.llama_c.gguf_get_kv_type(ctx, kid) != mod.impl.llama_c.GGUF_TYPE_ARRAY or mod.impl.llama_c.gguf_get_arr_type(ctx, kid) != mod.impl.llama_c.GGUF_TYPE_BOOL) {
             return exc.throw(.runtime_error, "{s} must be a bool array", .{key.slice()});
         }
 
-        const n_values = mod.impl.c.gguf_get_arr_n(ctx, kid);
+        const n_values = mod.impl.llama_c.gguf_get_arr_n(ctx, kid);
         if (n_values != names.len) {
             return exc.throw(.runtime_error, "{s} tensor/value length mismatch ({d} vs {d})", .{ key.slice(), names.len, n_values });
         }
 
         // the weights that cannot take 4-bit activations keep src1 at a
         // higher precision
-        const values: [*]const i8 = @ptrCast(mod.impl.c.gguf_get_arr_data(ctx, kid).?);
+        const values: [*]const i8 = @ptrCast(mod.impl.llama_c.gguf_get_arr_data(ctx, kid).?);
         var want: std.StringHashMapUnmanaged(void) = .empty;
         defer want.deinit(std.heap.c_allocator);
         for (0..n_values) |i| {
@@ -852,7 +852,7 @@ pub const PrecPolicy = struct {
         for (model.tensors_by_name.items) |w| {
             if (want.contains(mod.gguf_meta.cString(&w.name))) {
                 const gop = self.prec_src1.getOrPut(std.heap.c_allocator, w) catch oom();
-                if (!gop.found_existing) gop.value_ptr.* = mod.impl.c.GGML_PREC_Q8;
+                if (!gop.found_existing) gop.value_ptr.* = mod.impl.llama_c.GGML_PREC_Q8;
             }
         }
     }
@@ -874,7 +874,7 @@ pub const Model = struct {
     attn_rot: bool = true,
     /// `can_prefetch` (llama-model.h:950 @b1b770d90): the weights whose rows
     /// a graph input may prefetch before a gather.
-    can_prefetch: std.AutoHashMapUnmanaged(*const mod.impl.c.ggml_tensor, void) = .empty,
+    can_prefetch: std.AutoHashMapUnmanaged(*const mod.impl.llama_c.ggml_tensor, void) = .empty,
     classifier_labels: std.ArrayList([:0]u8) = .empty,
     decision_labels: std.ArrayList([:0]u8) = .empty,
 
@@ -891,11 +891,11 @@ pub const Model = struct {
     n_elements: u64 = 0,
     n_bytes: usize = 0,
     desc_str: std.ArrayList(u8) = .empty,
-    ftype: c_uint = mod.impl.c.LLAMA_FTYPE_ALL_F32,
+    ftype: c_uint = mod.impl.llama_c.LLAMA_FTYPE_ALL_F32,
 
     /// The parameters it was loaded with; `tensor_split` points into
     /// `tensor_split_owned` when one was given.
-    params: mod.impl.c.llama_model_params,
+    params: mod.impl.llama_c.llama_model_params,
     tensor_split_owned: [16]f32 = @splat(0),
     has_tensor_overrides: bool = false,
 
@@ -903,144 +903,144 @@ pub const Model = struct {
 
     // BEGIN GENERATED by scripts/gen-layer (llama_model) -- do not edit
     // The tensors of `llama_model` (llama-model.h:768 @b1b770d90), in its order.
-    tok_embd: ?*mod.impl.c.ggml_tensor = null,
-    type_embd: ?*mod.impl.c.ggml_tensor = null,
-    pos_embd: ?*mod.impl.c.ggml_tensor = null,
-    tok_norm: ?*mod.impl.c.ggml_tensor = null,
-    tok_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    output_norm: ?*mod.impl.c.ggml_tensor = null,
-    output_res_score: ?*mod.impl.c.ggml_tensor = null, // kimi-k3: final cross-layer residual mix
-    output_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    output: ?*mod.impl.c.ggml_tensor = null,
-    output_b: ?*mod.impl.c.ggml_tensor = null,
-    output_norm_enc: ?*mod.impl.c.ggml_tensor = null,
+    tok_embd: ?*mod.impl.llama_c.ggml_tensor = null,
+    type_embd: ?*mod.impl.llama_c.ggml_tensor = null,
+    pos_embd: ?*mod.impl.llama_c.ggml_tensor = null,
+    tok_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    tok_norm_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    output_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    output_res_score: ?*mod.impl.llama_c.ggml_tensor = null, // kimi-k3: final cross-layer residual mix
+    output_norm_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    output: ?*mod.impl.llama_c.ggml_tensor = null,
+    output_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    output_norm_enc: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // NVFP4 per-tensor scale2, input_scale for LM head
-    output_s: ?*mod.impl.c.ggml_tensor = null,
-    output_in_s: ?*mod.impl.c.ggml_tensor = null,
+    output_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    output_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // NextN/MTP model-level projections
-    nextn_proj_pre: ?*mod.impl.c.ggml_tensor = null,
-    nextn_proj_post: ?*mod.impl.c.ggml_tensor = null,
+    nextn_proj_pre: ?*mod.impl.llama_c.ggml_tensor = null,
+    nextn_proj_post: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // hrm-text initial low-cycle state
-    hrm_z_l_init: ?*mod.impl.c.ggml_tensor = null,
+    hrm_z_l_init: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // metis16 hyper-connection stream embeddings, depth memory and continuation head
-    stream_embd: ?*mod.impl.c.ggml_tensor = null,
-    depth_mem_state_write: ?*mod.impl.c.ggml_tensor = null,
-    depth_mem_meta_write: ?*mod.impl.c.ggml_tensor = null,
-    depth_mem_entry_bias: ?*mod.impl.c.ggml_tensor = null,
-    depth_mem_query: ?*mod.impl.c.ggml_tensor = null,
-    depth_mem_query_b: ?*mod.impl.c.ggml_tensor = null,
-    depth_mem_key: ?*mod.impl.c.ggml_tensor = null,
-    depth_mem_key_b: ?*mod.impl.c.ggml_tensor = null,
-    depth_mem_value: ?*mod.impl.c.ggml_tensor = null,
-    depth_mem_value_b: ?*mod.impl.c.ggml_tensor = null,
-    depth_mem_out: ?*mod.impl.c.ggml_tensor = null,
-    depth_mem_out_b: ?*mod.impl.c.ggml_tensor = null,
-    depth_mem_route_state: ?*mod.impl.c.ggml_tensor = null,
-    depth_mem_route_retr: ?*mod.impl.c.ggml_tensor = null,
-    depth_mem_route_diff: ?*mod.impl.c.ggml_tensor = null,
-    depth_mem_route_hist: ?*mod.impl.c.ggml_tensor = null,
-    depth_mem_route_b: ?*mod.impl.c.ggml_tensor = null,
-    depth_mem_stream_gate: ?*mod.impl.c.ggml_tensor = null,
-    depth_mem_stream_gate_b: ?*mod.impl.c.ggml_tensor = null,
-    cont_hidden_state: ?*mod.impl.c.ggml_tensor = null,
-    cont_hidden_retr: ?*mod.impl.c.ggml_tensor = null,
-    cont_hidden_diff: ?*mod.impl.c.ggml_tensor = null,
-    cont_hidden_route: ?*mod.impl.c.ggml_tensor = null,
-    cont_hidden_b: ?*mod.impl.c.ggml_tensor = null,
-    cont_output: ?*mod.impl.c.ggml_tensor = null,
-    cont_output_b: ?*mod.impl.c.ggml_tensor = null,
+    stream_embd: ?*mod.impl.llama_c.ggml_tensor = null,
+    depth_mem_state_write: ?*mod.impl.llama_c.ggml_tensor = null,
+    depth_mem_meta_write: ?*mod.impl.llama_c.ggml_tensor = null,
+    depth_mem_entry_bias: ?*mod.impl.llama_c.ggml_tensor = null,
+    depth_mem_query: ?*mod.impl.llama_c.ggml_tensor = null,
+    depth_mem_query_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    depth_mem_key: ?*mod.impl.llama_c.ggml_tensor = null,
+    depth_mem_key_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    depth_mem_value: ?*mod.impl.llama_c.ggml_tensor = null,
+    depth_mem_value_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    depth_mem_out: ?*mod.impl.llama_c.ggml_tensor = null,
+    depth_mem_out_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    depth_mem_route_state: ?*mod.impl.llama_c.ggml_tensor = null,
+    depth_mem_route_retr: ?*mod.impl.llama_c.ggml_tensor = null,
+    depth_mem_route_diff: ?*mod.impl.llama_c.ggml_tensor = null,
+    depth_mem_route_hist: ?*mod.impl.llama_c.ggml_tensor = null,
+    depth_mem_route_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    depth_mem_stream_gate: ?*mod.impl.llama_c.ggml_tensor = null,
+    depth_mem_stream_gate_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    cont_hidden_state: ?*mod.impl.llama_c.ggml_tensor = null,
+    cont_hidden_retr: ?*mod.impl.llama_c.ggml_tensor = null,
+    cont_hidden_diff: ?*mod.impl.llama_c.ggml_tensor = null,
+    cont_hidden_route: ?*mod.impl.llama_c.ggml_tensor = null,
+    cont_hidden_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    cont_output: ?*mod.impl.llama_c.ggml_tensor = null,
+    cont_output_b: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // DeepSeek-V4
-    hc_head_fn: ?*mod.impl.c.ggml_tensor = null,
-    hc_head_base: ?*mod.impl.c.ggml_tensor = null,
-    hc_head_scale: ?*mod.impl.c.ggml_tensor = null,
+    hc_head_fn: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_head_base: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_head_scale: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // classifier
-    cls: ?*mod.impl.c.ggml_tensor = null,
-    cls_b: ?*mod.impl.c.ggml_tensor = null,
-    cls_out: ?*mod.impl.c.ggml_tensor = null,
-    cls_out_b: ?*mod.impl.c.ggml_tensor = null,
-    cls_norm: ?*mod.impl.c.ggml_tensor = null,
-    cls_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    conv1d: ?*mod.impl.c.ggml_tensor = null,
-    conv1d_b: ?*mod.impl.c.ggml_tensor = null,
+    cls: ?*mod.impl.llama_c.ggml_tensor = null,
+    cls_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    cls_out: ?*mod.impl.llama_c.ggml_tensor = null,
+    cls_out_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    cls_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    cls_norm_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    conv1d: ?*mod.impl.llama_c.ggml_tensor = null,
+    conv1d_b: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // gemma3n altup
-    altup_proj: ?*mod.impl.c.ggml_tensor = null,
-    altup_unembd_proj: ?*mod.impl.c.ggml_tensor = null,
-    per_layer_tok_embd: ?*mod.impl.c.ggml_tensor = null,
+    altup_proj: ?*mod.impl.llama_c.ggml_tensor = null,
+    altup_unembd_proj: ?*mod.impl.llama_c.ggml_tensor = null,
+    per_layer_tok_embd: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // limite value embeddings
-    value_embd: ?*mod.impl.c.ggml_tensor = null,
-    hc_head_norm: ?*mod.impl.c.ggml_tensor = null,
-    hc_head_down: ?*mod.impl.c.ggml_tensor = null,
-    hc_head_up: ?*mod.impl.c.ggml_tensor = null,
-    per_layer_model_proj: ?*mod.impl.c.ggml_tensor = null,
-    per_layer_proj_norm: ?*mod.impl.c.ggml_tensor = null,
+    value_embd: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_head_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_head_down: ?*mod.impl.llama_c.ggml_tensor = null,
+    hc_head_up: ?*mod.impl.llama_c.ggml_tensor = null,
+    per_layer_model_proj: ?*mod.impl.llama_c.ggml_tensor = null,
+    per_layer_proj_norm: ?*mod.impl.llama_c.ggml_tensor = null,
 
     // eagle3 / dflash feature fusion layer
-    fc: ?*mod.impl.c.ggml_tensor = null,
-    fc_s: ?*mod.impl.c.ggml_tensor = null,
-    fc_in_s: ?*mod.impl.c.ggml_tensor = null,
-    d2t: ?*mod.impl.c.ggml_tensor = null, // draft to target vocabulary mapping
+    fc: ?*mod.impl.llama_c.ggml_tensor = null,
+    fc_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    fc_in_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    d2t: ?*mod.impl.llama_c.ggml_tensor = null, // draft to target vocabulary mapping
 
     // dspark
-    dspark_markov_w1: ?*mod.impl.c.ggml_tensor = null,
-    dspark_markov_w2: ?*mod.impl.c.ggml_tensor = null,
-    dspark_markov_w2_s: ?*mod.impl.c.ggml_tensor = null,
-    dspark_conf_proj: ?*mod.impl.c.ggml_tensor = null,
-    dspark_conf_proj_b: ?*mod.impl.c.ggml_tensor = null,
-    dspark_joint_proj: ?*mod.impl.c.ggml_tensor = null, // rnn markov head
-    dspark_joint_proj_b: ?*mod.impl.c.ggml_tensor = null,
-    dspark_mask_embd: ?*mod.impl.c.ggml_tensor = null, // per-slot mask embeddings
-    dflash_selector_prev: ?*mod.impl.c.ggml_tensor = null,
-    dflash_selector_next: ?*mod.impl.c.ggml_tensor = null,
-    dflash_selector_hidden: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_token_proj: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_token_proj_b: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_token_proj_s: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_pass_hidden_proj: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_pass_hidden_proj_b: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_pass_hidden_proj_s: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_feature_norm: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_feature_norm_b: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_feature_mlp_1: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_feature_mlp_1_b: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_feature_mlp_3: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_feature_mlp_3_b: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_slot_embedding: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_rank_embedding: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_attention_bias: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_context_proj: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_context_proj_b: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_context_proj_s: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_output_norm: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_anchor_norm: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_factor_input_proj: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_factor_input_proj_b: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_out_head: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_out_head_b: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_in_head: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_in_head_b: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_anchor_out_head: ?*mod.impl.c.ggml_tensor = null,
-    lilicorr_anchor_out_head_b: ?*mod.impl.c.ggml_tensor = null,
+    dspark_markov_w1: ?*mod.impl.llama_c.ggml_tensor = null,
+    dspark_markov_w2: ?*mod.impl.llama_c.ggml_tensor = null,
+    dspark_markov_w2_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    dspark_conf_proj: ?*mod.impl.llama_c.ggml_tensor = null,
+    dspark_conf_proj_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    dspark_joint_proj: ?*mod.impl.llama_c.ggml_tensor = null, // rnn markov head
+    dspark_joint_proj_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    dspark_mask_embd: ?*mod.impl.llama_c.ggml_tensor = null, // per-slot mask embeddings
+    dflash_selector_prev: ?*mod.impl.llama_c.ggml_tensor = null,
+    dflash_selector_next: ?*mod.impl.llama_c.ggml_tensor = null,
+    dflash_selector_hidden: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_token_proj: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_token_proj_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_token_proj_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_pass_hidden_proj: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_pass_hidden_proj_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_pass_hidden_proj_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_feature_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_feature_norm_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_feature_mlp_1: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_feature_mlp_1_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_feature_mlp_3: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_feature_mlp_3_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_slot_embedding: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_rank_embedding: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_attention_bias: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_context_proj: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_context_proj_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_context_proj_s: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_output_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_anchor_norm: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_factor_input_proj: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_factor_input_proj_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_out_head: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_out_head_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_in_head: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_in_head_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_anchor_out_head: ?*mod.impl.llama_c.ggml_tensor = null,
+    lilicorr_anchor_out_head_b: ?*mod.impl.llama_c.ggml_tensor = null,
 
     //Dense linear projections for SentenceTransformers models like embeddinggemma
     // For Sentence Transformers models structure see
     // https://sbert.net/docs/sentence_transformer/usage/custom_models.html#structure-of-sentence-transformer-models
-    dense_2_out_layers: ?*mod.impl.c.ggml_tensor = null,
-    dense_2_out_layers_b: ?*mod.impl.c.ggml_tensor = null,
-    dense_3_out_layers: ?*mod.impl.c.ggml_tensor = null,
+    dense_2_out_layers: ?*mod.impl.llama_c.ggml_tensor = null,
+    dense_2_out_layers_b: ?*mod.impl.llama_c.ggml_tensor = null,
+    dense_3_out_layers: ?*mod.impl.llama_c.ggml_tensor = null,
     // END GENERATED by scripts/gen-layer (llama_model)
     layers: []Layer = &.{},
 
     /// `tensors_by_name`: every weight created, in context order; the name
     /// is the tensor's own.
-    tensors_by_name: std.ArrayList(*mod.impl.c.ggml_tensor) = .empty,
+    tensors_by_name: std.ArrayList(*mod.impl.llama_c.ggml_tensor) = .empty,
 
     t_load_us: i64 = 0,
     t_start_us: i64 = 0,
@@ -1130,7 +1130,7 @@ pub const Model = struct {
     /// unported one stops.
     ///
     /// Return: the model, or `error.Thrown` where the C++ throws.
-    pub fn create(ml: *const mod.loader.Loader, params: mod.impl.c.llama_model_params, exc: *mod.impl.Exception) mod.impl.Thrown!Model {
+    pub fn create(ml: *const mod.loader.Loader, params: mod.impl.llama_c.llama_model_params, exc: *mod.impl.Exception) mod.impl.Thrown!Model {
         const a = ml.getArch();
         if (a == .unknown) return exc.throw(.runtime_error, "unknown model architecture: '{s}'", .{ml.getArchName()});
         return createArch(a, params, exc);
@@ -1145,11 +1145,11 @@ pub const Model = struct {
     /// - `exc`: receives what is thrown.
     ///
     /// Return: the model, or `error.Thrown` where the C++ throws.
-    pub fn createArch(a: mod.arch_table.Arch, params: mod.impl.c.llama_model_params, exc: *mod.impl.Exception) mod.impl.Thrown!Model {
+    pub fn createArch(a: mod.arch_table.Arch, params: mod.impl.llama_c.llama_model_params, exc: *mod.impl.Exception) mod.impl.Thrown!Model {
         if (!mod.model_table.mapped[@intCast(@backingInt(a))]) {
             return exc.throw(.runtime_error, "unsupported model architecture: '{s}'", .{mod.arch.archName(a)});
         }
-        if (params.split_mode == mod.impl.c.LLAMA_SPLIT_MODE_TENSOR and !mod.arch.supportsSmTensor(a)) {
+        if (params.split_mode == mod.impl.llama_c.LLAMA_SPLIT_MODE_TENSOR and !mod.arch.supportsSmTensor(a)) {
             return exc.throw(.runtime_error, "LLAMA_SPLIT_MODE_TENSOR not implemented for architecture '{s}'", .{mod.arch.archName(a)});
         }
         const cpu_list = std.heap.c_allocator.create(mod.loader.BuftList) catch oom();
@@ -1177,7 +1177,7 @@ pub const Model = struct {
 
     /// Return: nothing.
     /// `can_prefetch.count(t)`: whether a graph input may prefetch `t`'s rows.
-    pub fn canPrefetch(self: *const Model, t: ?*const mod.impl.c.ggml_tensor) bool {
+    pub fn canPrefetch(self: *const Model, t: ?*const mod.impl.llama_c.ggml_tensor) bool {
         const p = t orelse return false;
         return self.can_prefetch.contains(p);
     }
@@ -1186,8 +1186,8 @@ pub const Model = struct {
         // `~llama_model` deletes the LoRA adapters still registered.
         mod.adapter.freeModelLoras(self);
         for (self.ctxs_bufs.items) |*cb| {
-            mod.impl.c.ggml_free(cb.ctx);
-            for (cb.bufs.items) |buf| mod.impl.c.ggml_backend_buffer_free(buf);
+            mod.impl.llama_c.ggml_free(cb.ctx);
+            for (cb.bufs.items) |buf| mod.impl.llama_c.ggml_backend_buffer_free(buf);
             cb.bufs.deinit(std.heap.c_allocator);
         }
         self.ctxs_bufs.deinit(std.heap.c_allocator);
@@ -1247,11 +1247,11 @@ pub const Model = struct {
 
         // Every scalar value as text, the first of a repeated key kept.
         var i: i64 = 0;
-        while (i < mod.impl.c.gguf_get_n_kv(ctx)) : (i += 1) {
-            if (mod.impl.c.gguf_get_kv_type(ctx, i) == mod.impl.c.GGUF_TYPE_ARRAY) continue;
+        while (i < mod.impl.llama_c.gguf_get_n_kv(ctx)) : (i += 1) {
+            if (mod.impl.llama_c.gguf_get_kv_type(ctx, i) == mod.impl.llama_c.GGUF_TYPE_ARRAY) continue;
             var value: std.ArrayList(u8) = .empty;
             mod.loader.kvToStr(ctx, i, std.math.maxInt(usize), &value);
-            const slot = self.gguf_kv.getOrPut(mod.gguf_meta.cString(mod.impl.c.gguf_get_key(ctx, i)), undefined) catch oom();
+            const slot = self.gguf_kv.getOrPut(mod.gguf_meta.cString(mod.impl.llama_c.gguf_get_key(ctx, i)), undefined) catch oom();
             if (slot.found) {
                 value.deinit(std.heap.c_allocator);
             } else {
@@ -1369,7 +1369,7 @@ pub const Model = struct {
 
         const rope_scaling = (try meta.getKey([]const u8, .rope_scaling_type, false, exc)) orelse "linear";
         hp.rope_scaling_type_train = ropeScalingTypeFromString(rope_scaling);
-        mod.impl.assert(hp.rope_scaling_type_train != mod.impl.c.LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED, "llama-model.cpp", 1595, "hparams.rope_scaling_type_train != LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED");
+        mod.impl.assert(hp.rope_scaling_type_train != mod.impl.llama_c.LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED, "llama-model.cpp", 1595, "hparams.rope_scaling_type_train != LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED");
 
         const rope_section_order = (try meta.getKey([]const u8, .rope_section_order, false, exc)) orelse "tyxz";
         hp.rope_section_order = ropeSectionOrderFromString(rope_section_order);
@@ -1637,13 +1637,13 @@ pub const Model = struct {
 
         const Rotation = struct {
             block_size: u32,
-            buft: mod.impl.c.ggml_backend_buffer_type_t,
-            tensor: *mod.impl.c.ggml_tensor,
+            buft: mod.impl.llama_c.ggml_backend_buffer_type_t,
+            tensor: *mod.impl.llama_c.ggml_tensor,
         };
         const SignTensor = struct {
             width: u32,
-            buft: mod.impl.c.ggml_backend_buffer_type_t,
-            tensor: *mod.impl.c.ggml_tensor,
+            buft: mod.impl.llama_c.ggml_backend_buffer_type_t,
+            tensor: *mod.impl.llama_c.ggml_tensor,
         };
 
         var rotations: std.ArrayList(Rotation) = .empty;
@@ -1654,7 +1654,7 @@ pub const Model = struct {
         // the inverse transforms use the buffer type of the forward
         // rotations, not the host type of a CPU-mapped table: no PCIe round
         // trip per token
-        var preferred_buft: mod.impl.c.ggml_backend_buffer_type_t = null;
+        var preferred_buft: mod.impl.llama_c.ggml_backend_buffer_type_t = null;
 
         for ([_]bool{ true, false }) |forward| {
             const blocks_opt = if (forward) &hdmd.weight_blocks else &hdmd.inverse_blocks;
@@ -1664,10 +1664,10 @@ pub const Model = struct {
             while (it.next()) |entry| {
                 const weight_name = entry.key;
                 const block_size = entry.value.*;
-                var weight: ?*mod.impl.c.ggml_tensor = self.getTensor(weight_name);
+                var weight: ?*mod.impl.llama_c.ggml_tensor = self.getTensor(weight_name);
                 if (hdmd.tied_output and std.mem.eql(u8, weight_name, "token_embd.weight")) {
                     weight = if (forward) self.output else self.tok_embd;
-                    if (weight == null or !std.mem.eql(u8, mod.gguf_meta.cString(mod.impl.c.ggml_get_name(weight)), "token_embd.weight")) {
+                    if (weight == null or !std.mem.eql(u8, mod.gguf_meta.cString(mod.impl.llama_c.ggml_get_name(weight)), "token_embd.weight")) {
                         return exc.throw(.runtime_error, "prism.hadamard.tied_output is not bound to the token embedding", .{});
                     }
                 }
@@ -1679,12 +1679,12 @@ pub const Model = struct {
                     return exc.throw(.runtime_error, "prism.hadamard weight has no buffer: {s}", .{weight_name});
                 }
 
-                var buft = mod.impl.c.ggml_backend_buffer_get_type(w.buffer);
+                var buft = mod.impl.llama_c.ggml_backend_buffer_get_type(w.buffer);
                 // CPU extra buffer types (CPU_REPACK) only accept the
                 // tensors they can repack
-                if (mod.impl.c.ggml_backend_buft_get_device(buft)) |dev| {
-                    if (mod.impl.c.ggml_backend_dev_type(dev) == mod.impl.c.GGML_BACKEND_DEVICE_TYPE_CPU) {
-                        buft = mod.impl.c.ggml_backend_dev_buffer_type(dev);
+                if (mod.impl.llama_c.ggml_backend_buft_get_device(buft)) |dev| {
+                    if (mod.impl.llama_c.ggml_backend_dev_type(dev) == mod.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_CPU) {
+                        buft = mod.impl.llama_c.ggml_backend_dev_buffer_type(dev);
                     }
                 }
                 if (forward) {
@@ -1702,18 +1702,18 @@ pub const Model = struct {
                 }
 
                 if (rot_at == null) {
-                    const ctx = mod.impl.c.ggml_init(.{ .mem_size = mod.impl.c.ggml_tensor_overhead(), .mem_buffer = null, .no_alloc = true }) orelse
+                    const ctx = mod.impl.llama_c.ggml_init(.{ .mem_size = mod.impl.llama_c.ggml_tensor_overhead(), .mem_buffer = null, .no_alloc = true }) orelse
                         return exc.throw(.runtime_error, "failed to create Hadamard rotation context", .{});
 
-                    const rotation: *mod.impl.c.ggml_tensor = mod.impl.c.ggml_new_tensor_2d(ctx, mod.impl.c.GGML_TYPE_F32, block_size, block_size);
-                    _ = mod.impl.c.ggml_format_name(rotation, "prism.hadamard.%u", block_size);
+                    const rotation: *mod.impl.llama_c.ggml_tensor = mod.impl.llama_c.ggml_new_tensor_2d(ctx, mod.impl.llama_c.GGML_TYPE_F32, block_size, block_size);
+                    _ = mod.impl.llama_c.ggml_format_name(rotation, "prism.hadamard.%u", block_size);
 
-                    const buffer = mod.impl.c.ggml_backend_alloc_ctx_tensors_from_buft(ctx, buft);
+                    const buffer = mod.impl.llama_c.ggml_backend_alloc_ctx_tensors_from_buft(ctx, buft);
                     if (buffer == null) {
-                        mod.impl.c.ggml_free(ctx);
-                        return exc.throw(.runtime_error, "unable to allocate {s} Hadamard rotation buffer", .{mod.gguf_meta.cString(mod.impl.c.ggml_backend_buft_name(buft))});
+                        mod.impl.llama_c.ggml_free(ctx);
+                        return exc.throw(.runtime_error, "unable to allocate {s} Hadamard rotation buffer", .{mod.gguf_meta.cString(mod.impl.llama_c.ggml_backend_buft_name(buft))});
                     }
-                    mod.impl.c.ggml_backend_buffer_set_usage(buffer, mod.impl.c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
+                    mod.impl.llama_c.ggml_backend_buffer_set_usage(buffer, mod.impl.llama_c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
 
                     const n: usize = block_size;
                     const data = std.heap.c_allocator.alloc(f32, n * n) catch oom();
@@ -1730,7 +1730,7 @@ pub const Model = struct {
                             data[row * n + col] = if ((parity & 1) != 0) -scale else scale;
                         }
                     }
-                    mod.impl.c.ggml_backend_tensor_set(rotation, data.ptr, 0, data.len * @sizeOf(f32));
+                    mod.impl.llama_c.ggml_backend_tensor_set(rotation, data.ptr, 0, data.len * @sizeOf(f32));
 
                     var cb: CtxBufs = .{ .ctx = ctx };
                     cb.bufs.append(std.heap.c_allocator, buffer) catch oom();
@@ -1739,7 +1739,7 @@ pub const Model = struct {
                     rot_at = rotations.items.len - 1;
                 }
 
-                var sign_tensor: ?*mod.impl.c.ggml_tensor = null;
+                var sign_tensor: ?*mod.impl.llama_c.ggml_tensor = null;
                 if (hdmd.sign_data.items.len != 0) {
                     const width: u32 = @intCast(w.ne[0]);
                     const sd = hdmd.findSigns(width) orelse
@@ -1748,23 +1748,23 @@ pub const Model = struct {
                         if (st.width == width and st.buft == buft) sign_tensor = st.tensor;
                     }
                     if (sign_tensor == null) {
-                        const ctx = mod.impl.c.ggml_init(.{ .mem_size = mod.impl.c.ggml_tensor_overhead(), .mem_buffer = null, .no_alloc = true }) orelse
+                        const ctx = mod.impl.llama_c.ggml_init(.{ .mem_size = mod.impl.llama_c.ggml_tensor_overhead(), .mem_buffer = null, .no_alloc = true }) orelse
                             return exc.throw(.runtime_error, "failed to create Hadamard sign context", .{});
 
-                        const signs: *mod.impl.c.ggml_tensor = mod.impl.c.ggml_new_tensor_1d(ctx, mod.impl.c.GGML_TYPE_F32, width);
-                        _ = mod.impl.c.ggml_format_name(signs, "prism.hadamard.signs.%u", width);
+                        const signs: *mod.impl.llama_c.ggml_tensor = mod.impl.llama_c.ggml_new_tensor_1d(ctx, mod.impl.llama_c.GGML_TYPE_F32, width);
+                        _ = mod.impl.llama_c.ggml_format_name(signs, "prism.hadamard.signs.%u", width);
 
-                        const buffer = mod.impl.c.ggml_backend_alloc_ctx_tensors_from_buft(ctx, buft);
+                        const buffer = mod.impl.llama_c.ggml_backend_alloc_ctx_tensors_from_buft(ctx, buft);
                         if (buffer == null) {
-                            mod.impl.c.ggml_free(ctx);
-                            return exc.throw(.runtime_error, "unable to allocate {s} Hadamard sign buffer", .{mod.gguf_meta.cString(mod.impl.c.ggml_backend_buft_name(buft))});
+                            mod.impl.llama_c.ggml_free(ctx);
+                            return exc.throw(.runtime_error, "unable to allocate {s} Hadamard sign buffer", .{mod.gguf_meta.cString(mod.impl.llama_c.ggml_backend_buft_name(buft))});
                         }
-                        mod.impl.c.ggml_backend_buffer_set_usage(buffer, mod.impl.c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
+                        mod.impl.llama_c.ggml_backend_buffer_set_usage(buffer, mod.impl.llama_c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
 
                         const data = std.heap.c_allocator.alloc(f32, width) catch oom();
                         defer std.heap.c_allocator.free(data);
                         for (data, sd.values) |*d, v| d.* = @floatFromInt(v);
-                        mod.impl.c.ggml_backend_tensor_set(signs, data.ptr, 0, data.len * @sizeOf(f32));
+                        mod.impl.llama_c.ggml_backend_tensor_set(signs, data.ptr, 0, data.len * @sizeOf(f32));
 
                         var cb: CtxBufs = .{ .ctx = ctx };
                         cb.bufs.append(std.heap.c_allocator, buffer) catch oom();
@@ -1798,7 +1798,7 @@ pub const Model = struct {
 
     /// The architecture's own `load_arch_hparams`.
     fn loadArchHparams(self: *Model, ml: *const mod.loader.Loader, exc: *mod.impl.Exception) (mod.impl.Thrown || error{Unported})!void {
-        const entry = mod.models.forArch(self.arch) orelse return error.Unported;
+        const entry = mod.models.dispatch.forArch(self.arch) orelse return error.Unported;
         try entry.loadArchHparams(self, ml, exc);
     }
 
@@ -1819,7 +1819,7 @@ pub const Model = struct {
 
     /// Ports `llama_model_rope_type` (llama-model.cpp:3651 @b1b770d90): the
     /// generated rules, and the five that read the hyperparameters.
-    pub fn ropeType(self: *const Model) mod.impl.c.enum_llama_rope_type {
+    pub fn ropeType(self: *const Model) mod.impl.llama_c.enum_llama_rope_type {
         return switch (mod.model_table.rope_rules[@intCast(@backingInt(self.arch))]) {
             .fixed => |t| t,
             .abort => mod.impl.abort("llama-model.cpp", 3855, "unknown architecture"),
@@ -1828,13 +1828,13 @@ pub const Model = struct {
                 // DSV4 and ML4 DSpark drafters use normal RoPE; legacy DFlash backbones are NeoX
                 .dflash => blk: {
                     const sec = self.hparams.rope_sections;
-                    if (sec[0] != 0 or sec[1] != 0 or sec[2] != 0 or sec[3] != 0) break :blk mod.impl.c.LLAMA_ROPE_TYPE_MROPE;
-                    break :blk if (self.hparams.dsv4_hc_mult > 0 or self.hparams.n_lora_kv > 0) mod.impl.c.LLAMA_ROPE_TYPE_NORM else mod.impl.c.LLAMA_ROPE_TYPE_NEOX;
+                    if (sec[0] != 0 or sec[1] != 0 or sec[2] != 0 or sec[3] != 0) break :blk mod.impl.llama_c.LLAMA_ROPE_TYPE_MROPE;
+                    break :blk if (self.hparams.dsv4_hc_mult > 0 or self.hparams.n_lora_kv > 0) mod.impl.llama_c.LLAMA_ROPE_TYPE_NORM else mod.impl.llama_c.LLAMA_ROPE_TYPE_NEOX;
                 },
-                .glm4 => if (self.hparams.useMrope()) mod.impl.c.LLAMA_ROPE_TYPE_MROPE else mod.impl.c.LLAMA_ROPE_TYPE_NORM,
-                .glm4_moe, .hunyuan_vl => if (self.hparams.useMrope()) mod.impl.c.LLAMA_ROPE_TYPE_MROPE else mod.impl.c.LLAMA_ROPE_TYPE_NEOX,
+                .glm4 => if (self.hparams.useMrope()) mod.impl.llama_c.LLAMA_ROPE_TYPE_MROPE else mod.impl.llama_c.LLAMA_ROPE_TYPE_NORM,
+                .glm4_moe, .hunyuan_vl => if (self.hparams.useMrope()) mod.impl.llama_c.LLAMA_ROPE_TYPE_MROPE else mod.impl.llama_c.LLAMA_ROPE_TYPE_NEOX,
                 // VL files carry mrope sections; text-only files keep NORM rope
-                .bailingmoe3 => if (self.hparams.useMrope()) mod.impl.c.LLAMA_ROPE_TYPE_MROPE else mod.impl.c.LLAMA_ROPE_TYPE_NORM,
+                .bailingmoe3 => if (self.hparams.useMrope()) mod.impl.llama_c.LLAMA_ROPE_TYPE_MROPE else mod.impl.llama_c.LLAMA_ROPE_TYPE_NORM,
                 else => unreachable,
             },
         };
@@ -2028,7 +2028,7 @@ pub const Model = struct {
     /// `load_arch_tensors` is not ported.
     pub fn loadTensors(self: *Model, ml: *mod.loader.Loader, exc: *mod.impl.Exception) (mod.impl.Thrown || error{Unported})!bool {
         const split_mode = self.params.split_mode;
-        const use_mlock = self.params.load_mode == mod.impl.c.LLAMA_LOAD_MODE_MLOCK or self.params.load_mode == mod.impl.c.LLAMA_LOAD_MODE_MMAP_MLOCK;
+        const use_mlock = self.params.load_mode == mod.impl.llama_c.LLAMA_LOAD_MODE_MLOCK or self.params.load_mode == mod.impl.llama_c.LLAMA_LOAD_MODE_MMAP_MLOCK;
         const tensor_split = self.params.tensor_split;
 
         const n_layer_all: c_int = @intCast(self.hparams.n_layer_all);
@@ -2039,10 +2039,10 @@ pub const Model = struct {
         self.ml = ml;
         defer self.ml = null;
 
-        if (ml.use_mmap and self.params.load_mode == mod.impl.c.LLAMA_LOAD_MODE_AUTO) {
+        if (ml.use_mmap and self.params.load_mode == mod.impl.llama_c.LLAMA_LOAD_MODE_AUTO) {
             for (self.devices.items) |dev| {
-                var props: mod.impl.c.ggml_backend_dev_props = undefined;
-                mod.impl.c.ggml_backend_dev_get_props(dev.dev, &props);
+                var props: mod.impl.llama_c.ggml_backend_dev_props = undefined;
+                mod.impl.llama_c.ggml_backend_dev_get_props(dev.dev, &props);
                 if (!props.caps.mmap_support) {
                     ml.use_mmap = false;
                     break;
@@ -2052,19 +2052,19 @@ pub const Model = struct {
 
         // Resolve AUTO on systems without mmap support (e.g. iGPUs): fall
         // back to OFF unless mmap is in use (upstream #28160, #31943).
-        if (ml.lazy.mode == mod.impl.c.LLAMA_LAZY_MODE_AUTO and !ml.use_mmap) {
+        if (ml.lazy.mode == mod.impl.llama_c.LLAMA_LAZY_MODE_AUTO and !ml.use_mmap) {
             for (self.devices.items) |dev| {
-                var props: mod.impl.c.ggml_backend_dev_props = undefined;
-                mod.impl.c.ggml_backend_dev_get_props(dev.dev, &props);
+                var props: mod.impl.llama_c.ggml_backend_dev_props = undefined;
+                mod.impl.llama_c.ggml_backend_dev_get_props(dev.dev, &props);
                 if (!props.caps.mmap_support) {
-                    ml.lazy.mode = mod.impl.c.LLAMA_LAZY_MODE_OFF;
+                    ml.lazy.mode = mod.impl.llama_c.LLAMA_LAZY_MODE_OFF;
                     break;
                 }
             }
         }
 
-        const load_mode_name = if (self.params.load_mode == mod.impl.c.LLAMA_LOAD_MODE_AUTO)
-            loadModeName(if (ml.use_mmap) mod.impl.c.LLAMA_LOAD_MODE_MMAP else mod.impl.c.LLAMA_LOAD_MODE_NONE)
+        const load_mode_name = if (self.params.load_mode == mod.impl.llama_c.LLAMA_LOAD_MODE_AUTO)
+            loadModeName(if (ml.use_mmap) mod.impl.llama_c.LLAMA_LOAD_MODE_MMAP else mod.impl.llama_c.LLAMA_LOAD_MODE_NONE)
         else
             loadModeName(self.params.load_mode);
 
@@ -2081,7 +2081,7 @@ pub const Model = struct {
             self.gpu_buft_list.append(std.heap.c_allocator, .{ .dev = dev.dev, .list = list }) catch oom();
         }
 
-        const cpu_dev = mod.impl.c.ggml_backend_dev_by_type(mod.impl.c.GGML_BACKEND_DEVICE_TYPE_CPU) orelse
+        const cpu_dev = mod.impl.llama_c.ggml_backend_dev_by_type(mod.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_CPU) orelse
             return exc.throw(.runtime_error, "load_tensors: no CPU backend found", .{});
 
         // Calculate the split points.
@@ -2099,9 +2099,9 @@ pub const Model = struct {
             for (self.devices.items, 0..) |d, i| {
                 var total: usize = 0;
                 var free: usize = 0;
-                mod.impl.c.ggml_backend_dev_memory(d.dev, &free, &total);
+                mod.impl.llama_c.ggml_backend_dev_memory(d.dev, &free, &total);
                 // Devices with nothing to report fall back to host memory.
-                if (free == 0 and total == 0) mod.impl.c.ggml_backend_dev_memory(cpu_dev, &free, &total);
+                if (free == 0 and total == 0) mod.impl.llama_c.ggml_backend_dev_memory(cpu_dev, &free, &total);
                 splits[i] = @floatFromInt(free);
             }
         } else {
@@ -2163,8 +2163,8 @@ pub const Model = struct {
                     layer.k_cache_s = try self.createTensor(.{ .tensor = .attn_k, .suffix = "k_scale", .bid = i }, &one, nr, exc);
                     layer.v_cache_s = try self.createTensor(.{ .tensor = .attn_v, .suffix = "v_scale", .bid = i }, &one, nr, exc);
 
-                    if ((layer.k_cache_s != null and layer.k_cache_s.?.type != mod.impl.c.GGML_TYPE_F32) or
-                        (layer.v_cache_s != null and layer.v_cache_s.?.type != mod.impl.c.GGML_TYPE_F32))
+                    if ((layer.k_cache_s != null and layer.k_cache_s.?.type != mod.impl.llama_c.GGML_TYPE_F32) or
+                        (layer.v_cache_s != null and layer.v_cache_s.?.type != mod.impl.llama_c.GGML_TYPE_F32))
                     {
                         return exc.throw(.runtime_error, "KV cache scales for layer {d} must be F32", .{i});
                     }
@@ -2247,8 +2247,8 @@ pub const Model = struct {
 
         // Populate tensors_by_name.
         for (ml.ctx_map.items) |e| {
-            var t: ?*mod.impl.c.ggml_tensor = mod.impl.c.ggml_get_first_tensor(e.ctx.?);
-            while (t) |cur| : (t = mod.impl.c.ggml_get_next_tensor(e.ctx.?, cur)) {
+            var t: ?*mod.impl.llama_c.ggml_tensor = mod.impl.llama_c.ggml_get_first_tensor(e.ctx.?);
+            while (t) |cur| : (t = mod.impl.llama_c.ggml_get_next_tensor(e.ctx.?, cur)) {
                 self.tensors_by_name.append(std.heap.c_allocator, cur) catch oom();
             }
         }
@@ -2261,7 +2261,7 @@ pub const Model = struct {
 
         // Create the backend buffers. The model owns them through
         // `ctxs_bufs`; this is a view of them for loading the data.
-        const CtxBufsView = struct { *mod.impl.c.ggml_context, []const mod.impl.c.ggml_backend_buffer_t };
+        const CtxBufsView = struct { *mod.impl.llama_c.ggml_context, []const mod.impl.llama_c.ggml_backend_buffer_t };
         var ctx_bufs: std.ArrayList(CtxBufsView) = .empty;
         defer ctx_bufs.deinit(std.heap.c_allocator);
 
@@ -2270,28 +2270,28 @@ pub const Model = struct {
             const ctx = entry.ctx.?;
 
             // Skip contexts without tensors.
-            if (mod.impl.c.ggml_get_first_tensor(ctx) == null) continue;
+            if (mod.impl.llama_c.ggml_get_first_tensor(ctx) == null) continue;
 
             // Check if it is possible to use buffer_from_host_ptr with this buffer type.
-            var dev = mod.impl.c.ggml_backend_buft_get_device(buft);
+            var dev = mod.impl.llama_c.ggml_backend_buft_get_device(buft);
             if (dev == null) {
                 // The CPU backend's buffer type has a null device.
-                dev = mod.impl.c.ggml_backend_dev_by_type(mod.impl.c.GGML_BACKEND_DEVICE_TYPE_CPU) orelse
+                dev = mod.impl.llama_c.ggml_backend_dev_by_type(mod.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_CPU) orelse
                     return exc.throw(.runtime_error, "load_tensors: no CPU backend found", .{});
             }
-            var props: mod.impl.c.ggml_backend_dev_props = undefined;
-            mod.impl.c.ggml_backend_dev_get_props(dev, &props);
+            var props: mod.impl.llama_c.ggml_backend_dev_props = undefined;
+            mod.impl.llama_c.ggml_backend_dev_get_props(dev, &props);
             const buffer_from_host_ptr_supported = props.caps.buffer_from_host_ptr;
-            const is_default_buft = buft == mod.impl.c.ggml_backend_dev_buffer_type(dev);
+            const is_default_buft = buft == mod.impl.llama_c.ggml_backend_dev_buffer_type(dev);
 
-            var bufs: std.ArrayList(mod.impl.c.ggml_backend_buffer_t) = .empty;
+            var bufs: std.ArrayList(mod.impl.llama_c.ggml_backend_buffer_t) = .empty;
 
             // a lazy context is mapped whatever the load mode, but the memory-fit pass maps nothing
             const is_lazy_mapped = entry.key.lazy and !ml.no_alloc;
 
             if ((ml.use_mmap or is_lazy_mapped) and use_mmap_buffer and buffer_from_host_ptr_supported and is_default_buft) {
                 mod.impl.assert(!ml.no_alloc, "llama-model.cpp", 2053, "!ml.no_alloc");
-                const max_size = mod.impl.c.ggml_get_max_tensor_size(ctx);
+                const max_size = mod.impl.llama_c.ggml_get_max_tensor_size(ctx);
 
                 for (0..ml.files.items.len) |idx| {
                     // Map the regions holding this context's tensors. On
@@ -2305,29 +2305,29 @@ pub const Model = struct {
                     const ranges = ml.getMappingRanges(@intCast(idx), ctx);
                     defer std.heap.c_allocator.free(ranges);
                     for (ranges) |range| {
-                        const buf = mod.impl.c.ggml_backend_dev_buffer_from_host_ptr(dev, @ptrFromInt(addr + range.first), range.last - range.first, max_size) orelse
-                            return exc.throw(.runtime_error, "unable to allocate {s} buffer", .{std.mem.span(mod.impl.c.ggml_backend_buft_name(buft))});
+                        const buf = mod.impl.llama_c.ggml_backend_dev_buffer_from_host_ptr(dev, @ptrFromInt(addr + range.first), range.last - range.first, max_size) orelse
+                            return exc.throw(.runtime_error, "unable to allocate {s} buffer", .{std.mem.span(mod.impl.llama_c.ggml_backend_buft_name(buft))});
                         bufs.append(std.heap.c_allocator, buf) catch oom();
                     }
                 }
             } else {
-                var buf: mod.impl.c.ggml_backend_buffer_t = undefined;
+                var buf: mod.impl.llama_c.ggml_backend_buffer_t = undefined;
                 if (ml.no_alloc) {
-                    buf = mod.impl.c.ggml_backend_buft_alloc_buffer(buft, 0); // dummy buffer
-                    var t: ?*mod.impl.c.ggml_tensor = mod.impl.c.ggml_get_first_tensor(ctx);
-                    while (t) |cur| : (t = mod.impl.c.ggml_get_next_tensor(ctx, cur)) cur.buffer = buf;
+                    buf = mod.impl.llama_c.ggml_backend_buft_alloc_buffer(buft, 0); // dummy buffer
+                    var t: ?*mod.impl.llama_c.ggml_tensor = mod.impl.llama_c.ggml_get_first_tensor(ctx);
+                    while (t) |cur| : (t = mod.impl.llama_c.ggml_get_next_tensor(ctx, cur)) cur.buffer = buf;
                 } else {
-                    buf = mod.impl.c.ggml_backend_alloc_ctx_tensors_from_buft(ctx, buft);
+                    buf = mod.impl.llama_c.ggml_backend_alloc_ctx_tensors_from_buft(ctx, buft);
                 }
-                if (buf == null) return exc.throw(.runtime_error, "unable to allocate {s} buffer", .{std.mem.span(mod.impl.c.ggml_backend_buft_name(buft))});
+                if (buf == null) return exc.throw(.runtime_error, "unable to allocate {s} buffer", .{std.mem.span(mod.impl.llama_c.ggml_backend_buft_name(buft))});
                 // lock the buffers that hold the tensors: a multi_buffer has
                 // no base, and its parts are pageable memory when pinning fails
-                if (use_mlock and !ml.no_alloc and mod.impl.c.ggml_backend_buffer_is_host(buf)) {
-                    var lock_bufs: std.ArrayList(mod.impl.c.ggml_backend_buffer_t) = .empty;
+                if (use_mlock and !ml.no_alloc and mod.impl.llama_c.ggml_backend_buffer_is_host(buf)) {
+                    var lock_bufs: std.ArrayList(mod.impl.llama_c.ggml_backend_buffer_t) = .empty;
                     defer lock_bufs.deinit(std.heap.c_allocator);
-                    var t: ?*mod.impl.c.ggml_tensor = mod.impl.c.ggml_get_first_tensor(ctx);
-                    while (t) |cur| : (t = mod.impl.c.ggml_get_next_tensor(ctx, cur)) {
-                        if (cur.buffer != null and std.mem.indexOfScalar(mod.impl.c.ggml_backend_buffer_t, lock_bufs.items, cur.buffer) == null) {
+                    var t: ?*mod.impl.llama_c.ggml_tensor = mod.impl.llama_c.ggml_get_first_tensor(ctx);
+                    while (t) |cur| : (t = mod.impl.llama_c.ggml_get_next_tensor(ctx, cur)) {
+                        if (cur.buffer != null and std.mem.indexOfScalar(mod.impl.llama_c.ggml_backend_buffer_t, lock_bufs.items, cur.buffer) == null) {
                             lock_bufs.append(std.heap.c_allocator, cur.buffer) catch oom();
                         }
                     }
@@ -2335,8 +2335,8 @@ pub const Model = struct {
                         const lock = std.heap.c_allocator.create(mod.mmap.Mlock) catch oom();
                         lock.* = .{};
                         self.mlock_bufs.append(std.heap.c_allocator, lock) catch oom();
-                        lock.init(mod.impl.c.ggml_backend_buffer_get_base(lock_buf).?);
-                        lock.growTo(mod.impl.c.ggml_backend_buffer_get_size(lock_buf));
+                        lock.init(mod.impl.llama_c.ggml_backend_buffer_get_base(lock_buf).?);
+                        lock.growTo(mod.impl.llama_c.ggml_backend_buffer_get_size(lock_buf));
                     }
                 }
                 bufs.append(std.heap.c_allocator, buf) catch oom();
@@ -2344,7 +2344,7 @@ pub const Model = struct {
 
             // These buffers hold weights; the scheduler prefers the backend
             // holding an op's weight.
-            for (bufs.items) |buf| mod.impl.c.ggml_backend_buffer_set_usage(buf, mod.impl.c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
+            for (bufs.items) |buf| mod.impl.llama_c.ggml_backend_buffer_set_usage(buf, mod.impl.llama_c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
 
             self.ctxs_bufs.append(std.heap.c_allocator, .{ .ctx = ctx, .bufs = bufs }) catch oom();
             entry.ctx = null;
@@ -2371,7 +2371,7 @@ pub const Model = struct {
         for (self.ctxs_bufs.items) |cb| {
             for (cb.bufs.items) |buf| {
                 mod.impl.logInfo("%s: %12s model buffer size = %8.2f MiB\n", .{
-                    "load_tensors", mod.impl.c.ggml_backend_buffer_name(buf), @as(f64, @floatFromInt(mod.impl.c.ggml_backend_buffer_get_size(buf))) / 1024.0 / 1024.0,
+                    "load_tensors", mod.impl.llama_c.ggml_backend_buffer_name(buf), @as(f64, @floatFromInt(mod.impl.llama_c.ggml_backend_buffer_get_size(buf))) / 1024.0 / 1024.0,
                 });
             }
         }
@@ -2384,7 +2384,7 @@ pub const Model = struct {
             // in its own order, a context's test its first buffer.
             const staged = struct {
                 fn f(e: *const CtxBufsView) bool {
-                    return e[1].len != 0 and !mod.impl.c.ggml_backend_buffer_is_host(e[1][0]);
+                    return e[1].len != 0 and !mod.impl.llama_c.ggml_backend_buffer_is_host(e[1][0]);
                 }
             }.f;
             var partitioned: std.ArrayList(CtxBufsView) = .empty;
@@ -2414,11 +2414,11 @@ pub const Model = struct {
 
     /// `get_layer_buft_list`, a lambda of `load_tensors` (llama-model.cpp:1689
     /// @b1b770d90): layer `il`'s device and buffer types.
-    fn layerBuftList(self: *Model, il: c_int, cpu_dev: mod.impl.c.ggml_backend_dev_t, splits: []const f32, i_gpu_start: c_int, act_gpu_layers: c_int) LayerDev {
+    fn layerBuftList(self: *Model, il: c_int, cpu_dev: mod.impl.llama_c.ggml_backend_dev_t, splits: []const f32, i_gpu_start: c_int, act_gpu_layers: c_int) LayerDev {
         const n_layer_all: c_int = @intCast(self.hparams.n_layer_all);
         const is_swa: c_int = @intFromBool(il < n_layer_all and self.hparams.isSwa(@intCast(il)));
         if (il < i_gpu_start or (il - i_gpu_start) >= act_gpu_layers) {
-            mod.impl.logDebug("load_tensors: layer %3d assigned to device %s, is_swa = %d\n", .{ il, mod.impl.c.ggml_backend_dev_name(cpu_dev), is_swa });
+            mod.impl.logDebug("load_tensors: layer %3d assigned to device %s, is_swa = %d\n", .{ il, mod.impl.llama_c.ggml_backend_dev_name(cpu_dev), is_swa });
             return .{ .dev = cpu_dev, .buft_list = self.cpu_buft_list };
         }
         // `std`'s `upper_bound`: the first split point greater than the layer's
@@ -2427,11 +2427,11 @@ pub const Model = struct {
         var layer_gpu: usize = 0;
         while (layer_gpu < splits.len and !(frac < splits[layer_gpu])) layer_gpu += 1;
         const dev = self.devices.items[layer_gpu].dev;
-        mod.impl.logDebug("load_tensors: layer %3d assigned to device %s, is_swa = %d\n", .{ il, mod.impl.c.ggml_backend_dev_name(dev), is_swa });
+        mod.impl.logDebug("load_tensors: layer %3d assigned to device %s, is_swa = %d\n", .{ il, mod.impl.llama_c.ggml_backend_dev_name(dev), is_swa });
         return .{ .dev = dev, .buft_list = self.gpuBuftList(dev).? };
     }
 
-    fn gpuBuftList(self: *const Model, dev: mod.impl.c.ggml_backend_dev_t) ?*mod.loader.BuftList {
+    fn gpuBuftList(self: *const Model, dev: mod.impl.llama_c.ggml_backend_dev_t) ?*mod.loader.BuftList {
         for (self.gpu_buft_list.items) |g| if (g.dev == dev) return g.list;
         return null;
     }
@@ -2445,7 +2445,7 @@ pub const Model = struct {
         var z: [mod.arch.max_name + 1]u8 = undefined;
         @memcpy(z[0..n.len], n.slice());
         z[n.len] = 0;
-        return mod.impl.c.gguf_find_tensor(ml.meta.ctx, &z) >= 0;
+        return mod.impl.llama_c.gguf_find_tensor(ml.meta.ctx, &z) >= 0;
     }
 
     /// Ports `llama_model_base`'s `create_tensor` (llama-model.cpp:2505
@@ -2455,7 +2455,7 @@ pub const Model = struct {
     ///
     /// Return: the tensor, null when absent and optional or skipped, or
     /// `error.Thrown`.
-    pub fn createTensor(self: *Model, tn: mod.loader.Tn, ne: []const i64, flags: u32, exc: *mod.impl.Exception) mod.impl.Thrown!?*mod.impl.c.ggml_tensor {
+    pub fn createTensor(self: *Model, tn: mod.loader.Tn, ne: []const i64, flags: u32, exc: *mod.impl.Exception) mod.impl.Thrown!?*mod.impl.llama_c.ggml_tensor {
         mod.impl.assert(self.ml != null, "llama-model.cpp", 4026, "ml != nullptr");
         var buft_list_layer: ?*const mod.loader.BuftList = null;
         if (tn.bid != -1) {
@@ -2651,7 +2651,7 @@ pub const Model = struct {
 
     /// The architecture's own `load_arch_tensors`.
     fn loadArchTensors(self: *Model, ml: *mod.loader.Loader, exc: *mod.impl.Exception) (mod.impl.Thrown || error{Unported})!void {
-        const entry = mod.models.forArch(self.arch) orelse return error.Unported;
+        const entry = mod.models.dispatch.forArch(self.arch) orelse return error.Unported;
         try entry.loadArchTensors(self, ml, exc);
     }
 
@@ -2672,12 +2672,12 @@ pub const Model = struct {
     }
 
     /// Ports `llama_model`'s `dev_layer` (llama-model.cpp:2809 @b1b770d90).
-    pub fn devLayer(self: *const Model, il: usize) mod.impl.c.ggml_backend_dev_t {
+    pub fn devLayer(self: *const Model, il: usize) mod.impl.llama_c.ggml_backend_dev_t {
         return self.dev_layer.items[il].dev;
     }
 
     /// Ports `llama_model`'s `dev_output` (llama-model.cpp:2813 @b1b770d90).
-    pub fn devOutput(self: *const Model) mod.impl.c.ggml_backend_dev_t {
+    pub fn devOutput(self: *const Model) mod.impl.llama_c.ggml_backend_dev_t {
         return self.dev_output.dev;
     }
 
@@ -2687,20 +2687,20 @@ pub const Model = struct {
     /// device can add two `n_embd` vectors held in it.
     ///
     /// Return: the buffer type, or `error.Thrown` when none can.
-    pub fn selectBuft(self: *const Model, il: usize, exc: *mod.impl.Exception) mod.impl.Thrown!mod.impl.c.ggml_backend_buffer_type_t {
+    pub fn selectBuft(self: *const Model, il: usize, exc: *mod.impl.Exception) mod.impl.Thrown!mod.impl.llama_c.ggml_backend_buffer_type_t {
         for (self.dev_layer.items[il].buft_list.?.items) |cur| {
-            const ctx = mod.impl.c.ggml_init(.{ .mem_size = mod.impl.c.ggml_tensor_overhead() * 8, .mem_buffer = null, .no_alloc = true }) orelse
+            const ctx = mod.impl.llama_c.ggml_init(.{ .mem_size = mod.impl.llama_c.ggml_tensor_overhead() * 8, .mem_buffer = null, .no_alloc = true }) orelse
                 return exc.throw(.runtime_error, "failed to create ggml context", .{});
-            defer mod.impl.c.ggml_free(ctx);
-            const buf = mod.impl.c.ggml_backend_buft_alloc_buffer(cur.buft, 0);
-            defer mod.impl.c.ggml_backend_buffer_free(buf);
-            const a = mod.impl.c.ggml_new_tensor_1d(ctx, mod.impl.c.GGML_TYPE_F32, self.hparams.n_embd);
-            const layer_dir = mod.impl.c.ggml_new_tensor_1d(ctx, mod.impl.c.GGML_TYPE_F32, self.hparams.n_embd);
-            const op_tensor = mod.impl.c.ggml_add(ctx, a, layer_dir);
+            defer mod.impl.llama_c.ggml_free(ctx);
+            const buf = mod.impl.llama_c.ggml_backend_buft_alloc_buffer(cur.buft, 0);
+            defer mod.impl.llama_c.ggml_backend_buffer_free(buf);
+            const a = mod.impl.llama_c.ggml_new_tensor_1d(ctx, mod.impl.llama_c.GGML_TYPE_F32, self.hparams.n_embd);
+            const layer_dir = mod.impl.llama_c.ggml_new_tensor_1d(ctx, mod.impl.llama_c.GGML_TYPE_F32, self.hparams.n_embd);
+            const op_tensor = mod.impl.llama_c.ggml_add(ctx, a, layer_dir);
             for (op_tensor.*.src) |src| {
                 if (src) |s| s.*.buffer = buf;
             }
-            if (mod.impl.c.ggml_backend_dev_supports_op(cur.dev, op_tensor)) return cur.buft;
+            if (mod.impl.llama_c.ggml_backend_dev_supports_op(cur.dev, op_tensor)) return cur.buft;
         }
         return exc.throw(.runtime_error, "no suitable buffer type found", .{});
     }
@@ -2737,9 +2737,9 @@ pub const Model = struct {
     /// Ports `llama_model`'s `get_tensor` (llama-model.cpp:2871 @b1b770d90).
     ///
     /// Return: the first tensor with that name, or null.
-    pub fn getTensor(self: *const Model, name: []const u8) ?*mod.impl.c.ggml_tensor {
+    pub fn getTensor(self: *const Model, name: []const u8) ?*mod.impl.llama_c.ggml_tensor {
         for (self.tensors_by_name.items) |t| {
-            if (std.mem.eql(u8, mod.gguf_meta.cString(mod.impl.c.ggml_get_name(t)), name)) return t;
+            if (std.mem.eql(u8, mod.gguf_meta.cString(mod.impl.llama_c.ggml_get_name(t)), name)) return t;
         }
         return null;
     }
@@ -2779,7 +2779,7 @@ pub const Model = struct {
         var res = self.getRopeParams(cparams, il);
 
         res.n_offs = 0;
-        res.type = mod.impl.c.LLAMA_ROPE_TYPE_NEOX;
+        res.type = mod.impl.llama_c.LLAMA_ROPE_TYPE_NEOX;
         res.freq_base = cparams.rope_freq_base;
         res.freq_scale = cparams.rope_freq_scale;
         res.factors = null;
@@ -2790,7 +2790,7 @@ pub const Model = struct {
     /// The virtual call of `get_rope_params` (llama-model.h:994 @b1b770d90):
     /// the architecture's override when it has one, else `getRopeParamsBase`.
     pub fn getRopeParams(self: *const Model, cparams: *const mod.cparams.Cparams, il: u32) RopeParams {
-        if (mod.models.forArch(self.arch)) |e| if (e.getRopeParams) |f| return f(self, cparams, il);
+        if (mod.models.dispatch.forArch(self.arch)) |e| if (e.getRopeParams) |f| return f(self, cparams, il);
         return self.getRopeParamsBase(cparams, il);
     }
 
@@ -2798,7 +2798,7 @@ pub const Model = struct {
     /// @b1b770d90): the architecture's override when it has one, else
     /// `getRopeParamsIndexerBase`.
     pub fn getRopeParamsIndexer(self: *const Model, cparams: *const mod.cparams.Cparams, il: u32) RopeParams {
-        if (mod.models.forArch(self.arch)) |e| if (e.getRopeParamsIndexer) |f| return f(self, cparams, il);
+        if (mod.models.dispatch.forArch(self.arch)) |e| if (e.getRopeParamsIndexer) |f| return f(self, cparams, il);
         return self.getRopeParamsIndexerBase(cparams, il);
     }
 
@@ -2814,7 +2814,7 @@ pub const Model = struct {
 
     /// Ports `llama_model`'s `get_rope_factors` (llama-model.cpp:2921
     /// @b1b770d90): long or short frequency factors by the context size.
-    pub fn getRopeFactors(self: *const Model, cparams: *const mod.cparams.Cparams, il: u32) ?*mod.impl.c.ggml_tensor {
+    pub fn getRopeFactors(self: *const Model, cparams: *const mod.cparams.Cparams, il: u32) ?*mod.impl.llama_c.ggml_tensor {
         const layer = &self.layers[il];
         if (layer.rope_freqs != null) return layer.rope_freqs;
         if (cparams.n_ctx_seq > self.hparams.n_ctx_orig_yarn) return layer.rope_long;
@@ -2832,8 +2832,8 @@ pub const Model = struct {
         const hp = &self.hparams;
         const a = self.arch;
         // Dense MTP heads use a plain attention KV cache.
-        const mtp_on_hybrid_qwen = params.ctx_type == mod.impl.c.LLAMA_CONTEXT_TYPE_MTP and (a == .qwen3next or a == .qwen35 or a == .qwen35moe or a == .bailingmoe3);
-        const mtp_on_hybrid_nemotron = params.ctx_type == mod.impl.c.LLAMA_CONTEXT_TYPE_MTP and a == .nemotron_h_moe;
+        const mtp_on_hybrid_qwen = params.ctx_type == mod.impl.llama_c.LLAMA_CONTEXT_TYPE_MTP and (a == .qwen3next or a == .qwen35 or a == .qwen35moe or a == .bailingmoe3);
+        const mtp_on_hybrid_nemotron = params.ctx_type == mod.impl.llama_c.LLAMA_CONTEXT_TYPE_MTP and a == .nemotron_h_moe;
         const swa_type: mod.hparams.SwaType = @fromBackingInt(@intCast(hp.swa_type));
 
         // The non-causal LFM2 and LFM3 decision graphs read the whole prompt
@@ -2858,7 +2858,7 @@ pub const Model = struct {
                 return m.memoryOf();
             },
             .glm_dsa, .deepseek32 => {
-                if (params.ctx_type == mod.impl.c.LLAMA_CONTEXT_TYPE_MTP and hp.n_layer_nextn > 0) {
+                if (params.ctx_type == mod.impl.llama_c.LLAMA_CONTEXT_TYPE_MTP and hp.n_layer_nextn > 0) {
                     // The NextN/MTP draft head runs dense MLA, without the
                     // DSA indexer, so the MTP context has a plain attention
                     // KV cache of the nextn layers alone -- as the hybrid
@@ -2884,7 +2884,7 @@ pub const Model = struct {
                 var filter_recr: mod.memory.LayerFilter = .{ .ctx = hp, .func = filterTrunkRecr };
 
                 // The draft head is a single DSA layer.
-                if (params.ctx_type == mod.impl.c.LLAMA_CONTEXT_TYPE_MTP) {
+                if (params.ctx_type == mod.impl.llama_c.LLAMA_CONTEXT_TYPE_MTP) {
                     if (hp.n_layer_nextn == 0) {
                         return exc.throw(.runtime_error, "GLM5-Next MTP requires the NextN block, convert without --no-mtp", .{});
                     }
@@ -2893,7 +2893,7 @@ pub const Model = struct {
                     filter_recr = .{ .ctx = hp, .func = filterNone };
                 }
 
-                const m = try mod.memory_hybrid_idx.MemoryHybridIdx.create(self, params.no_alloc, params.type_k, params.type_v, !cparams.flash_attn, cparams.n_ctx_seq, hp.n_swa, swa_type, mod.impl.c.GGML_TYPE_F32, mod.impl.c.GGML_TYPE_F32, @max(1, cparams.n_seq_max), cparams.n_seq_max, cparams.n_rs_seq, cparams.offload_kqv, cparams.kv_unified, filter_attn, filter_recr, filter_idx, exc);
+                const m = try mod.memory_hybrid_idx.MemoryHybridIdx.create(self, params.no_alloc, params.type_k, params.type_v, !cparams.flash_attn, cparams.n_ctx_seq, hp.n_swa, swa_type, mod.impl.llama_c.GGML_TYPE_F32, mod.impl.llama_c.GGML_TYPE_F32, @max(1, cparams.n_seq_max), cparams.n_seq_max, cparams.n_rs_seq, cparams.offload_kqv, cparams.kv_unified, filter_attn, filter_recr, filter_idx, exc);
                 return m.memoryOf();
             },
             // `LLM_ARCH_HY_V4` (llama-model.cpp:3114 @b1b770d90).
@@ -2923,7 +2923,7 @@ pub const Model = struct {
             .dots3note => {
                 mod.impl.assert(swa_type != .none, "llama-model.cpp", 3158, "hparams.swa_type != LLAMA_SWA_TYPE_NONE");
 
-                if (params.ctx_type == mod.impl.c.LLAMA_CONTEXT_TYPE_MTP and hp.n_layer_nextn > 0) {
+                if (params.ctx_type == mod.impl.llama_c.LLAMA_CONTEXT_TYPE_MTP and hp.n_layer_nextn > 0) {
                     // The MTP draft context: a plain attention KV cache of
                     // the nextn layer alone.
                     const filter: mod.memory.LayerFilter = .{ .ctx = hp, .func = filterNextn };
@@ -2944,7 +2944,7 @@ pub const Model = struct {
             .deepseek41, .deepseek4 => {
                 mod.impl.assert(swa_type != .none, "llama-model.cpp", 3210, "hparams.swa_type != LLAMA_SWA_TYPE_NONE");
 
-                if (params.ctx_type == mod.impl.c.LLAMA_CONTEXT_TYPE_MTP) {
+                if (params.ctx_type == mod.impl.llama_c.LLAMA_CONTEXT_TYPE_MTP) {
                     const filter_mtp: mod.memory.LayerFilter = .{ .ctx = hp, .func = filterNextn };
                     const m = try mod.kv_cache_iswa.KvCacheIswa.create(self, params.no_alloc, null, params.type_k, params.type_v, !cparams.flash_attn, cparams.offload_kqv, params.swa_full, cparams.kv_unified, cparams.n_ctx_seq, cparams.n_seq_max, cparams.n_ubatch, null, filter_mtp, .{}, .{}, exc);
                     return m.memoryOf();
@@ -2964,7 +2964,7 @@ pub const Model = struct {
         }
 
         if (mod.arch.isRecurrent(a)) {
-            const m = try mod.memory_recurrent.MemoryRecurrent.create(self, params.no_alloc, mod.impl.c.GGML_TYPE_F32, mod.impl.c.GGML_TYPE_F32, cparams.offload_kqv, @max(1, cparams.n_seq_max), cparams.n_seq_max, cparams.n_rs_seq, .{}, exc);
+            const m = try mod.memory_recurrent.MemoryRecurrent.create(self, params.no_alloc, mod.impl.llama_c.GGML_TYPE_F32, mod.impl.llama_c.GGML_TYPE_F32, cparams.offload_kqv, @max(1, cparams.n_seq_max), cparams.n_seq_max, cparams.n_rs_seq, .{}, exc);
             return m.memoryOf();
         }
         if (mod.arch.isHybrid(a) and !mtp_on_hybrid_qwen and !mtp_on_hybrid_nemotron) {
@@ -2998,7 +2998,7 @@ pub const Model = struct {
 
                 // The MTP draft context holds the MTP block alone: its
                 // attention and indexer, no recurrent layer.
-                if (a == .qwen4exp and params.ctx_type == mod.impl.c.LLAMA_CONTEXT_TYPE_MTP) {
+                if (a == .qwen4exp and params.ctx_type == mod.impl.llama_c.LLAMA_CONTEXT_TYPE_MTP) {
                     filter_attn = .{ .ctx = hp, .func = filterNextn };
                     filter_recr = .{ .ctx = hp, .func = filterNone };
                     if (filter_idx.func != null) filter_idx = .{ .ctx = hp, .func = filterNextn };
@@ -3006,15 +3006,15 @@ pub const Model = struct {
             }
             if (swa_type != .none) {
                 // Hybrid models with SWA use the hybrid iSWA memory.
-                const m = try mod.memory_hybrid_iswa.MemoryHybridIswa.create(self, params.no_alloc, params.type_k, params.type_v, !cparams.flash_attn, params.swa_full, cparams.n_ctx_seq, cparams.n_ubatch, mod.impl.c.GGML_TYPE_F32, mod.impl.c.GGML_TYPE_F32, @max(1, cparams.n_seq_max), cparams.n_seq_max, cparams.n_rs_seq, cparams.offload_kqv, cparams.kv_unified, filter_attn, filter_recr, exc);
+                const m = try mod.memory_hybrid_iswa.MemoryHybridIswa.create(self, params.no_alloc, params.type_k, params.type_v, !cparams.flash_attn, params.swa_full, cparams.n_ctx_seq, cparams.n_ubatch, mod.impl.llama_c.GGML_TYPE_F32, mod.impl.llama_c.GGML_TYPE_F32, @max(1, cparams.n_seq_max), cparams.n_seq_max, cparams.n_rs_seq, cparams.offload_kqv, cparams.kv_unified, filter_attn, filter_recr, exc);
                 return m.memoryOf();
             }
             if (needs_mem_idx) {
                 // sparse attention over a per-token indexer cache, in its own memory type
-                const m = try mod.memory_hybrid_idx.MemoryHybridIdx.create(self, params.no_alloc, params.type_k, params.type_v, !cparams.flash_attn, cparams.n_ctx_seq, hp.n_swa, swa_type, mod.impl.c.GGML_TYPE_F32, mod.impl.c.GGML_TYPE_F32, @max(1, cparams.n_seq_max), cparams.n_seq_max, cparams.n_rs_seq, cparams.offload_kqv, cparams.kv_unified, filter_attn, filter_recr, filter_idx, exc);
+                const m = try mod.memory_hybrid_idx.MemoryHybridIdx.create(self, params.no_alloc, params.type_k, params.type_v, !cparams.flash_attn, cparams.n_ctx_seq, hp.n_swa, swa_type, mod.impl.llama_c.GGML_TYPE_F32, mod.impl.llama_c.GGML_TYPE_F32, @max(1, cparams.n_seq_max), cparams.n_seq_max, cparams.n_rs_seq, cparams.offload_kqv, cparams.kv_unified, filter_attn, filter_recr, filter_idx, exc);
                 return m.memoryOf();
             }
-            const m = try mod.memory_hybrid.MemoryHybrid.create(self, params.no_alloc, params.type_k, params.type_v, !cparams.flash_attn, cparams.n_ctx_seq, hp.n_swa, swa_type, mod.impl.c.GGML_TYPE_F32, mod.impl.c.GGML_TYPE_F32, @max(1, cparams.n_seq_max), cparams.n_seq_max, cparams.n_rs_seq, cparams.offload_kqv, cparams.kv_unified, filter_attn, filter_recr, exc);
+            const m = try mod.memory_hybrid.MemoryHybrid.create(self, params.no_alloc, params.type_k, params.type_v, !cparams.flash_attn, cparams.n_ctx_seq, hp.n_swa, swa_type, mod.impl.llama_c.GGML_TYPE_F32, mod.impl.llama_c.GGML_TYPE_F32, @max(1, cparams.n_seq_max), cparams.n_seq_max, cparams.n_rs_seq, cparams.offload_kqv, cparams.kv_unified, filter_attn, filter_recr, exc);
             return m.memoryOf();
         }
 
@@ -3029,7 +3029,7 @@ pub const Model = struct {
         // trunk attends, or when a model is entirely nextn layers and has no
         // trunk.
         if (hp.n_layer_nextn > 0 and hp.nLayer() > 0 and hp.router_layer < 0) {
-            filter = if (params.ctx_type == mod.impl.c.LLAMA_CONTEXT_TYPE_MTP) .{ .ctx = hp, .func = filterNextn } else .{ .ctx = hp, .func = filterTrunk };
+            filter = if (params.ctx_type == mod.impl.llama_c.LLAMA_CONTEXT_TYPE_MTP) .{ .ctx = hp, .func = filterNextn } else .{ .ctx = hp, .func = filterTrunk };
         }
         if (swa_type != .none) {
             mod.impl.assert(hp.isSwaAny(), "llama-model.cpp", 3444, "hparams.is_swa_any()");
@@ -3059,9 +3059,9 @@ pub const Model = struct {
     /// of the MTP hidden state.
     ///
     /// Return: the graph, owned by `params.res`.
-    pub fn buildGraph(self: *const Model, params: *const mod.graph.Params) *mod.impl.c.ggml_cgraph {
+    pub fn buildGraph(self: *const Model, params: *const mod.graph.Params) *mod.impl.llama_c.ggml_cgraph {
         const b = mod.graph.Builder.init(params);
-        const entry = mod.models.forArch(self.arch) orelse mod.impl.abort("llama-model.cpp", 3522, "build_arch_graph: architecture not ported");
+        const entry = mod.models.dispatch.forArch(self.arch) orelse mod.impl.abort("llama-model.cpp", 3522, "build_arch_graph: architecture not ported");
         entry.buildArchGraph(self, &b, params);
         b.buildPooling(self.cls, self.cls_b, self.cls_out, self.cls_out_b, self.cls_norm);
         // the LM head, if the context outputs logits
@@ -3087,11 +3087,11 @@ pub const Model = struct {
             if (self.noAlloc()) {
                 mod.impl.assert(cb.bufs.items.len == 1, "llama-model.cpp", 2565, "bufs.size() == 1");
                 const buf = cb.bufs.items[0];
-                mod.impl.assert(mod.impl.c.ggml_backend_buffer_get_base(buf) == null, "llama-model.cpp", 2567, "ggml_backend_buffer_get_base(buf) == nullptr");
-                const buft = mod.impl.c.ggml_backend_buffer_get_type(buf);
-                addBuftSize(&ret, buft, mod.impl.c.ggml_backend_alloc_ctx_tensors_from_buft_size(cb.ctx, buft));
+                mod.impl.assert(mod.impl.llama_c.ggml_backend_buffer_get_base(buf) == null, "llama-model.cpp", 2567, "ggml_backend_buffer_get_base(buf) == nullptr");
+                const buft = mod.impl.llama_c.ggml_backend_buffer_get_type(buf);
+                addBuftSize(&ret, buft, mod.impl.llama_c.ggml_backend_alloc_ctx_tensors_from_buft_size(cb.ctx, buft));
             } else {
-                for (cb.bufs.items) |buf| addBuftSize(&ret, mod.impl.c.ggml_backend_buffer_get_type(buf), mod.impl.c.ggml_backend_buffer_get_size(buf));
+                for (cb.bufs.items) |buf| addBuftSize(&ret, mod.impl.llama_c.ggml_backend_buffer_get_type(buf), mod.impl.llama_c.ggml_backend_buffer_get_size(buf));
             }
         }
         return ret.toOwnedSlice(std.heap.c_allocator) catch oom();
@@ -3234,7 +3234,7 @@ const ShareFromOther = struct {
 // -----------------------------------------------------------------------------
 // Devices and buffer types
 
-pub fn addBuftSize(list: *std.ArrayList(BuftSize), buft: mod.impl.c.ggml_backend_buffer_type_t, size: usize) void {
+pub fn addBuftSize(list: *std.ArrayList(BuftSize), buft: mod.impl.llama_c.ggml_backend_buffer_type_t, size: usize) void {
     var pos: usize = 0;
     while (pos < list.items.len) : (pos += 1) {
         if (list.items[pos].buft == buft) {
@@ -3247,29 +3247,29 @@ pub fn addBuftSize(list: *std.ArrayList(BuftSize), buft: mod.impl.c.ggml_backend
 }
 
 /// Ports `llama_load_mode_name` (src/llama.cpp:50 @b1b770d90).
-pub fn loadModeName(load_mode: mod.impl.c.enum_llama_load_mode) [:0]const u8 {
+pub fn loadModeName(load_mode: mod.impl.llama_c.enum_llama_load_mode) [:0]const u8 {
     return switch (load_mode) {
-        mod.impl.c.LLAMA_LOAD_MODE_AUTO => "auto",
-        mod.impl.c.LLAMA_LOAD_MODE_NONE => "none",
-        mod.impl.c.LLAMA_LOAD_MODE_MMAP => "mmap",
-        mod.impl.c.LLAMA_LOAD_MODE_MLOCK => "mlock",
-        mod.impl.c.LLAMA_LOAD_MODE_MMAP_MLOCK => "mmap+mlock",
-        mod.impl.c.LLAMA_LOAD_MODE_DIRECT_IO => "dio",
+        mod.impl.llama_c.LLAMA_LOAD_MODE_AUTO => "auto",
+        mod.impl.llama_c.LLAMA_LOAD_MODE_NONE => "none",
+        mod.impl.llama_c.LLAMA_LOAD_MODE_MMAP => "mmap",
+        mod.impl.llama_c.LLAMA_LOAD_MODE_MLOCK => "mlock",
+        mod.impl.llama_c.LLAMA_LOAD_MODE_MMAP_MLOCK => "mmap+mlock",
+        mod.impl.llama_c.LLAMA_LOAD_MODE_DIRECT_IO => "dio",
         else => mod.impl.abort("llama.cpp", 65, "fatal error"),
     };
 }
 
 /// Ports `llama_supports_rpc` (src/llama.cpp:111 @b1b770d90).
 pub fn supportsRpc() bool {
-    if (mod.impl.c.ggml_backend_reg_count() == 0) mod.impl.c.ggml_backend_load_all();
-    return mod.impl.c.ggml_backend_reg_by_name("RPC") != null;
+    if (mod.impl.llama_c.ggml_backend_reg_count() == 0) mod.impl.llama_c.ggml_backend_load_all();
+    return mod.impl.llama_c.ggml_backend_reg_by_name("RPC") != null;
 }
 
 /// Ports `llama_supports_gpu_offload` (src/llama.cpp:102 @b1b770d90).
 pub fn supportsGpuOffload() bool {
-    if (mod.impl.c.ggml_backend_reg_count() == 0) mod.impl.c.ggml_backend_load_all();
-    return mod.impl.c.ggml_backend_dev_by_type(mod.impl.c.GGML_BACKEND_DEVICE_TYPE_GPU) != null or
-        mod.impl.c.ggml_backend_dev_by_type(mod.impl.c.GGML_BACKEND_DEVICE_TYPE_IGPU) != null or
+    if (mod.impl.llama_c.ggml_backend_reg_count() == 0) mod.impl.llama_c.ggml_backend_load_all();
+    return mod.impl.llama_c.ggml_backend_dev_by_type(mod.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_GPU) != null or
+        mod.impl.llama_c.ggml_backend_dev_by_type(mod.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_IGPU) != null or
         supportsRpc();
 }
 
@@ -3278,11 +3278,11 @@ pub fn supportsGpuOffload() bool {
 fn makeCpuBuftList(list: *mod.loader.BuftList, devices: []const Device, use_extra_bufts: bool, no_host: bool, exc: *mod.impl.Exception) mod.impl.Thrown!void {
     // ACCEL buffer types.
     var i: usize = 0;
-    while (i < mod.impl.c.ggml_backend_dev_count()) : (i += 1) {
-        const dev = mod.impl.c.ggml_backend_dev_get(i);
-        if (mod.impl.c.ggml_backend_dev_type(dev) == mod.impl.c.GGML_BACKEND_DEVICE_TYPE_ACCEL) {
-            const buft = mod.impl.c.ggml_backend_dev_buffer_type(dev);
-            if (buft != mod.impl.c.ggml_backend_cpu_buffer_type()) list.append(std.heap.c_allocator, .{ .dev = dev, .buft = buft }) catch oom();
+    while (i < mod.impl.llama_c.ggml_backend_dev_count()) : (i += 1) {
+        const dev = mod.impl.llama_c.ggml_backend_dev_get(i);
+        if (mod.impl.llama_c.ggml_backend_dev_type(dev) == mod.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_ACCEL) {
+            const buft = mod.impl.llama_c.ggml_backend_dev_buffer_type(dev);
+            if (buft != mod.impl.llama_c.ggml_backend_cpu_buffer_type()) list.append(std.heap.c_allocator, .{ .dev = dev, .buft = buft }) catch oom();
         }
     }
 
@@ -3290,7 +3290,7 @@ fn makeCpuBuftList(list: *mod.loader.BuftList, devices: []const Device, use_extr
     // transfer time when large batches are offloaded to a GPU.
     if (!no_host) {
         for (devices) |dev| {
-            if (mod.impl.c.ggml_backend_dev_host_buffer_type(dev.dev)) |buft| {
+            if (mod.impl.llama_c.ggml_backend_dev_host_buffer_type(dev.dev)) |buft| {
                 list.append(std.heap.c_allocator, .{ .dev = dev.dev, .buft = buft }) catch oom();
                 break;
             }
@@ -3299,11 +3299,11 @@ fn makeCpuBuftList(list: *mod.loader.BuftList, devices: []const Device, use_extr
 
     // Extra buffer types.
     if (use_extra_bufts) {
-        const cpu_dev = mod.impl.c.ggml_backend_dev_by_type(mod.impl.c.GGML_BACKEND_DEVICE_TYPE_CPU) orelse
+        const cpu_dev = mod.impl.llama_c.ggml_backend_dev_by_type(mod.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_CPU) orelse
             return exc.throw(.runtime_error, "make_cpu_buft_list: no CPU backend found", .{});
-        const cpu_reg = mod.impl.c.ggml_backend_dev_backend_reg(cpu_dev);
-        const get_extra: ?*const fn (mod.impl.c.ggml_backend_dev_t) callconv(.c) [*c]mod.impl.c.ggml_backend_buffer_type_t =
-            @ptrCast(@alignCast(mod.impl.c.ggml_backend_reg_get_proc_address(cpu_reg, "ggml_backend_dev_get_extra_bufts")));
+        const cpu_reg = mod.impl.llama_c.ggml_backend_dev_backend_reg(cpu_dev);
+        const get_extra: ?*const fn (mod.impl.llama_c.ggml_backend_dev_t) callconv(.c) [*c]mod.impl.llama_c.ggml_backend_buffer_type_t =
+            @ptrCast(@alignCast(mod.impl.llama_c.ggml_backend_reg_get_proc_address(cpu_reg, "ggml_backend_dev_get_extra_bufts")));
         if (get_extra) |f| {
             var extra = f(cpu_dev);
             while (extra != null and extra[0] != null) : (extra += 1) list.append(std.heap.c_allocator, .{ .dev = cpu_dev, .buft = extra[0] }) catch oom();
@@ -3312,10 +3312,10 @@ fn makeCpuBuftList(list: *mod.loader.BuftList, devices: []const Device, use_extr
 
     // The CPU buffer type.
     i = 0;
-    while (i < mod.impl.c.ggml_backend_dev_count()) : (i += 1) {
-        const dev = mod.impl.c.ggml_backend_dev_get(i);
-        if (mod.impl.c.ggml_backend_dev_type(dev) == mod.impl.c.GGML_BACKEND_DEVICE_TYPE_CPU) {
-            list.append(std.heap.c_allocator, .{ .dev = dev, .buft = mod.impl.c.ggml_backend_dev_buffer_type(dev) }) catch oom();
+    while (i < mod.impl.llama_c.ggml_backend_dev_count()) : (i += 1) {
+        const dev = mod.impl.llama_c.ggml_backend_dev_get(i);
+        if (mod.impl.llama_c.ggml_backend_dev_type(dev) == mod.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_CPU) {
+            list.append(std.heap.c_allocator, .{ .dev = dev, .buft = mod.impl.llama_c.ggml_backend_dev_buffer_type(dev) }) catch oom();
         }
     }
 }
@@ -3323,30 +3323,30 @@ fn makeCpuBuftList(list: *mod.loader.BuftList, devices: []const Device, use_extr
 /// Ports `make_gpu_buft_list` (llama-model.cpp:1304 @b1b770d90): the
 /// device's split buffer type when splitting by rows, its default buffer
 /// type, then its extra ones.
-fn makeGpuBuftList(list: *mod.loader.BuftList, dev: mod.impl.c.ggml_backend_dev_t, split_mode: mod.impl.c.enum_llama_split_mode, tensor_split: [*c]const f32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
-    if (split_mode == mod.impl.c.LLAMA_SPLIT_MODE_ROW) {
-        const reg = mod.impl.c.ggml_backend_dev_backend_reg(dev);
-        const split_fn: ?*const fn (c_int, [*c]const f32) callconv(.c) mod.impl.c.ggml_backend_buffer_type_t =
-            @ptrCast(@alignCast(mod.impl.c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_split_buffer_type")));
+fn makeGpuBuftList(list: *mod.loader.BuftList, dev: mod.impl.llama_c.ggml_backend_dev_t, split_mode: mod.impl.llama_c.enum_llama_split_mode, tensor_split: [*c]const f32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
+    if (split_mode == mod.impl.llama_c.LLAMA_SPLIT_MODE_ROW) {
+        const reg = mod.impl.llama_c.ggml_backend_dev_backend_reg(dev);
+        const split_fn: ?*const fn (c_int, [*c]const f32) callconv(.c) mod.impl.llama_c.ggml_backend_buffer_type_t =
+            @ptrCast(@alignCast(mod.impl.llama_c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_split_buffer_type")));
         if (split_fn) |f| {
             var dev_index: usize = 0;
-            while (dev_index < mod.impl.c.ggml_backend_reg_dev_count(reg)) : (dev_index += 1) {
-                if (mod.impl.c.ggml_backend_reg_dev_get(reg, dev_index) == dev) break;
-            } else return exc.throw(.runtime_error, "device {s} not found in its backend reg", .{std.mem.span(mod.impl.c.ggml_backend_dev_name(dev))});
+            while (dev_index < mod.impl.llama_c.ggml_backend_reg_dev_count(reg)) : (dev_index += 1) {
+                if (mod.impl.llama_c.ggml_backend_reg_dev_get(reg, dev_index) == dev) break;
+            } else return exc.throw(.runtime_error, "device {s} not found in its backend reg", .{std.mem.span(mod.impl.llama_c.ggml_backend_dev_name(dev))});
             if (f(@intCast(dev_index), tensor_split)) |buft| list.append(std.heap.c_allocator, .{ .dev = dev, .buft = buft }) catch oom();
         } else {
-            return exc.throw(.runtime_error, "device {s} does not support split buffers", .{std.mem.span(mod.impl.c.ggml_backend_dev_name(dev))});
+            return exc.throw(.runtime_error, "device {s} does not support split buffers", .{std.mem.span(mod.impl.llama_c.ggml_backend_dev_name(dev))});
         }
     }
 
     // The device's default buffer type.
-    list.append(std.heap.c_allocator, .{ .dev = dev, .buft = mod.impl.c.ggml_backend_dev_buffer_type(dev) }) catch oom();
+    list.append(std.heap.c_allocator, .{ .dev = dev, .buft = mod.impl.llama_c.ggml_backend_dev_buffer_type(dev) }) catch oom();
 
     // The device's extra buffer types, if any.
-    const reg = mod.impl.c.ggml_backend_dev_backend_reg(dev);
+    const reg = mod.impl.llama_c.ggml_backend_dev_backend_reg(dev);
     if (reg != null) {
-        const get_extra: ?*const fn (mod.impl.c.ggml_backend_dev_t) callconv(.c) [*c]mod.impl.c.ggml_backend_buffer_type_t =
-            @ptrCast(@alignCast(mod.impl.c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_dev_get_extra_bufts")));
+        const get_extra: ?*const fn (mod.impl.llama_c.ggml_backend_dev_t) callconv(.c) [*c]mod.impl.llama_c.ggml_backend_buffer_type_t =
+            @ptrCast(@alignCast(mod.impl.llama_c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_dev_get_extra_bufts")));
         if (get_extra) |f| {
             var extra = f(dev);
             while (extra != null and extra[0] != null) : (extra += 1) list.append(std.heap.c_allocator, .{ .dev = dev, .buft = extra[0] }) catch oom();
@@ -3364,11 +3364,11 @@ fn makeGpuBuftList(list: *mod.loader.BuftList, dev: mod.impl.c.ggml_backend_dev_
 ///
 /// Return: false on a bad `main_gpu` or no device for tensor parallelism,
 /// as the C++ does.
-pub fn prepareDevices(params: *const mod.impl.c.llama_model_params, model: *Model) bool {
+pub fn prepareDevices(params: *const mod.impl.llama_c.llama_model_params, model: *Model) bool {
     const func = "llama_prepare_model_devices";
 
     if (params.devices) |devs| {
-        if (params.split_mode == mod.impl.c.LLAMA_SPLIT_MODE_TENSOR) {
+        if (params.split_mode == mod.impl.llama_c.LLAMA_SPLIT_MODE_TENSOR) {
             var n_devs: usize = 0;
             while (devs[n_devs] != null) n_devs += 1;
             if (n_devs == 0) {
@@ -3376,11 +3376,11 @@ pub fn prepareDevices(params: *const mod.impl.c.llama_model_params, model: *Mode
                 return false;
             }
             mod.impl.logInfo("%s: creating a Meta device with %zu devices\n", .{ func, n_devs });
-            for (0..n_devs) |i| mod.impl.logInfo("%s: - device %zu: %s\n", .{ func, i, mod.impl.c.ggml_backend_dev_name(devs[i]) });
+            for (0..n_devs) |i| mod.impl.logInfo("%s: - device %zu: %s\n", .{ func, i, mod.impl.llama_c.ggml_backend_dev_name(devs[i]) });
             model.get_split_state_ud = .{ .n_devices = n_devs, .model = model };
             model.devices.append(std.heap.c_allocator, .{
                 .is_meta = true,
-                .dev = mod.impl.c.ggml_backend_meta_device(devs, n_devs, mod.meta_split.getSplitState, &model.get_split_state_ud),
+                .dev = mod.impl.llama_c.ggml_backend_meta_device(devs, n_devs, mod.meta_split.getSplitState, &model.get_split_state_ud),
             }) catch oom();
         } else {
             var d = devs;
@@ -3395,15 +3395,15 @@ pub fn prepareDevices(params: *const mod.impl.c.llama_model_params, model: *Mode
         var rpc_servers: std.ArrayList(Device) = .empty;
         defer rpc_servers.deinit(std.heap.c_allocator);
 
-        if (params.split_mode == mod.impl.c.LLAMA_SPLIT_MODE_TENSOR) {
-            var devs: std.ArrayList(mod.impl.c.ggml_backend_dev_t) = .empty;
+        if (params.split_mode == mod.impl.llama_c.LLAMA_SPLIT_MODE_TENSOR) {
+            var devs: std.ArrayList(mod.impl.llama_c.ggml_backend_dev_t) = .empty;
             defer devs.deinit(std.heap.c_allocator);
-            devs.ensureTotalCapacity(std.heap.c_allocator, mod.impl.c.ggml_backend_dev_count()) catch oom();
+            devs.ensureTotalCapacity(std.heap.c_allocator, mod.impl.llama_c.ggml_backend_dev_count()) catch oom();
             var i: usize = 0;
-            while (i < mod.impl.c.ggml_backend_dev_count()) : (i += 1) {
-                const dev = mod.impl.c.ggml_backend_dev_get(i);
-                if (mod.impl.c.ggml_backend_dev_buffer_type(dev) == mod.impl.c.ggml_backend_cpu_buffer_type()) {
-                    mod.impl.logInfo("%s: skipping %s (%s) for tensor parallelism\n", .{ func, mod.impl.c.ggml_backend_dev_name(dev), mod.impl.c.ggml_backend_dev_description(dev) });
+            while (i < mod.impl.llama_c.ggml_backend_dev_count()) : (i += 1) {
+                const dev = mod.impl.llama_c.ggml_backend_dev_get(i);
+                if (mod.impl.llama_c.ggml_backend_dev_buffer_type(dev) == mod.impl.llama_c.ggml_backend_cpu_buffer_type()) {
+                    mod.impl.logInfo("%s: skipping %s (%s) for tensor parallelism\n", .{ func, mod.impl.llama_c.ggml_backend_dev_name(dev), mod.impl.llama_c.ggml_backend_dev_description(dev) });
                     continue;
                 }
                 devs.append(std.heap.c_allocator, dev) catch oom();
@@ -3414,32 +3414,32 @@ pub fn prepareDevices(params: *const mod.impl.c.llama_model_params, model: *Mode
             }
             mod.impl.logInfo("%s: creating a Meta device for tensor parallelism from %zu devices:\n", .{ func, devs.items.len });
             for (devs.items, 0..) |dev, k| {
-                mod.impl.logInfo("%s: - device %zu: %s (%s)\n", .{ func, k, mod.impl.c.ggml_backend_dev_name(dev), mod.impl.c.ggml_backend_dev_description(dev) });
+                mod.impl.logInfo("%s: - device %zu: %s (%s)\n", .{ func, k, mod.impl.llama_c.ggml_backend_dev_name(dev), mod.impl.llama_c.ggml_backend_dev_description(dev) });
             }
             model.get_split_state_ud = .{ .n_devices = devs.items.len, .model = model };
             gpus.append(std.heap.c_allocator, .{
                 .is_meta = true,
-                .dev = mod.impl.c.ggml_backend_meta_device(devs.items.ptr, devs.items.len, mod.meta_split.getSplitState, &model.get_split_state_ud),
+                .dev = mod.impl.llama_c.ggml_backend_meta_device(devs.items.ptr, devs.items.len, mod.meta_split.getSplitState, &model.get_split_state_ud),
             }) catch oom();
         } else {
             var i: usize = 0;
-            while (i < mod.impl.c.ggml_backend_dev_count()) : (i += 1) {
-                const dev = mod.impl.c.ggml_backend_dev_get(i);
-                switch (mod.impl.c.ggml_backend_dev_type(dev)) {
+            while (i < mod.impl.llama_c.ggml_backend_dev_count()) : (i += 1) {
+                const dev = mod.impl.llama_c.ggml_backend_dev_get(i);
+                switch (mod.impl.llama_c.ggml_backend_dev_type(dev)) {
                     // CPU backends are handled separately.
-                    mod.impl.c.GGML_BACKEND_DEVICE_TYPE_CPU, mod.impl.c.GGML_BACKEND_DEVICE_TYPE_ACCEL => {},
-                    mod.impl.c.GGML_BACKEND_DEVICE_TYPE_GPU => {
-                        const reg = mod.impl.c.ggml_backend_dev_backend_reg(dev);
-                        if (std.mem.eql(u8, std.mem.span(mod.impl.c.ggml_backend_reg_name(reg)), "RPC")) {
+                    mod.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_CPU, mod.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_ACCEL => {},
+                    mod.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_GPU => {
+                        const reg = mod.impl.llama_c.ggml_backend_dev_backend_reg(dev);
+                        if (std.mem.eql(u8, std.mem.span(mod.impl.llama_c.ggml_backend_reg_name(reg)), "RPC")) {
                             rpc_servers.append(std.heap.c_allocator, .{ .is_meta = false, .dev = dev }) catch oom();
                         } else {
                             // Skip a GPU already present under the same device id.
-                            var props: mod.impl.c.ggml_backend_dev_props = undefined;
-                            mod.impl.c.ggml_backend_dev_get_props(dev, &props);
+                            var props: mod.impl.llama_c.ggml_backend_dev_props = undefined;
+                            mod.impl.llama_c.ggml_backend_dev_get_props(dev, &props);
                             var dup: ?Device = null;
                             for (gpus.items) |g| {
-                                var d_props: mod.impl.c.ggml_backend_dev_props = undefined;
-                                mod.impl.c.ggml_backend_dev_get_props(g.dev, &d_props);
+                                var d_props: mod.impl.llama_c.ggml_backend_dev_props = undefined;
+                                mod.impl.llama_c.ggml_backend_dev_get_props(g.dev, &d_props);
                                 if (props.device_id != null and d_props.device_id != null and std.mem.orderZ(u8, props.device_id, d_props.device_id) == .eq) {
                                     dup = g;
                                     break;
@@ -3447,18 +3447,18 @@ pub fn prepareDevices(params: *const mod.impl.c.llama_model_params, model: *Mode
                             }
                             if (dup) |g| {
                                 mod.impl.logInfo("%s: skipping device %s (%s) with id %s - already using device %s (%s) with the same id\n", .{
-                                    func,                                                                              mod.impl.c.ggml_backend_dev_name(dev),   mod.impl.c.ggml_backend_dev_description(dev),
-                                    @as([*c]const u8, if (props.device_id != null) props.device_id else "unknown id"), mod.impl.c.ggml_backend_dev_name(g.dev), mod.impl.c.ggml_backend_dev_description(g.dev),
+                                    func,                                                                              mod.impl.llama_c.ggml_backend_dev_name(dev),   mod.impl.llama_c.ggml_backend_dev_description(dev),
+                                    @as([*c]const u8, if (props.device_id != null) props.device_id else "unknown id"), mod.impl.llama_c.ggml_backend_dev_name(g.dev), mod.impl.llama_c.ggml_backend_dev_description(g.dev),
                                 });
                             } else {
                                 gpus.append(std.heap.c_allocator, .{ .is_meta = false, .dev = dev }) catch oom();
                             }
                         }
                     },
-                    mod.impl.c.GGML_BACKEND_DEVICE_TYPE_IGPU => {
+                    mod.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_IGPU => {
                         // Integrated devices seen by several backends are kept
                         // once, unless they are the same backend's.
-                        if (igpus.items.len == 0 or mod.impl.c.ggml_backend_dev_backend_reg(dev) == mod.impl.c.ggml_backend_dev_backend_reg(igpus.items[igpus.items.len - 1].dev)) {
+                        if (igpus.items.len == 0 or mod.impl.llama_c.ggml_backend_dev_backend_reg(dev) == mod.impl.llama_c.ggml_backend_dev_backend_reg(igpus.items[igpus.items.len - 1].dev)) {
                             igpus.append(std.heap.c_allocator, .{ .is_meta = false, .dev = dev }) catch oom();
                         }
                     },
@@ -3475,7 +3475,7 @@ pub fn prepareDevices(params: *const mod.impl.c.llama_model_params, model: *Mode
     }
 
     // In single-GPU mode, keep only the main GPU.
-    if (params.split_mode == mod.impl.c.LLAMA_SPLIT_MODE_NONE and model.devices.items.len != 0) {
+    if (params.split_mode == mod.impl.llama_c.LLAMA_SPLIT_MODE_NONE and model.devices.items.len != 0) {
         if (params.main_gpu < 0) {
             model.devices.clearRetainingCapacity();
         } else {
@@ -3490,10 +3490,10 @@ pub fn prepareDevices(params: *const mod.impl.c.llama_model_params, model: *Mode
     }
 
     for (model.devices.items) |dev| {
-        var props: mod.impl.c.ggml_backend_dev_props = undefined;
-        mod.impl.c.ggml_backend_dev_get_props(dev.dev, &props);
+        var props: mod.impl.llama_c.ggml_backend_dev_props = undefined;
+        mod.impl.llama_c.ggml_backend_dev_get_props(dev.dev, &props);
         mod.impl.logInfo("%s: using device %s (%s) (%s) - %zu MiB free\n", .{
-            func,                                                                              mod.impl.c.ggml_backend_dev_name(dev.dev), mod.impl.c.ggml_backend_dev_description(dev.dev),
+            func,                                                                              mod.impl.llama_c.ggml_backend_dev_name(dev.dev), mod.impl.llama_c.ggml_backend_dev_description(dev.dev),
             @as([*c]const u8, if (props.device_id != null) props.device_id else "unknown id"), props.memory_free / 1024 / 1024,
         });
     }
@@ -3526,11 +3526,11 @@ pub const Loaded = union(enum) {
 pub fn loadMetadata(
     source: mod.loader.Loader.Source,
     splits: *std.ArrayList([:0]const u8),
-    params: mod.impl.c.llama_model_params,
-    overrides: ?[*]const mod.impl.c.llama_model_kv_override,
+    params: mod.impl.llama_c.llama_model_params,
+    overrides: ?[*]const mod.impl.llama_c.llama_model_kv_override,
     exc: *mod.impl.Exception,
 ) Loaded {
-    var ml = mod.loader.Loader.init(source, splits, mod.impl.c.LLAMA_LOAD_MODE_MMAP, false, params.no_alloc, false, overrides, exc) catch return .thrown;
+    var ml = mod.loader.Loader.init(source, splits, mod.impl.llama_c.LLAMA_LOAD_MODE_MMAP, false, params.no_alloc, false, overrides, exc) catch return .thrown;
     defer ml.deinit();
     ml.lazy.mode = params.lazy_mode;
     ml.printInfo();
@@ -3593,9 +3593,9 @@ pub const LoadResult = struct {
 pub fn load(
     source: mod.loader.Loader.Source,
     splits: *std.ArrayList([:0]const u8),
-    set_tensor_data: mod.impl.c.llama_model_set_tensor_data_t,
+    set_tensor_data: mod.impl.llama_c.llama_model_set_tensor_data_t,
     set_tensor_data_ud: ?*anyopaque,
-    params: *mod.impl.c.llama_model_params,
+    params: *mod.impl.llama_c.llama_model_params,
 ) LoadResult {
     var exc: mod.impl.Exception = .{};
     if (loadInner(source, splits, set_tensor_data, set_tensor_data_ud, params, &exc)) |r| {
@@ -3617,9 +3617,9 @@ var arch_name_failed: [*:0]const u8 = "";
 fn loadInner(
     source: mod.loader.Loader.Source,
     splits: *std.ArrayList([:0]const u8),
-    set_tensor_data: mod.impl.c.llama_model_set_tensor_data_t,
+    set_tensor_data: mod.impl.llama_c.llama_model_set_tensor_data_t,
     set_tensor_data_ud: ?*anyopaque,
-    params: *mod.impl.c.llama_model_params,
+    params: *mod.impl.llama_c.llama_model_params,
     exc: *mod.impl.Exception,
 ) (mod.impl.Thrown || error{Unported})!LoadResult {
     var ml = try mod.loader.Loader.init(source, splits, params.load_mode, params.check_tensors, params.no_alloc, params.load_mtp, params.kv_overrides, exc);
@@ -3718,18 +3718,18 @@ fn defaultProgress(progress: f32, ctx: ?*anyopaque) callconv(.c) bool {
 pub fn loadFromFileImpl(
     source: ?mod.loader.Loader.Source,
     splits: *std.ArrayList([:0]const u8),
-    set_tensor_data: mod.impl.c.llama_model_set_tensor_data_t,
+    set_tensor_data: mod.impl.llama_c.llama_model_set_tensor_data_t,
     set_tensor_data_ud: ?*anyopaque,
-    params_: mod.impl.c.llama_model_params,
+    params_: mod.impl.llama_c.llama_model_params,
 ) ?*Model {
     var params = params_;
     const src = source orelse {
         mod.impl.logError("%s: exactly one out metadata, path_model, and file must be defined\n", .{"llama_model_load_from_file_impl"});
         return null;
     };
-    mod.impl.c.ggml_time_init();
+    mod.impl.llama_c.ggml_time_init();
 
-    if (!params.vocab_only and mod.impl.c.ggml_backend_reg_count() == 0) {
+    if (!params.vocab_only and mod.impl.llama_c.ggml_backend_reg_count() == 0) {
         mod.impl.logError("%s: no backends are loaded. hint: use ggml_backend_load() or ggml_backend_load_all() to load a backend before calling this function\n", .{"llama_model_load_from_file_impl"});
         return null;
     }
@@ -3779,9 +3779,9 @@ test {
 
 test "rope scaling names round-trip and an unknown one is unspecified" {
     var exc: mod.impl.Exception = .{};
-    try std.testing.expectEqualStrings("yarn", try ropeScalingTypeName(mod.impl.c.LLAMA_ROPE_SCALING_TYPE_YARN, &exc));
-    try std.testing.expectEqual(@as(c_int, mod.impl.c.LLAMA_ROPE_SCALING_TYPE_LONGROPE), ropeScalingTypeFromString("longrope"));
-    try std.testing.expectEqual(@as(c_int, mod.impl.c.LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED), ropeScalingTypeFromString("Linear"));
+    try std.testing.expectEqualStrings("yarn", try ropeScalingTypeName(mod.impl.llama_c.LLAMA_ROPE_SCALING_TYPE_YARN, &exc));
+    try std.testing.expectEqual(@as(c_int, mod.impl.llama_c.LLAMA_ROPE_SCALING_TYPE_LONGROPE), ropeScalingTypeFromString("longrope"));
+    try std.testing.expectEqual(@as(c_int, mod.impl.llama_c.LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED), ropeScalingTypeFromString("Linear"));
 }
 
 test "a modulus by zero is the dividend, as udiv makes it" {

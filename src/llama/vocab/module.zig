@@ -18,7 +18,7 @@ pub const rwkv = @import("rwkv.zig");
 pub const plamo2 = @import("plamo2.zig");
 
 pub const Vocab = vocab.Vocab;
-pub const Token = llama.impl.c.llama_token;
+pub const Token = llama.impl.llama_c.llama_token;
 
 // -----------------------------------------------------------------------------
 // Unit Tests

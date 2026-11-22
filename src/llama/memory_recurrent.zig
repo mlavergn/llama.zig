@@ -69,11 +69,11 @@ pub const MemoryRecurrent = struct {
     rs_z: i32 = -1,
 
     cells: std.ArrayList(MemCell) = .empty,
-    r_l: std.ArrayList(?*mod.impl.c.ggml_tensor) = .empty,
-    s_l: std.ArrayList(?*mod.impl.c.ggml_tensor) = .empty,
+    r_l: std.ArrayList(?*mod.impl.llama_c.ggml_tensor) = .empty,
+    s_l: std.ArrayList(?*mod.impl.llama_c.ggml_tensor) = .empty,
     /// A second conv history, PLE's, which must stay replicated across
     /// devices and so cannot share the r row.
-    p_l: std.ArrayList(?*mod.impl.c.ggml_tensor) = .empty,
+    p_l: std.ArrayList(?*mod.impl.llama_c.ggml_tensor) = .empty,
 
     hparams: *const mod.hparams.Hparams,
     n_seq_max: u32 = 1,
@@ -90,8 +90,8 @@ pub const MemoryRecurrent = struct {
     pub fn create(
         model: *const mod.model.Model,
         no_alloc: bool,
-        type_r: mod.impl.c.enum_ggml_type,
-        type_s: mod.impl.c.enum_ggml_type,
+        type_r: mod.impl.llama_c.enum_ggml_type,
+        type_s: mod.impl.llama_c.enum_ggml_type,
         offload: bool,
         mem_size: u32,
         n_seq_max: u32,
@@ -114,10 +114,10 @@ pub const MemoryRecurrent = struct {
         self.cells.appendNTimes(std.heap.c_allocator, .{}, mem_size) catch oom();
 
         // One context per buffer type, ordered by the buffer type's name.
-        var ctx_map: std.ArrayList(struct { buft: mod.impl.c.ggml_backend_buffer_type_t, ctx: *mod.impl.c.ggml_context }) = .empty;
+        var ctx_map: std.ArrayList(struct { buft: mod.impl.llama_c.ggml_backend_buffer_type_t, ctx: *mod.impl.llama_c.ggml_context }) = .empty;
         var n_moved: usize = 0;
         defer {
-            for (ctx_map.items[n_moved..]) |e| mod.impl.c.ggml_free(e.ctx);
+            for (ctx_map.items[n_moved..]) |e| mod.impl.llama_c.ggml_free(e.ctx);
             ctx_map.deinit(std.heap.c_allocator);
         }
 
@@ -132,11 +132,11 @@ pub const MemoryRecurrent = struct {
                 continue;
             }
             var dev_name: [*:0]const u8 = "CPU";
-            var buft = mod.impl.c.ggml_backend_cpu_buffer_type();
+            var buft = mod.impl.llama_c.ggml_backend_cpu_buffer_type();
             if (offload) {
                 const dev = model.devLayer(@intCast(i));
-                buft = mod.impl.c.ggml_backend_dev_buffer_type(dev);
-                dev_name = mod.impl.c.ggml_backend_dev_name(dev);
+                buft = mod.impl.llama_c.ggml_backend_dev_buffer_type(dev);
+                dev_name = mod.impl.llama_c.ggml_backend_dev_name(dev);
             }
             mod.impl.logDebug("%s, layer %3d: dev = %s\n", .{ func, i, dev_name });
 
@@ -144,18 +144,18 @@ pub const MemoryRecurrent = struct {
                 return exc.throw(.runtime_error, "failed to create ggml context for rs cache", .{});
 
             const n_rows: i64 = @as(i64, mem_size) * (1 + n_rs_seq);
-            const r = mod.impl.c.ggml_new_tensor_2d(ctx, type_r, hparams.nEmbdR(), n_rows);
-            const s = mod.impl.c.ggml_new_tensor_2d(ctx, type_s, hparams.nEmbdS(), n_rows);
-            _ = mod.impl.c.ggml_format_name(r, "cache_r_l%d", i);
-            _ = mod.impl.c.ggml_format_name(s, "cache_s_l%d", i);
+            const r = mod.impl.llama_c.ggml_new_tensor_2d(ctx, type_r, hparams.nEmbdR(), n_rows);
+            const s = mod.impl.llama_c.ggml_new_tensor_2d(ctx, type_s, hparams.nEmbdS(), n_rows);
+            _ = mod.impl.llama_c.ggml_format_name(r, "cache_r_l%d", i);
+            _ = mod.impl.llama_c.ggml_format_name(s, "cache_s_l%d", i);
             self.r_l.items[@intCast(i)] = r;
             self.s_l.items[@intCast(i)] = s;
 
             // The PLE history needs its own row: the meta backend must
             // mirror it while the delta-net conv state beside it is split.
             if (hparams.pleConvState() > 0 and hparams.isPle(@intCast(i))) {
-                const p = mod.impl.c.ggml_new_tensor_2d(ctx, type_r, hparams.pleConvState(), n_rows);
-                _ = mod.impl.c.ggml_format_name(p, "cache_ple_r_l%d", i);
+                const p = mod.impl.llama_c.ggml_new_tensor_2d(ctx, type_r, hparams.pleConvState(), n_rows);
+                _ = mod.impl.llama_c.ggml_format_name(p, "cache_ple_r_l%d", i);
                 self.p_l.items[@intCast(i)] = p;
             }
         }
@@ -165,7 +165,7 @@ pub const MemoryRecurrent = struct {
         for (ctx_map.items) |e| {
             const buf = try self.ctxs_bufs.emplace(e.ctx, e.buft, "rs cache", exc);
             n_moved += 1;
-            mod.impl.logInfo("%s: %10s RS buffer size = %8.2f MiB\n", .{ func, mod.impl.c.ggml_backend_buffer_name(buf), @as(f64, @floatFromInt(mod.impl.c.ggml_backend_buffer_get_size(buf))) / 1024.0 / 1024.0 });
+            mod.impl.logInfo("%s: %10s RS buffer size = %8.2f MiB\n", .{ func, mod.impl.llama_c.ggml_backend_buffer_name(buf), @as(f64, @floatFromInt(mod.impl.llama_c.ggml_backend_buffer_get_size(buf))) / 1024.0 / 1024.0 });
         }
 
         var n_rs_seq_shown = n_rs_seq;
@@ -187,11 +187,11 @@ pub const MemoryRecurrent = struct {
                 n_layer,
                 n_seq_max,
                 n_rs_seq_shown,
-                mod.impl.c.ggml_type_name(type_r),
+                mod.impl.llama_c.ggml_type_name(type_r),
                 @as(f64, @as(f32, @floatFromInt(memory_size_r)) / (1024.0 * 1024.0)),
-                mod.impl.c.ggml_type_name(type_s),
+                mod.impl.llama_c.ggml_type_name(type_s),
                 @as(f64, @as(f32, @floatFromInt(memory_size_s)) / (1024.0 * 1024.0)),
-                mod.impl.c.ggml_type_name(type_r),
+                mod.impl.llama_c.ggml_type_name(type_r),
                 @as(f64, @as(f32, @floatFromInt(memory_size_p)) / (1024.0 * 1024.0)),
             });
         }
@@ -200,16 +200,16 @@ pub const MemoryRecurrent = struct {
 
     /// `ctx_for_buft`: r and s per layer, plus the separate PLE conv row
     /// where the model has one.
-    fn ctxForBuft(map: anytype, buft: mod.impl.c.ggml_backend_buffer_type_t, n_layer: i32, has_ple: bool) ?*mod.impl.c.ggml_context {
-        const name = std.mem.span(mod.impl.c.ggml_backend_buft_name(buft));
+    fn ctxForBuft(map: anytype, buft: mod.impl.llama_c.ggml_backend_buffer_type_t, n_layer: i32, has_ple: bool) ?*mod.impl.llama_c.ggml_context {
+        const name = std.mem.span(mod.impl.llama_c.ggml_backend_buft_name(buft));
         var pos: usize = 0;
         while (pos < map.items.len) : (pos += 1) {
-            const order = std.mem.order(u8, std.mem.span(mod.impl.c.ggml_backend_buft_name(map.items[pos].buft)), name);
+            const order = std.mem.order(u8, std.mem.span(mod.impl.llama_c.ggml_backend_buft_name(map.items[pos].buft)), name);
             if (order == .eq) return map.items[pos].ctx;
             if (order == .gt) break;
         }
         const n_per_layer: usize = if (has_ple) 3 else 2;
-        const ctx = mod.impl.c.ggml_init(.{ .mem_size = n_per_layer * @as(usize, @intCast(n_layer)) * mod.impl.c.ggml_tensor_overhead(), .mem_buffer = null, .no_alloc = true }) orelse return null;
+        const ctx = mod.impl.llama_c.ggml_init(.{ .mem_size = n_per_layer * @as(usize, @intCast(n_layer)) * mod.impl.llama_c.ggml_tensor_overhead(), .mem_buffer = null, .no_alloc = true }) orelse return null;
         map.insert(std.heap.c_allocator, pos, .{ .buft = buft, .ctx = ctx }) catch oom();
         return ctx;
     }
@@ -237,7 +237,7 @@ pub const MemoryRecurrent = struct {
         self.head = 0;
         self.used = 0;
         if (data) {
-            for (self.ctxs_bufs.bufs.items) |e| mod.impl.c.ggml_backend_buffer_clear(e.buf, 0);
+            for (self.ctxs_bufs.bufs.items) |e| mod.impl.llama_c.ggml_backend_buffer_clear(e.buf, 0);
         }
         @memset(self.rs_idx.items, 0);
     }
@@ -686,7 +686,7 @@ pub const MemoryRecurrent = struct {
     /// Ports `llama_memory_recurrent`'s `total_size` (llama-memory-recurrent.cpp:738 @b1b770d90).
     pub fn totalSize(self: *const MemoryRecurrent) usize {
         var size: usize = 0;
-        for (self.ctxs_bufs.bufs.items) |e| size += mod.impl.c.ggml_backend_buffer_get_size(e.buf);
+        for (self.ctxs_bufs.bufs.items) |e| size += mod.impl.llama_c.ggml_backend_buffer_get_size(e.buf);
         return size;
     }
 
@@ -694,7 +694,7 @@ pub const MemoryRecurrent = struct {
     fn sizeRBytes(self: *const MemoryRecurrent) usize {
         var size: usize = 0;
         for (self.r_l.items) |r| if (r) |t| {
-            size += mod.impl.c.ggml_nbytes(t);
+            size += mod.impl.llama_c.ggml_nbytes(t);
         };
         return size;
     }
@@ -703,7 +703,7 @@ pub const MemoryRecurrent = struct {
     fn sizeSBytes(self: *const MemoryRecurrent) usize {
         var size: usize = 0;
         for (self.s_l.items) |s| if (s) |t| {
-            size += mod.impl.c.ggml_nbytes(t);
+            size += mod.impl.llama_c.ggml_nbytes(t);
         };
         return size;
     }
@@ -712,7 +712,7 @@ pub const MemoryRecurrent = struct {
     fn sizePBytes(self: *const MemoryRecurrent) usize {
         var size: usize = 0;
         for (self.p_l.items) |p| if (p) |t| {
-            size += mod.impl.c.ggml_nbytes(t);
+            size += mod.impl.llama_c.ggml_nbytes(t);
         };
         return size;
     }
@@ -769,7 +769,7 @@ pub const MemoryRecurrent = struct {
         }
         if (cell_range_begin != size) cell_ranges.append(std.heap.c_allocator, .{ cell_range_begin, size }) catch oom();
 
-        if (flags & mod.impl.c.LLAMA_STATE_SEQ_FLAGS_ON_DEVICE != 0 and cell_ranges.items.len > 1) {
+        if (flags & mod.impl.llama_c.LLAMA_STATE_SEQ_FLAGS_ON_DEVICE != 0 and cell_ranges.items.len > 1) {
             mod.impl.abort("llama-memory-recurrent.cpp", 842, "cannot save/load multiple ranges of cells to/from device memory\n");
         }
 
@@ -826,15 +826,15 @@ pub const MemoryRecurrent = struct {
         const n_layer = self.hparams.nLayer();
         for (0..n_layer) |il| {
             if (self.r_l.items[il]) |t| {
-                const row = mod.impl.c.ggml_row_size(t.type, self.hparams.nEmbdR());
+                const row = mod.impl.llama_c.ggml_row_size(t.type, self.hparams.nEmbdR());
                 mod.impl.clearTensorData(t, cell_head * row, cell_count * row);
             }
             if (self.s_l.items[il]) |t| {
-                const row = mod.impl.c.ggml_row_size(t.type, self.hparams.nEmbdS());
+                const row = mod.impl.llama_c.ggml_row_size(t.type, self.hparams.nEmbdS());
                 mod.impl.clearTensorData(t, cell_head * row, cell_count * row);
             }
             if (self.p_l.items[il]) |t| {
-                const row = mod.impl.c.ggml_row_size(t.type, self.hparams.pleConvState());
+                const row = mod.impl.llama_c.ggml_row_size(t.type, self.hparams.pleConvState());
                 mod.impl.clearTensorData(t, cell_head * row, cell_count * row);
             }
         }
@@ -872,7 +872,7 @@ pub const MemoryRecurrent = struct {
             const r = rl orelse continue;
             const r_type_i: i32 = @intCast(r.type);
             try w.writeValue(r_type_i, exc);
-            const r_size_row: u64 = mod.impl.c.ggml_row_size(r.type, self.hparams.nEmbdR());
+            const r_size_row: u64 = mod.impl.llama_c.ggml_row_size(r.type, self.hparams.nEmbdR());
             try w.writeValue(r_size_row, exc);
             for (cell_ranges) |range| {
                 const range_size: usize = range[1] - range[0];
@@ -880,7 +880,7 @@ pub const MemoryRecurrent = struct {
             }
 
             if (pl) |p| {
-                const p_size_row: u64 = mod.impl.c.ggml_row_size(p.type, self.hparams.pleConvState());
+                const p_size_row: u64 = mod.impl.llama_c.ggml_row_size(p.type, self.hparams.pleConvState());
                 try w.writeValue(p_size_row, exc);
                 for (cell_ranges) |range| {
                     const range_size: usize = range[1] - range[0];
@@ -892,7 +892,7 @@ pub const MemoryRecurrent = struct {
             const s = sl orelse continue;
             const s_type_i: i32 = @intCast(s.type);
             try w.writeValue(s_type_i, exc);
-            const s_size_row: u64 = mod.impl.c.ggml_row_size(s.type, self.hparams.nEmbdS());
+            const s_size_row: u64 = mod.impl.llama_c.ggml_row_size(s.type, self.hparams.nEmbdS());
             try w.writeValue(s_size_row, exc);
             for (cell_ranges) |range| {
                 const range_size: usize = range[1] - range[0];
@@ -1011,7 +1011,7 @@ pub const MemoryRecurrent = struct {
                 return false;
             }
             const r_size_row_ref = try r.readValue(u64, exc);
-            const r_size_row = mod.impl.c.ggml_row_size(t.type, self.hparams.nEmbdR());
+            const r_size_row = mod.impl.llama_c.ggml_row_size(t.type, self.hparams.nEmbdR());
             if (r_size_row != r_size_row_ref) {
                 mod.impl.logError("%s: mismatched r row size (%zu != %zu, layer %d)\n", .{ func, r_size_row, @as(usize, @intCast(r_size_row_ref)), @as(c_int, @intCast(il)) });
                 return false;
@@ -1020,7 +1020,7 @@ pub const MemoryRecurrent = struct {
 
             if (pl) |p| {
                 const p_size_row_ref = try r.readValue(u64, exc);
-                const p_size_row = mod.impl.c.ggml_row_size(p.type, self.hparams.pleConvState());
+                const p_size_row = mod.impl.llama_c.ggml_row_size(p.type, self.hparams.pleConvState());
                 if (p_size_row != p_size_row_ref) {
                     mod.impl.logError("%s: mismatched ple row size (%zu != %zu, layer %d)\n", .{ func, p_size_row, @as(usize, @intCast(p_size_row_ref)), @as(c_int, @intCast(il)) });
                     return false;
@@ -1038,7 +1038,7 @@ pub const MemoryRecurrent = struct {
                 return false;
             }
             const s_size_row_ref = try r.readValue(u64, exc);
-            const s_size_row = mod.impl.c.ggml_row_size(t.type, self.hparams.nEmbdS());
+            const s_size_row = mod.impl.llama_c.ggml_row_size(t.type, self.hparams.nEmbdS());
             if (s_size_row != s_size_row_ref) {
                 mod.impl.logError("%s: mismatched s row size (%zu != %zu, layer %d)\n", .{ func, s_size_row, @as(usize, @intCast(s_size_row_ref)), @as(c_int, @intCast(il)) });
                 return false;
@@ -1230,18 +1230,18 @@ pub const RecurrentContext = struct {
     }
 
     /// Ports `llama_memory_recurrent_context`'s `get_r_l` (llama-memory-recurrent.cpp:1351 @b1b770d90).
-    pub fn getRL(self: *const RecurrentContext, il: i32) *mod.impl.c.ggml_tensor {
+    pub fn getRL(self: *const RecurrentContext, il: i32) *mod.impl.llama_c.ggml_tensor {
         return self.mem.?.r_l.items[@intCast(il)].?;
     }
 
     /// Ports `llama_memory_recurrent_context`'s `get_s_l` (llama-memory-recurrent.cpp:1355 @b1b770d90).
-    pub fn getSL(self: *const RecurrentContext, il: i32) *mod.impl.c.ggml_tensor {
+    pub fn getSL(self: *const RecurrentContext, il: i32) *mod.impl.llama_c.ggml_tensor {
         return self.mem.?.s_l.items[@intCast(il)].?;
     }
 
     /// Ports `llama_memory_recurrent_context`'s `get_p_l` (llama-memory-recurrent.cpp:1359
     /// @b1b770d90): the layer's PLE conv history row, null where it has none.
-    pub fn getPL(self: *const RecurrentContext, il: i32) ?*mod.impl.c.ggml_tensor {
+    pub fn getPL(self: *const RecurrentContext, il: i32) ?*mod.impl.llama_c.ggml_tensor {
         return self.mem.?.p_l.items[@intCast(il)];
     }
 

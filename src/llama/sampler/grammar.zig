@@ -11,7 +11,7 @@ const llama = @import("../module.zig");
 
 /// Ports `llama_sampler_grammar` (llama-sampler.cpp:2667 @b1b770d90).
 const Gram = struct {
-    vocab: ?*const llama.impl.c.struct_llama_vocab,
+    vocab: ?*const llama.impl.llama_c.struct_llama_vocab,
 
     /// Kept to rebuild the grammar on reset; empty when there is none.
     grammar_str: [:0]u8,
@@ -25,19 +25,19 @@ fn emptyZ() [:0]u8 {
 }
 
 /// Ports `llama_sampler_grammar_name` (llama-sampler.cpp:2676 @b1b770d90).
-fn grammarName(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]const u8 {
+fn grammarName(smpl: [*c]const llama.impl.llama_c.struct_llama_sampler) callconv(.c) [*c]const u8 {
     _ = smpl;
     return "grammar";
 }
 
 /// Ports `llama_sampler_grammar_accept_impl` (llama-sampler.cpp:2680 @b1b770d90).
-fn grammarAccept(smpl: [*c]llama.impl.c.struct_llama_sampler, token: llama.impl.c.llama_token) callconv(.c) void {
+fn grammarAccept(smpl: [*c]llama.impl.llama_c.struct_llama_sampler, token: llama.impl.llama_c.llama_token) callconv(.c) void {
     const ctx = llama.sampler.core.ctxOf(Gram, smpl);
     if (ctx.grammar) |g| llama.grammar.grammar.acceptImpl(g, token);
 }
 
 /// Ports `llama_sampler_grammar_apply` (llama-sampler.cpp:2687 @b1b770d90).
-fn grammarApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.impl.c.llama_token_data_array) callconv(.c) void {
+fn grammarApply(smpl: [*c]llama.impl.llama_c.struct_llama_sampler, cur_p: [*c]llama.impl.llama_c.llama_token_data_array) callconv(.c) void {
     const ctx = llama.sampler.core.ctxOf(Gram, smpl);
     if (ctx.grammar) |g| llama.grammar.grammar.applyImpl(g, cur_p);
 }
@@ -45,7 +45,7 @@ fn grammarApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.im
 /// Ports `llama_sampler_grammar_reset` (llama-sampler.cpp:2705 @b1b770d90).
 ///
 /// Rebuilds the grammar from its text, keeping its trigger configuration.
-fn grammarReset(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+fn grammarReset(smpl: [*c]llama.impl.llama_c.struct_llama_sampler) callconv(.c) void {
     const ctx = llama.sampler.core.ctxOf(Gram, smpl);
     const g = ctx.grammar orelse return;
 
@@ -69,7 +69,7 @@ fn grammarReset(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
 }
 
 /// Ports `llama_sampler_grammar_clone` (llama-sampler.cpp:2725 @b1b770d90).
-fn grammarClone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+fn grammarClone(smpl: [*c]const llama.impl.llama_c.struct_llama_sampler) callconv(.c) [*c]llama.impl.llama_c.struct_llama_sampler {
     const ctx = llama.sampler.core.ctxOf(Gram, smpl);
 
     const result = initGrammarImpl(ctx.vocab, null, null, false, &.{}, &.{});
@@ -89,7 +89,7 @@ fn grammarClone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) 
 }
 
 /// Ports `llama_sampler_grammar_free` (llama-sampler.cpp:2746 @b1b770d90).
-fn grammarFree(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+fn grammarFree(smpl: [*c]llama.impl.llama_c.struct_llama_sampler) callconv(.c) void {
     const ctx = llama.sampler.core.ctxOf(Gram, smpl);
 
     if (ctx.grammar) |g| llama.grammar.grammar.freeImpl(g);
@@ -100,7 +100,7 @@ fn grammarFree(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
 }
 
 /// Ports `llama_sampler_grammar_i` (llama-sampler.cpp:2756 @b1b770d90).
-var grammar_iface: llama.impl.c.struct_llama_sampler_i = .{
+var grammar_iface: llama.impl.llama_c.struct_llama_sampler_i = .{
     .name = grammarName,
     .accept = grammarAccept,
     .apply = grammarApply,
@@ -114,13 +114,13 @@ var grammar_iface: llama.impl.c.struct_llama_sampler_i = .{
 /// An empty or null grammar text gives a sampler with no grammar, which
 /// constrains nothing.
 fn initGrammarImpl(
-    vocab: ?*const llama.impl.c.struct_llama_vocab,
+    vocab: ?*const llama.impl.llama_c.struct_llama_vocab,
     grammar_str: ?[*:0]const u8,
     grammar_root: ?[*:0]const u8,
     lazy: bool,
-    trigger_tokens: []const llama.impl.c.llama_token,
+    trigger_tokens: []const llama.impl.llama_c.llama_token,
     trigger_patterns: []const [*:0]const u8,
-) [*c]llama.impl.c.struct_llama_sampler {
+) [*c]llama.impl.llama_c.struct_llama_sampler {
     if (grammar_str != null and grammar_str.?[0] != 0) {
         const g = llama.grammar.grammar.initImpl(vocab, grammar_str.?, grammar_root.?, lazy, trigger_patterns, trigger_tokens);
         if (g == null) return null;
@@ -155,7 +155,7 @@ fn cSlice(comptime T: type, ptr: [*c]const T, n: usize) []const T {
 /// - `grammar_root`: the start symbol.
 ///
 /// Return: the sampler, or null when the grammar does not parse.
-pub export fn llama_sampler_init_grammar(vocab: ?*const llama.impl.c.struct_llama_vocab, grammar_str: [*c]const u8, grammar_root: [*c]const u8) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+pub fn llama_sampler_init_grammar(vocab: ?*const llama.impl.llama_c.struct_llama_vocab, grammar_str: [*c]const u8, grammar_root: [*c]const u8) callconv(.c) [*c]llama.impl.llama_c.struct_llama_sampler {
     return initGrammarImpl(vocab, @ptrCast(grammar_str), @ptrCast(grammar_root), false, &.{}, &.{});
 }
 
@@ -172,21 +172,21 @@ pub export fn llama_sampler_init_grammar(vocab: ?*const llama.impl.c.struct_llam
 /// - `num_trigger_tokens`: how many.
 ///
 /// Return: the sampler, or null when the grammar does not parse.
-pub export fn llama_sampler_init_grammar_lazy_patterns(
-    vocab: ?*const llama.impl.c.struct_llama_vocab,
+pub fn llama_sampler_init_grammar_lazy_patterns(
+    vocab: ?*const llama.impl.llama_c.struct_llama_vocab,
     grammar_str: [*c]const u8,
     grammar_root: [*c]const u8,
     trigger_patterns: [*c]const [*c]const u8,
     num_trigger_patterns: usize,
-    trigger_tokens: [*c]const llama.impl.c.llama_token,
+    trigger_tokens: [*c]const llama.impl.llama_c.llama_token,
     num_trigger_tokens: usize,
-) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+) callconv(.c) [*c]llama.impl.llama_c.struct_llama_sampler {
     return initGrammarImpl(
         vocab,
         @ptrCast(grammar_str),
         @ptrCast(grammar_root),
         true,
-        cSlice(llama.impl.c.llama_token, trigger_tokens, num_trigger_tokens),
+        cSlice(llama.impl.llama_c.llama_token, trigger_tokens, num_trigger_tokens),
         @ptrCast(cSlice([*c]const u8, trigger_patterns, num_trigger_patterns)),
     );
 }

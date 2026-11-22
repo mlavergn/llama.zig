@@ -55,8 +55,8 @@ pub const Pipeline = struct {
 /// matmul pipeline is looked up by -- the A and B types, whether it is the
 /// `mul_mat_id` form, and the accumulator.
 pub const MatmulPipelineKey = struct {
-    type_a: ggml.impl.c.ggml_type,
-    type_b: ggml.impl.c.ggml_type,
+    type_a: ggml.impl.ggml_c.ggml_type,
+    type_b: ggml.impl.ggml_c.ggml_type,
     mul_mat_id: bool,
     f16acc: bool,
 };

@@ -92,9 +92,9 @@ fn unaryRows(
     comptime T: type,
     comptime kernel: anytype,
     params: *const ggml.cpu.defs.ComputeParams,
-    dst: *ggml.impl.c.ggml_tensor,
+    dst: *ggml.impl.ggml_c.ggml_tensor,
 ) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
@@ -102,7 +102,7 @@ fn unaryRows(
     const nth: i64 = params.nth;
 
     const nc: i64 = @as(c_int, @truncate(src0.ne[0]));
-    const nr: i64 = @as(c_int, @truncate(ggml.impl.c.ggml_nrows(src0)));
+    const nr: i64 = @as(c_int, @truncate(ggml.impl.ggml_c.ggml_nrows(src0)));
 
     // rows per thread
     const dr = @divTrunc(nr + nth - 1, nth);
@@ -133,33 +133,33 @@ fn unaryByType(
     comptime k16: anytype,
     comptime kb16: anytype,
     params: *const ggml.cpu.defs.ComputeParams,
-    dst: *ggml.impl.c.ggml_tensor,
+    dst: *ggml.impl.ggml_c.ggml_tensor,
 ) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => unaryRows(f32, k32, params, dst),
-        ggml.impl.c.GGML_TYPE_F16 => unaryRows(ggml.impl.c.ggml_fp16_t, k16, params, dst),
-        ggml.impl.c.GGML_TYPE_BF16 => unaryRows(ggml.impl.c.ggml_bf16_t, kb16, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => unaryRows(f32, k32, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => unaryRows(ggml.impl.ggml_c.ggml_fp16_t, k16, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_BF16 => unaryRows(ggml.impl.ggml_c.ggml_bf16_t, kb16, params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
 
 /// Ports `ggml_compute_forward_gelu` (ops.cpp:2156 @b1b770d90) and
 /// `ggml_compute_forward_gelu_bf16` (ops.cpp:2150 @b1b770d90).
-fn gelu(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+fn gelu(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     unaryByType(ggml.cpu.ops.vecinline.gelu_f32, ggml.cpu.ops.vecinline.gelu_f16, ggml.cpu.ops.vecinline.gelu_bf16, params, dst);
 }
 
 /// Ports `ggml_compute_forward_gelu_erf` (ops.cpp:2396 @b1b770d90) and
 /// `ggml_compute_forward_gelu_erf_bf16` (ops.cpp:2390 @b1b770d90).
-fn geluErf(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+fn geluErf(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     unaryByType(ggml.cpu.ops.vecinline.gelu_erf_f32, ggml.cpu.ops.vecinline.gelu_erf_f16, ggml.cpu.ops.vecinline.gelu_erf_bf16, params, dst);
 }
 
 /// Ports `ggml_compute_forward_gelu_quick` (ops.cpp:2525 @b1b770d90) and
 /// `ggml_compute_forward_gelu_quick_bf16` (ops.cpp:2519 @b1b770d90).
-fn geluQuick(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+fn geluQuick(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     unaryByType(geluQuickF32, ggml.cpu.ops.vecinline.gelu_quick_f16, ggml.cpu.ops.vecinline.gelu_quick_bf16, params, dst);
 }
 
@@ -170,7 +170,7 @@ fn geluQuick(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_
 /// its NEON polynomial `exp`; the `f16` and `bf16` arms are the scalar
 /// `vec.h` inlines with libm's `expf`. They are not the same function of
 /// `x`, as in the C.
-fn silu(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+fn silu(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     unaryByType(siluF32, ggml.cpu.ops.vecinline.silu_f16, ggml.cpu.ops.vecinline.silu_bf16, params, dst);
 }
 
@@ -183,12 +183,12 @@ fn silu(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tenso
 /// Single-threaded: every thread but the first returns at once. Rows are
 /// addressed by `nb[1]` alone, the C assuming (in an `assert` compiled out
 /// here) that both tensors are contiguous in their upper dimensions.
-fn leakyReluRows(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+fn leakyReluRows(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     if (params.ith != 0) return;
 
-    const n: i64 = @as(c_int, @truncate(ggml.impl.c.ggml_nrows(src0)));
+    const n: i64 = @as(c_int, @truncate(ggml.impl.ggml_c.ggml_nrows(src0)));
     const nc: i64 = @as(c_int, @truncate(src0.ne[0]));
 
     const negative_slope: f32 = ggml.impl.getOpParamsF32(dst, 0);
@@ -205,12 +205,12 @@ fn leakyReluRows(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, d
 }
 
 /// Ports `ggml_compute_forward_leaky_relu` (ops.cpp:2741 @b1b770d90).
-pub export fn ggml_compute_forward_leaky_relu(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_leaky_relu(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => leakyReluRows(f32, params, dst),
-        ggml.impl.c.GGML_TYPE_F16 => leakyReluRows(ggml.impl.c.ggml_fp16_t, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => leakyReluRows(f32, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => leakyReluRows(ggml.impl.ggml_c.ggml_fp16_t, params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -223,15 +223,15 @@ pub export fn ggml_compute_forward_leaky_relu(params: *const ggml.cpu.defs.Compu
 ///
 /// Note the operand order: `src[0]` is the incoming gradient and `src[1]` the
 /// forward input, and the row count comes from `src[1]`.
-fn siluBackRows(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const grad = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+fn siluBackRows(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const grad = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
     const nc: i64 = @as(c_int, @truncate(src1.ne[0]));
-    const nr: i64 = @as(c_int, @truncate(ggml.impl.c.ggml_nrows(src1)));
+    const nr: i64 = @as(c_int, @truncate(ggml.impl.ggml_c.ggml_nrows(src1)));
 
     // rows per thread
     const dr = @divTrunc(nr + nth - 1, nth);
@@ -255,12 +255,12 @@ fn siluBackRows(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, ds
 }
 
 /// Ports `ggml_compute_forward_silu_back` (ops.cpp:2852 @b1b770d90).
-pub export fn ggml_compute_forward_silu_back(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_silu_back(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => siluBackRows(f32, params, dst),
-        ggml.impl.c.GGML_TYPE_F16 => siluBackRows(ggml.impl.c.ggml_fp16_t, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => siluBackRows(f32, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => siluBackRows(ggml.impl.ggml_c.ggml_fp16_t, params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -285,19 +285,19 @@ const GluRows = struct {
     ir0: i64,
     ir1: i64,
 
-    fn of(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) GluRows {
-        const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-        const src1: ?*ggml.impl.c.ggml_tensor = dst.src[1];
+    fn of(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) GluRows {
+        const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+        const src1: ?*ggml.impl.ggml_c.ggml_tensor = dst.src[1];
         const src0_d: [*]u8 = @ptrCast(src0.data.?);
         const src1_d: [*]u8 = @ptrCast((if (src1) |s| s.data else src0.data).?);
         const src0_o = src0.nb[1];
         const src1_o = if (src1) |s| s.nb[1] else src0.nb[1];
 
-        ggml.impl.assert(ggml.impl.c.ggml_is_contiguous_1(src0), "ggml_is_contiguous_1(src0)");
-        ggml.impl.assert(ggml.impl.c.ggml_is_contiguous_1(dst), "ggml_is_contiguous_1(dst)");
+        ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_1(src0), "ggml_is_contiguous_1(src0)");
+        ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_1(dst), "ggml_is_contiguous_1(dst)");
 
         if (src1) |s| {
-            ggml.impl.assert(ggml.impl.c.ggml_is_contiguous_1(s), "ggml_is_contiguous_1(src1)");
+            ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_1(s), "ggml_is_contiguous_1(src1)");
             ggml.impl.assert(src0.type == s.type, "src0->type == src1->type");
         }
 
@@ -305,10 +305,10 @@ const GluRows = struct {
         const nth: i64 = params.nth;
 
         const nc: i64 = @as(c_int, @truncate(if (src1 != null) src0.ne[0] else @divTrunc(src0.ne[0], 2)));
-        const nr: i64 = @as(c_int, @truncate(ggml.impl.c.ggml_nrows(src0)));
+        const nr: i64 = @as(c_int, @truncate(ggml.impl.ggml_c.ggml_nrows(src0)));
 
         ggml.impl.assert(dst.ne[0] == nc, "dst->ne[0] == nc");
-        ggml.impl.assert(ggml.impl.c.ggml_nrows(dst) == nr, "ggml_nrows(dst) == nr");
+        ggml.impl.assert(ggml.impl.ggml_c.ggml_nrows(dst) == nr, "ggml_nrows(dst) == nr");
 
         const swapped = ggml.impl.getOpParamsI32(dst, 1);
 
@@ -364,7 +364,7 @@ fn gluRows(
     comptime T: type,
     comptime kernel: anytype,
     params: *const ggml.cpu.defs.ComputeParams,
-    dst: *ggml.impl.c.ggml_tensor,
+    dst: *ggml.impl.ggml_c.ggml_tensor,
 ) void {
     const g = GluRows.of(params, dst);
     const dd: [*]u8 = @ptrCast(dst.data.?);
@@ -382,45 +382,45 @@ fn gluByType(
     comptime k16: anytype,
     comptime kb16: anytype,
     params: *const ggml.cpu.defs.ComputeParams,
-    dst: *ggml.impl.c.ggml_tensor,
+    dst: *ggml.impl.ggml_c.ggml_tensor,
 ) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => gluRows(f32, k32, params, dst),
-        ggml.impl.c.GGML_TYPE_F16 => gluRows(ggml.impl.c.ggml_fp16_t, k16, params, dst),
-        ggml.impl.c.GGML_TYPE_BF16 => gluRows(ggml.impl.c.ggml_bf16_t, kb16, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => gluRows(f32, k32, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => gluRows(ggml.impl.ggml_c.ggml_fp16_t, k16, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_BF16 => gluRows(ggml.impl.ggml_c.ggml_bf16_t, kb16, params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
 
 /// Ports `ggml_compute_forward_reglu` (ops.cpp:3054 @b1b770d90) and
 /// `ggml_compute_forward_reglu_bf16` (ops.cpp:3048 @b1b770d90).
-fn reglu(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+fn reglu(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     gluByType(ggml.cpu.ops.vecinline.reglu_f32, ggml.cpu.ops.vecinline.reglu_f16, ggml.cpu.ops.vecinline.reglu_bf16, params, dst);
 }
 
 /// Ports `ggml_compute_forward_geglu` (ops.cpp:3207 @b1b770d90) and
 /// `ggml_compute_forward_geglu_bf16` (ops.cpp:3201 @b1b770d90).
-fn geglu(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+fn geglu(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     gluByType(ggml.cpu.ops.vecinline.geglu_f32, ggml.cpu.ops.vecinline.geglu_f16, ggml.cpu.ops.vecinline.geglu_bf16, params, dst);
 }
 
 /// Ports `ggml_compute_forward_swiglu` (ops.cpp:3360 @b1b770d90) and
 /// `ggml_compute_forward_swiglu_bf16` (ops.cpp:3354 @b1b770d90).
-fn swiglu(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+fn swiglu(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     gluByType(swigluF32, ggml.cpu.ops.vecinline.swiglu_f16, ggml.cpu.ops.vecinline.swiglu_bf16, params, dst);
 }
 
 /// Ports `ggml_compute_forward_geglu_erf` (ops.cpp:3804 @b1b770d90) and
 /// `ggml_compute_forward_geglu_erf_bf16` (ops.cpp:3798 @b1b770d90).
-fn gegluErf(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+fn gegluErf(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     gluByType(ggml.cpu.ops.vecinline.geglu_erf_f32, ggml.cpu.ops.vecinline.geglu_erf_f16, ggml.cpu.ops.vecinline.geglu_erf_bf16, params, dst);
 }
 
 /// Ports `ggml_compute_forward_geglu_quick` (ops.cpp:3957 @b1b770d90) and
 /// `ggml_compute_forward_geglu_quick_bf16` (ops.cpp:3951 @b1b770d90).
-fn gegluQuick(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+fn gegluQuick(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     gluByType(gegluQuickF32, ggml.cpu.ops.vecinline.geglu_quick_f16, ggml.cpu.ops.vecinline.geglu_quick_bf16, params, dst);
 }
 
@@ -434,7 +434,7 @@ fn gegluQuick(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml
 /// through `GGML_CPU_FP32_TO_FP16`, unlike `swiglu_clamp`'s, which uses the
 /// non-CPU macros. Its `#ifndef NDEBUG` NaN/Inf scan is compiled out in the
 /// reference.
-fn swigluOaiRows(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+fn swigluOaiRows(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const g = GluRows.of(params, dst);
     const dd: [*]u8 = @ptrCast(dst.data.?);
 
@@ -465,12 +465,12 @@ fn swigluOaiRows(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, d
 }
 
 /// Ports `ggml_compute_forward_swiglu_oai` (ops.cpp:3522 @b1b770d90).
-fn swigluOai(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+fn swigluOai(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => swigluOaiRows(f32, params, dst),
-        ggml.impl.c.GGML_TYPE_F16 => swigluOaiRows(ggml.impl.c.ggml_fp16_t, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => swigluOaiRows(f32, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => swigluOaiRows(ggml.impl.ggml_c.ggml_fp16_t, params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -482,7 +482,7 @@ fn swigluOai(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_
 /// on both sides; unlike `swiglu_oai` the sigmoid is unscaled and the value
 /// is not offset by one. No expression adds a product, so nothing contracts.
 /// The C's `#ifndef NDEBUG` NaN/Inf scan is compiled out in the reference.
-fn swigluClampRows(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+fn swigluClampRows(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const g = GluRows.of(params, dst);
     const dd: [*]u8 = @ptrCast(dst.data.?);
 
@@ -510,12 +510,12 @@ fn swigluClampRows(comptime T: type, params: *const ggml.cpu.defs.ComputeParams,
 }
 
 /// Ports `ggml_compute_forward_swiglu_clamp` (ops.cpp:3664 @b1b770d90).
-fn swigluClamp(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+fn swigluClamp(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => swigluClampRows(f32, params, dst),
-        ggml.impl.c.GGML_TYPE_F16 => swigluClampRows(ggml.impl.c.ggml_fp16_t, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => swigluClampRows(f32, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => swigluClampRows(ggml.impl.ggml_c.ggml_fp16_t, params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -524,48 +524,48 @@ fn swigluClamp(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggm
 // The dispatchers
 
 /// Ports `ggml_compute_forward_unary` (ops.cpp:10245 @b1b770d90).
-pub export fn ggml_compute_forward_unary(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const op = ggml.impl.c.ggml_get_unary_op(dst);
+pub fn ggml_compute_forward_unary(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const op = ggml.impl.ggml_c.ggml_get_unary_op(dst);
 
     switch (op) {
-        ggml.impl.c.GGML_UNARY_OP_ABS => ggml.cpu.unary_ops.entry(.abs)(params, dst),
-        ggml.impl.c.GGML_UNARY_OP_SGN => ggml.cpu.unary_ops.entry(.sgn)(params, dst),
-        ggml.impl.c.GGML_UNARY_OP_NEG => ggml.cpu.unary_ops.entry(.neg)(params, dst),
-        ggml.impl.c.GGML_UNARY_OP_STEP => ggml.cpu.unary_ops.entry(.step)(params, dst),
-        ggml.impl.c.GGML_UNARY_OP_TANH => ggml.cpu.unary_ops.entry(.tanh)(params, dst),
-        ggml.impl.c.GGML_UNARY_OP_ELU => ggml.cpu.unary_ops.entry(.elu)(params, dst),
-        ggml.impl.c.GGML_UNARY_OP_RELU => ggml.cpu.unary_ops.entry(.relu)(params, dst),
-        ggml.impl.c.GGML_UNARY_OP_SIGMOID => ggml.cpu.unary_ops.entry(.sigmoid)(params, dst),
-        ggml.impl.c.GGML_UNARY_OP_GELU => gelu(params, dst),
-        ggml.impl.c.GGML_UNARY_OP_GELU_ERF => geluErf(params, dst),
-        ggml.impl.c.GGML_UNARY_OP_GELU_QUICK => geluQuick(params, dst),
-        ggml.impl.c.GGML_UNARY_OP_SILU => silu(params, dst),
-        ggml.impl.c.GGML_UNARY_OP_HARDSWISH => ggml.cpu.unary_ops.entry(.hardswish)(params, dst),
-        ggml.impl.c.GGML_UNARY_OP_HARDSIGMOID => ggml.cpu.unary_ops.entry(.hardsigmoid)(params, dst),
-        ggml.impl.c.GGML_UNARY_OP_EXP => ggml.cpu.unary_ops.entry(.exp)(params, dst),
-        ggml.impl.c.GGML_UNARY_OP_FLOOR => ggml.cpu.unary_ops.entry(.floor)(params, dst),
-        ggml.impl.c.GGML_UNARY_OP_CEIL => ggml.cpu.unary_ops.entry(.ceil)(params, dst),
-        ggml.impl.c.GGML_UNARY_OP_ROUND => ggml.cpu.unary_ops.entry(.round)(params, dst),
-        ggml.impl.c.GGML_UNARY_OP_TRUNC => ggml.cpu.unary_ops.entry(.trunc)(params, dst),
-        ggml.impl.c.GGML_UNARY_OP_XIELU => ggml.cpu.unary_ops.ggml_compute_forward_xielu(params, dst),
-        ggml.impl.c.GGML_UNARY_OP_EXPM1 => ggml.cpu.unary_ops.entry(.expm1)(params, dst),
-        ggml.impl.c.GGML_UNARY_OP_SOFTPLUS => ggml.cpu.unary_ops.entry(.softplus)(params, dst),
+        ggml.impl.ggml_c.GGML_UNARY_OP_ABS => ggml.cpu.unary_ops.entry(.abs)(params, dst),
+        ggml.impl.ggml_c.GGML_UNARY_OP_SGN => ggml.cpu.unary_ops.entry(.sgn)(params, dst),
+        ggml.impl.ggml_c.GGML_UNARY_OP_NEG => ggml.cpu.unary_ops.entry(.neg)(params, dst),
+        ggml.impl.ggml_c.GGML_UNARY_OP_STEP => ggml.cpu.unary_ops.entry(.step)(params, dst),
+        ggml.impl.ggml_c.GGML_UNARY_OP_TANH => ggml.cpu.unary_ops.entry(.tanh)(params, dst),
+        ggml.impl.ggml_c.GGML_UNARY_OP_ELU => ggml.cpu.unary_ops.entry(.elu)(params, dst),
+        ggml.impl.ggml_c.GGML_UNARY_OP_RELU => ggml.cpu.unary_ops.entry(.relu)(params, dst),
+        ggml.impl.ggml_c.GGML_UNARY_OP_SIGMOID => ggml.cpu.unary_ops.entry(.sigmoid)(params, dst),
+        ggml.impl.ggml_c.GGML_UNARY_OP_GELU => gelu(params, dst),
+        ggml.impl.ggml_c.GGML_UNARY_OP_GELU_ERF => geluErf(params, dst),
+        ggml.impl.ggml_c.GGML_UNARY_OP_GELU_QUICK => geluQuick(params, dst),
+        ggml.impl.ggml_c.GGML_UNARY_OP_SILU => silu(params, dst),
+        ggml.impl.ggml_c.GGML_UNARY_OP_HARDSWISH => ggml.cpu.unary_ops.entry(.hardswish)(params, dst),
+        ggml.impl.ggml_c.GGML_UNARY_OP_HARDSIGMOID => ggml.cpu.unary_ops.entry(.hardsigmoid)(params, dst),
+        ggml.impl.ggml_c.GGML_UNARY_OP_EXP => ggml.cpu.unary_ops.entry(.exp)(params, dst),
+        ggml.impl.ggml_c.GGML_UNARY_OP_FLOOR => ggml.cpu.unary_ops.entry(.floor)(params, dst),
+        ggml.impl.ggml_c.GGML_UNARY_OP_CEIL => ggml.cpu.unary_ops.entry(.ceil)(params, dst),
+        ggml.impl.ggml_c.GGML_UNARY_OP_ROUND => ggml.cpu.unary_ops.entry(.round)(params, dst),
+        ggml.impl.ggml_c.GGML_UNARY_OP_TRUNC => ggml.cpu.unary_ops.entry(.trunc)(params, dst),
+        ggml.impl.ggml_c.GGML_UNARY_OP_XIELU => ggml.cpu.unary_ops.ggml_compute_forward_xielu(params, dst),
+        ggml.impl.ggml_c.GGML_UNARY_OP_EXPM1 => ggml.cpu.unary_ops.entry(.expm1)(params, dst),
+        ggml.impl.ggml_c.GGML_UNARY_OP_SOFTPLUS => ggml.cpu.unary_ops.entry(.softplus)(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
 
 /// Ports `ggml_compute_forward_glu` (ops.cpp:10349 @b1b770d90).
-pub export fn ggml_compute_forward_glu(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const op = ggml.impl.c.ggml_get_glu_op(dst);
+pub fn ggml_compute_forward_glu(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const op = ggml.impl.ggml_c.ggml_get_glu_op(dst);
 
     switch (op) {
-        ggml.impl.c.GGML_GLU_OP_REGLU => reglu(params, dst),
-        ggml.impl.c.GGML_GLU_OP_GEGLU => geglu(params, dst),
-        ggml.impl.c.GGML_GLU_OP_SWIGLU => swiglu(params, dst),
-        ggml.impl.c.GGML_GLU_OP_SWIGLU_OAI => swigluOai(params, dst),
-        ggml.impl.c.GGML_GLU_OP_GEGLU_ERF => gegluErf(params, dst),
-        ggml.impl.c.GGML_GLU_OP_GEGLU_QUICK => gegluQuick(params, dst),
-        ggml.impl.c.GGML_GLU_OP_SWIGLU_CLAMP => swigluClamp(params, dst),
+        ggml.impl.ggml_c.GGML_GLU_OP_REGLU => reglu(params, dst),
+        ggml.impl.ggml_c.GGML_GLU_OP_GEGLU => geglu(params, dst),
+        ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU => swiglu(params, dst),
+        ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU_OAI => swigluOai(params, dst),
+        ggml.impl.ggml_c.GGML_GLU_OP_GEGLU_ERF => gegluErf(params, dst),
+        ggml.impl.ggml_c.GGML_GLU_OP_GEGLU_QUICK => gegluQuick(params, dst),
+        ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU_CLAMP => swigluClamp(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }

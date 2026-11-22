@@ -18,6 +18,7 @@
 //! `mutable state_out`; here they take the builder by pointer.
 
 const std = @import("std");
+const llama = @import("llama");
 const mtmd = @import("../module.zig");
 
 /// One `state_out` entry: a slot name and the tensor holding its new state.
@@ -111,22 +112,22 @@ pub const Seanet = struct {
         if (state_name.len != 0 and p_total > 0) {
             // streaming: the left context is the tail of the previous call
             const left = self.stateAt(state_name); // [p_total, IC]
-            x = mtmd.impl.c.ggml_concat(ctx0, left, x, 0);
-            self.pushState(state_name, mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_view_2d(ctx0, x, p_total, mtmd.graph.ne(x, 1), mtmd.graph.nb(x, 1), @as(usize, @intCast(mtmd.graph.ne(x, 0) - p_total)) * mtmd.graph.nb(x, 0))));
+            x = llama.impl.llama_c.ggml_concat(ctx0, left, x, 0);
+            self.pushState(state_name, llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_view_2d(ctx0, x, p_total, mtmd.graph.ne(x, 1), mtmd.graph.nb(x, 1), @as(usize, @intCast(mtmd.graph.ne(x, 0) - p_total)) * mtmd.graph.nb(x, 0))));
         } else if (pad_replicate and p_total > 0) {
             // the resamplers repeat the first frame instead of zero-padding
-            const first = mtmd.impl.c.ggml_view_2d(ctx0, x, 1, mtmd.graph.ne(x, 1), mtmd.graph.nb(x, 1), 0);
-            const left = mtmd.impl.c.ggml_repeat_4d(ctx0, first, p_total, mtmd.graph.ne(x, 1), 1, 1);
-            x = mtmd.impl.c.ggml_concat(ctx0, left, x, 0);
-            x = mtmd.impl.c.ggml_pad_ext(ctx0, x, 0, @intCast(p_extra), 0, 0, 0, 0, 0, 0);
+            const first = llama.impl.llama_c.ggml_view_2d(ctx0, x, 1, mtmd.graph.ne(x, 1), mtmd.graph.nb(x, 1), 0);
+            const left = llama.impl.llama_c.ggml_repeat_4d(ctx0, first, p_total, mtmd.graph.ne(x, 1), 1, 1);
+            x = llama.impl.llama_c.ggml_concat(ctx0, left, x, 0);
+            x = llama.impl.llama_c.ggml_pad_ext(ctx0, x, 0, @intCast(p_extra), 0, 0, 0, 0, 0, 0);
         } else {
-            x = mtmd.impl.c.ggml_pad_ext(ctx0, x, @intCast(p_total), @intCast(p_extra), 0, 0, 0, 0, 0, 0);
+            x = llama.impl.llama_c.ggml_pad_ext(ctx0, x, @intCast(p_total), @intCast(p_extra), 0, 0, 0, 0, 0, 0);
         }
 
-        var y = mtmd.impl.c.ggml_conv_1d(ctx0, w, x, stride, 0, dilation);
-        y = mtmd.impl.c.ggml_reshape_2d(ctx0, y, mtmd.graph.ne(y, 0), mtmd.graph.ne(y, 1));
+        var y = llama.impl.llama_c.ggml_conv_1d(ctx0, w, x, stride, 0, dilation);
+        y = llama.impl.llama_c.ggml_reshape_2d(ctx0, y, mtmd.graph.ne(y, 0), mtmd.graph.ne(y, 1));
         if (b != null) {
-            y = mtmd.impl.c.ggml_add(ctx0, y, mtmd.impl.c.ggml_reshape_2d(ctx0, b, 1, mtmd.graph.ne(b, 0)));
+            y = llama.impl.llama_c.ggml_add(ctx0, y, llama.impl.llama_c.ggml_reshape_2d(ctx0, b, 1, mtmd.graph.ne(b, 0)));
         }
         return y;
     }
@@ -155,37 +156,37 @@ pub const Seanet = struct {
         var col: mtmd.graph.T = undefined;
         if (depthwise) {
             // one group per channel: a batched matmul over the channels scales the kernel by each step
-            const krn = mtmd.impl.c.ggml_reshape_3d(ctx0, w, 1, K, OC); // [1, K, OC]
-            const xs = mtmd.impl.c.ggml_reshape_3d(ctx0, x, 1, Tn, OC); // [1, T, OC]
-            col = mtmd.impl.c.ggml_mul_mat(ctx0, krn, xs); // [K, T, OC]
-            col = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, col, 0, 2, 1, 3)); // [K, OC, T]
-            col = mtmd.impl.c.ggml_reshape_2d(ctx0, col, K * OC, Tn);
+            const krn = llama.impl.llama_c.ggml_reshape_3d(ctx0, w, 1, K, OC); // [1, K, OC]
+            const xs = llama.impl.llama_c.ggml_reshape_3d(ctx0, x, 1, Tn, OC); // [1, T, OC]
+            col = llama.impl.llama_c.ggml_mul_mat(ctx0, krn, xs); // [K, T, OC]
+            col = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_permute(ctx0, col, 0, 2, 1, 3)); // [K, OC, T]
+            col = llama.impl.llama_c.ggml_reshape_2d(ctx0, col, K * OC, Tn);
         } else {
-            var w2 = mtmd.impl.c.ggml_reshape_2d(ctx0, w, K * OC, mtmd.graph.ne(w, 2));
-            w2 = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, w2)); // [IC, K * OC]
-            const xt = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, x)); // [IC, T]
-            col = mtmd.impl.c.ggml_mul_mat(ctx0, w2, xt);
+            var w2 = llama.impl.llama_c.ggml_reshape_2d(ctx0, w, K * OC, mtmd.graph.ne(w, 2));
+            w2 = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, w2)); // [IC, K * OC]
+            const xt = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, x)); // [IC, T]
+            col = llama.impl.llama_c.ggml_mul_mat(ctx0, w2, xt);
         }
-        const full = mtmd.impl.c.ggml_col2im_1d(ctx0, col, stride, @intCast(OC), 0); // [emit_len + p_total, OC]
+        const full = llama.impl.llama_c.ggml_col2im_1d(ctx0, col, stride, @intCast(OC), 0); // [emit_len + p_total, OC]
 
         var out: mtmd.graph.T = undefined;
         if (state_name.len == 0 or p_total == 0) {
-            out = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_view_2d(ctx0, full, emit_len, mtmd.graph.ne(full, 1), mtmd.graph.nb(full, 1), 0));
+            out = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_view_2d(ctx0, full, emit_len, mtmd.graph.ne(full, 1), mtmd.graph.nb(full, 1), 0));
         } else {
             // overlap-add the tail the previous call held back
             const prev = self.stateAt(state_name); // [p_total, OC]
-            const head = mtmd.impl.c.ggml_add(ctx0, mtmd.impl.c.ggml_view_2d(ctx0, full, p_total, mtmd.graph.ne(full, 1), mtmd.graph.nb(full, 1), 0), prev);
+            const head = llama.impl.llama_c.ggml_add(ctx0, llama.impl.llama_c.ggml_view_2d(ctx0, full, p_total, mtmd.graph.ne(full, 1), mtmd.graph.nb(full, 1), 0), prev);
             if (emit_len > p_total) {
-                const rest = mtmd.impl.c.ggml_view_2d(ctx0, full, emit_len - p_total, mtmd.graph.ne(full, 1), mtmd.graph.nb(full, 1), @as(usize, @intCast(p_total)) * mtmd.graph.nb(full, 0));
-                out = mtmd.impl.c.ggml_concat(ctx0, head, rest, 0);
+                const rest = llama.impl.llama_c.ggml_view_2d(ctx0, full, emit_len - p_total, mtmd.graph.ne(full, 1), mtmd.graph.nb(full, 1), @as(usize, @intCast(p_total)) * mtmd.graph.nb(full, 0));
+                out = llama.impl.llama_c.ggml_concat(ctx0, head, rest, 0);
             } else {
                 out = head;
             }
-            self.pushState(state_name, mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_view_2d(ctx0, full, p_total, mtmd.graph.ne(full, 1), mtmd.graph.nb(full, 1), @as(usize, @intCast(emit_len)) * mtmd.graph.nb(full, 0))));
+            self.pushState(state_name, llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_view_2d(ctx0, full, p_total, mtmd.graph.ne(full, 1), mtmd.graph.nb(full, 1), @as(usize, @intCast(emit_len)) * mtmd.graph.nb(full, 0))));
         }
 
         if (b != null) {
-            out = mtmd.impl.c.ggml_add(ctx0, out, mtmd.impl.c.ggml_reshape_2d(ctx0, b, 1, mtmd.graph.ne(b, 0)));
+            out = llama.impl.llama_c.ggml_add(ctx0, out, llama.impl.llama_c.ggml_reshape_2d(ctx0, b, 1, mtmd.graph.ne(b, 0)));
         }
         return out;
     }
@@ -202,12 +203,12 @@ pub const Seanet = struct {
     /// Return: `x` plus the residual branch.
     pub fn resUnit(self: *Seanet, x: mtmd.graph.T, stage: *const mtmd.model.Seanet.Stage, dilation: c_int, state_prefix: []const u8) mtmd.graph.T {
         const ctx0 = self.g.ctx0;
-        var h = mtmd.impl.c.ggml_elu(ctx0, x);
+        var h = llama.impl.llama_c.ggml_elu(ctx0, x);
         h = self.conv1d(h, stage.res_conv1_w, stage.res_conv1_b, 1, dilation, false, state_prefix);
-        h = mtmd.impl.c.ggml_elu(ctx0, h);
+        h = llama.impl.llama_c.ggml_elu(ctx0, h);
         // the second conv is pointwise, it needs no left context
         h = self.conv1d(h, stage.res_conv2_w, stage.res_conv2_b, 1, 1, false, "");
-        return mtmd.impl.c.ggml_add(ctx0, x, h);
+        return llama.impl.llama_c.ggml_add(ctx0, x, h);
     }
 
     /// Ports `encode` (pockettts-seanet.cpp:112 @b1b770d90), a member of
@@ -231,12 +232,12 @@ pub const Seanet = struct {
             const stride = hparams.seanet_ratios.items[@intCast(i)];
 
             cur = self.resUnit(cur, stage, 1, "");
-            cur = mtmd.impl.c.ggml_elu(ctx0, cur);
+            cur = llama.impl.llama_c.ggml_elu(ctx0, cur);
             cur = self.conv1d(cur, stage.scale_conv_w, stage.scale_conv_b, stride, 1, false, "");
             self.g.cb(cur, "seanet_enc_stage", i);
         }
 
-        cur = mtmd.impl.c.ggml_elu(ctx0, cur);
+        cur = llama.impl.llama_c.ggml_elu(ctx0, cur);
         cur = self.conv1d(cur, seanet.conv_out_w, seanet.conv_out_b, 1, 1, false, "");
         self.g.cb(cur, "seanet_enc_out", -1);
 
@@ -266,7 +267,7 @@ pub const Seanet = struct {
             // the decoder mirrors the encoder, so the ratios are walked backwards
             const stride = hparams.seanet_ratios.items[@intCast(hparams.seanet_n_stage - 1 - i)];
 
-            cur = mtmd.impl.c.ggml_elu(ctx0, cur);
+            cur = llama.impl.llama_c.ggml_elu(ctx0, cur);
             const up_name = if (stream) self.idName("dec_up_", i) else "";
             cur = self.convTranspose1d(cur, stage.scale_conv_w, stage.scale_conv_b, stride, up_name);
             const res_name = if (stream) self.idName("dec_res_", i) else "";
@@ -274,7 +275,7 @@ pub const Seanet = struct {
             self.g.cb(cur, "seanet_dec_stage", i);
         }
 
-        cur = mtmd.impl.c.ggml_elu(ctx0, cur);
+        cur = llama.impl.llama_c.ggml_elu(ctx0, cur);
         cur = self.conv1d(cur, seanet.conv_out_w, seanet.conv_out_b, 1, 1, false, if (stream) "dec_out" else "");
         self.g.cb(cur, "seanet_dec_out", -1);
 

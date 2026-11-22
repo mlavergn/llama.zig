@@ -128,10 +128,10 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
         }
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The mixture of experts.
@@ -158,21 +158,21 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             b.cb(cur_gate_inp, "ffn_shexp_gate_inp", il);
 
             // A sigmoid, as silu(x) / x.
-            const cur_gate: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_div(ctx, llama.impl.c.ggml_silu(ctx, cur_gate_inp), cur_gate_inp);
+            const cur_gate: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_div(ctx, llama.impl.llama_c.ggml_silu(ctx, cur_gate_inp), cur_gate_inp);
             b.cb(cur_gate, "ffn_shexp_gate", il);
 
             const cur_ffn = b.buildFfn(cur, layer.ffn_up_shexp, null, null, layer.ffn_gate_shexp, null, null, layer.ffn_down_shexp, null, null, null, .silu, .par, il);
             b.cb(cur_ffn, "ffn_shexp", il);
 
-            const ffn_shexp_out: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul(ctx, cur_ffn, cur_gate);
+            const ffn_shexp_out: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_mul(ctx, cur_ffn, cur_gate);
             b.cb(ffn_shexp_out, "ffn_shexp_out", il);
 
-            moe_out = llama.impl.c.ggml_add(ctx, moe_out, ffn_shexp_out);
+            moe_out = llama.impl.llama_c.ggml_add(ctx, moe_out, ffn_shexp_out);
             b.cb(moe_out, "ffn_out", il);
 
             cur = moe_out;
         }
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

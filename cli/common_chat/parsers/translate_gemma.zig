@@ -12,15 +12,13 @@ const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
 
-const Allocator = std.mem.Allocator;
-
 /// `p.literal(data.generation_prompt) << p.content(p.rest())`.
 fn parser(generation_prompt: []const u8, p: *common_chat.chat_peg.ChatBuilder) peg.Error!peg.ParserId {
     return p.b.shl(try p.b.literal(generation_prompt), try p.content(try p.b.rest()));
 }
 
 /// `json{{k, v}, ...}` member by member, in order.
-fn obj(a: Allocator, members: []const [2][]const u8) common_chat.exception.Error!json.Value {
+fn obj(a: std.mem.Allocator, members: []const [2][]const u8) common_chat.exception.Error!json.Value {
     var v = json.Value.emptyObject();
     for (members) |m| v.set(a, m[0], try json.Value.from(a, m[1])) catch |e| return common_chat.util.fromJson(e);
     return v;
@@ -30,7 +28,7 @@ fn obj(a: Allocator, members: []const [2][]const u8) common_chat.exception.Error
 /// @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
-pub fn init(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
+pub fn init(a: std.mem.Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
     var data: common_chat.params.ChatParams = .{};
 
     // default to chat_template_kwargs, or en-GB if not specified

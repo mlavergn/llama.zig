@@ -16,7 +16,6 @@
 
 const std = @import("std");
 const mod = @import("module.zig");
-const Value = @import("value.zig").Value;
 
 /// `error_handler_t`: what `dump` does with a string that is not UTF-8.
 pub const ErrorHandler = enum {
@@ -218,7 +217,7 @@ fn indentBy(out: *std.ArrayList(u8), a: std.mem.Allocator, c: u8, n: usize) !voi
 /// deeper is written by `dumpIteratively` without the call stack, in the
 /// same bytes. Integers are `dump_integer` (json.hpp:19686 @b1b770d90),
 /// which is plain decimal.
-fn dumpValue(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, pretty_print: bool, opts: Options, indent_step: usize, current_indent: usize, depth: usize) mod.errors.Error!void {
+fn dumpValue(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const mod.value.Value, pretty_print: bool, opts: Options, indent_step: usize, current_indent: usize, depth: usize) mod.errors.Error!void {
     switch (val.*) {
         .object => |m| {
             if (depth >= dump_depth_limit) return dumpIteratively(out, a, val, pretty_print, opts, indent_step, current_indent);
@@ -297,7 +296,7 @@ const dump_depth_limit: usize = 128;
 /// the C's `object_it` or `array_it` as an index.
 const DumpFrame = struct {
     /// the object or array being serialized
-    value: *const Value,
+    value: *const mod.value.Value,
     next: usize = 0,
     /// the indentation of the container itself, for its closing bracket
     current_indent: usize,
@@ -309,7 +308,7 @@ const DumpFrame = struct {
 /// everything below it, in the bytes `dumpValue` writes, keeping the
 /// containers it has entered on an explicit stack instead of the call
 /// stack. Reached only for a value nested deeper than `dump_depth_limit`.
-fn dumpIteratively(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, pretty_print: bool, opts: Options, indent_step: usize, current_indent: usize) mod.errors.Error!void {
+fn dumpIteratively(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const mod.value.Value, pretty_print: bool, opts: Options, indent_step: usize, current_indent: usize) mod.errors.Error!void {
     // Scalars, empty containers and binary values are written by
     // dumpValueShallow alone: only a container with elements is pushed.
     var stack: std.ArrayList(DumpFrame) = .empty;
@@ -341,7 +340,7 @@ fn dumpIteratively(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Va
         }
         if (pretty_print) try indentBy(out, a, opts.indent_char, frame.child_indent);
 
-        const element: *const Value = switch (frame.value.*) {
+        const element: *const mod.value.Value = switch (frame.value.*) {
             .object => |*m| blk: {
                 const mem = &m.members.items[frame.next];
                 try out.append(a, '"');
@@ -364,7 +363,7 @@ fn dumpIteratively(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Va
 /// elements of a container. An object or array with elements is opened and
 /// pushed onto `stack` for `dumpIteratively` to walk; anything else is
 /// written out in full by `dumpValue`.
-fn dumpValueShallow(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, pretty_print: bool, opts: Options, indent_step: usize, current_indent: usize, stack: *std.ArrayList(DumpFrame)) mod.errors.Error!void {
+fn dumpValueShallow(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const mod.value.Value, pretty_print: bool, opts: Options, indent_step: usize, current_indent: usize, stack: *std.ArrayList(DumpFrame)) mod.errors.Error!void {
     const open: u8 = switch (val.*) {
         .object => |m| if (m.members.items.len != 0) '{' else 0,
         .array => |arr| if (arr.items.len != 0) '[' else 0,
@@ -397,7 +396,7 @@ fn dumpValueShallow(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const V
 ///
 /// Return: `error.JsonError` (`type_error.316`) for a string that is not
 /// UTF-8 under `.strict`; `error.OutOfMemory`.
-pub fn dumpTo(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, opts: Options) mod.errors.Error!void {
+pub fn dumpTo(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const mod.value.Value, opts: Options) mod.errors.Error!void {
     if (opts.indent >= 0) {
         try dumpValue(out, a, val, true, opts, @intCast(opts.indent), 0, 0);
     } else {
@@ -414,7 +413,7 @@ pub fn dumpTo(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, 
 /// - `indent`: below 0 compact, otherwise spaces per level.
 ///
 /// Return: the text, owned by the caller.
-pub fn dump(a: std.mem.Allocator, val: *const Value, indent: i32) mod.errors.Error![]u8 {
+pub fn dump(a: std.mem.Allocator, val: *const mod.value.Value, indent: i32) mod.errors.Error![]u8 {
     return dumpOptions(a, val, .{ .indent = indent });
 }
 
@@ -422,7 +421,7 @@ pub fn dump(a: std.mem.Allocator, val: *const Value, indent: i32) mod.errors.Err
 /// with invalid UTF-8 replaced by U+FFFD, so it cannot fail but for memory.
 ///
 /// Return: the text, owned by the caller.
-pub fn dumpSafe(a: std.mem.Allocator, val: *const Value, indent: i32) error{OutOfMemory}![]u8 {
+pub fn dumpSafe(a: std.mem.Allocator, val: *const mod.value.Value, indent: i32) error{OutOfMemory}![]u8 {
     return dumpOptions(a, val, .{ .indent = indent, .error_handler = .replace }) catch |e| switch (e) {
         error.OutOfMemory => error.OutOfMemory,
         error.JsonError => unreachable,
@@ -432,7 +431,7 @@ pub fn dumpSafe(a: std.mem.Allocator, val: *const Value, indent: i32) error{OutO
 /// `basic_json::dump` with every parameter.
 ///
 /// Return: the text, owned by the caller.
-pub fn dumpOptions(a: std.mem.Allocator, val: *const Value, opts: Options) mod.errors.Error![]u8 {
+pub fn dumpOptions(a: std.mem.Allocator, val: *const mod.value.Value, opts: Options) mod.errors.Error![]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(a);
     try dumpTo(&out, a, val, opts);
@@ -471,12 +470,12 @@ test "dump_escaped strict reports the byte and its index" {
 
 test "dump indents nested containers" {
     const a = std.testing.allocator;
-    var v = Value.emptyObject();
+    var v = mod.value.Value.emptyObject();
     defer v.deinit(a);
-    try v.set(a, "a", try Value.from(a, 1.5));
-    var arr = Value.emptyArray();
+    try v.set(a, "a", try mod.value.Value.from(a, 1.5));
+    var arr = mod.value.Value.emptyArray();
     try arr.pushBack(a, .null);
-    try arr.pushBack(a, Value.emptyObject());
+    try arr.pushBack(a, mod.value.Value.emptyObject());
     try v.set(a, "b", arr);
     const s = try dump(a, &v, 2);
     defer a.free(s);
@@ -489,20 +488,20 @@ test "dump indents nested containers" {
 
 test "dump_iteratively writes the bytes dump writes" {
     const a = std.testing.allocator;
-    var leaf = Value.emptyObject();
-    try leaf.set(a, "s", try Value.from(a, "\xc3\xa9"));
-    try leaf.set(a, "e", Value.emptyArray());
+    var leaf = mod.value.Value.emptyObject();
+    try leaf.set(a, "s", try mod.value.Value.from(a, "\xc3\xa9"));
+    try leaf.set(a, "e", mod.value.Value.emptyArray());
     var v = leaf;
     defer v.deinit(a);
     for (0..40) |i| {
-        var outer = if (i % 3 == 0) Value.emptyObject() else Value.emptyArray();
+        var outer = if (i % 3 == 0) mod.value.Value.emptyObject() else mod.value.Value.emptyArray();
         if (i % 3 == 0) {
-            try outer.set(a, "x", try Value.from(a, i));
+            try outer.set(a, "x", try mod.value.Value.from(a, i));
             try outer.set(a, "k", v);
         } else {
             try outer.pushBack(a, v);
-            try outer.pushBack(a, Value.emptyObject());
-            try outer.pushBack(a, try Value.from(a, 1.5));
+            try outer.pushBack(a, mod.value.Value.emptyObject());
+            try outer.pushBack(a, try mod.value.Value.from(a, 1.5));
         }
         v = outer;
     }

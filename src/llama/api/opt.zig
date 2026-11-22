@@ -20,7 +20,7 @@ const llama = @import("../module.zig");
 /// - `userdata`: unused.
 ///
 /// Return: true, for every tensor.
-pub fn llama_opt_param_filter_all(tensor: [*c]const llama.impl.c.struct_ggml_tensor, userdata: ?*anyopaque) callconv(.c) bool {
+pub fn llama_opt_param_filter_all(tensor: [*c]const llama.impl.llama_c.struct_ggml_tensor, userdata: ?*anyopaque) callconv(.c) bool {
     _ = tensor;
     _ = userdata;
     return true;
@@ -34,7 +34,7 @@ pub fn llama_opt_param_filter_all(tensor: [*c]const llama.impl.c.struct_ggml_ten
 /// - `lopt_params`: the training parameters.
 ///
 /// Return: nothing.
-pub fn llama_opt_init(ctx: ?*llama.impl.c.struct_llama_context, model: ?*llama.impl.c.struct_llama_model, lopt_params: llama.impl.c.struct_llama_opt_params) callconv(.c) void {
+pub fn llama_opt_init(ctx: ?*llama.impl.llama_c.struct_llama_context, model: ?*llama.impl.llama_c.struct_llama_model, lopt_params: llama.impl.llama_c.struct_llama_opt_params) callconv(.c) void {
     llama.context_opt.optInit(llama.api.context.ctxOf(ctx), llama.api.context.modelOf(model), lopt_params);
 }
 
@@ -51,13 +51,13 @@ pub fn llama_opt_init(ctx: ?*llama.impl.c.struct_llama_context, model: ?*llama.i
 ///
 /// Return: nothing.
 pub fn llama_opt_epoch(
-    ctx: ?*llama.impl.c.struct_llama_context,
-    dataset: llama.impl.c.ggml_opt_dataset_t,
-    result_train: llama.impl.c.ggml_opt_result_t,
-    result_eval: llama.impl.c.ggml_opt_result_t,
+    ctx: ?*llama.impl.llama_c.struct_llama_context,
+    dataset: llama.impl.llama_c.ggml_opt_dataset_t,
+    result_train: llama.impl.llama_c.ggml_opt_result_t,
+    result_eval: llama.impl.llama_c.ggml_opt_result_t,
     idata_split: i64,
-    callback_train: llama.impl.c.ggml_opt_epoch_callback,
-    callback_eval: llama.impl.c.ggml_opt_epoch_callback,
+    callback_train: llama.impl.llama_c.ggml_opt_epoch_callback,
+    callback_eval: llama.impl.llama_c.ggml_opt_epoch_callback,
 ) callconv(.c) void {
     llama.context_opt.optEpoch(llama.api.context.ctxOf(ctx), dataset, result_train, result_eval, idata_split, callback_train, callback_eval);
 }

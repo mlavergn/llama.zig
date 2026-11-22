@@ -22,10 +22,8 @@
 //! show a corpus decodes rather than failing on both sides.
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const vendor = @import("vendor");
-const stb = vendor.stb_image;
-const ma = vendor.miniaudio;
 
 extern fn ref_stbi_load(buf: [*]const u8, len: c_int, req_comp: c_int, x: *c_int, y: *c_int, comp: *c_int, reason: *?[*:0]const u8) ?[*]u8;
 extern fn ref_stbi_free(data: ?[*]u8) void;
@@ -82,21 +80,21 @@ fn report(comptime fmt: []const u8, args: anytype) void {
 /// `stbi__convert_format` (see `stb_image.zig`'s `picLoadImpl`).
 fn refCrashes(buf: []const u8, req: c_int) bool {
     if (buf.len < 92 or !std.mem.eql(u8, buf[0..4], "\x53\x80\xF6\x34") or !std.mem.eql(u8, buf[88..92], "PICT")) return false;
-    const pid = libc.fork();
+    const pid = std.c.fork();
     if (pid == 0) {
         // the expected crash needs no stack trace from a safe build's handler
-        _ = libc.signal(11, 0); // SIGSEGV, SIG_DFL
-        _ = libc.signal(10, 0); // SIGBUS on Darwin
-        _ = libc.signal(7, 0); // SIGBUS on Linux
+        _ = stdlib.libc.signal(11, 0); // SIGSEGV, SIG_DFL
+        _ = stdlib.libc.signal(10, 0); // SIGBUS on Darwin
+        _ = stdlib.libc.signal(7, 0); // SIGBUS on Linux
         var x: c_int = 0;
         var y: c_int = 0;
         var c: c_int = 0;
         var reason: ?[*:0]const u8 = null;
         ref_stbi_free(ref_stbi_load(buf.ptr, @intCast(@min(buf.len, std.math.maxInt(c_int))), req, &x, &y, &c, &reason));
-        libc._exit(0);
+        std.c._exit(0);
     }
     var status: c_int = 0;
-    _ = libc.waitpid(pid, &status, 0);
+    _ = std.c.waitpid(pid, &status, 0);
     return (status & 0x7f) != 0; // terminated by a signal
 }
 
@@ -104,7 +102,7 @@ fn checkImage(gpa: std.mem.Allocator, name: []const u8, buf: []const u8, req: c_
     stats.image_checks += 1;
     if (refCrashes(buf, req)) {
         stats.ref_crashes += 1;
-        switch (stb.loadFromMemory(gpa, buf, req)) {
+        switch (vendor.stb_image.loadFromMemory(gpa, buf, req)) {
             .ok => |img| {
                 gpa.free(img.pixels);
                 stats.image_fail += 1;
@@ -121,7 +119,7 @@ fn checkImage(gpa: std.mem.Allocator, name: []const u8, buf: []const u8, req: c_
     const len: c_int = @intCast(@min(buf.len, std.math.maxInt(c_int)));
     const rdata = ref_stbi_load(buf.ptr, len, req, &rx, &ry, &rc, &reason);
     defer ref_stbi_free(rdata);
-    const port = stb.loadFromMemory(gpa, buf, req);
+    const port = vendor.stb_image.loadFromMemory(gpa, buf, req);
     switch (port) {
         .ok => |img| {
             defer gpa.free(img.pixels);
@@ -139,7 +137,7 @@ fn checkImage(gpa: std.mem.Allocator, name: []const u8, buf: []const u8, req: c_
                 stats.image_fail += 1;
                 return report("{s} req={d}: port returned {d} bytes, expected {d}", .{ name, req, img.pixels.len, n });
             }
-            if (stb.read_indeterminate) {
+            if (vendor.stb_image.read_indeterminate) {
                 // the C read memory it never wrote: the pixels are unspecified
                 stats.indeterminate += 1;
                 return;
@@ -173,18 +171,18 @@ fn optEq(a: ?[]const u8, b: ?[]const u8) bool {
 
 fn checkAudio(gpa: std.mem.Allocator, name: []const u8, buf: []const u8, rate: c_int) void {
     stats.audio_checks += 1;
-    if (ma.dr_flac.claims(buf)) stats.flac_checks += 1;
+    if (vendor.miniaudio.dr_flac.claims(buf)) stats.flac_checks += 1;
     var rout: ?[*]f32 = null;
     var rn: u64 = 0;
     const rstage = ref_audio_decode(buf.ptr, buf.len, rate, frame_cap, &rout, &rn);
     defer ref_audio_free(rout);
 
-    ma.resetIndeterminate();
+    vendor.miniaudio.resetIndeterminate();
     var pstage: c_int = 0;
     var pn: u64 = 0;
     var pout: []f32 = &.{};
     defer gpa.free(pout);
-    if (ma.Decoder.initMemory(gpa, buf, @intCast(rate))) |dec_c| {
+    if (vendor.miniaudio.Decoder.initMemory(gpa, buf, @intCast(rate))) |dec_c| {
         var dec = dec_c;
         defer dec.deinit();
         pn = dec.lengthInPcmFrames();
@@ -203,7 +201,7 @@ fn checkAudio(gpa: std.mem.Allocator, name: []const u8, buf: []const u8, rate: c
         stats.audio_fail += 1;
         return report("{s} rate={d}: port stage {d} len {d}, ref stage {d} len {d}", .{ name, rate, pstage, pn, rstage, rn });
     }
-    if (ma.readIndeterminate()) {
+    if (vendor.miniaudio.readIndeterminate()) {
         stats.indeterminate += 1;
         return;
     }
@@ -216,7 +214,7 @@ fn checkAudio(gpa: std.mem.Allocator, name: []const u8, buf: []const u8, rate: c
             }
         }
         if (pstage == 0) stats.audio_ok_both += 1;
-        if (pstage == 0 and ma.dr_flac.claims(buf)) stats.flac_ok_both += 1;
+        if (pstage == 0 and vendor.miniaudio.dr_flac.claims(buf)) stats.flac_ok_both += 1;
     }
 }
 
@@ -225,8 +223,8 @@ const rates = [_]c_int{ 16000, 24000, 0, 44100, 48000, 8000 };
 
 fn checkAll(gpa: std.mem.Allocator, name: []const u8, buf: []const u8, base: bool) void {
     if (only) |o| if (std.mem.indexOf(u8, name, o) == null) return;
-    if (base and ma.isAudioFile(buf) and (std.mem.endsWith(u8, name, ".mp3") or std.mem.startsWith(u8, name, "synth/mp3"))) mp3Frames(gpa, name, buf);
-    if (ma.isAudioFile(buf)) {
+    if (base and vendor.miniaudio.isAudioFile(buf) and (std.mem.endsWith(u8, name, ".mp3") or std.mem.startsWith(u8, name, "synth/mp3"))) mp3Frames(gpa, name, buf);
+    if (vendor.miniaudio.isAudioFile(buf)) {
         const nrates: usize = if (base and !quick) rates.len else 2;
         for (rates[0..nrates]) |r| checkAudio(gpa, name, buf, r);
     }
@@ -360,7 +358,7 @@ fn xingVariants(gpa: std.mem.Allocator, name: []const u8, bytes: []const u8) !vo
 /// frame's PCM and the decoder state after it: where a whole-file diff
 /// names a sample, this names the frame and the field.
 fn mp3Frames(gpa: std.mem.Allocator, name: []const u8, buf: []const u8) void {
-    const Dec = ma.dr_mp3.kernels.Decoder;
+    const Dec = vendor.miniaudio.dr_mp3.kernels.Decoder;
     if (ref_mp3_dec_size() != @sizeOf(Dec)) {
         stats.audio_fail += 1;
         return report("mp3 decoder layout: C {d} bytes, port {d}", .{ ref_mp3_dec_size(), @sizeOf(Dec) });
@@ -379,7 +377,7 @@ fn mp3Frames(gpa: std.mem.Allocator, name: []const u8, buf: []const u8) void {
         var fr: c_int = 0;
         var fp: c_int = 0;
         const nr = ref_mp3_decode_frame(dr, buf[pos..].ptr, @intCast(buf.len - pos), &pr, &fr);
-        const np = ma.dr_mp3.kernels.decodeOne(dp, buf[pos..], &pp, &fp);
+        const np = vendor.miniaudio.dr_mp3.kernels.decodeOne(dp, buf[pos..], &pp, &fp);
         stats.audio_checks += 1;
         if (nr != np or fr != fp) {
             stats.audio_fail += 1;
@@ -448,7 +446,7 @@ fn lengthSweep() void {
         var n: u64 = 0;
         while (n < 2000) : (n += 1) {
             const a = ref_frame_count_after_resampling(out, in, n);
-            const b = ma.frameCountAfterResampling(out, in, n);
+            const b = vendor.miniaudio.frameCountAfterResampling(out, in, n);
             stats.audio_checks += 1;
             if (a != b) {
                 stats.audio_fail += 1;
@@ -482,7 +480,7 @@ fn resamplerSweep(gpa: std.mem.Allocator) void {
     for (rate_list) |rin| for (rate_list) |rout| {
         const rc = ref_resampler_init(rin, rout);
         defer ref_resampler_free(rc);
-        const pc = (ma.HelperResampler.create(gpa, @intCast(rin), @intCast(rout)) catch @panic("OOM")) orelse {
+        const pc = (vendor.miniaudio.HelperResampler.create(gpa, @intCast(rin), @intCast(rout)) catch @panic("OOM")) orelse {
             stats.audio_fail += 1;
             return report("resampler {d} -> {d}: the port refused to init", .{ rin, rout });
         };
@@ -541,7 +539,7 @@ fn synthPairSweep() void {
         var pa: [64]i16 = @splat(0);
         var pb: [64]i16 = @splat(0);
         ref_mp3_synth_pair(&pa, 1, &z);
-        ma.dr_mp3.kernels.synthPair_(&pb, 1, &z);
+        vendor.miniaudio.dr_mp3.kernels.synthPair_(&pb, 1, &z);
         if (pa[0] != pb[0] or pa[16] != pb[16]) {
             kernelFail("synth_pair", t, 0);
             return;
@@ -552,7 +550,7 @@ fn synthPairSweep() void {
 
 /// dr_mp3's kernels on random inputs, each beside the reference's own.
 fn mp3Kernels() void {
-    const k = ma.dr_mp3.kernels;
+    const k = vendor.miniaudio.dr_mp3.kernels;
     var prng = std.Random.DefaultPrng.init(0x3333);
     const rnd = prng.random();
     const trials: usize = if (quick) 200 else 2000;

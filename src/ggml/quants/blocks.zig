@@ -38,19 +38,19 @@ pub const Half = u16;
 /// Mirrors `block_q1_0` (ggml-common.h:181 @b1b770d90).
 pub const Q1_0 = extern struct {
     d: Half,
-    qs: [ggml.impl.c.QK1_0 / 8]u8,
+    qs: [ggml.impl.ggml_c.QK1_0 / 8]u8,
 };
 
 /// Mirrors `block_q2_0` (ggml-common.h:188 @b1b770d90).
 pub const Q2_0 = extern struct {
     d: Half,
-    qs: [ggml.impl.c.QK2_0 / 4]u8,
+    qs: [ggml.impl.ggml_c.QK2_0 / 4]u8,
 };
 
 /// Mirrors `block_q4_0` (ggml-common.h:195 @b1b770d90).
 pub const Q4_0 = extern struct {
     d: Half,
-    qs: [ggml.impl.c.QK4_0 / 2]u8,
+    qs: [ggml.impl.ggml_c.QK4_0 / 2]u8,
 };
 
 /// Mirrors `block_q5_0` (ggml-common.h:230 @b1b770d90).
@@ -60,13 +60,13 @@ pub const Q4_0 = extern struct {
 pub const Q5_0 = extern struct {
     d: Half,
     qh: [4]u8,
-    qs: [ggml.impl.c.QK5_0 / 2]u8,
+    qs: [ggml.impl.ggml_c.QK5_0 / 2]u8,
 };
 
 /// Mirrors `block_q8_0` (ggml-common.h:252 @b1b770d90).
 pub const Q8_0 = extern struct {
     d: Half,
-    qs: [ggml.impl.c.QK8_0]i8,
+    qs: [ggml.impl.ggml_c.QK8_0]i8,
 };
 
 // -----------------------------------------------------------------------------
@@ -87,7 +87,7 @@ pub const Q8_0 = extern struct {
 pub const Q4_1 = extern struct {
     d: Half align(4),
     m: Half,
-    qs: [ggml.impl.c.QK4_1 / 2]u8,
+    qs: [ggml.impl.ggml_c.QK4_1 / 2]u8,
 };
 
 /// Mirrors `block_q5_1` (ggml-common.h:238 @b1b770d90).
@@ -95,7 +95,7 @@ pub const Q5_1 = extern struct {
     d: Half align(4),
     m: Half,
     qh: [4]u8,
-    qs: [ggml.impl.c.QK5_1 / 2]u8,
+    qs: [ggml.impl.ggml_c.QK5_1 / 2]u8,
 };
 
 /// Mirrors `block_q8_1` (ggml-common.h:259 @b1b770d90).
@@ -106,7 +106,7 @@ pub const Q5_1 = extern struct {
 pub const Q8_1 = extern struct {
     d: Half align(4),
     s: Half,
-    qs: [ggml.impl.c.QK8_1]i8,
+    qs: [ggml.impl.ggml_c.QK8_1]i8,
 };
 
 // -----------------------------------------------------------------------------
@@ -115,13 +115,13 @@ pub const Q8_1 = extern struct {
 /// Mirrors `block_mxfp4` (ggml-common.h:215 @b1b770d90).
 pub const MXFP4 = extern struct {
     e: u8,
-    qs: [ggml.impl.c.QK_MXFP4 / 2]u8,
+    qs: [ggml.impl.ggml_c.QK_MXFP4 / 2]u8,
 };
 
 /// Mirrors `block_nvfp4` (ggml-common.h:223 @b1b770d90).
 pub const NVFP4 = extern struct {
-    d: [ggml.impl.c.QK_NVFP4 / ggml.impl.c.QK_NVFP4_SUB]u8,
-    qs: [ggml.impl.c.QK_NVFP4 / 2]u8,
+    d: [ggml.impl.ggml_c.QK_NVFP4 / ggml.impl.ggml_c.QK_NVFP4_SUB]u8,
+    qs: [ggml.impl.ggml_c.QK_NVFP4 / 2]u8,
 };
 
 // -----------------------------------------------------------------------------
@@ -133,14 +133,14 @@ pub const NVFP4 = extern struct {
 
 /// Mirrors `block_tq1_0` (ggml-common.h:276 @b1b770d90). 1.6875 bpw.
 pub const TQ1_0 = extern struct {
-    qs: [(ggml.impl.c.QK_K - 4 * ggml.impl.c.QK_K / 64) / 5]u8,
-    qh: [ggml.impl.c.QK_K / 64]u8,
+    qs: [(ggml.impl.ggml_c.QK_K - 4 * ggml.impl.ggml_c.QK_K / 64) / 5]u8,
+    qh: [ggml.impl.ggml_c.QK_K / 64]u8,
     d: Half,
 };
 
 /// Mirrors `block_tq2_0` (ggml-common.h:284 @b1b770d90). 2.0625 bpw.
 pub const TQ2_0 = extern struct {
-    qs: [ggml.impl.c.QK_K / 4]u8,
+    qs: [ggml.impl.ggml_c.QK_K / 4]u8,
     d: Half,
 };
 
@@ -162,8 +162,8 @@ pub const TQ2_0 = extern struct {
 /// `x = d * q + dmin * m`, with both the scale and the min quantized to 4 bits
 /// and packed together in `scales`.
 pub const Q2_K = extern struct {
-    scales: [ggml.impl.c.QK_K / 16]u8,
-    qs: [ggml.impl.c.QK_K / 4]u8,
+    scales: [ggml.impl.ggml_c.QK_K / 16]u8,
+    qs: [ggml.impl.ggml_c.QK_K / 4]u8,
     d: Half align(4),
     dmin: Half,
 };
@@ -174,8 +174,8 @@ pub const Q2_K = extern struct {
 /// from the low two bits in `qs`. The 16 sub-block scales are 6-bit, packed
 /// into 12 bytes.
 pub const Q3_K = extern struct {
-    hmask: [ggml.impl.c.QK_K / 8]u8,
-    qs: [ggml.impl.c.QK_K / 4]u8,
+    hmask: [ggml.impl.ggml_c.QK_K / 8]u8,
+    qs: [ggml.impl.ggml_c.QK_K / 4]u8,
     scales: [12]u8,
     d: Half,
 };
@@ -184,17 +184,17 @@ pub const Q3_K = extern struct {
 pub const Q4_K = extern struct {
     d: Half align(4),
     dmin: Half,
-    scales: [ggml.impl.c.K_SCALE_SIZE]u8,
-    qs: [ggml.impl.c.QK_K / 2]u8,
+    scales: [ggml.impl.ggml_c.K_SCALE_SIZE]u8,
+    qs: [ggml.impl.ggml_c.QK_K / 2]u8,
 };
 
 /// Mirrors `block_q5_K` (ggml-common.h:344 @b1b770d90). 8 sub-blocks of 32, ~5.5 bpw.
 pub const Q5_K = extern struct {
     d: Half align(4),
     dmin: Half,
-    scales: [ggml.impl.c.K_SCALE_SIZE]u8,
-    qh: [ggml.impl.c.QK_K / 8]u8,
-    qs: [ggml.impl.c.QK_K / 2]u8,
+    scales: [ggml.impl.ggml_c.K_SCALE_SIZE]u8,
+    qh: [ggml.impl.ggml_c.QK_K / 8]u8,
+    qs: [ggml.impl.ggml_c.QK_K / 2]u8,
 };
 
 /// Mirrors `block_q6_K` (ggml-common.h:362 @b1b770d90). 16 sub-blocks of 16, ~6.5625 bpw.
@@ -202,9 +202,9 @@ pub const Q5_K = extern struct {
 /// Symmetric -- no `dmin` -- and its sub-block scales are full `int8`, not
 /// packed, which is what makes it the most accurate of the K-quants.
 pub const Q6_K = extern struct {
-    ql: [ggml.impl.c.QK_K / 2]u8,
-    qh: [ggml.impl.c.QK_K / 4]u8,
-    scales: [ggml.impl.c.QK_K / 16]i8,
+    ql: [ggml.impl.ggml_c.QK_K / 2]u8,
+    qh: [ggml.impl.ggml_c.QK_K / 4]u8,
+    scales: [ggml.impl.ggml_c.QK_K / 16]i8,
     d: Half,
 };
 
@@ -216,8 +216,8 @@ pub const Q6_K = extern struct {
 /// pass over the quants.
 pub const Q8_K = extern struct {
     d: f32,
-    qs: [ggml.impl.c.QK_K]i8,
-    bsums: [ggml.impl.c.QK_K / 16]i16,
+    qs: [ggml.impl.ggml_c.QK_K]i8,
+    bsums: [ggml.impl.ggml_c.QK_K / 16]i16,
 };
 
 // -----------------------------------------------------------------------------
@@ -236,14 +236,14 @@ pub const Q8_K = extern struct {
 /// Mirrors `block_iq2_xxs` (ggml-common.h:381 @b1b770d90). 2.0625 bpw.
 pub const IQ2_XXS = extern struct {
     d: Half,
-    qs: [ggml.impl.c.QK_K / 8]u16,
+    qs: [ggml.impl.ggml_c.QK_K / 8]u16,
 };
 
 /// Mirrors `block_iq2_xs` (ggml-common.h:388 @b1b770d90). 2.3125 bpw.
 pub const IQ2_XS = extern struct {
     d: Half,
-    qs: [ggml.impl.c.QK_K / 8]u16,
-    scales: [ggml.impl.c.QK_K / 32]u8,
+    qs: [ggml.impl.ggml_c.QK_K / 8]u16,
+    scales: [ggml.impl.ggml_c.QK_K / 32]u8,
 };
 
 /// Mirrors `block_iq2_s` (ggml-common.h:396 @b1b770d90). 2.5625 bpw.
@@ -252,9 +252,9 @@ pub const IQ2_XS = extern struct {
 /// which the C indexes as `qs + QK_K/8`. The struct is sized for both.
 pub const IQ2_S = extern struct {
     d: Half,
-    qs: [ggml.impl.c.QK_K / 4]u8,
-    qh: [ggml.impl.c.QK_K / 32]u8,
-    scales: [ggml.impl.c.QK_K / 32]u8,
+    qs: [ggml.impl.ggml_c.QK_K / 4]u8,
+    qh: [ggml.impl.ggml_c.QK_K / 32]u8,
+    scales: [ggml.impl.ggml_c.QK_K / 32]u8,
 };
 
 /// Mirrors `block_iq3_xxs` (ggml-common.h:407 @b1b770d90). 3.0625 bpw.
@@ -263,16 +263,16 @@ pub const IQ2_S = extern struct {
 /// scales and signs, which the C reaches as `qs + QK_K/4`.
 pub const IQ3_XXS = extern struct {
     d: Half,
-    qs: [3 * ggml.impl.c.QK_K / 8]u8,
+    qs: [3 * ggml.impl.ggml_c.QK_K / 8]u8,
 };
 
 /// Mirrors `block_iq3_s` (ggml-common.h:415 @b1b770d90). 3.4375 bpw.
 pub const IQ3_S = extern struct {
     d: Half,
-    qs: [ggml.impl.c.QK_K / 4]u8,
-    qh: [ggml.impl.c.QK_K / 32]u8,
-    signs: [ggml.impl.c.QK_K / 8]u8,
-    scales: [ggml.impl.c.QK_K / 64]u8,
+    qs: [ggml.impl.ggml_c.QK_K / 4]u8,
+    qh: [ggml.impl.ggml_c.QK_K / 32]u8,
+    signs: [ggml.impl.ggml_c.QK_K / 8]u8,
+    scales: [ggml.impl.ggml_c.QK_K / 64]u8,
 };
 
 /// Mirrors `block_iq1_s` (ggml-common.h:425 @b1b770d90). 1.5625 bpw.
@@ -281,8 +281,8 @@ pub const IQ3_S = extern struct {
 /// sub-block scale and one carries the sign of the delta.
 pub const IQ1_S = extern struct {
     d: Half,
-    qs: [ggml.impl.c.QK_K / 8]u8,
-    qh: [ggml.impl.c.QK_K / 32]u16,
+    qs: [ggml.impl.ggml_c.QK_K / 8]u8,
+    qh: [ggml.impl.ggml_c.QK_K / 32]u16,
 };
 
 /// Mirrors `block_iq1_m` (ggml-common.h:433 @b1b770d90). 1.75 bpw.
@@ -291,23 +291,23 @@ pub const IQ1_S = extern struct {
 /// a time across the top of the four `scales` shorts, and reassembled by
 /// `iq1mScale`. That is the whole reason `iq1m_scale_t` exists in the C.
 pub const IQ1_M = extern struct {
-    qs: [ggml.impl.c.QK_K / 8]u8,
-    qh: [ggml.impl.c.QK_K / 16]u8,
-    scales: [ggml.impl.c.QK_K / 32]u8,
+    qs: [ggml.impl.ggml_c.QK_K / 8]u8,
+    qh: [ggml.impl.ggml_c.QK_K / 16]u8,
+    scales: [ggml.impl.ggml_c.QK_K / 32]u8,
 };
 
 /// Mirrors `block_iq4_nl` (ggml-common.h:448 @b1b770d90). Non-linear 4-bit, 32 per block.
 pub const IQ4_NL = extern struct {
     d: Half,
-    qs: [ggml.impl.c.QK4_NL / 2]u8,
+    qs: [ggml.impl.ggml_c.QK4_NL / 2]u8,
 };
 
 /// Mirrors `block_iq4_xs` (ggml-common.h:454 @b1b770d90). Non-linear 4-bit, super-block.
 pub const IQ4_XS = extern struct {
     d: Half,
     scales_h: u16,
-    scales_l: [ggml.impl.c.QK_K / 64]u8,
-    qs: [ggml.impl.c.QK_K / 2]u8,
+    scales_l: [ggml.impl.ggml_c.QK_K / 64]u8,
+    qs: [ggml.impl.ggml_c.QK_K / 2]u8,
 };
 
 /// Ports `IQ1S_DELTA` and `IQ1M_DELTA` (ggml-common.h:1133 @b1b770d90).
@@ -347,33 +347,33 @@ fn layoutMatches(comptime Ours: type, comptime Theirs: type) void {
 }
 
 comptime {
-    layoutMatches(Q1_0, ggml.impl.c.block_q1_0);
-    layoutMatches(Q2_0, ggml.impl.c.block_q2_0);
-    layoutMatches(Q4_0, ggml.impl.c.block_q4_0);
-    layoutMatches(Q4_1, ggml.impl.c.block_q4_1);
-    layoutMatches(Q5_0, ggml.impl.c.block_q5_0);
-    layoutMatches(Q5_1, ggml.impl.c.block_q5_1);
-    layoutMatches(Q8_0, ggml.impl.c.block_q8_0);
-    layoutMatches(Q8_1, ggml.impl.c.block_q8_1);
-    layoutMatches(MXFP4, ggml.impl.c.block_mxfp4);
-    layoutMatches(NVFP4, ggml.impl.c.block_nvfp4);
-    layoutMatches(TQ1_0, ggml.impl.c.block_tq1_0);
-    layoutMatches(TQ2_0, ggml.impl.c.block_tq2_0);
-    layoutMatches(Q2_K, ggml.impl.c.block_q2_K);
-    layoutMatches(Q3_K, ggml.impl.c.block_q3_K);
-    layoutMatches(Q4_K, ggml.impl.c.block_q4_K);
-    layoutMatches(Q5_K, ggml.impl.c.block_q5_K);
-    layoutMatches(Q6_K, ggml.impl.c.block_q6_K);
-    layoutMatches(Q8_K, ggml.impl.c.block_q8_K);
-    layoutMatches(IQ2_XXS, ggml.impl.c.block_iq2_xxs);
-    layoutMatches(IQ2_XS, ggml.impl.c.block_iq2_xs);
-    layoutMatches(IQ2_S, ggml.impl.c.block_iq2_s);
-    layoutMatches(IQ3_XXS, ggml.impl.c.block_iq3_xxs);
-    layoutMatches(IQ3_S, ggml.impl.c.block_iq3_s);
-    layoutMatches(IQ1_S, ggml.impl.c.block_iq1_s);
-    layoutMatches(IQ1_M, ggml.impl.c.block_iq1_m);
-    layoutMatches(IQ4_NL, ggml.impl.c.block_iq4_nl);
-    layoutMatches(IQ4_XS, ggml.impl.c.block_iq4_xs);
+    layoutMatches(Q1_0, ggml.impl.ggml_c.block_q1_0);
+    layoutMatches(Q2_0, ggml.impl.ggml_c.block_q2_0);
+    layoutMatches(Q4_0, ggml.impl.ggml_c.block_q4_0);
+    layoutMatches(Q4_1, ggml.impl.ggml_c.block_q4_1);
+    layoutMatches(Q5_0, ggml.impl.ggml_c.block_q5_0);
+    layoutMatches(Q5_1, ggml.impl.ggml_c.block_q5_1);
+    layoutMatches(Q8_0, ggml.impl.ggml_c.block_q8_0);
+    layoutMatches(Q8_1, ggml.impl.ggml_c.block_q8_1);
+    layoutMatches(MXFP4, ggml.impl.ggml_c.block_mxfp4);
+    layoutMatches(NVFP4, ggml.impl.ggml_c.block_nvfp4);
+    layoutMatches(TQ1_0, ggml.impl.ggml_c.block_tq1_0);
+    layoutMatches(TQ2_0, ggml.impl.ggml_c.block_tq2_0);
+    layoutMatches(Q2_K, ggml.impl.ggml_c.block_q2_K);
+    layoutMatches(Q3_K, ggml.impl.ggml_c.block_q3_K);
+    layoutMatches(Q4_K, ggml.impl.ggml_c.block_q4_K);
+    layoutMatches(Q5_K, ggml.impl.ggml_c.block_q5_K);
+    layoutMatches(Q6_K, ggml.impl.ggml_c.block_q6_K);
+    layoutMatches(Q8_K, ggml.impl.ggml_c.block_q8_K);
+    layoutMatches(IQ2_XXS, ggml.impl.ggml_c.block_iq2_xxs);
+    layoutMatches(IQ2_XS, ggml.impl.ggml_c.block_iq2_xs);
+    layoutMatches(IQ2_S, ggml.impl.ggml_c.block_iq2_s);
+    layoutMatches(IQ3_XXS, ggml.impl.ggml_c.block_iq3_xxs);
+    layoutMatches(IQ3_S, ggml.impl.ggml_c.block_iq3_s);
+    layoutMatches(IQ1_S, ggml.impl.ggml_c.block_iq1_s);
+    layoutMatches(IQ1_M, ggml.impl.ggml_c.block_iq1_m);
+    layoutMatches(IQ4_NL, ggml.impl.ggml_c.block_iq4_nl);
+    layoutMatches(IQ4_XS, ggml.impl.ggml_c.block_iq4_xs);
 }
 
 // -----------------------------------------------------------------------------
@@ -387,16 +387,16 @@ test "the restated layouts agree with the C on every size" {
     // The comptime block above already fails the build on a mismatch. This
     // restates it as a test so the intent survives someone deleting the
     // comptime block, and so the sizes appear in the test output.
-    try std.testing.expectEqual(@sizeOf(ggml.impl.c.block_q1_0), @sizeOf(Q1_0));
-    try std.testing.expectEqual(@sizeOf(ggml.impl.c.block_q2_0), @sizeOf(Q2_0));
-    try std.testing.expectEqual(@sizeOf(ggml.impl.c.block_q4_0), @sizeOf(Q4_0));
-    try std.testing.expectEqual(@sizeOf(ggml.impl.c.block_q4_1), @sizeOf(Q4_1));
-    try std.testing.expectEqual(@sizeOf(ggml.impl.c.block_q5_0), @sizeOf(Q5_0));
-    try std.testing.expectEqual(@sizeOf(ggml.impl.c.block_q5_1), @sizeOf(Q5_1));
-    try std.testing.expectEqual(@sizeOf(ggml.impl.c.block_q8_0), @sizeOf(Q8_0));
-    try std.testing.expectEqual(@sizeOf(ggml.impl.c.block_q8_1), @sizeOf(Q8_1));
-    try std.testing.expectEqual(@sizeOf(ggml.impl.c.block_mxfp4), @sizeOf(MXFP4));
-    try std.testing.expectEqual(@sizeOf(ggml.impl.c.block_nvfp4), @sizeOf(NVFP4));
+    try std.testing.expectEqual(@sizeOf(ggml.impl.ggml_c.block_q1_0), @sizeOf(Q1_0));
+    try std.testing.expectEqual(@sizeOf(ggml.impl.ggml_c.block_q2_0), @sizeOf(Q2_0));
+    try std.testing.expectEqual(@sizeOf(ggml.impl.ggml_c.block_q4_0), @sizeOf(Q4_0));
+    try std.testing.expectEqual(@sizeOf(ggml.impl.ggml_c.block_q4_1), @sizeOf(Q4_1));
+    try std.testing.expectEqual(@sizeOf(ggml.impl.ggml_c.block_q5_0), @sizeOf(Q5_0));
+    try std.testing.expectEqual(@sizeOf(ggml.impl.ggml_c.block_q5_1), @sizeOf(Q5_1));
+    try std.testing.expectEqual(@sizeOf(ggml.impl.ggml_c.block_q8_0), @sizeOf(Q8_0));
+    try std.testing.expectEqual(@sizeOf(ggml.impl.ggml_c.block_q8_1), @sizeOf(Q8_1));
+    try std.testing.expectEqual(@sizeOf(ggml.impl.ggml_c.block_mxfp4), @sizeOf(MXFP4));
+    try std.testing.expectEqual(@sizeOf(ggml.impl.ggml_c.block_nvfp4), @sizeOf(NVFP4));
 
     // The three union-bearing formats align to 4, not 2: `ggml_half2` is a
     // four-byte type and the union inherits its alignment.

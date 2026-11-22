@@ -143,11 +143,11 @@ pub const DotFn = *const fn (
 ///
 /// The reference quantizer, not `ggml_quantize_chunk`: that has no case for
 /// `q8_1` or `q8_K` at all, and one path for all three is less to get wrong.
-fn quantY(t: ggml.impl.c.enum_ggml_type, src: [*c]const f32, dst: *anyopaque, n: i64) !void {
+fn quantY(t: ggml.impl.ggml_c.enum_ggml_type, src: [*c]const f32, dst: *anyopaque, n: i64) !void {
     switch (t) {
-        ggml.impl.c.GGML_TYPE_Q8_0 => ggml.quants.legacy.quantize_row_q8_0_ref(src, @ptrCast(@alignCast(dst)), n),
-        ggml.impl.c.GGML_TYPE_Q8_1 => ggml.quants.legacy.quantize_row_q8_1_ref(src, @ptrCast(@alignCast(dst)), n),
-        ggml.impl.c.GGML_TYPE_Q8_K => ggml.quants.k.quantize_row_q8_K_ref(src, @ptrCast(@alignCast(dst)), n),
+        ggml.impl.ggml_c.GGML_TYPE_Q8_0 => ggml.quants.legacy.quantize_row_q8_0_ref(src, @ptrCast(@alignCast(dst)), n),
+        ggml.impl.ggml_c.GGML_TYPE_Q8_1 => ggml.quants.legacy.quantize_row_q8_1_ref(src, @ptrCast(@alignCast(dst)), n),
+        ggml.impl.ggml_c.GGML_TYPE_Q8_K => ggml.quants.k.quantize_row_q8_K_ref(src, @ptrCast(@alignCast(dst)), n),
         else => return error.UnexpectedVecDotType,
     }
 }
@@ -162,7 +162,7 @@ fn quantY(t: ggml.impl.c.enum_ggml_type, src: [*c]const f32, dst: *anyopaque, n:
 ///
 /// Return: nothing; fails the test on the first pattern that differs, naming
 /// the pattern and printing both values in decimal and in hex.
-pub fn check(dot: DotFn, xt: ggml.impl.c.enum_ggml_type, yt: ggml.impl.c.enum_ggml_type, g: anytype) !void {
+pub fn check(dot: DotFn, xt: ggml.impl.ggml_c.enum_ggml_type, yt: ggml.impl.ggml_c.enum_ggml_type, g: anytype) !void {
     // The NEON `nvfp4` kernel reads `ggml_table_f32_ue4m3`, which only
     // `ggml_cpu_init` fills. A test binary never runs a graph, so nothing else
     // would call it, and every scale would be zero. Idempotent.
@@ -222,7 +222,7 @@ pub const RowFn = *const fn (x: [*c]const f32, y: ?*anyopaque, k: i64) callconv(
 /// - `g`: the golden row for this quantizer.
 ///
 /// Return: nothing; fails on the first pattern whose output checksum differs.
-pub fn checkRow(quant: RowFn, t: ggml.impl.c.enum_ggml_type, g: anytype) !void {
+pub fn checkRow(quant: RowFn, t: ggml.impl.ggml_c.enum_ggml_type, g: anytype) !void {
     ggml.cpu.features.ggml_cpu_init();
     try expectNotAllZero(g);
 

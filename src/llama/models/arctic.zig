@@ -122,11 +122,11 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         }
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The feed-forward network.
@@ -136,7 +136,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         cur = b.buildFfn(cur, layer.ffn_up, null, null, layer.ffn_gate, null, null, layer.ffn_down, null, null, null, .silu, .par, il);
         b.cb(cur, "ffn_out", il);
 
-        const ffn_out: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        const ffn_out: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
         b.cb(ffn_out, "ffn_out", il);
 
         // The mixture of experts, on the attention block's input.
@@ -157,7 +157,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         }, il);
         b.cb(cur, "ffn_moe_out", il);
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_out);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_out);
         b.cb(cur, "ffn_out", il);
 
         cur = b.buildCvec(cur, il);

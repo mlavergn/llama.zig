@@ -343,15 +343,15 @@ fn resolveGrammar(gpa: std.mem.Allocator, io: std.Io, src: mod.args.GrammarSourc
     };
     if (src == .gbnf_file) return text;
 
-    var value = mod.json.parse(gpa, text) catch |e| {
+    var value = mod.cli_fit.json.parse(gpa, text) catch |e| {
         if (e == error.OutOfMemory) return e;
-        try grammar_error.appendSlice(gpa, mod.json.what());
+        try grammar_error.appendSlice(gpa, mod.cli_fit.json.what());
         return error.GrammarSource;
     };
     defer value.deinit(gpa);
-    return mod.json.schema_to_grammar.jsonSchemaToGrammar(gpa, &value, false) catch |e| {
+    return mod.cli_fit.json.schema_to_grammar.jsonSchemaToGrammar(gpa, &value, false) catch |e| {
         if (e == error.OutOfMemory) return error.OutOfMemory;
-        try grammar_error.appendSlice(gpa, mod.json.schema.what());
+        try grammar_error.appendSlice(gpa, mod.cli_fit.json.schema.what());
         return error.GrammarSource;
     };
 }
@@ -366,7 +366,7 @@ fn resolveGrammar(gpa: std.mem.Allocator, io: std.Io, src: mod.args.GrammarSourc
 /// Return: nothing.
 fn quietLog(level: c_uint, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
     _ = user_data;
-    if (level == llama.impl.c.GGML_LOG_LEVEL_ERROR or level == llama.impl.c.GGML_LOG_LEVEL_WARN) {
+    if (level == llama.impl.llama_c.GGML_LOG_LEVEL_ERROR or level == llama.impl.llama_c.GGML_LOG_LEVEL_WARN) {
         std.debug.print("{s}", .{std.mem.span(text)});
     }
 }

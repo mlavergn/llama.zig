@@ -13,25 +13,16 @@
 const std = @import("std");
 const json = @import("json");
 const peg = @import("peg");
-const errors = peg.errors;
-const arena_mod = peg.arena;
 
-const Allocator = std.mem.Allocator;
-const Error = errors.Error;
-const Arena = arena_mod.Arena;
-const Parser = arena_mod.Parser;
-const ParserId = arena_mod.ParserId;
-const Value = json.Value;
-
-fn je(e: json.Error) Error {
-    return errors.fromJson(e);
+fn je(e: json.Error) peg.errors.Error {
+    return peg.errors.fromJson(e);
 }
 
-fn str(gpa: Allocator, s: []const u8) Error!Value {
-    return Value.initString(gpa, s) catch |e| je(e);
+fn str(gpa: std.mem.Allocator, s: []const u8) peg.errors.Error!json.Value {
+    return json.Value.initString(gpa, s) catch |e| je(e);
 }
 
-fn put(gpa: Allocator, o: *Value, key: []const u8, v: Value) Error!void {
+fn put(gpa: std.mem.Allocator, o: *json.Value, key: []const u8, v: json.Value) peg.errors.Error!void {
     var val = v;
     o.set(gpa, key, val) catch |e| {
         val.deinit(gpa);
@@ -39,22 +30,22 @@ fn put(gpa: Allocator, o: *Value, key: []const u8, v: Value) Error!void {
     };
 }
 
-fn idArray(gpa: Allocator, ids: []const ParserId) Error!Value {
-    var arr = Value.emptyArray();
+fn idArray(gpa: std.mem.Allocator, ids: []const peg.arena.ParserId) peg.errors.Error!json.Value {
+    var arr = json.Value.emptyArray();
     errdefer arr.deinit(gpa);
     for (ids) |id| arr.pushBack(gpa, .{ .number_unsigned = id }) catch |e| return je(e);
     return arr;
 }
 
-fn strArray(gpa: Allocator, list: []const []const u8) Error!Value {
-    var arr = Value.emptyArray();
+fn strArray(gpa: std.mem.Allocator, list: []const []const u8) peg.errors.Error!json.Value {
+    var arr = json.Value.emptyArray();
     errdefer arr.deinit(gpa);
     for (list) |s| arr.pushBack(gpa, try str(gpa, s)) catch |e| return je(e);
     return arr;
 }
 
-fn typed(gpa: Allocator, t: []const u8) Error!Value {
-    var o = Value.emptyObject();
+fn typed(gpa: std.mem.Allocator, t: []const u8) peg.errors.Error!json.Value {
+    var o = json.Value.emptyObject();
     errdefer o.deinit(gpa);
     try put(gpa, &o, "type", try str(gpa, t));
     return o;
@@ -63,7 +54,7 @@ fn typed(gpa: Allocator, t: []const u8) Error!Value {
 /// One parser, as the old `serialize_parser_variant` wrote it.
 ///
 /// Return: owned by the caller.
-fn serializeParser(gpa: Allocator, parser: *const Parser) Error!Value {
+fn serializeParser(gpa: std.mem.Allocator, parser: *const peg.arena.Parser) peg.errors.Error!json.Value {
     const name: []const u8 = switch (parser.*) {
         .epsilon => "epsilon",
         .start => "start",
@@ -100,10 +91,10 @@ fn serializeParser(gpa: Allocator, parser: *const Parser) Error!Value {
         },
         .and_, .not_, .atomic => |c| try put(gpa, &o, "child", .{ .number_unsigned = c }),
         .chars => |p| {
-            var ranges = Value.emptyArray();
+            var ranges = json.Value.emptyArray();
             errdefer ranges.deinit(gpa);
             for (p.ranges) |r| {
-                var ro = Value.emptyObject();
+                var ro = json.Value.emptyObject();
                 errdefer ro.deinit(gpa);
                 try put(gpa, &ro, "start", .{ .number_unsigned = r.start });
                 try put(gpa, &ro, "end", .{ .number_unsigned = r.end });
@@ -147,12 +138,12 @@ fn serializeParser(gpa: Allocator, parser: *const Parser) Error!Value {
 /// The arena, as the old `to_json` wrote it, its rules sorted by name.
 ///
 /// Return: owned by the caller.
-pub fn toJson(gpa: Allocator, arena: *const Arena) Error!Value {
-    var parsers = Value.emptyArray();
+pub fn toJson(gpa: std.mem.Allocator, arena: *const peg.arena.Arena) peg.errors.Error!json.Value {
+    var parsers = json.Value.emptyArray();
     errdefer parsers.deinit(gpa);
     for (arena.parsers.items) |*p| parsers.pushBack(gpa, try serializeParser(gpa, p)) catch |e| return je(e);
 
-    const Entry = struct { key: []const u8, id: ParserId };
+    const Entry = struct { key: []const u8, id: peg.arena.ParserId };
     var entries: std.ArrayList(Entry) = .empty;
     defer entries.deinit(gpa);
     var it = arena.rules.iterator();
@@ -162,11 +153,11 @@ pub fn toJson(gpa: Allocator, arena: *const Arena) Error!Value {
             return std.mem.order(u8, x.key, y.key) == .lt;
         }
     }.lt);
-    var rules = Value.emptyObject();
+    var rules = json.Value.emptyObject();
     errdefer rules.deinit(gpa);
     for (entries.items) |e| try put(gpa, &rules, e.key, .{ .number_unsigned = e.id });
 
-    var o = Value.emptyObject();
+    var o = json.Value.emptyObject();
     errdefer o.deinit(gpa);
     try put(gpa, &o, "parsers", parsers);
     try put(gpa, &o, "rules", rules);
@@ -178,7 +169,7 @@ pub fn toJson(gpa: Allocator, arena: *const Arena) Error!Value {
 ///
 /// Return: owned by the caller; `JsonError` when a string in it is not
 /// UTF-8.
-pub fn save(gpa: Allocator, arena: *const Arena) Error![]u8 {
+pub fn save(gpa: std.mem.Allocator, arena: *const peg.arena.Arena) peg.errors.Error![]u8 {
     var v = try toJson(gpa, arena);
     defer v.deinit(gpa);
     return json.dump(gpa, &v, -1) catch |e| je(e);

@@ -37,8 +37,6 @@ const stdlib = @import("stdlib");
 const json = @import("json");
 const peg = @import("peg");
 
-const Allocator = std.mem.Allocator;
-
 fn fromJson(e: json.Error) peg.Error {
     return peg.errors.fromJson(e);
 }
@@ -127,7 +125,7 @@ fn jsonBraceDepth(s: []const u8) c_int {
 /// `common_json(s).dump()`: `s` as a JSON string, quoted.
 ///
 /// Return: owned by the caller; `JsonError` when `s` is not UTF-8.
-fn dumpString(gpa: Allocator, s: []const u8) peg.Error![]u8 {
+fn dumpString(gpa: std.mem.Allocator, s: []const u8) peg.Error![]u8 {
     var v = json.Value.initString(gpa, s) catch |e| return fromJson(e);
     defer v.deinit(gpa);
     return json.dump(gpa, &v, -1) catch |e| fromJson(e);
@@ -137,7 +135,7 @@ fn dumpString(gpa: Allocator, s: []const u8) peg.Error![]u8 {
 /// `s` JSON-escaped, without the quotes.
 ///
 /// Return: owned by the caller.
-fn escapeJsonStringInner(gpa: Allocator, s: []const u8) peg.Error![]u8 {
+fn escapeJsonStringInner(gpa: std.mem.Allocator, s: []const u8) peg.Error![]u8 {
     const escaped = try dumpString(gpa, s);
     if (escaped.len >= 2 and escaped[0] == '"' and escaped[escaped.len - 1] == '"') {
         defer gpa.free(escaped);
@@ -152,7 +150,7 @@ fn escapeJsonStringInner(gpa: Allocator, s: []const u8) peg.Error![]u8 {
 /// as JSON's literals.
 ///
 /// Return: owned by the caller.
-pub fn normalizeQuotesToJson(gpa: Allocator, input: []const u8) peg.Error![]u8 {
+pub fn normalizeQuotesToJson(gpa: std.mem.Allocator, input: []const u8) peg.Error![]u8 {
     var result: std.ArrayList(u8) = .empty;
     errdefer result.deinit(gpa);
     try result.ensureTotalCapacity(gpa, input.len + 16);
@@ -245,14 +243,14 @@ pub fn normalizeQuotesToJson(gpa: Allocator, input: []const u8) peg.Error![]u8 {
 }
 
 /// Replaces `field` with a copy of `s`.
-fn setStr(gpa: Allocator, field: *[]const u8, s: []const u8) peg.Error!void {
+fn setStr(gpa: std.mem.Allocator, field: *[]const u8, s: []const u8) peg.Error!void {
     const copy = try gpa.dupe(u8, s);
     gpa.free(field.*);
     field.* = copy;
 }
 
 /// `field += s`.
-fn appendStr(gpa: Allocator, field: *[]const u8, s: []const u8) peg.Error!void {
+fn appendStr(gpa: std.mem.Allocator, field: *[]const u8, s: []const u8) peg.Error!void {
     if (s.len == 0) return;
     const out = try gpa.alloc(u8, field.len + s.len);
     @memcpy(out[0..field.len], field.*);
@@ -263,7 +261,7 @@ fn appendStr(gpa: Allocator, field: *[]const u8, s: []const u8) peg.Error!void {
 
 /// `field += node.sanitized_text()`: the node's text with every invalid
 /// UTF-8 run replaced by U+FFFD.
-fn appendSanitized(gpa: Allocator, field: *[]const u8, node: *const peg.AstNode) peg.Error!void {
+fn appendSanitized(gpa: std.mem.Allocator, field: *[]const u8, node: *const peg.AstNode) peg.Error!void {
     if (node.invalid_utf8.len == 0) return appendStr(gpa, field, node.text);
     const text = try node.sanitizedText(gpa);
     defer gpa.free(text);
@@ -278,7 +276,7 @@ fn appendSanitized(gpa: Allocator, field: *[]const u8, node: *const peg.AstNode)
 pub const TagMap = struct {
     pub const Entry = struct { key: []const u8, value: []const u8 };
 
-    gpa: Allocator,
+    gpa: std.mem.Allocator,
     /// sorted bytewise by key
     entries: std.ArrayList(Entry) = .empty,
 
@@ -352,7 +350,7 @@ pub const TaggedPegParser = struct {
         return self;
     }
 
-    fn extract(gpa: Allocator, ctx: *peg.ParseContext, result: peg.ParseResult) peg.Error!TaggedParseResult {
+    fn extract(gpa: std.mem.Allocator, ctx: *peg.ParseContext, result: peg.ParseResult) peg.Error!TaggedParseResult {
         var tags: TagMap = .{ .gpa = gpa };
         errdefer tags.deinit();
         try tags.fromAst(&ctx.ast, &result);
@@ -366,7 +364,7 @@ pub const TaggedPegParser = struct {
     /// Ports `parse_and_extract` (chat-peg-parser.cpp:202 @b1b770d90).
     ///
     /// Return: owned by the caller; free with `deinit`.
-    pub fn parseAndExtract(self: *const TaggedPegParser, gpa: Allocator, input: []const u8, extra_flags: u32) peg.Error!TaggedParseResult {
+    pub fn parseAndExtract(self: *const TaggedPegParser, gpa: std.mem.Allocator, input: []const u8, extra_flags: u32) peg.Error!TaggedParseResult {
         var ctx = try peg.ParseContext.init(gpa, input, self.flags | extra_flags);
         defer ctx.deinit();
         const result = try self.arena.parse(&ctx, 0);
@@ -378,7 +376,7 @@ pub const TaggedPegParser = struct {
     /// result.
     ///
     /// Return: owned by the caller; free with `deinit`.
-    pub fn parseAnywhereAndExtract(self: *const TaggedPegParser, gpa: Allocator, input: []const u8) peg.Error!TaggedParseResult {
+    pub fn parseAnywhereAndExtract(self: *const TaggedPegParser, gpa: std.mem.Allocator, input: []const u8) peg.Error!TaggedParseResult {
         if (input.len == 0) return self.parseAndExtract(gpa, input, peg.Flags.none);
         for (0..input.len) |i| {
             var ctx = try peg.ParseContext.init(gpa, input, self.flags);
@@ -391,7 +389,7 @@ pub const TaggedPegParser = struct {
 };
 
 /// Ports `build_tagged_peg_parser` (chat-peg-parser.cpp:228 @b1b770d90).
-pub fn buildTaggedPegParser(gpa: Allocator, ctx: anytype, comptime f: fn (@TypeOf(ctx), *peg.Builder) peg.Error!peg.ParserId) peg.Error!TaggedPegParser {
+pub fn buildTaggedPegParser(gpa: std.mem.Allocator, ctx: anytype, comptime f: fn (@TypeOf(ctx), *peg.Builder) peg.Error!peg.ParserId) peg.Error!TaggedPegParser {
     return .{ .arena = try peg.buildPegParser(gpa, ctx, f) };
 }
 
@@ -437,7 +435,7 @@ pub const Mapper = struct {
     /// Where `current_tool` points; `closed` is null, set by a `tool-close`.
     const Current = union(enum) { none, pending, result: usize, closed };
 
-    gpa: Allocator,
+    gpa: std.mem.Allocator,
     result: *mod.msg.Msg,
     kind: Kind = .base,
     pending_tool_call: ?mod.msg.ToolCall = null,
@@ -450,7 +448,7 @@ pub const Mapper = struct {
     after_close: bool = false,
 
     /// Return: a mapper writing into `result`, whose strings `gpa` owns.
-    pub fn init(gpa: Allocator, result: *mod.msg.Msg, kind: Kind) Mapper {
+    pub fn init(gpa: std.mem.Allocator, result: *mod.msg.Msg, kind: Kind) Mapper {
         return .{ .gpa = gpa, .result = result, .kind = kind };
     }
 
@@ -778,7 +776,7 @@ pub const Mapper = struct {
 
     /// Ports `minimax_m3_collect` (chat-peg-parser.cpp:1108 @b1b770d90): the
     /// nearest descendants tagged `tag`.
-    fn minimaxCollect(gpa: Allocator, arena: *const peg.AstArena, node: *const peg.AstNode, tag: []const u8, out: *std.ArrayList(peg.AstId)) peg.Error!void {
+    fn minimaxCollect(gpa: std.mem.Allocator, arena: *const peg.AstArena, node: *const peg.AstNode, tag: []const u8, out: *std.ArrayList(peg.AstId)) peg.Error!void {
         for (node.children) |child_id| {
             const child = try arena.get(child_id);
             if (std.mem.eql(u8, child.tag, tag)) {
@@ -913,7 +911,7 @@ pub const ChatBuilder = struct {
     pub const TOOL_ARG_VALUE = "tool-arg-value";
     pub const TOOL_ARG_STRING_VALUE = "tool-arg-string-value";
 
-    pub fn init(gpa: Allocator) peg.Error!ChatBuilder {
+    pub fn init(gpa: std.mem.Allocator) peg.Error!ChatBuilder {
         return .{ .b = try peg.Builder.init(gpa) };
     }
 
@@ -921,11 +919,11 @@ pub const ChatBuilder = struct {
         self.b.deinit();
     }
 
-    fn alloc(self: *ChatBuilder) Allocator {
+    fn alloc(self: *ChatBuilder) std.mem.Allocator {
         return self.b.arena.gpa;
     }
 
-    fn tmp(self: *ChatBuilder) Allocator {
+    fn tmp(self: *ChatBuilder) std.mem.Allocator {
         return self.b.arena.alloc();
     }
 
@@ -1653,7 +1651,7 @@ pub const ChatBuilder = struct {
 /// Ports `build_chat_peg_parser` (chat-peg-parser.h:194 @b1b770d90).
 ///
 /// Return: the arena, owned by the caller.
-pub fn buildChatPegParser(gpa: Allocator, ctx: anytype, comptime f: fn (@TypeOf(ctx), *ChatBuilder) peg.Error!peg.ParserId) peg.Error!peg.Arena {
+pub fn buildChatPegParser(gpa: std.mem.Allocator, ctx: anytype, comptime f: fn (@TypeOf(ctx), *ChatBuilder) peg.Error!peg.ParserId) peg.Error!peg.Arena {
     var cb = try ChatBuilder.init(gpa);
     defer cb.deinit();
     cb.b.setRoot(try f(ctx, &cb));

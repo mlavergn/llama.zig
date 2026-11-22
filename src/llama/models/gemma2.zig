@@ -84,9 +84,9 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadK(0);
 
-    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.llama_c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
 
-    inpL = llama.impl.c.ggml_scale(ctx, inpL, stdlib.libm.sqrtfInt(b.n_embd));
+    inpL = llama.impl.llama_c.ggml_scale(ctx, inpL, stdlib.libm.sqrtfInt(b.n_embd));
     b.cb(inpL, "inp_scaled", -1);
 
     // The positions.
@@ -119,18 +119,18 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             b.cb(Kcur, "Kcur", il);
             b.cb(Vcur, "Vcur", il);
 
-            Qcur = llama.impl.c.ggml_scale(ctx, Qcur, hp.f_attention_scale);
+            Qcur = llama.impl.llama_c.ggml_scale(ctx, Qcur, hp.f_attention_scale);
 
             cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0, il);
         }
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpL = llama.impl.llama_c.ggml_get_rows(ctx, inpL, inp_out_ids);
         }
         cur = b.buildNorm(cur, layer.attn_post_norm, null, .rms, il);
         b.cb(cur, "attn_post_norm", il);
 
-        const sa_out: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpL);
+        const sa_out: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpL);
         b.cb(sa_out, "sa_out", il);
 
         cur = b.buildNorm(sa_out, layer.ffn_norm, null, .rms, il);
@@ -144,7 +144,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
         cur = b.buildNorm(cur, layer.ffn_post_norm, null, .rms, -1);
         b.cb(cur, "ffn_post_norm", -1);
 
-        cur = llama.impl.c.ggml_add(ctx, cur, sa_out);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, sa_out);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
@@ -163,9 +163,9 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     cur = b.buildLoraMm(model.output.?, cur, model.output_s);
 
     // Final logit soft-capping.
-    cur = llama.impl.c.ggml_scale(ctx, cur, 1.0 / hp.f_final_logit_softcapping);
-    cur = llama.impl.c.ggml_tanh(ctx, cur);
-    cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_final_logit_softcapping);
+    cur = llama.impl.llama_c.ggml_scale(ctx, cur, 1.0 / hp.f_final_logit_softcapping);
+    cur = llama.impl.llama_c.ggml_tanh(ctx, cur);
+    cur = llama.impl.llama_c.ggml_scale(ctx, cur, hp.f_final_logit_softcapping);
 
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;

@@ -68,14 +68,14 @@ inline fn qsOf(b: *const ggml.cpu.repack.blocks.block_q1_0x4) [*]const u8 {
 }
 
 /// `vcvt_f32_f16(vld1_f16(d))` over a block's four scales.
-inline fn scales4(d: *const [4]ggml.impl.c.ggml_half) ggml.cpu.quants.arch.neon.f32x4 {
+inline fn scales4(d: *const [4]ggml.impl.ggml_c.ggml_half) ggml.cpu.quants.arch.neon.f32x4 {
     return ggml.cpu.quants.arch.neon.cvt_f32_f16(ggml.cpu.quants.arch.neon.load_f16x4(@ptrCast(d)));
 }
 
 /// Ports `ggml_gemv_q1_0_4x4_q8_0` (arch/arm/repack.cpp:1963 @b1b770d90).
-pub export fn ggml_gemv_q1_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemv_q1_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.q1_0.ggml_gemv_q1_0_4x4_q8_0_generic(n, s_out, bs, vx, vy, nr, nc);
-    const qk: c_int = ggml.impl.c.QK1_0;
+    const qk: c_int = ggml.impl.ggml_c.QK1_0;
     const nb: usize = @intCast(@divTrunc(n, qk));
     const ncols_interleaved: c_int = 4;
 
@@ -83,7 +83,7 @@ pub export fn ggml_gemv_q1_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
     var col: c_int = 0;
     while (col < nc) : (col += ncols_interleaved) {
         const b_ptr = @as([*]const ggml.cpu.repack.blocks.block_q1_0x4, @ptrCast(@alignCast(vx))) + @as(usize, @intCast(@divTrunc(col, ncols_interleaved))) * nb;
-        const a_ptr: [*]const ggml.impl.c.block_q8_0 = @ptrCast(@alignCast(vy));
+        const a_ptr: [*]const ggml.impl.ggml_c.block_q8_0 = @ptrCast(@alignCast(vy));
         var acc: ggml.cpu.quants.arch.neon.f32x4 = @splat(0);
 
         for (0..nb) |l| {
@@ -120,9 +120,9 @@ pub export fn ggml_gemv_q1_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
 }
 
 /// Ports `ggml_gemv_q1_0_4x8_q8_0` (arch/arm/repack.cpp:2024 @b1b770d90).
-pub export fn ggml_gemv_q1_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemv_q1_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.q1_0.ggml_gemv_q1_0_4x8_q8_0_generic(n, s_out, bs, vx, vy, nr, nc);
-    const qk: c_int = ggml.impl.c.QK1_0;
+    const qk: c_int = ggml.impl.ggml_c.QK1_0;
     const nb: usize = @intCast(@divTrunc(n, qk));
     const ncols_interleaved: c_int = 4;
 
@@ -130,7 +130,7 @@ pub export fn ggml_gemv_q1_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
     var col: c_int = 0;
     while (col < nc) : (col += ncols_interleaved) {
         const b_ptr = @as([*]const ggml.cpu.repack.blocks.block_q1_0x4, @ptrCast(@alignCast(vx))) + @as(usize, @intCast(@divTrunc(col, ncols_interleaved))) * nb;
-        const a_ptr: [*]const ggml.impl.c.block_q8_0 = @ptrCast(@alignCast(vy));
+        const a_ptr: [*]const ggml.impl.ggml_c.block_q8_0 = @ptrCast(@alignCast(vy));
         var acc: ggml.cpu.quants.arch.neon.f32x4 = @splat(0);
 
         for (0..nb) |l| {
@@ -171,9 +171,9 @@ pub export fn ggml_gemv_q1_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
 }
 
 /// Ports `ggml_gemm_q1_0_4x4_q8_0` (arch/arm/repack.cpp:5608 @b1b770d90).
-pub export fn ggml_gemm_q1_0_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemm_q1_0_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.q1_0.ggml_gemm_q1_0_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
-    const qk: c_int = ggml.impl.c.QK1_0;
+    const qk: c_int = ggml.impl.ggml_c.QK1_0;
     const nb: usize = @intCast(@divTrunc(n, qk));
     const ncols_interleaved = 4;
 
@@ -225,9 +225,9 @@ pub export fn ggml_gemm_q1_0_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const
 
 /// Ports `ggml_gemm_q1_0_4x8_q8_0` (arch/arm/repack.cpp:5686 @b1b770d90),
 /// the `__ARM_FEATURE_MATMUL_INT8` arm.
-pub export fn ggml_gemm_q1_0_4x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemm_q1_0_4x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !ggml.cpu.quants.arch.neon.has_i8mm) return ggml.cpu.repack.q1_0.ggml_gemm_q1_0_4x8_q8_0_generic(n, s, bs, vx, vy, nr, nc);
-    const qk: c_int = ggml.impl.c.QK1_0;
+    const qk: c_int = ggml.impl.ggml_c.QK1_0;
     const nb: usize = @intCast(@divTrunc(n, qk));
     const ncols_interleaved = 4;
 

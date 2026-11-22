@@ -95,20 +95,20 @@ inline fn quantizeQ8(comptime Block: type, x_in: [*c]const f32, vy: ?*anyopaque,
 
 /// Ports `quantize_row_q8_0` (arch/x86/quants.c:302 @b1b770d90), the
 /// `__AVX2__ || __AVX__` arm with its `__AVX2__` pack.
-pub export fn quantize_row_q8_0(x: [*c]const f32, vy: ?*anyopaque, k: i64) void {
+pub fn quantize_row_q8_0(x: [*c]const f32, vy: ?*anyopaque, k: i64) callconv(.c) void {
     quantizeQ8(ggml.quants.blocks.Q8_0, x, vy, k);
 }
 
 /// Ports `quantize_row_q8_1` (arch/x86/quants.c:400 @b1b770d90), the
 /// `__AVX2__ || __AVX__` arm with its `__AVX2__` pack and sum.
-pub export fn quantize_row_q8_1(x: [*c]const f32, vy: ?*anyopaque, k: i64) void {
+pub fn quantize_row_q8_1(x: [*c]const f32, vy: ?*anyopaque, k: i64) callconv(.c) void {
     quantizeQ8(ggml.quants.blocks.Q8_1, x, vy, k);
 }
 
 /// Ports `quantize_row_q8_K` (arch/x86/quants.c:505 @b1b770d90): on x86 it
 /// has no vector arm, and calls `ggml-quants.c`'s reference quantizer as it
 /// stands.
-pub export fn quantize_row_q8_K(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
+pub fn quantize_row_q8_K(x: [*c]const f32, y: ?*anyopaque, k: i64) callconv(.c) void {
     ggml.quants.k.quantize_row_q8_K_ref(x, @ptrCast(@alignCast(y)), k);
 }
 

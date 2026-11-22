@@ -92,7 +92,7 @@ fn makeBlockQ1_0x4(in: *const [4]ggml.quants.blocks.Q1_0, blck_size_interleave: 
     ggml.impl.assert(blck_size_interleave == 4 or blck_size_interleave == 8, "blck_size_interleave == 4 || blck_size_interleave == 8");
 
     if (blck_size_interleave == 4) {
-        for (0..ggml.impl.c.QK1_0 / QK8_0) |k| {
+        for (0..ggml.impl.ggml_c.QK1_0 / QK8_0) |k| {
             for (0..QK8_0 / 4) |tile| {
                 var packed_lo: u8 = 0;
                 var packed_hi: u8 = 0;
@@ -117,7 +117,7 @@ fn makeBlockQ1_0x4(in: *const [4]ggml.quants.blocks.Q1_0, blck_size_interleave: 
         return out;
     }
 
-    for (0..ggml.impl.c.QK1_0 / 8) |byte_idx| {
+    for (0..ggml.impl.ggml_c.QK1_0 / 8) |byte_idx| {
         out.qs[byte_idx * 4 + 0] = @bitCast(in[0].qs[byte_idx]);
         out.qs[byte_idx * 4 + 1] = @bitCast(in[1].qs[byte_idx]);
         out.qs[byte_idx * 4 + 2] = @bitCast(in[2].qs[byte_idx]);
@@ -456,11 +456,11 @@ fn Repacker(
     comptime make: fn (*const [rows]Src, u32) Dst,
 ) type {
     return struct {
-        fn run(t: *ggml.impl.c.ggml_tensor, interleave_block: c_int, data: *const anyopaque, data_size: usize) callconv(.c) c_int {
+        fn run(t: *ggml.impl.ggml_c.ggml_tensor, interleave_block: c_int, data: *const anyopaque, data_size: usize) callconv(.c) c_int {
             const dst_base: [*]Dst = @ptrCast(@alignCast(t.data.?));
             const src_base: [*]const Src = @ptrCast(@alignCast(data));
             var dst_tmp: [rows]Src = undefined;
-            const nrow: usize = @intCast(ggml.impl.c.ggml_nrows(t));
+            const nrow: usize = @intCast(ggml.impl.ggml_c.ggml_nrows(t));
             const nblocks: usize = @intCast(@divTrunc(t.ne[0], qk));
 
             ggml.impl.assert(data_size == nrow * nblocks * @sizeOf(Src), "data_size matches the tensor");
@@ -488,7 +488,7 @@ fn Repacker(
 
 /// Ports `repack_q1_0_to_q1_0_4_bl` (ggml-cpu/repack.cpp:3853 @b1b770d90),
 /// one of the three without the `t->ne[0] % 8` guard.
-pub const repackQ1_0toQ1_0_4 = Repacker(ggml.quants.blocks.Q1_0, ggml.cpu.repack.blocks.block_q1_0x4, 4, ggml.impl.c.QK1_0, false, makeBlockQ1_0x4).run;
+pub const repackQ1_0toQ1_0_4 = Repacker(ggml.quants.blocks.Q1_0, ggml.cpu.repack.blocks.block_q1_0x4, 4, ggml.impl.ggml_c.QK1_0, false, makeBlockQ1_0x4).run;
 
 /// Ports `repack_q4_0_to_q4_0_4_bl` (ggml-cpu/repack.cpp:3541 @b1b770d90).
 pub const repackQ4_0toQ4_0_4 = Repacker(ggml.quants.blocks.Q4_0, ggml.cpu.repack.blocks.block_q4_0x4, 4, QK4_0, true, makeBlockQ4_0x4).run;

@@ -65,7 +65,7 @@ inline fn digit(byte: u8, l: usize) u16 {
 /// `qs`, plus a 4-digit tail in `qh`. `qs` is 48 bytes, so the first loop
 /// covers the 32-byte-aligned part and the second the 16-byte remainder --
 /// which is why the two loops differ only in their stride.
-pub export fn ggml_vec_dot_tq1_0_q8_K_generic(
+pub fn ggml_vec_dot_tq1_0_q8_K_generic(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -74,14 +74,14 @@ pub export fn ggml_vec_dot_tq1_0_q8_K_generic(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
+) callconv(.c) void {
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
     const x = as(ggml.quants.blocks.TQ1_0, vx);
     const y = as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb = @divTrunc(n, ggml.impl.c.QK_K);
+    const nb = @divTrunc(n, ggml.impl.ggml_c.QK_K);
 
     const qs_len = @typeInfo(@FieldType(ggml.quants.blocks.TQ1_0, "qs")).array.len;
     const qh_len = @typeInfo(@FieldType(ggml.quants.blocks.TQ1_0, "qh")).array.len;
@@ -133,7 +133,7 @@ pub export fn ggml_vec_dot_tq1_0_q8_K_generic(
 /// Four two-bit digits per byte, mapped `{0,1,2} -> {-1,0,1}` by subtracting
 /// one. Simpler than `tq1_0` because two bits waste a quarter of the range in
 /// exchange for a plain shift-and-mask.
-pub export fn ggml_vec_dot_tq2_0_q8_K_generic(
+pub fn ggml_vec_dot_tq2_0_q8_K_generic(
     n: c_int,
     s: [*c]f32,
     bs: usize,
@@ -142,14 +142,14 @@ pub export fn ggml_vec_dot_tq2_0_q8_K_generic(
     vy: ?*const anyopaque,
     by: usize,
     nrc: c_int,
-) void {
+) callconv(.c) void {
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
     const x = as(ggml.quants.blocks.TQ2_0, vx);
     const y = as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb = @divTrunc(n, ggml.impl.c.QK_K);
+    const nb = @divTrunc(n, ggml.impl.ggml_c.QK_K);
     const qs_len = @typeInfo(@FieldType(ggml.quants.blocks.TQ2_0, "qs")).array.len;
 
     var sumf: f32 = 0.0;
@@ -184,11 +184,11 @@ test {
 }
 
 test "tq1_0 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_tq1_0_q8_K_generic, ggml.impl.c.GGML_TYPE_TQ1_0, ggml.impl.c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.tq1_0);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_tq1_0_q8_K_generic, ggml.impl.ggml_c.GGML_TYPE_TQ1_0, ggml.impl.ggml_c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.tq1_0);
 }
 
 test "tq2_0 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_tq2_0_q8_K_generic, ggml.impl.c.GGML_TYPE_TQ2_0, ggml.impl.c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.tq2_0);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_tq2_0_q8_K_generic, ggml.impl.ggml_c.GGML_TYPE_TQ2_0, ggml.impl.ggml_c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.tq2_0);
 }
 
 /// Packs five ternary digits exactly as `quantize_row_tq1_0_ref` does

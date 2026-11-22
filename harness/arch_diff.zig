@@ -23,12 +23,8 @@
 //! Usage: arch_diff
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const harness_root = @import("harness_root");
-
-const A = harness_root.arch;
-const ext = harness_root.api.model;
-const c = harness_root.impl.c;
 
 extern fn ref_arch_unknown() c_int;
 extern fn ref_arch_name(arch: c_int) [*:0]const u8;
@@ -68,20 +64,20 @@ fn count(comptime E: type) usize {
     return std.enums.values(E).len;
 }
 
-fn flags(a: A.Arch) c_int {
-    return @as(c_int, @intFromBool(A.isRecurrent(a))) |
-        @as(c_int, @intFromBool(A.isHybrid(a))) << 1 |
-        @as(c_int, @intFromBool(A.isDiffusion(a))) << 2 |
-        @as(c_int, @intFromBool(A.supportsRsRollback(a))) << 3 |
-        @as(c_int, @intFromBool(A.supportsSmTensor(a))) << 4 |
-        @as(c_int, @intFromBool(A.supportsMixedBatch(a))) << 5;
+fn flags(a: harness_root.arch.Arch) c_int {
+    return @as(c_int, @intFromBool(harness_root.arch.isRecurrent(a))) |
+        @as(c_int, @intFromBool(harness_root.arch.isHybrid(a))) << 1 |
+        @as(c_int, @intFromBool(harness_root.arch.isDiffusion(a))) << 2 |
+        @as(c_int, @intFromBool(harness_root.arch.supportsRsRollback(a))) << 3 |
+        @as(c_int, @intFromBool(harness_root.arch.supportsSmTensor(a))) << 4 |
+        @as(c_int, @intFromBool(harness_root.arch.supportsMixedBatch(a))) << 5;
 }
 
 /// `llama-ext.h`'s queries, as `api/model.zig` answers them.
-fn extFlags(a: A.Arch) c_int {
-    return @as(c_int, @intFromBool(ext.llama_arch_supports_sm_tensor(a))) |
-        @as(c_int, @intFromBool(ext.llama_arch_supports_mixed_batch(a))) << 1 |
-        @as(c_int, @intFromBool(ext.llama_arch_supports_save(a))) << 2;
+fn extFlags(a: harness_root.arch.Arch) c_int {
+    return @as(c_int, @intFromBool(harness_root.api.model.llama_arch_supports_sm_tensor(a))) |
+        @as(c_int, @intFromBool(harness_root.api.model.llama_arch_supports_mixed_batch(a))) << 1 |
+        @as(c_int, @intFromBool(harness_root.api.model.llama_arch_supports_save(a))) << 2;
 }
 
 // -----------------------------------------------------------------------------
@@ -92,25 +88,25 @@ fn extFlags(a: A.Arch) c_int {
 fn checkExt() void {
     var all: [512]c_int = undefined;
     const n_all = ref_ext_arch_all(&all, all.len);
-    const port_all = ext.llama_arch_all();
+    const port_all = harness_root.api.model.llama_arch_all();
     expectInt("llama_arch_all length", n_all, @intCast(port_all.len));
     for (port_all, 0..) |a, i| {
         if (i < n_all) expectInt("llama_arch_all entry", all[i], @backingInt(a));
     }
     var n_no_save: usize = 0;
-    for (std.enums.values(A.Arch)) |a| {
+    for (std.enums.values(harness_root.arch.Arch)) |a| {
         const i = @backingInt(a);
         var what: [64]u8 = undefined;
         const w = std.mem.print(&what, "llama_arch {d}", .{i}) catch unreachable;
         expectInt(w, ref_ext_arch_flags(i), extFlags(a));
         if (ref_ext_arch_flags(i) & 4 == 0) n_no_save += 1;
-        const name = ext.llama_arch_name(a);
+        const name = harness_root.api.model.llama_arch_name(a);
         expectStr(w, std.mem.span(ref_ext_arch_name(i)), name);
-        expectInt(w, ref_ext_arch_from_string(name.ptr), @backingInt(ext.llama_arch_from_string(name)));
-        for (std.enums.values(A.Kv)) |kv| {
+        expectInt(w, ref_ext_arch_from_string(name.ptr), @backingInt(harness_root.api.model.llama_arch_from_string(name)));
+        for (std.enums.values(harness_root.arch.Kv)) |kv| {
             var buf: [256]u8 = undefined;
             const n = ref_ext_kv_name(i, @backingInt(kv), &buf, buf.len);
-            const k = ext.llama_arch_kv_name(a, kv);
+            const k = harness_root.api.model.llama_arch_kv_name(a, kv);
             expectStr("llama_arch_kv_name", buf[0..@intCast(n)], k.slice());
         }
     }
@@ -119,23 +115,23 @@ fn checkExt() void {
 }
 
 fn checkArchs() void {
-    const n = count(A.Arch);
-    expectInt("LLM_ARCH_UNKNOWN", ref_arch_unknown(), @backingInt(A.Arch.unknown));
+    const n = count(harness_root.arch.Arch);
+    expectInt("LLM_ARCH_UNKNOWN", ref_arch_unknown(), @backingInt(harness_root.arch.Arch.unknown));
     expectInt("llm_arch count", ref_arch_unknown() + 1, @intCast(n));
 
     var all: [512]c_int = undefined;
     const n_all = ref_arch_all(&all, all.len);
-    const port_all = A.archAll();
+    const port_all = harness_root.arch.archAll();
     expectInt("llm_arch_all length", n_all, @intCast(port_all.len));
     for (port_all, 0..) |a, i| {
         if (i < n_all) expectInt("llm_arch_all entry", all[i], @backingInt(a));
     }
 
-    for (std.enums.values(A.Arch)) |a| {
+    for (std.enums.values(harness_root.arch.Arch)) |a| {
         const i = @backingInt(a);
         var what: [64]u8 = undefined;
         const w = std.mem.print(&what, "arch {d}", .{i}) catch unreachable;
-        expectStr(w, std.mem.span(ref_arch_name(i)), A.archName(a));
+        expectStr(w, std.mem.span(ref_arch_name(i)), harness_root.arch.archName(a));
         expectInt(w, ref_arch_flags(i), flags(a));
     }
     // Past the end of the enum, the map must miss.
@@ -145,8 +141,8 @@ fn checkArchs() void {
     var probes: std.ArrayList([:0]const u8) = .empty;
     const extra = [_][:0]const u8{ "", "unknown", "(unknown)", "LLAMA", "llama ", " llama", "qwen3", "qwen35", "qwen35moe", "qwen", "llama4" };
     for (extra) |e| probes.append(std.heap.c_allocator, e) catch unreachable;
-    for (std.enums.values(A.Arch)) |a| {
-        const name = A.archName(a);
+    for (std.enums.values(harness_root.arch.Arch)) |a| {
+        const name = harness_root.arch.archName(a);
         probes.append(std.heap.c_allocator, name) catch unreachable;
         if (name.len > 1) probes.append(std.heap.c_allocator, std.heap.c_allocator.dupeSentinel(u8, name[0 .. name.len - 1], 0) catch unreachable) catch unreachable;
         const upper = std.heap.c_allocator.dupeSentinel(u8, name, 0) catch unreachable;
@@ -154,7 +150,7 @@ fn checkArchs() void {
         probes.append(std.heap.c_allocator, upper) catch unreachable;
     }
     for (probes.items) |p| {
-        expectInt(p, ref_arch_from_string(p.ptr), @backingInt(A.archFromString(p)));
+        expectInt(p, ref_arch_from_string(p.ptr), @backingInt(harness_root.arch.archFromString(p)));
     }
 }
 
@@ -164,8 +160,8 @@ fn checkArchs() void {
 fn checkKeys() void {
     const suffixes = [_]?[:0]const u8{ null, "weight", "" };
     var buf: [512]u8 = undefined;
-    for (std.enums.values(A.Arch)) |a| {
-        for (std.enums.values(A.Kv)) |kv| {
+    for (std.enums.values(harness_root.arch.Arch)) |a| {
+        for (std.enums.values(harness_root.arch.Kv)) |kv| {
             for (suffixes) |sfx| {
                 const r = ref_kv_name(@backingInt(a), @backingInt(kv), if (sfx) |s| s.ptr else null, &buf, buf.len);
                 if (r < 0) {
@@ -173,15 +169,15 @@ fn checkKeys() void {
                     fail("LLM_KV({s})({s}) threw '{s}'", .{ @tagName(a), @tagName(kv), std.mem.sliceTo(&buf, 0) });
                     continue;
                 }
-                const port = A.kvName(a, kv, sfx);
+                const port = harness_root.arch.kvName(a, kv, sfx);
                 expectStr(@tagName(kv), buf[0..@intCast(r)], port.slice());
             }
         }
     }
     // Past the end of the enum, LLM_KV_NAMES.at must throw.
-    const n = count(A.Kv);
+    const n = count(harness_root.arch.Kv);
     for (n..n + 4) |i| {
-        const r = ref_kv_name(@backingInt(A.Arch.llama), @intCast(i), null, &buf, buf.len);
+        const r = ref_kv_name(@backingInt(harness_root.arch.Arch.llama), @intCast(i), null, &buf, buf.len);
         expectInt("kv past the enum throws", r, -1);
         if (r < 0) expectStr("kv past the enum", std.mem.sliceTo(&buf, 0), "map::at:  key not found");
     }
@@ -195,24 +191,24 @@ fn checkKeys() void {
 /// its `file:line: ` prefix.
 fn abortsWith(body: *const fn (ctx: c_int) void, ctx: c_int, out: []u8) ?[]const u8 {
     var fds: [2]c_int = undefined;
-    if (libc.pipe(&fds) != 0) return null;
-    const pid = libc.fork();
+    if (std.c.pipe(&fds) != 0) return null;
+    const pid = std.c.fork();
     if (pid == 0) {
-        _ = libc.dup2(fds[1], 2);
-        _ = libc.close(fds[0]);
+        _ = std.c.dup2(fds[1], 2);
+        _ = std.c.close(fds[0]);
         body(ctx);
-        libc._exit(0);
+        std.c._exit(0);
     }
-    _ = libc.close(fds[1]);
+    _ = std.c.close(fds[1]);
     var len: usize = 0;
     while (len < out.len) {
-        const got = libc.read(fds[0], out[len..].ptr, out.len - len);
+        const got = std.c.read(fds[0], out[len..].ptr, out.len - len);
         if (got <= 0) break;
         len += @intCast(got);
     }
-    _ = libc.close(fds[0]);
+    _ = std.c.close(fds[0]);
     var status: c_int = 0;
-    _ = libc.waitpid(pid, &status, 0);
+    _ = std.c.waitpid(pid, &status, 0);
     const sig = status & 0x7f;
     if (sig != sigabrt) return null;
     const text = out[0..len];
@@ -226,18 +222,18 @@ fn abortsWith(body: *const fn (ctx: c_int) void, ctx: c_int, out: []u8) ?[]const
 
 fn refTensorAbort(t: c_int) void {
     var buf: [256]u8 = undefined;
-    _ = ref_tensor_name(@backingInt(A.Arch.llama), t, null, -1, -1, &buf, buf.len);
+    _ = ref_tensor_name(@backingInt(harness_root.arch.Arch.llama), t, null, -1, -1, &buf, buf.len);
 }
 
 fn portTensorAbort(t: c_int) void {
-    _ = A.tensorName(@fromBackingInt(@intCast(t)), null, -1, -1);
+    _ = harness_root.arch.tensorName(@fromBackingInt(@intCast(t)), null, -1, -1);
 }
 
 fn checkTensors() void {
     const suffixes = [_]?[:0]const u8{ null, "weight", "bias" };
     const ids = [_]i32{ -1, 0, 1, 9, 10, 123, std.math.maxInt(i32), std.math.minInt(i32) };
     var buf: [512]u8 = undefined;
-    for (std.enums.values(A.Tensor)) |t| {
+    for (std.enums.values(harness_root.arch.Tensor)) |t| {
         const ti: c_int = @backingInt(t);
         if (harness_root.arch_table.tensor_names[@intCast(ti)] == null) {
             var rb: [4096]u8 = undefined;
@@ -251,13 +247,13 @@ fn checkTensors() void {
             continue;
         }
         for (ids) |bid| for (ids[0..4]) |xid| for (suffixes) |sfx| {
-            const r = ref_tensor_name(@backingInt(A.Arch.llama), ti, if (sfx) |s| s.ptr else null, bid, xid, &buf, buf.len);
-            const port = A.tensorName(t, sfx, bid, xid);
+            const r = ref_tensor_name(@backingInt(harness_root.arch.Arch.llama), ti, if (sfx) |s| s.ptr else null, bid, xid, &buf, buf.len);
+            const port = harness_root.arch.tensorName(t, sfx, bid, xid);
             expectStr(@tagName(t), buf[0..@intCast(r)], port.slice());
         };
     }
     // Past the end of the enum, LLM_TENSOR_NAMES must miss: the C++ aborts.
-    const n = count(A.Tensor);
+    const n = count(harness_root.arch.Tensor);
     for (n..n + 2) |i| {
         var rb: [4096]u8 = undefined;
         checks += 1;
@@ -273,7 +269,7 @@ fn checkTensors() void {
             continue;
         }
         var exc: harness_root.impl.Exception = .{};
-        if (A.tensorInfoFor(@fromBackingInt(@intCast(i)), &exc)) |info| {
+        if (harness_root.arch.tensorInfoFor(@fromBackingInt(@intCast(i)), &exc)) |info| {
             expectInt("tensor info throws", r, 0);
             expectInt("tensor info layer", layer, @backingInt(info.layer));
             expectInt("tensor info op", op, @intCast(info.op));

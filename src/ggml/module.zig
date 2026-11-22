@@ -53,62 +53,12 @@ pub const blas = if (config.blas_port) @import("blas.zig") else struct {};
 
 pub const win32 = @import("win32.zig");
 
+/// The C API: every exported symbol. Forced below only when libggml is the
+/// compilation root or under test; see `lib.zig`.
+pub const lib = @import("lib.zig");
+
 comptime {
-    // libggml built on its own (or under test): every ported file, so the
-    // archive exports the C API. A file that reaches this barrel from inside
-    // the port, or a gate that compiles one file against upstream's C, forces
-    // nothing.
-    if (@import("root") == @This() or @import("builtin").is_test) {
-        // Ported translation units export C symbols that nothing in Zig references,
-        // so they need forcing into the compilation or the archive ships without
-        // them and the link fails with symbols the C++ side still expects.
-        _ = alloc;
-        // ggml.c, split across seven files:
-        _ = impl;
-        _ = types;
-        _ = context;
-        _ = runtime;
-        _ = ops;
-        _ = graph;
-        _ = quantize;
-        // ggml-quants.c, split across src/ggml/quants/:
-        _ = quants;
-        // ggml-cpu/ggml-cpu.c, split across src/ggml/cpu/:
-        _ = cpu;
-        _ = threading;
-        _ = backend_reg;
-        _ = gguf;
-        // ggml-backend.cpp, split in two: the vtable dispatch and the scheduler.
-        _ = backend;
-        _ = backend_sched;
-        _ = backend_meta;
-        _ = opt;
-        // ggml-metal/, the host layer. The two .m files stay Objective-C.
-        //
-        // **Behind `config.use_metal`, like the registry's reference to it.**
-        // `metal/backend.zig` calls 39 functions that live in
-        // `ggml-metal-device.m`, `-context.m`, `-device.cpp` and `-ops.cpp`,
-        // and the `test-port` root deliberately links none of them — its own
-        // comment says "the ported registry must not reference the Metal
-        // backend". Importing this unconditionally made `make validate` fail
-        // with 39 undefined symbols at that step.
-        if (config.use_metal) _ = metal;
-        // ggml-cuda/, the host layer; the kernels travel as fatbins.
-        // Behind `config.cuda_port` until the swap:
-        // until then the default build links upstream's host objects, which
-        // export the same ten `ggml-cuda.h` symbols.
-        if (config.cuda_port) _ = cuda;
-        // ggml-vulkan/, the host layer; the shaders travel as the reference
-        // generator's SPIR-V. Behind
-        // `config.vulkan_port` until the swap: until then the default build
-        // compiles upstream's `ggml-vulkan.cpp`, which exports the same symbols.
-        if (config.vulkan_port) _ = vulkan;
-        // ggml-blas/, over Accelerate only. Behind
-        // `config.blas_port`: `-Dblas-port=false` compiles upstream's
-        // `ggml-blas.cpp` instead, for the gates, which exports the same four
-        // symbols.
-        if (config.blas_port) _ = blas;
-    }
+    if (@import("root") == @This() or @import("builtin").is_test) _ = lib;
 }
 
 // -----------------------------------------------------------------------------

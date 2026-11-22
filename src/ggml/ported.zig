@@ -47,10 +47,10 @@
 const std = @import("std");
 
 comptime {
-    _ = @import("module.zig");
+    _ = @import("module.zig").lib;
 }
 
 test {
     std.testing.refAllDecls(@This());
-    _ = @import("module.zig");
+    _ = @import("module.zig").lib;
 }

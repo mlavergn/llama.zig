@@ -117,12 +117,12 @@ fn solveTriF32Cuda(
 }
 
 /// Ports `ggml_cuda_op_solve_tri` (solve_tri.cu:250 @b1b770d90).
-pub fn opSolveTri(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]); // A (n×n, lower triangular)
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]); // B (n×k)
+pub fn opSolveTri(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]); // A (n×n, lower triangular)
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]); // B (n×k)
 
-    _ = ggml.impl.c.ggml_is_contiguous(src0);
-    _ = ggml.impl.c.ggml_is_contiguous(src1);
+    _ = ggml.impl.ggml_c.ggml_is_contiguous(src0);
+    _ = ggml.impl.ggml_c.ggml_is_contiguous(src1);
 
     const n = src0.ne[0];
     const k = src1.ne[0];

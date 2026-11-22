@@ -82,7 +82,7 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
         b.cb(attn_norm_output, "attn_norm", il);
 
         // Self-attention.
-        var cur: *llama.impl.c.ggml_tensor = undefined;
+        var cur: *llama.impl.llama_c.ggml_tensor = undefined;
         {
             const qkv = b.buildQkv(layer, attn_norm_output, n_embd_head, b.n_head, b.n_head_kv, il);
             var Qcur = qkv.q;
@@ -97,21 +97,21 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
 
             // Phi-2 scales Q to avoid precision issues; see
             // https://github.com/ml-explore/mlx-examples/blob/08e862336ade809bc37d1035f94b359e7d1a5152/phi2/phi2.py#L64-L66
-            Qcur = llama.impl.c.ggml_scale(ctx, Qcur, 1.0 / stdlib.libm.sqrtfInt(n_embd_head));
+            Qcur = llama.impl.llama_c.ggml_scale(ctx, Qcur, 1.0 / stdlib.libm.sqrtfInt(n_embd_head));
 
             cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0, il);
         }
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
-            attn_norm_output = llama.impl.c.ggml_get_rows(ctx, attn_norm_output, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpL = llama.impl.llama_c.ggml_get_rows(ctx, inpL, inp_out_ids);
+            attn_norm_output = llama.impl.llama_c.ggml_get_rows(ctx, attn_norm_output, inp_out_ids);
         }
         // The feed-forward network.
         const ffn_output = b.buildFfn(attn_norm_output, layer.ffn_up, layer.ffn_up_b, null, null, null, null, layer.ffn_down, layer.ffn_down_b, null, null, .gelu, .seq, il);
         b.cb(ffn_output, "ffn_out", il);
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_output);
-        cur = llama.impl.c.ggml_add(ctx, cur, inpL);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_output);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, inpL);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
@@ -127,7 +127,7 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
     cur = b.buildLoraMm(model.output.?, cur, model.output_s);
     b.cb(cur, "result_output_no_bias", -1);
 
-    cur = llama.impl.c.ggml_add(ctx, cur, model.output_b);
+    cur = llama.impl.llama_c.ggml_add(ctx, cur, model.output_b);
 
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;

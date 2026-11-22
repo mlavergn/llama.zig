@@ -283,7 +283,7 @@ pub fn errorText(err: Error) [:0]const u8 {
 ///
 /// Return: never.
 pub fn throwRegexError(err: Error) noreturn {
-    mod.impl.c.ggml_abort("regex", 0, "terminating due to uncaught exception of type std::__1::regex_error: %s", errorText(err).ptr);
+    mod.impl.llama_c.ggml_abort("regex", 0, "terminating due to uncaught exception of type std::__1::regex_error: %s", errorText(err).ptr);
 }
 
 // -----------------------------------------------------------------------------

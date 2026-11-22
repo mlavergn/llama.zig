@@ -94,7 +94,7 @@ const AttnParams = struct {
     m0: f32,
     m1: f32,
 
-    fn of(dst: *const ggml.impl.c.ggml_tensor, n_head: u32) AttnParams {
+    fn of(dst: *const ggml.impl.ggml_c.ggml_tensor, n_head: u32) AttnParams {
         var scale = ggml.impl.getOpParamsF32(dst, 0);
         const max_bias = ggml.impl.getOpParamsF32(dst, 1);
         const logit_softcap = ggml.impl.getOpParamsF32(dst, 2);
@@ -118,10 +118,10 @@ const AttnParams = struct {
 };
 
 /// The shape checks all three `flash_attn_ext` functions open with.
-fn checkShapes(dst: *const ggml.impl.c.ggml_tensor) void {
-    const q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const k = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const v = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
+fn checkShapes(dst: *const ggml.impl.ggml_c.ggml_tensor) void {
+    const q = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const k = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const v = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]);
 
     const DK = k.ne[0];
     const DV = v.ne[0];
@@ -131,9 +131,9 @@ fn checkShapes(dst: *const ggml.impl.c.ggml_tensor) void {
     ggml.impl.assert(dst.ne[2] == N, "ne2 == N");
 
     // input tensor rows must be contiguous
-    ggml.impl.assert(q.nb[0] == ggml.impl.c.ggml_type_size(q.type), "nbq0 == ggml_type_size(q->type)");
-    ggml.impl.assert(k.nb[0] == ggml.impl.c.ggml_type_size(k.type), "nbk0 == ggml_type_size(k->type)");
-    ggml.impl.assert(v.nb[0] == ggml.impl.c.ggml_type_size(v.type), "nbv0 == ggml_type_size(v->type)");
+    ggml.impl.assert(q.nb[0] == ggml.impl.ggml_c.ggml_type_size(q.type), "nbq0 == ggml_type_size(q->type)");
+    ggml.impl.assert(k.nb[0] == ggml.impl.ggml_c.ggml_type_size(k.type), "nbk0 == ggml_type_size(k->type)");
+    ggml.impl.assert(v.nb[0] == ggml.impl.ggml_c.ggml_type_size(v.type), "nbv0 == ggml_type_size(v->type)");
 
     ggml.impl.assert(q.ne[0] == DK, "neq0 == DK");
     ggml.impl.assert(k.ne[0] == DK, "nek0 == DK");
@@ -196,7 +196,7 @@ fn simdGemm(C: [*]f32, A: [*]const f32, B: [*]const f32, M: usize, K: usize, N: 
 ///   for `reduce_partials` instead of normalising into `dst`.
 fn oneChunk(
     params: *const ggml.cpu.defs.ComputeParams,
-    dst: *ggml.impl.c.ggml_tensor,
+    dst: *ggml.impl.ggml_c.ggml_tensor,
     ir0: i64,
     ir1: i64,
     ic_start: i64,
@@ -204,12 +204,12 @@ fn oneChunk(
     partials: ?[*]f32,
     partial_stride: i64,
 ) void {
-    const q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const k = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const v = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
-    const mask: ?*ggml.impl.c.ggml_tensor = dst.src[3];
-    const sinks: ?*ggml.impl.c.ggml_tensor = dst.src[4];
-    const kv_rows: ?*ggml.impl.c.ggml_tensor = dst.src[5];
+    const q = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const k = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const v = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]);
+    const mask: ?*ggml.impl.ggml_c.ggml_tensor = dst.src[3];
+    const sinks: ?*ggml.impl.ggml_c.ggml_tensor = dst.src[4];
+    const kv_rows: ?*ggml.impl.ggml_c.ggml_tensor = dst.src[5];
 
     const neq1 = q.ne[1];
     const neq2 = q.ne[2];
@@ -241,13 +241,13 @@ fn oneChunk(
 
     const ap = AttnParams.of(dst, @intCast(neq2));
 
-    const k_vec_dot_type = ggml.impl.c.ggml_get_type_traits_cpu(k.type).*.vec_dot_type;
-    const q_to_vec_dot = ggml.impl.c.ggml_get_type_traits_cpu(k_vec_dot_type).*.from_float;
-    const kq_vec_dot = ggml.impl.c.ggml_get_type_traits_cpu(k.type).*.vec_dot;
-    const v_to_float = ggml.impl.c.ggml_get_type_traits(v.type).*.to_float;
+    const k_vec_dot_type = ggml.impl.ggml_c.ggml_get_type_traits_cpu(k.type).*.vec_dot_type;
+    const q_to_vec_dot = ggml.impl.ggml_c.ggml_get_type_traits_cpu(k_vec_dot_type).*.from_float;
+    const kq_vec_dot = ggml.impl.ggml_c.ggml_get_type_traits_cpu(k.type).*.vec_dot;
+    const v_to_float = ggml.impl.ggml_c.ggml_get_type_traits(v.type).*.to_float;
 
     ggml.impl.assert(q_to_vec_dot != null, "q_to_vec_dot && \"fattn: unsupported K-type\"");
-    ggml.impl.assert(v.type == ggml.impl.c.GGML_TYPE_F32 or v_to_float != null, "(v->type == GGML_TYPE_F32 || v_to_float) && \"fattn: unsupported V-type\"");
+    ggml.impl.assert(v.type == ggml.impl.ggml_c.GGML_TYPE_F32 or v_to_float != null, "(v->type == GGML_TYPE_F32 || v_to_float) && \"fattn: unsupported V-type\"");
 
     const ith: usize = @intCast(params.ith);
     const dk: usize = @intCast(DK);
@@ -269,12 +269,12 @@ fn oneChunk(
         const wbase: [*]f32 = @ptrCast(@alignCast(params.wdata.?));
         const VKQ32 = wbase + ith * (1 * dk + 2 * dv + ggml.cpu.ops.common.cache_line_size_f32); // FP32 VKQ accumulator
         const V32 = VKQ32 + 1 * dv; // (temporary) FP32 V buffer
-        const Q_q: [*]ggml.impl.c.ggml_fp16_t = @ptrCast(@alignCast(VKQ32 + 2 * dv)); // (temporary) buffer for Q converted to quantized/FP16
+        const Q_q: [*]ggml.impl.ggml_c.ggml_fp16_t = @ptrCast(@alignCast(VKQ32 + 2 * dv)); // (temporary) buffer for Q converted to quantized/FP16
 
         @memset(VKQ32[0..dv], 0);
 
-        const mp: ?[*]const ggml.impl.c.ggml_fp16_t = if (mask) |m|
-            ggml.cpu.ops.common.ptr(ggml.impl.c.ggml_fp16_t, m.data, ggml.cpu.ops.common.byteOff(iq1, m.nb[1]) + ggml.cpu.ops.common.byteOff(@rem(iq2, m.ne[2]), m.nb[2]) + ggml.cpu.ops.common.byteOff(@rem(iq3, m.ne[3]), m.nb[3]))
+        const mp: ?[*]const ggml.impl.ggml_c.ggml_fp16_t = if (mask) |m|
+            ggml.cpu.ops.common.ptr(ggml.impl.ggml_c.ggml_fp16_t, m.data, ggml.cpu.ops.common.byteOff(iq1, m.nb[1]) + ggml.cpu.ops.common.byteOff(@rem(iq2, m.ne[2]), m.nb[2]) + ggml.cpu.ops.common.byteOff(@rem(iq3, m.ne[3]), m.nb[3]))
         else
             null;
 
@@ -340,7 +340,7 @@ fn oneChunk(
             }
 
             // V += v*libm.expf(s - M)
-            if (v.type == ggml.impl.c.GGML_TYPE_F16) {
+            if (v.type == ggml.impl.ggml_c.GGML_TYPE_F16) {
                 ggml.cpu.ops.vecinline.mad_f16_f32(DV, VKQ32, @ptrCast(@alignCast(v_data)), vs);
             } else if (v_to_float) |to_float| {
                 to_float(v_data, V32, DV);
@@ -413,12 +413,12 @@ const KvRow = struct {
 /// With `kv_rows` the tile loop runs over the mask columns and reads each K/V
 /// row through `kv_rows`; a padding row (negative) is masked to `-inf`, so the
 /// C reads row 0 for it.
-fn tiled(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor, ir0: i64, ir1: i64) void {
-    const q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const k = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const v = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
-    const mask: ?*ggml.impl.c.ggml_tensor = dst.src[3];
-    const sinks: ?*ggml.impl.c.ggml_tensor = dst.src[4];
+fn tiled(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor, ir0: i64, ir1: i64) void {
+    const q = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const k = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const v = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]);
+    const mask: ?*ggml.impl.ggml_c.ggml_tensor = dst.src[3];
+    const sinks: ?*ggml.impl.ggml_c.ggml_tensor = dst.src[4];
 
     const neq1 = q.ne[1];
     const neq2 = q.ne[2];
@@ -462,7 +462,7 @@ fn tiled(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tens
     const KV_TILE_SZ = kv_tile_sz;
 
     // with kv_rows the loop runs over the mask columns and reads K/V rows through kv_rows
-    const kv_rows: ?*ggml.impl.c.ggml_tensor = dst.src[5];
+    const kv_rows: ?*ggml.impl.ggml_c.ggml_tensor = dst.src[5];
     const n_kv_cols: i64 = if (kv_rows) |kr| kr.ne[0] else nek1;
 
     var ir: i64 = ir0;
@@ -545,7 +545,7 @@ fn tiled(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tens
             if (mask) |m| {
                 var can_skip = true;
                 for (0..tile_rows) |tq| {
-                    const mp_row = ggml.cpu.ops.common.ptr(ggml.impl.c.ggml_fp16_t, m.data, ggml.cpu.ops.common.byteOff(iq1 + @as(i64, @intCast(tq)), m.nb[1]) + ggml.cpu.ops.common.byteOff(@rem(iq2, m.ne[2]), m.nb[2]) + ggml.cpu.ops.common.byteOff(@rem(iq3, m.ne[3]), m.nb[3]));
+                    const mp_row = ggml.cpu.ops.common.ptr(ggml.impl.ggml_c.ggml_fp16_t, m.data, ggml.cpu.ops.common.byteOff(iq1 + @as(i64, @intCast(tq)), m.nb[1]) + ggml.cpu.ops.common.byteOff(@rem(iq2, m.ne[2]), m.nb[2]) + ggml.cpu.ops.common.byteOff(@rem(iq3, m.ne[3]), m.nb[3]));
                     for (0..kv_tile) |tk| {
                         mask32[tq * KV_TILE_SZ + tk] = slope * ggml.impl.fp16ToFp32(mp_row[@as(usize, @intCast(ic)) + tk]);
                         if (mask32[tq * KV_TILE_SZ + tk] != -inf) {
@@ -567,8 +567,8 @@ fn tiled(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tens
             // Zero-pad the last tile so the GEMM always operates on KV_TILE_SZ columns
             for (0..kv_tile) |tk| {
                 const k_off = ggml.cpu.ops.common.byteOff(kv_row.at(ic + @as(i64, @intCast(tk))), nbk1) + ggml.cpu.ops.common.byteOff(ik2, nbk2) + ggml.cpu.ops.common.byteOff(ik3, nbk3);
-                if (kv_type == ggml.impl.c.GGML_TYPE_F16) {
-                    const k_f16 = ggml.cpu.ops.common.ptr(ggml.impl.c.ggml_fp16_t, k.data, k_off);
+                if (kv_type == ggml.impl.ggml_c.GGML_TYPE_F16) {
+                    const k_f16 = ggml.cpu.ops.common.ptr(ggml.impl.ggml_c.ggml_fp16_t, k.data, k_off);
                     for (0..dk) |d| {
                         K_f32[d * KV_TILE_SZ + tk] = ggml.impl.fp16ToFp32(k_f16[d]);
                     }
@@ -636,8 +636,8 @@ fn tiled(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tens
             // Pack V tile to contiguous F32, zero-padded
             for (0..kv_tile) |tk| {
                 const v_off = ggml.cpu.ops.common.byteOff(kv_row.at(ic + @as(i64, @intCast(tk))), nbv1) + ggml.cpu.ops.common.byteOff(iv2, nbv2) + ggml.cpu.ops.common.byteOff(iv3, nbv3);
-                if (kv_type == ggml.impl.c.GGML_TYPE_F16) {
-                    ggml.cpu.convert.ggml_cpu_fp16_to_fp32(ggml.cpu.ops.common.ptr(ggml.impl.c.ggml_fp16_t, v.data, v_off), V32 + tk * dv, DV);
+                if (kv_type == ggml.impl.ggml_c.GGML_TYPE_F16) {
+                    ggml.cpu.convert.ggml_cpu_fp16_to_fp32(ggml.cpu.ops.common.ptr(ggml.impl.ggml_c.ggml_fp16_t, v.data, v_off), V32 + tk * dv, DV);
                 } else {
                     @memcpy((V32 + tk * dv)[0..dv], ggml.cpu.ops.common.ptr(f32, v.data, v_off)[0..dv]);
                 }
@@ -693,10 +693,10 @@ fn tiled(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tens
 ///
 /// Combines the per-chunk `[M, S, VKQ]` the split-KV path wrote. Partials
 /// layout in `wdata`: `[n_q_heads][n_chunks][2 + DV]`.
-fn reducePartials(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor, n_chunks: i64, chunk_size: i64) void {
-    const q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const k = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const v = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
+fn reducePartials(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor, n_chunks: i64, chunk_size: i64) void {
+    const q = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const k = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const v = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]);
 
     const DK = k.ne[0];
     const DV = v.ne[0];
@@ -769,10 +769,10 @@ fn reducePartials(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.
 /// Ports `ggml_compute_forward_flash_attn_ext_f16` (ops.cpp:9315 @b1b770d90),
 /// the `GGML_SIMD` arm without SVE for the tiled-path guard, which x86
 /// skips.
-fn flashAttnExtF16(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const k = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const v = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
+fn flashAttnExtF16(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const q = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const k = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const v = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]);
 
     const neq1 = q.ne[1];
     const neq2 = q.ne[2];
@@ -793,11 +793,11 @@ fn flashAttnExtF16(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c
     const use_ref = params.use_ref;
 
     // with kv_rows the loops run over the mask columns, the split KV path does not support it
-    const kv_rows: ?*ggml.impl.c.ggml_tensor = dst.src[5];
+    const kv_rows: ?*ggml.impl.ggml_c.ggml_tensor = dst.src[5];
     const n_kv_cols: i64 = if (kv_rows) |kr| kr.ne[0] else nek1;
 
-    const kv_is_f32_or_f16 = (k.type == ggml.impl.c.GGML_TYPE_F32 or k.type == ggml.impl.c.GGML_TYPE_F16);
-    const use_split_kv_path = !use_ref and kv_rows == null and (neq1 == 1 and neq3 == 1) and kv_is_f32_or_f16 and (k.type == v.type) and q.type == ggml.impl.c.GGML_TYPE_F32 and nek1 >= 512;
+    const kv_is_f32_or_f16 = (k.type == ggml.impl.ggml_c.GGML_TYPE_F32 or k.type == ggml.impl.ggml_c.GGML_TYPE_F16);
+    const use_split_kv_path = !use_ref and kv_rows == null and (neq1 == 1 and neq3 == 1) and kv_is_f32_or_f16 and (k.type == v.type) and q.type == ggml.impl.ggml_c.GGML_TYPE_F32 and nek1 >= 512;
 
     if (use_split_kv_path) {
         const chunk_size = @divTrunc(nek1 + nth - 1, nth);
@@ -854,7 +854,7 @@ fn flashAttnExtF16(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c
         const dr = @divTrunc(nr + nchunk - 1, nchunk);
 
         var use_tiled = !use_ref and
-            (q.type == ggml.impl.c.GGML_TYPE_F32 and
+            (q.type == ggml.impl.ggml_c.GGML_TYPE_F32 and
                 kv_is_f32_or_f16 and
                 k.type == v.type and
                 neq1 >= @as(i64, q_tile_sz));
@@ -883,9 +883,9 @@ fn flashAttnExtF16(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c
 }
 
 /// Ports `ggml_compute_forward_flash_attn_ext` (ops.cpp:9455 @b1b770d90).
-pub export fn ggml_compute_forward_flash_attn_ext(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    switch (ggml.impl.c.ggml_prec_get_acc(dst)) {
-        ggml.impl.c.GGML_PREC_UNDEFINED, ggml.impl.c.GGML_PREC_F32, ggml.impl.c.GGML_PREC_BF16 => {
+pub fn ggml_compute_forward_flash_attn_ext(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    switch (ggml.impl.ggml_c.ggml_prec_get_acc(dst)) {
+        ggml.impl.ggml_c.GGML_PREC_UNDEFINED, ggml.impl.ggml_c.GGML_PREC_F32, ggml.impl.ggml_c.GGML_PREC_BF16 => {
             // uses F32 accumulators
             flashAttnExtF16(params, dst);
         },
@@ -899,11 +899,11 @@ pub export fn ggml_compute_forward_flash_attn_ext(params: *const ggml.cpu.defs.C
 /// Ports `ggml_compute_forward_flash_attn_back_f32` (ops.cpp:9475 @b1b770d90),
 /// the arm without `GGML_SOFT_MAX_ACCELERATE`, which nothing defines (it is
 /// commented out at ggml.c:327).
-fn flashAttnBackF32(params: *const ggml.cpu.defs.ComputeParams, masked: bool, dst: *ggml.impl.c.ggml_tensor) void {
-    const q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const k = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const v = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
-    const d = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[3]);
+fn flashAttnBackF32(params: *const ggml.cpu.defs.ComputeParams, masked: bool, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const q = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const k = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const v = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]);
+    const d = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[3]);
 
     const neq0 = q.ne[0];
     const neq1 = q.ne[1];
@@ -970,16 +970,16 @@ fn flashAttnBackF32(params: *const ggml.cpu.defs.ComputeParams, masked: bool, ds
     }
     ggml.cpu.threading.ggml_barrier(params.threadpool.?);
 
-    const elem_q: usize = @intCast(ggml.impl.c.ggml_nelements(q));
-    const elem_k: usize = @intCast(ggml.impl.c.ggml_nelements(k));
+    const elem_q: usize = @intCast(ggml.impl.ggml_c.ggml_nelements(q));
+    const elem_k: usize = @intCast(ggml.impl.ggml_c.ggml_nelements(k));
 
     const result_type = dst.type;
-    ggml.impl.assert(ggml.impl.c.ggml_blck_size(result_type) == 1, "ggml_blck_size(result_type) == 1");
-    const tsize = ggml.impl.c.ggml_type_size(result_type);
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_blck_size(result_type) == 1, "ggml_blck_size(result_type) == 1");
+    const tsize = ggml.impl.ggml_c.ggml_type_size(result_type);
 
     const offs_q: usize = 0;
-    const offs_k = offs_q + stdlib.num.pad(usize, elem_q * tsize, ggml.impl.c.GGML_MEM_ALIGN);
-    const offs_v = offs_k + stdlib.num.pad(usize, elem_k * tsize, ggml.impl.c.GGML_MEM_ALIGN);
+    const offs_k = offs_q + stdlib.num.pad(usize, elem_q * tsize, ggml.impl.ggml_c.GGML_MEM_ALIGN);
+    const offs_v = offs_k + stdlib.num.pad(usize, elem_k * tsize, ggml.impl.ggml_c.GGML_MEM_ALIGN);
 
     const grad_q = ggml.cpu.ops.common.ptr(u8, dst.data, 0);
     const grad_k = ggml.cpu.ops.common.ptr(u8, dst.data, offs_k);
@@ -1164,11 +1164,11 @@ fn flashAttnBackF32(params: *const ggml.cpu.defs.ComputeParams, masked: bool, ds
 }
 
 /// Ports `ggml_compute_forward_flash_attn_back` (ops.cpp:9790 @b1b770d90).
-pub export fn ggml_compute_forward_flash_attn_back(params: *const ggml.cpu.defs.ComputeParams, masked: bool, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_flash_attn_back(params: *const ggml.cpu.defs.ComputeParams, masked: bool, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const q = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (q.type) {
-        ggml.impl.c.GGML_TYPE_F32 => flashAttnBackF32(params, masked, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => flashAttnBackF32(params, masked, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -1181,22 +1181,22 @@ pub export fn ggml_compute_forward_flash_attn_back(params: *const ggml.cpu.defs.
 /// `score += MAX(qk, 0.0f) * w_row[h]` is one expression — the ternary the
 /// macro expands to is the product's left operand, not a barrier — so each
 /// head's contribution is fused.
-pub export fn ggml_compute_forward_lightning_indexer(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const k = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
-    const w = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]); // weights
-    const m = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[3]); // mask
+pub fn ggml_compute_forward_lightning_indexer(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const q = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const k = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
+    const w = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]); // weights
+    const m = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[3]); // mask
 
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type  == GGML_TYPE_F32");
-    ggml.impl.assert(q.type == ggml.impl.c.GGML_TYPE_F32, "q->type == GGML_TYPE_F32");
-    ggml.impl.assert(w.type == ggml.impl.c.GGML_TYPE_F32, "w->type == GGML_TYPE_F32");
-    ggml.impl.assert(m.type == ggml.impl.c.GGML_TYPE_F16, "m->type == GGML_TYPE_F16");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type  == GGML_TYPE_F32");
+    ggml.impl.assert(q.type == ggml.impl.ggml_c.GGML_TYPE_F32, "q->type == GGML_TYPE_F32");
+    ggml.impl.assert(w.type == ggml.impl.ggml_c.GGML_TYPE_F32, "w->type == GGML_TYPE_F32");
+    ggml.impl.assert(m.type == ggml.impl.ggml_c.GGML_TYPE_F16, "m->type == GGML_TYPE_F16");
 
-    ggml.impl.assert(dst.nb[0] == ggml.impl.c.ggml_type_size(dst.type), "nb0 == ggml_type_size(dst->type)");
-    ggml.impl.assert(q.nb[0] == ggml.impl.c.ggml_type_size(q.type), "nbq0 == ggml_type_size(q->type)");
-    ggml.impl.assert(k.nb[0] == ggml.impl.c.ggml_type_size(k.type), "nbk0 == ggml_type_size(k->type)");
-    ggml.impl.assert(w.nb[0] == ggml.impl.c.ggml_type_size(w.type), "nbw0 == ggml_type_size(w->type)");
-    ggml.impl.assert(m.nb[0] == ggml.impl.c.ggml_type_size(m.type), "nbm0 == ggml_type_size(m->type)");
+    ggml.impl.assert(dst.nb[0] == ggml.impl.ggml_c.ggml_type_size(dst.type), "nb0 == ggml_type_size(dst->type)");
+    ggml.impl.assert(q.nb[0] == ggml.impl.ggml_c.ggml_type_size(q.type), "nbq0 == ggml_type_size(q->type)");
+    ggml.impl.assert(k.nb[0] == ggml.impl.ggml_c.ggml_type_size(k.type), "nbk0 == ggml_type_size(k->type)");
+    ggml.impl.assert(w.nb[0] == ggml.impl.ggml_c.ggml_type_size(w.type), "nbw0 == ggml_type_size(w->type)");
+    ggml.impl.assert(m.nb[0] == ggml.impl.ggml_c.ggml_type_size(m.type), "nbm0 == ggml_type_size(m->type)");
 
     const n_embd = q.ne[0];
     const n_head = q.ne[1];
@@ -1204,8 +1204,8 @@ pub export fn ggml_compute_forward_lightning_indexer(params: *const ggml.cpu.def
     const n_stream = q.ne[3];
     const n_kv = k.ne[2];
 
-    const k_to_float = ggml.impl.c.ggml_get_type_traits(k.type).*.to_float;
-    ggml.impl.assert(k.type == ggml.impl.c.GGML_TYPE_F32 or k_to_float != null, "(k->type == GGML_TYPE_F32 || k_to_float) && \"lightning indexer: unsupported K-type\"");
+    const k_to_float = ggml.impl.ggml_c.ggml_get_type_traits(k.type).*.to_float;
+    ggml.impl.assert(k.type == ggml.impl.ggml_c.GGML_TYPE_F32 or k_to_float != null, "(k->type == GGML_TYPE_F32 || k_to_float) && \"lightning indexer: unsupported K-type\"");
 
     const nr = n_kv;
     const ith: i64 = params.ith;
@@ -1227,7 +1227,7 @@ pub export fn ggml_compute_forward_lightning_indexer(params: *const ggml.cpu.def
         var t: i64 = 0;
         while (t < n_tokens) : (t += 1) {
             const w_row = ggml.cpu.ops.common.ptr(f32, w.data, ggml.cpu.ops.common.byteOff(t, w.nb[1]) + ggml.cpu.ops.common.byteOff(s, w.nb[3]));
-            const m_row = ggml.cpu.ops.common.ptr(ggml.impl.c.ggml_fp16_t, m.data, ggml.cpu.ops.common.byteOff(t, m.nb[1]) + ggml.cpu.ops.common.byteOff(@rem(s, m.ne[3]), m.nb[3]));
+            const m_row = ggml.cpu.ops.common.ptr(ggml.impl.ggml_c.ggml_fp16_t, m.data, ggml.cpu.ops.common.byteOff(t, m.nb[1]) + ggml.cpu.ops.common.byteOff(@rem(s, m.ne[3]), m.nb[3]));
             const dst_row = ggml.cpu.ops.common.ptr(f32, dst.data, ggml.cpu.ops.common.byteOff(t, dst.nb[1]) + ggml.cpu.ops.common.byteOff(s, dst.nb[3]));
             var ik: i64 = ir0;
             while (ik < ir1) : (ik += 1) {

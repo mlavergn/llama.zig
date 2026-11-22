@@ -22,11 +22,9 @@ const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
 
-const Allocator = std.mem.Allocator;
-
 /// Ports `peg_generator`'s `generate_parser` (chat-auto-parser-generator.cpp:23
 /// @b1b770d90), the overload that analyses the template first.
-pub fn generateParser(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
+pub fn generateParser(a: std.mem.Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
     // Run differential analysis to extract template structure
     var ap: common_chat.autoparser.types.Autoparser = .{};
     try common_chat.autoparser.analyzer.analyzeTemplate(&ap, a, tmpl);
@@ -37,7 +35,7 @@ pub fn generateParser(a: Allocator, tmpl: *const common_chat.template.Template, 
 /// @b1b770d90): the prompt, the generation prompt (rebuilt for a continued
 /// message), the parser, and -- for tools or a response format -- the
 /// grammar and its lazy trigger.
-pub fn generateParserAnalyzed(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams, ap: *const common_chat.autoparser.types.Autoparser) common_chat.exception.Error!common_chat.params.ChatParams {
+pub fn generateParserAnalyzed(a: std.mem.Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams, ap: *const common_chat.autoparser.types.Autoparser) common_chat.exception.Error!common_chat.params.ChatParams {
     // Create the result structure
     var data: common_chat.params.ChatParams = .{};
     data.prompt = try common_chat.template.directApply(a, tmpl, inputs);
@@ -111,16 +109,16 @@ const Ctx = struct {
     extracting_reasoning: bool = false,
     reasoning: ?*const common_chat.autoparser.types.AnalyzeReasoning = null,
     content: ?*const common_chat.autoparser.types.AnalyzeContent = null,
-    a: Allocator,
+    a: std.mem.Allocator,
 
-    fn init(p: *common_chat.chat_peg.ChatBuilder, inputs: *const common_chat.template.GenerationParams, a: Allocator) peg.Error!Ctx {
+    fn init(p: *common_chat.chat_peg.ChatBuilder, inputs: *const common_chat.template.GenerationParams, a: std.mem.Allocator) peg.Error!Ctx {
         return .{ .p = p, .inputs = inputs, .reasoning_parser = try p.b.eps(), .a = a };
     }
 };
 
 /// The state `autoparser`'s `build_parser`'s lambda closes over.
 const Root = struct {
-    a: Allocator,
+    a: std.mem.Allocator,
     ap: *const common_chat.autoparser.types.Autoparser,
     inputs: *const common_chat.template.GenerationParams,
     generation_prompt: []const u8,
@@ -173,7 +171,7 @@ const Root = struct {
 /// @b1b770d90).
 ///
 /// Return: the arena, its `gpa` `a`; release with `deinit`.
-pub fn buildParser(a: Allocator, ap: *const common_chat.autoparser.types.Autoparser, inputs: *const common_chat.template.GenerationParams, generation_prompt: []const u8) common_chat.exception.Error!peg.Arena {
+pub fn buildParser(a: std.mem.Allocator, ap: *const common_chat.autoparser.types.Autoparser, inputs: *const common_chat.template.GenerationParams, generation_prompt: []const u8) common_chat.exception.Error!peg.Arena {
     if (!ap.analysis_complete) {
         return common_chat.exception.throw(error.InvalidArgument, "Cannot call build_parser on autoparser without performing analysis first, call analyze_template(...)", .{});
     }

@@ -19,18 +19,18 @@
 //! `llama-server`.
 
 const std = @import("std");
+const llama = @import("llama");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const c = @import("tools_h");
 
 const S = [:0]const u8;
 
 /// Ports `list_builtin_chat_templates` (arg.cpp:1293 @b1b770d90): libllama's
 /// built-in template names, comma-separated.
 pub fn listBuiltinChatTemplates(a: std.mem.Allocator) ![:0]const u8 {
-    const n = c.llama_chat_builtin_templates(null, 0);
+    const n = llama.api.chat.llama_chat_builtin_templates(null, 0);
     const names = try a.alloc([*c]const u8, @intCast(n));
-    _ = c.llama_chat_builtin_templates(names.ptr, names.len);
+    _ = llama.api.chat.llama_chat_builtin_templates(names.ptr, names.len);
     var msg: std.ArrayList(u8) = .empty;
     for (names, 0..) |t, i| {
         try msg.appendSlice(a, std.mem.span(@as([*:0]const u8, @ptrCast(t))));
@@ -48,16 +48,16 @@ fn tf(b: bool) [*:0]const u8 {
 }
 
 /// Ports `kv_cache_types` (arg.cpp:281 @b1b770d90).
-const kv_cache_types = [_]c.ggml_type{
-    c.GGML_TYPE_F32,  c.GGML_TYPE_F16,  c.GGML_TYPE_BF16, c.GGML_TYPE_F8_E4M3,
-    c.GGML_TYPE_Q8_0, c.GGML_TYPE_Q4_0, c.GGML_TYPE_Q4_1, c.GGML_TYPE_IQ4_NL,
-    c.GGML_TYPE_Q5_0, c.GGML_TYPE_Q5_1,
+const kv_cache_types = [_]llama.impl.llama_c.ggml_type{
+    llama.impl.llama_c.GGML_TYPE_F32,  llama.impl.llama_c.GGML_TYPE_F16,  llama.impl.llama_c.GGML_TYPE_BF16, llama.impl.llama_c.GGML_TYPE_F8_E4M3,
+    llama.impl.llama_c.GGML_TYPE_Q8_0, llama.impl.llama_c.GGML_TYPE_Q4_0, llama.impl.llama_c.GGML_TYPE_Q4_1, llama.impl.llama_c.GGML_TYPE_IQ4_NL,
+    llama.impl.llama_c.GGML_TYPE_Q5_0, llama.impl.llama_c.GGML_TYPE_Q5_1,
 };
 
 /// Ports `kv_cache_type_from_str` (arg.cpp:294 @b1b770d90).
-pub fn kvCacheTypeFromStr(s: []const u8) !c.ggml_type {
+pub fn kvCacheTypeFromStr(s: []const u8) !llama.impl.llama_c.ggml_type {
     for (kv_cache_types) |t| {
-        if (std.mem.eql(u8, std.mem.span(c.ggml_type_name(t)), s)) return t;
+        if (std.mem.eql(u8, std.mem.span(llama.impl.llama_c.ggml_type_name(t)), s)) return t;
     }
     var buf: [512]u8 = undefined;
     return mod.arg.throwStr(std.fmt.bufPrint(&buf, "Unsupported cache type: {s}", .{s}) catch "Unsupported cache type");
@@ -67,25 +67,25 @@ pub fn kvCacheTypeFromStr(s: []const u8) !c.ggml_type {
 pub fn allKvCacheTypes(a: std.mem.Allocator) ![:0]const u8 {
     var s: std.ArrayList(u8) = .empty;
     for (kv_cache_types, 0..) |t, i| {
-        try s.appendSlice(a, std.mem.span(c.ggml_type_name(t)));
+        try s.appendSlice(a, std.mem.span(llama.impl.llama_c.ggml_type_name(t)));
         if (i != kv_cache_types.len - 1) try s.appendSlice(a, ", ");
     }
     return a.dupeSentinel(u8, s.items, 0);
 }
 
 /// Ports `parse_device_list` (arg.cpp:1127 @b1b770d90).
-pub fn parseDeviceList(p: *mod.params.Params, value: []const u8) !std.ArrayList(c.ggml_backend_dev_t) {
-    var devices: std.ArrayList(c.ggml_backend_dev_t) = .empty;
+pub fn parseDeviceList(p: *mod.params.Params, value: []const u8) !std.ArrayList(llama.impl.llama_c.ggml_backend_dev_t) {
+    var devices: std.ArrayList(llama.impl.llama_c.ggml_backend_dev_t) = .empty;
     const dev_names = try stdlib.strings.split(p.arena, value, ',');
     if (dev_names.items.len == 0) return mod.arg.throwStr("no devices specified");
     if (dev_names.items.len == 1 and std.mem.eql(u8, dev_names.items[0], "none")) {
         try devices.append(p.arena, null);
     } else {
-        c.ggml_backend_load_all();
+        llama.impl.llama_c.ggml_backend_load_all();
         for (dev_names.items) |device| {
             const z = try p.arena.dupeSentinel(u8, device, 0);
-            const dev = c.ggml_backend_dev_by_name(z.ptr);
-            if (dev == null or c.ggml_backend_dev_type(dev) == c.GGML_BACKEND_DEVICE_TYPE_CPU) {
+            const dev = llama.impl.llama_c.ggml_backend_dev_by_name(z.ptr);
+            if (dev == null or llama.impl.llama_c.ggml_backend_dev_type(dev) == llama.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_CPU) {
                 return mod.arg.throw("invalid device: %s", .{z.ptr});
             }
             try devices.append(p.arena, dev);
@@ -98,14 +98,14 @@ pub fn parseDeviceList(p: *mod.params.Params, value: []const u8) !std.ArrayList(
 /// Ports `common_print_available_devices` (arg.cpp:1149 @b1b770d90).
 pub fn printAvailableDevices(a: std.mem.Allocator) !void {
     const MiB: usize = 1024 * 1024;
-    var devices: std.ArrayList(c.ggml_backend_dev_t) = .empty;
+    var devices: std.ArrayList(llama.impl.llama_c.ggml_backend_dev_t) = .empty;
 
-    c.ggml_backend_load_all();
+    llama.impl.llama_c.ggml_backend_load_all();
 
     var i: usize = 0;
-    while (i < c.ggml_backend_dev_count()) : (i += 1) {
-        const dev = c.ggml_backend_dev_get(i);
-        if (c.ggml_backend_dev_type(dev) != c.GGML_BACKEND_DEVICE_TYPE_CPU) try devices.append(a, dev);
+    while (i < llama.impl.llama_c.ggml_backend_dev_count()) : (i += 1) {
+        const dev = llama.impl.llama_c.ggml_backend_dev_get(i);
+        if (llama.impl.llama_c.ggml_backend_dev_type(dev) != llama.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_CPU) try devices.append(a, dev);
     }
     mod.io.printf("Available devices:\n", .{});
 
@@ -116,24 +116,24 @@ pub fn printAvailableDevices(a: std.mem.Allocator) !void {
     for (devices.items) |dev| {
         var free: usize = 0;
         var total: usize = 0;
-        c.ggml_backend_dev_memory(dev, &free, &total);
-        mod.io.printf("  %s: %s (%zu MiB, %zu MiB free)\n", .{ c.ggml_backend_dev_name(dev), c.ggml_backend_dev_description(dev), total / MiB, free / MiB });
+        llama.impl.llama_c.ggml_backend_dev_memory(dev, &free, &total);
+        mod.io.printf("  %s: %s (%zu MiB, %zu MiB free)\n", .{ llama.impl.llama_c.ggml_backend_dev_name(dev), llama.impl.llama_c.ggml_backend_dev_description(dev), total / MiB, free / MiB });
     }
 }
 
 /// Ports `parse_tensor_buffer_overrides` (arg.cpp:229 @b1b770d90).
-pub fn parseTensorBufferOverrides(p: *mod.params.Params, value: []const u8, overrides_out: *std.ArrayList(c.llama_model_tensor_buft_override)) !void {
-    c.ggml_backend_load_all();
+pub fn parseTensorBufferOverrides(p: *mod.params.Params, value: []const u8, overrides_out: *std.ArrayList(llama.impl.llama_c.llama_model_tensor_buft_override)) !void {
+    llama.impl.llama_c.ggml_backend_load_all();
 
     // `std::map<std::string, buft>`: by name, sorted
-    const Entry = struct { name: []const u8, buft: c.ggml_backend_buffer_type_t };
+    const Entry = struct { name: []const u8, buft: llama.impl.llama_c.ggml_backend_buffer_type_t };
     var buft_list: std.ArrayList(Entry) = .empty;
     var i: usize = 0;
-    while (i < c.ggml_backend_dev_count()) : (i += 1) {
-        const dev = c.ggml_backend_dev_get(i);
-        const buft = c.ggml_backend_dev_buffer_type(dev);
+    while (i < llama.impl.llama_c.ggml_backend_dev_count()) : (i += 1) {
+        const dev = llama.impl.llama_c.ggml_backend_dev_get(i);
+        const buft = llama.impl.llama_c.ggml_backend_dev_buffer_type(dev);
         if (buft != null) {
-            const name = std.mem.span(c.ggml_backend_buft_name(buft));
+            const name = std.mem.span(llama.impl.llama_c.ggml_backend_buft_name(buft));
             var replaced = false;
             for (buft_list.items) |*e| {
                 if (std.mem.eql(u8, e.name, name)) {
@@ -161,7 +161,7 @@ pub fn parseTensorBufferOverrides(p: *mod.params.Params, value: []const u8, over
         } else null;
         if (found == null) {
             mod.io.printf("Available buffer types:\n", .{});
-            for (buft_list.items) |e| mod.io.printf("  %s\n", .{c.ggml_backend_buft_name(e.buft)});
+            for (buft_list.items) |e| mod.io.printf("  %s\n", .{llama.impl.llama_c.ggml_backend_buft_name(e.buft)});
             return mod.arg.throwStr("unknown buffer type");
         }
         try overrides_out.append(p.arena, .{ .pattern = (try p.arena.dupeSentinel(u8, tensor_name, 0)).ptr, .buft = found });
@@ -184,11 +184,11 @@ fn llmFfnBlockRegex(p: *mod.params.Params, idx: c_int, ffn_regex: []const u8) ![
 /// Ports `llm_add_n_cpu_ffn_overrides` (common/common.h:1291 @b1b770d90):
 /// one CPU buffer-type override per layer below `n`. The C keeps the
 /// patterns alive in a static list; here the arena does.
-pub fn llmAddNCpuFfnOverrides(p: *mod.params.Params, n: c_int, ffn_regex: []const u8, overrides: *std.ArrayList(c.llama_model_tensor_buft_override)) !void {
+pub fn llmAddNCpuFfnOverrides(p: *mod.params.Params, n: c_int, ffn_regex: []const u8, overrides: *std.ArrayList(llama.impl.llama_c.llama_model_tensor_buft_override)) !void {
     var i: c_int = 0;
     while (i < n) : (i += 1) {
         const re = try llmFfnBlockRegex(p, i, ffn_regex);
-        try overrides.append(p.arena, .{ .pattern = re.ptr, .buft = c.ggml_backend_cpu_buffer_type() });
+        try overrides.append(p.arena, .{ .pattern = re.ptr, .buft = llama.impl.llama_c.ggml_backend_cpu_buffer_type() });
     }
 }
 
@@ -246,11 +246,11 @@ pub fn add(ctx: *mod.arg.Context) !void {
     try ctx.add((mod.arg.Arg{ .args = &.{"--rope-scaling"}, .value_hint = "{none,linear,yarn}", .help = "RoPE frequency scaling method, defaults to linear unless specified by the model", .handler = .{ .string = struct {
         fn f(q: *mod.params.Params, value: S) !void {
             if (std.mem.eql(u8, value, "none")) {
-                q.rope_scaling_type = c.LLAMA_ROPE_SCALING_TYPE_NONE;
+                q.rope_scaling_type = llama.impl.llama_c.LLAMA_ROPE_SCALING_TYPE_NONE;
             } else if (std.mem.eql(u8, value, "linear")) {
-                q.rope_scaling_type = c.LLAMA_ROPE_SCALING_TYPE_LINEAR;
+                q.rope_scaling_type = llama.impl.llama_c.LLAMA_ROPE_SCALING_TYPE_LINEAR;
             } else if (std.mem.eql(u8, value, "yarn")) {
-                q.rope_scaling_type = c.LLAMA_ROPE_SCALING_TYPE_YARN;
+                q.rope_scaling_type = llama.impl.llama_c.LLAMA_ROPE_SCALING_TYPE_YARN;
             } else return mod.arg.throwStr("invalid value");
         }
     }.f } }).setEnv("LLAMA_ARG_ROPE_SCALING_TYPE"));
@@ -321,13 +321,13 @@ pub fn add(ctx: *mod.arg.Context) !void {
         }
     }.f } }).setEnv("LLAMA_ARG_NO_HOST"));
     // arg.cpp:2448
-    try ctx.add((mod.arg.Arg{ .args = &.{ "-ctk", "--cache-type-k" }, .value_hint = "TYPE", .help = try ctx.fmt("KV cache data type for K\nallowed values: %s\n(default: %s)", .{ kv_types.ptr, c.ggml_type_name(p.cache_type_k) }), .handler = .{ .string = struct {
+    try ctx.add((mod.arg.Arg{ .args = &.{ "-ctk", "--cache-type-k" }, .value_hint = "TYPE", .help = try ctx.fmt("KV cache data type for K\nallowed values: %s\n(default: %s)", .{ kv_types.ptr, llama.impl.llama_c.ggml_type_name(p.cache_type_k) }), .handler = .{ .string = struct {
         fn f(q: *mod.params.Params, value: S) !void {
             q.cache_type_k = try kvCacheTypeFromStr(value);
         }
     }.f } }).setEnv("LLAMA_ARG_CACHE_TYPE_K"));
     // arg.cpp:2461
-    try ctx.add((mod.arg.Arg{ .args = &.{ "-ctv", "--cache-type-v" }, .value_hint = "TYPE", .help = try ctx.fmt("KV cache data type for V\nallowed values: %s\n(default: %s)", .{ kv_types.ptr, c.ggml_type_name(p.cache_type_v) }), .handler = .{ .string = struct {
+    try ctx.add((mod.arg.Arg{ .args = &.{ "-ctv", "--cache-type-v" }, .value_hint = "TYPE", .help = try ctx.fmt("KV cache data type for V\nallowed values: %s\n(default: %s)", .{ kv_types.ptr, llama.impl.llama_c.ggml_type_name(p.cache_type_v) }), .handler = .{ .string = struct {
         fn f(q: *mod.params.Params, value: S) !void {
             q.cache_type_v = try kvCacheTypeFromStr(value);
         }
@@ -508,17 +508,17 @@ pub fn add(ctx: *mod.arg.Context) !void {
     // never has, is asked for only when the option is given.
     try ctx.add((mod.arg.Arg{ .args = &.{"--rpc"}, .value_hint = "SERVERS", .help = "comma-separated list of RPC servers (host:port)", .handler = .{ .string = struct {
         fn f(_: *mod.params.Params, _: S) !void {
-            if (!c.llama_supports_rpc()) return mod.arg.throwStr("RPC not supported in this build");
+            if (!llama.api.llama.llama_supports_rpc()) return mod.arg.throwStr("RPC not supported in this build");
             return mod.arg.throwStr("an RPC backend is not supported by this port");
         }
     }.f } }).setEnv("LLAMA_ARG_RPC"));
     // arg.cpp:2702
     try ctx.add((mod.arg.Arg{ .args = &.{ "-lm", "--load-mode" }, .value_hint = "MODE", .help = "model loading mode (default: auto)\n- auto: mmap, unless a device does not support it\n- none: no special loading mode\n- mmap: memory-map model (if mmap disabled, slower load but may reduce pageouts if not using mlock)\n- mlock: force system to keep model in RAM rather than swapping or compressing\n- mmap+mlock: mmap + force system to keep model in RAM rather than swapping or compressing\n- dio: use DirectIO if available\n", .handler = .{ .string = struct {
         fn f(q: *mod.params.Params, value: S) !void {
-            const modes = [_]struct { []const u8, c.llama_load_mode }{
-                .{ "auto", c.LLAMA_LOAD_MODE_AUTO },             .{ "none", c.LLAMA_LOAD_MODE_NONE },
-                .{ "mmap", c.LLAMA_LOAD_MODE_MMAP },             .{ "mlock", c.LLAMA_LOAD_MODE_MLOCK },
-                .{ "mmap+mlock", c.LLAMA_LOAD_MODE_MMAP_MLOCK }, .{ "dio", c.LLAMA_LOAD_MODE_DIRECT_IO },
+            const modes = [_]struct { []const u8, llama.impl.llama_c.llama_load_mode }{
+                .{ "auto", llama.impl.llama_c.LLAMA_LOAD_MODE_AUTO },             .{ "none", llama.impl.llama_c.LLAMA_LOAD_MODE_NONE },
+                .{ "mmap", llama.impl.llama_c.LLAMA_LOAD_MODE_MMAP },             .{ "mlock", llama.impl.llama_c.LLAMA_LOAD_MODE_MLOCK },
+                .{ "mmap+mlock", llama.impl.llama_c.LLAMA_LOAD_MODE_MMAP_MLOCK }, .{ "dio", llama.impl.llama_c.LLAMA_LOAD_MODE_DIRECT_IO },
             };
             for (modes) |m| if (std.mem.eql(u8, value, m[0])) {
                 q.load_mode = m[1];
@@ -531,11 +531,11 @@ pub fn add(ctx: *mod.arg.Context) !void {
     try ctx.add((mod.arg.Arg{ .args = &.{ "-lzm", "--lazy-mode" }, .value_hint = "MODE", .help = "on-demand reading of certain tensors, for example per-layer embeddings (default: auto)\n- on: read the rows of such tensors from disk on demand instead of keeping them resident (requires mmap)\n- auto: on, but only for tensors larger than 4 GiB\n- off: always keep them resident", .handler = .{ .string = struct {
         fn f(q: *mod.params.Params, value: S) !void {
             if (std.mem.eql(u8, value, "on")) {
-                q.lazy_mode = c.LLAMA_LAZY_MODE_ON;
+                q.lazy_mode = llama.impl.llama_c.LLAMA_LAZY_MODE_ON;
             } else if (std.mem.eql(u8, value, "auto")) {
-                q.lazy_mode = c.LLAMA_LAZY_MODE_AUTO;
+                q.lazy_mode = llama.impl.llama_c.LLAMA_LAZY_MODE_AUTO;
             } else if (std.mem.eql(u8, value, "off")) {
-                q.lazy_mode = c.LLAMA_LAZY_MODE_OFF;
+                q.lazy_mode = llama.impl.llama_c.LLAMA_LAZY_MODE_OFF;
             } else return mod.arg.throwStr("invalid value");
         }
     }.f } }).setEnv("LLAMA_ARG_LAZY_MODE"));
@@ -543,11 +543,11 @@ pub fn add(ctx: *mod.arg.Context) !void {
     try ctx.add((mod.arg.Arg{ .args = &.{"--numa"}, .value_hint = "TYPE", .help = "attempt optimizations that help on some NUMA systems\n- distribute: spread execution evenly over all nodes\n- isolate: only spawn threads on CPUs on the node that execution started on\n- numactl: use the CPU map provided by numactl\nif run without this previously, it is recommended to drop the system page cache before using this\nsee https://github.com/ggml-org/llama.cpp/issues/1437", .handler = .{ .string = struct {
         fn f(q: *mod.params.Params, value: S) !void {
             if (std.mem.eql(u8, value, "distribute") or value.len == 0) {
-                q.numa = c.GGML_NUMA_STRATEGY_DISTRIBUTE;
+                q.numa = llama.impl.llama_c.GGML_NUMA_STRATEGY_DISTRIBUTE;
             } else if (std.mem.eql(u8, value, "isolate")) {
-                q.numa = c.GGML_NUMA_STRATEGY_ISOLATE;
+                q.numa = llama.impl.llama_c.GGML_NUMA_STRATEGY_ISOLATE;
             } else if (std.mem.eql(u8, value, "numactl")) {
-                q.numa = c.GGML_NUMA_STRATEGY_NUMACTL;
+                q.numa = llama.impl.llama_c.GGML_NUMA_STRATEGY_NUMACTL;
             } else return mod.arg.throwStr("invalid value");
         }
     }.f } }).setEnv("LLAMA_ARG_NUMA"));
@@ -578,7 +578,7 @@ pub fn add(ctx: *mod.arg.Context) !void {
             .void_ = struct {
                 fn f(q: *mod.params.Params) !void {
                     // `llm_ffn_exps_cpu_override` (common/common.h:1287 @b1b770d90)
-                    try q.tensor_buft_overrides.append(q.arena, .{ .pattern = llm_ffn_exps_regex, .buft = c.ggml_backend_cpu_buffer_type() });
+                    try q.tensor_buft_overrides.append(q.arena, .{ .pattern = llm_ffn_exps_regex, .buft = llama.impl.llama_c.ggml_backend_cpu_buffer_type() });
                 }
             }.f,
         },
@@ -651,7 +651,7 @@ pub fn add(ctx: *mod.arg.Context) !void {
             } else {
                 q.n_gpu_layers = try mod.arg.stoi(value);
             }
-            if (!c.llama_supports_gpu_offload()) {
+            if (!llama.api.llama.llama_supports_gpu_offload()) {
                 mod.io.eprintf("warning: no usable GPU found, --gpu-layers option will be ignored\n", .{});
                 mod.io.eprintf("warning: one possible reason is that llama.cpp was compiled without GPU support\n", .{});
                 mod.io.eprintf("warning: consult docs/build.md for compilation instructions\n", .{});
@@ -662,15 +662,15 @@ pub fn add(ctx: *mod.arg.Context) !void {
     try ctx.add((mod.arg.Arg{ .args = &.{ "-sm", "--split-mode" }, .value_hint = "{none,layer,row,tensor}", .help = "how to split the model across multiple GPUs, one of:\n- none: use one GPU only\n- layer (default): split layers and KV across GPUs (pipelined)\n- row: split weight across GPUs by rows (parallelized)\n- tensor: split weights and KV across GPUs (parallelized, EXPERIMENTAL)", .handler = .{ .string = struct {
         fn f(q: *mod.params.Params, value: S) !void {
             if (std.mem.eql(u8, value, "none")) {
-                q.split_mode = c.LLAMA_SPLIT_MODE_NONE;
+                q.split_mode = llama.impl.llama_c.LLAMA_SPLIT_MODE_NONE;
             } else if (std.mem.eql(u8, value, "layer")) {
-                q.split_mode = c.LLAMA_SPLIT_MODE_LAYER;
+                q.split_mode = llama.impl.llama_c.LLAMA_SPLIT_MODE_LAYER;
             } else if (std.mem.eql(u8, value, "row")) {
-                q.split_mode = c.LLAMA_SPLIT_MODE_ROW;
+                q.split_mode = llama.impl.llama_c.LLAMA_SPLIT_MODE_ROW;
             } else if (std.mem.eql(u8, value, "tensor")) {
-                q.split_mode = c.LLAMA_SPLIT_MODE_TENSOR;
+                q.split_mode = llama.impl.llama_c.LLAMA_SPLIT_MODE_TENSOR;
             } else return mod.arg.throwStr("invalid value");
-            if (!c.llama_supports_gpu_offload()) {
+            if (!llama.api.llama.llama_supports_gpu_offload()) {
                 mod.io.eprintf("warning: llama.cpp was compiled without support for GPU offload. Setting the split mode has no effect.\n", .{});
             }
         }
@@ -685,13 +685,13 @@ pub fn add(ctx: *mod.arg.Context) !void {
                 fn f(q: *mod.params.Params, value: S) !void {
                     // split string by , and /
                     const split_arg = try splitCommaSlash(q.arena, value);
-                    const max = c.llama_max_devices();
+                    const max = llama.api.llama.llama_max_devices();
                     if (split_arg.items.len >= max) return mod.arg.throw("got %zu input configs, but system only has %zu devices", .{ split_arg.items.len, max });
                     var i: usize = 0;
                     while (i < max) : (i += 1) {
                         q.tensor_split[i] = if (i < split_arg.items.len) try mod.arg.stof(split_arg.items[i]) else 0.0;
                     }
-                    if (!c.llama_supports_gpu_offload()) {
+                    if (!llama.api.llama.llama_supports_gpu_offload()) {
                         mod.io.eprintf("warning: llama.cpp was compiled without support for GPU offload. Setting a tensor split has no effect.\n", .{});
                     }
                 }
@@ -702,7 +702,7 @@ pub fn add(ctx: *mod.arg.Context) !void {
     try ctx.add((mod.arg.Arg{ .args = &.{ "-mg", "--main-gpu" }, .value_hint = "INDEX", .help = try ctx.fmt("the GPU to use for the model (with split-mode = none), or for intermediate results and KV (with split-mode = row) (default: %d)", .{p.main_gpu}), .handler = .{ .int = struct {
         fn f(q: *mod.params.Params, value: c_int) !void {
             q.main_gpu = value;
-            if (!c.llama_supports_gpu_offload()) {
+            if (!llama.api.llama.llama_supports_gpu_offload()) {
                 mod.io.eprintf("warning: llama.cpp was compiled without support for GPU offload. Setting the main GPU has no effect.\n", .{});
             }
         }
@@ -737,7 +737,7 @@ pub fn add(ctx: *mod.arg.Context) !void {
                 fn f(q: *mod.params.Params, value: S) !void {
                     // split string by , and /
                     const split_arg = try splitCommaSlash(q.arena, value);
-                    const max = c.llama_max_devices();
+                    const max = llama.api.llama.llama_max_devices();
                     if (split_arg.items.len >= max) return mod.arg.throw("got %zu input configs, but system only has %zu devices", .{ split_arg.items.len, max });
                     if (split_arg.items.len == 1) {
                         const v = (try mod.arg.stoull(split_arg.items[0])) *% 1024 *% 1024;

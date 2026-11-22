@@ -41,10 +41,10 @@ extern fn vDSP_measqv(a: [*]const f32, ia: Stride, cc: *f32, n: Length) void;
 /// Ports `ggml_compute_forward_norm_f32` (ops.cpp:3985 @b1b770d90), both arms
 /// of its contiguous path: vDSP under `GGML_USE_ACCELERATE`, otherwise
 /// `ggml_vec_cvar_f32`, which centres `y` and returns the variance.
-fn normF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+fn normF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
-    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
@@ -118,11 +118,11 @@ fn normF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_te
 }
 
 /// Ports `ggml_compute_forward_norm` (ops.cpp:4054 @b1b770d90).
-pub export fn ggml_compute_forward_norm(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_norm(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => normF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => normF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -141,10 +141,10 @@ const RmsNormFuseOp = enum { none, mul };
 ///
 /// The C's `assert(scale > 0.0f)` is the `<cassert>` one, compiled out under
 /// `NDEBUG`, so it is not reproduced.
-fn rmsNormF32(comptime fuse_op: RmsNormFuseOp, params: *const ggml.cpu.defs.ComputeParams, dst_rms_norm: *ggml.impl.c.ggml_tensor, dst_fused: ?*ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst_rms_norm.src[0]);
-    var src1: ?*const ggml.impl.c.ggml_tensor = null;
-    var dst: *ggml.impl.c.ggml_tensor = dst_rms_norm;
+fn rmsNormF32(comptime fuse_op: RmsNormFuseOp, params: *const ggml.cpu.defs.ComputeParams, dst_rms_norm: *ggml.impl.ggml_c.ggml_tensor, dst_fused: ?*ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst_rms_norm.src[0]);
+    var src1: ?*const ggml.impl.ggml_c.ggml_tensor = null;
+    var dst: *ggml.impl.ggml_c.ggml_tensor = dst_rms_norm;
 
     if (fuse_op == .mul) {
         const f = dst_fused.?;
@@ -152,7 +152,7 @@ fn rmsNormF32(comptime fuse_op: RmsNormFuseOp, params: *const ggml.cpu.defs.Comp
         dst = f;
     }
 
-    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
 
     ggml.impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
 
@@ -214,11 +214,11 @@ fn rmsNormF32(comptime fuse_op: RmsNormFuseOp, params: *const ggml.cpu.defs.Comp
 }
 
 /// Ports `ggml_compute_forward_rms_norm` (ops.cpp:4147 @b1b770d90).
-pub export fn ggml_compute_forward_rms_norm(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_rms_norm(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => rmsNormF32(.none, params, dst, null),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => rmsNormF32(.none, params, dst, null),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -226,15 +226,15 @@ pub export fn ggml_compute_forward_rms_norm(params: *const ggml.cpu.defs.Compute
 /// Ports `ggml_compute_forward_rms_norm_mul_fused` (ops.cpp:4167 @b1b770d90):
 /// `dst_mul = rms_norm(src0) * src1` in one pass, without materialising the
 /// `rms_norm` result.
-pub export fn ggml_compute_forward_rms_norm_mul_fused(params: *const ggml.cpu.defs.ComputeParams, dst_rms_norm: *ggml.impl.c.ggml_tensor, dst_mul: ?*ggml.impl.c.ggml_tensor) callconv(.c) void {
+pub fn ggml_compute_forward_rms_norm_mul_fused(params: *const ggml.cpu.defs.ComputeParams, dst_rms_norm: *ggml.impl.ggml_c.ggml_tensor, dst_mul: ?*ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
     ggml.impl.assert(dst_mul != null, "dst_mul != nullptr");
     const m = dst_mul.?;
     ggml.impl.assert(m.src[0] == dst_rms_norm or m.src[1] == dst_rms_norm, "dst_mul->src[0] == dst_rms_norm || dst_mul->src[1] == dst_rms_norm");
 
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst_rms_norm.src[0]);
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst_rms_norm.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => rmsNormF32(.mul, params, dst_rms_norm, m),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => rmsNormF32(.mul, params, dst_rms_norm, m),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -244,11 +244,11 @@ pub export fn ggml_compute_forward_rms_norm_mul_fused(params: *const ggml.cpu.de
 /// The C's long derivation comment ends at
 /// `dx = (dz + x*(-sum_xdz/sum_eps)) * rrms`; see ggml-org/ggml#1491 for why
 /// `sum_eps` rather than `mean_eps` is the divisor.
-fn rmsNormBackF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]); // gradients from forward pass output
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]); // src1 from forward pass
+fn rmsNormBackF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]); // gradients from forward pass output
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]); // src1 from forward pass
 
-    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0, dst) and ggml.impl.c.ggml_are_same_shape(src0, src1), "ggml_are_same_shape(src0, dst) && ggml_are_same_shape(src0, src1)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst) and ggml.impl.ggml_c.ggml_are_same_shape(src0, src1), "ggml_are_same_shape(src0, dst) && ggml_are_same_shape(src0, src1)");
 
     ggml.impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
     ggml.impl.assert(src1.nb[0] == @sizeOf(f32), "src1->nb[0] == sizeof(float)");
@@ -312,11 +312,11 @@ fn rmsNormBackF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.
 }
 
 /// Ports `ggml_compute_forward_rms_norm_back` (ops.cpp:4346 @b1b770d90).
-pub export fn ggml_compute_forward_rms_norm_back(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_rms_norm_back(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => rmsNormBackF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => rmsNormBackF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -325,10 +325,10 @@ pub export fn ggml_compute_forward_rms_norm_back(params: *const ggml.cpu.defs.Co
 ///
 /// Threads split over groups, not rows. The mean and variance are divided in
 /// `double` and only then narrowed, as the C's `float = double / int64_t` is.
-fn groupNormF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+fn groupNormF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
-    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
 
     ggml.impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
 
@@ -412,11 +412,11 @@ fn groupNormF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.gg
 }
 
 /// Ports `ggml_compute_forward_group_norm` (ops.cpp:4441 @b1b770d90).
-pub export fn ggml_compute_forward_group_norm(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_group_norm(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => groupNormF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => groupNormF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -425,10 +425,10 @@ pub export fn ggml_compute_forward_group_norm(params: *const ggml.cpu.defs.Compu
 ///
 /// `sqrtf(sum)` takes a `float`, so the `double` sum is narrowed **before**
 /// the square root, not after.
-fn l2NormF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+fn l2NormF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
-    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
@@ -480,11 +480,11 @@ fn l2NormF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_
 }
 
 /// Ports `ggml_compute_forward_l2_norm` (ops.cpp:4509 @b1b770d90).
-pub export fn ggml_compute_forward_l2_norm(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_l2_norm(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => l2NormF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => l2NormF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }

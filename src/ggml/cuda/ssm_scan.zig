@@ -402,14 +402,14 @@ fn ssmScanSsdF32Cuda(
 /// Ports `ggml_cuda_op_ssm_scan_impl` (ssm-scan.cu:798 @b1b770d90), the
 /// body of `ggml_cuda_op_ssm_scan`, separate so that the fused entry
 /// point can pass a cache.
-fn opSsmScanImpl(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor, cache: ?*const FusedCache) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]); // s
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]); // x
-    const src2 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]); // dt
-    const src3 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[3]); // A
-    const src4 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[4]); // B
-    const src5 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[5]); // C
-    const src6 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[6]); // ids
+fn opSsmScanImpl(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor, cache: ?*const FusedCache) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]); // s
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]); // x
+    const src2 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[2]); // dt
+    const src3 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[3]); // A
+    const src4 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[4]); // B
+    const src5 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[5]); // C
+    const src6 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[6]); // ids
 
     const nc = src0.ne[0]; // d_state
     const nr = src0.ne[1]; // head_dim or 1
@@ -420,9 +420,9 @@ fn opSsmScanImpl(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor, 
     const K_param = ggml.impl.getOpParamsI32(dst, 0);
     const K: i64 = if (K_param > 0) K_param else 1;
 
-    const s_off: i64 = @bitCast(@as(usize, @bitCast(ggml.impl.c.ggml_nelements(src1))) * @sizeOf(f32));
+    const s_off: i64 = @bitCast(@as(usize, @bitCast(ggml.impl.ggml_c.ggml_nelements(src1))) * @sizeOf(f32));
 
-    ggml.impl.assert(ggml.impl.c.ggml_nelements(src1) + K * nc * nr * nh * n_s == ggml.impl.c.ggml_nelements(dst), "ggml_nelements(src1) + K*nc*nr*nh*n_s == ggml_nelements(dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_nelements(src1) + K * nc * nr * nh * n_s == ggml.impl.ggml_c.ggml_nelements(dst), "ggml_nelements(src1) + K*nc*nr*nh*n_s == ggml_nelements(dst)");
     ggml.impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
     ggml.impl.assert(src1.nb[0] == @sizeOf(f32), "src1->nb[0] == sizeof(float)");
     ggml.impl.assert(src2.nb[0] == @sizeOf(f32), "src2->nb[0] == sizeof(float)");
@@ -442,9 +442,9 @@ fn opSsmScanImpl(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor, 
     const dst_d: ?*anyopaque = dst.data;
     const stream = ctx.stream();
 
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    ggml.impl.assert(src6.type == ggml.impl.c.GGML_TYPE_I32, "src6->type == GGML_TYPE_I32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(src6.type == ggml.impl.ggml_c.GGML_TYPE_I32, "src6->type == GGML_TYPE_I32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
 
     // Byte strides are narrowed to int for both scan and SSD paths.
     ggml.impl.assert(src0.nb[2] <= int_max, "src0->nb[2] <= (size_t)INT_MAX");
@@ -512,12 +512,12 @@ fn opSsmScanImpl(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor, 
 }
 
 /// Ports `ggml_cuda_op_ssm_scan` (ssm-scan.cu:893 @b1b770d90).
-pub fn opSsmScan(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+pub fn opSsmScan(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     opSsmScanImpl(ctx, dst, null);
 }
 
 /// Ports `ggml_cuda_op_ssm_scan_fused_cache` (ssm-scan.cu:897 @b1b770d90):
 /// the same op, writing the state snapshots into the cache instead of dst.
-pub fn opSsmScanFusedCache(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor, cache: FusedCache) void {
+pub fn opSsmScanFusedCache(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor, cache: FusedCache) void {
     opSsmScanImpl(ctx, dst, &cache);
 }

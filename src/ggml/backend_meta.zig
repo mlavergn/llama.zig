@@ -65,8 +65,6 @@ const stdlib = @import("stdlib");
 
 /// The heap the rest of ggml uses. A function entered through a C ABI has no
 /// allocator to be handed one, the same reasoning as `backend.zig`.
-const allocator = std.heap.c_allocator;
-
 /// Aborts on a failed allocation, standing in for the `std::bad_alloc` the C++
 /// would let escape to `std::terminate`.
 fn oom() noreturn {
@@ -82,34 +80,34 @@ fn oom() noreturn {
 /// - `fmt`: printf format.
 /// - `args`: its arguments.
 fn abortFmt(comptime line: c_int, comptime fmt: [*:0]const u8, args: anytype) noreturn {
-    @call(.auto, mod.impl.c.ggml_abort, .{ "ggml-backend-meta.cpp", line, fmt } ++ args);
+    @call(.auto, mod.impl.ggml_c.ggml_abort, .{ "ggml-backend-meta.cpp", line, fmt } ++ args);
 }
 
-const axis_0: mod.impl.c.enum_ggml_backend_meta_split_axis = mod.impl.c.GGML_BACKEND_SPLIT_AXIS_0;
-const axis_1: mod.impl.c.enum_ggml_backend_meta_split_axis = mod.impl.c.GGML_BACKEND_SPLIT_AXIS_1;
-const axis_2: mod.impl.c.enum_ggml_backend_meta_split_axis = mod.impl.c.GGML_BACKEND_SPLIT_AXIS_2;
-const axis_3: mod.impl.c.enum_ggml_backend_meta_split_axis = mod.impl.c.GGML_BACKEND_SPLIT_AXIS_3;
-const axis_mirrored: mod.impl.c.enum_ggml_backend_meta_split_axis = mod.impl.c.GGML_BACKEND_SPLIT_AXIS_MIRRORED;
-const axis_partial: mod.impl.c.enum_ggml_backend_meta_split_axis = mod.impl.c.GGML_BACKEND_SPLIT_AXIS_PARTIAL;
-const axis_none: mod.impl.c.enum_ggml_backend_meta_split_axis = mod.impl.c.GGML_BACKEND_SPLIT_AXIS_NONE;
-const axis_unknown: mod.impl.c.enum_ggml_backend_meta_split_axis = mod.impl.c.GGML_BACKEND_SPLIT_AXIS_UNKNOWN;
+const axis_0: mod.impl.ggml_c.enum_ggml_backend_meta_split_axis = mod.impl.ggml_c.GGML_BACKEND_SPLIT_AXIS_0;
+const axis_1: mod.impl.ggml_c.enum_ggml_backend_meta_split_axis = mod.impl.ggml_c.GGML_BACKEND_SPLIT_AXIS_1;
+const axis_2: mod.impl.ggml_c.enum_ggml_backend_meta_split_axis = mod.impl.ggml_c.GGML_BACKEND_SPLIT_AXIS_2;
+const axis_3: mod.impl.ggml_c.enum_ggml_backend_meta_split_axis = mod.impl.ggml_c.GGML_BACKEND_SPLIT_AXIS_3;
+const axis_mirrored: mod.impl.ggml_c.enum_ggml_backend_meta_split_axis = mod.impl.ggml_c.GGML_BACKEND_SPLIT_AXIS_MIRRORED;
+const axis_partial: mod.impl.ggml_c.enum_ggml_backend_meta_split_axis = mod.impl.ggml_c.GGML_BACKEND_SPLIT_AXIS_PARTIAL;
+const axis_none: mod.impl.ggml_c.enum_ggml_backend_meta_split_axis = mod.impl.ggml_c.GGML_BACKEND_SPLIT_AXIS_NONE;
+const axis_unknown: mod.impl.ggml_c.enum_ggml_backend_meta_split_axis = mod.impl.ggml_c.GGML_BACKEND_SPLIT_AXIS_UNKNOWN;
 
-const max_dims: usize = mod.impl.c.GGML_MAX_DIMS;
-const max_src: usize = mod.impl.c.GGML_MAX_SRC;
+const max_dims: usize = mod.impl.ggml_c.GGML_MAX_DIMS;
+const max_src: usize = mod.impl.ggml_c.GGML_MAX_SRC;
 /// Ports `GGML_BACKEND_META_MAX_DEVICES` (ggml-backend.h:400 @b1b770d90).
-const max_devices: usize = mod.impl.c.GGML_BACKEND_META_MAX_DEVICES;
+const max_devices: usize = mod.impl.ggml_c.GGML_BACKEND_META_MAX_DEVICES;
 
 /// True for an axis that names a tensor dimension — the C's recurring
 /// `axis >= 0 && axis < GGML_MAX_DIMS`. The enum promotes to `int` there, and
 /// every value it ever holds is non-negative, so the lower bound is vacuous.
-inline fn isDim(axis: mod.impl.c.enum_ggml_backend_meta_split_axis) bool {
+inline fn isDim(axis: mod.impl.ggml_c.enum_ggml_backend_meta_split_axis) bool {
     return axis < max_dims;
 }
 
 /// The C's brace initialiser `{axis, {0}, {1}, 1}`: every `ne` zero, `nr[0]`
 /// one and the rest zero, one segment.
-fn ssMake(axis: mod.impl.c.enum_ggml_backend_meta_split_axis) mod.impl.c.struct_ggml_backend_meta_split_state {
-    var ss = std.mem.zeroes(mod.impl.c.struct_ggml_backend_meta_split_state);
+fn ssMake(axis: mod.impl.ggml_c.enum_ggml_backend_meta_split_axis) mod.impl.ggml_c.struct_ggml_backend_meta_split_state {
+    var ss = std.mem.zeroes(mod.impl.ggml_c.struct_ggml_backend_meta_split_state);
     ss.axis = axis;
     ss.nr[0] = 1;
     ss.n_segments = 1;
@@ -117,24 +115,24 @@ fn ssMake(axis: mod.impl.c.enum_ggml_backend_meta_split_axis) mod.impl.c.struct_
 }
 
 /// The axis as the C's `int` — what `int split_dim = split_state.axis` holds.
-inline fn axisInt(axis: mod.impl.c.enum_ggml_backend_meta_split_axis) c_int {
+inline fn axisInt(axis: mod.impl.ggml_c.enum_ggml_backend_meta_split_axis) c_int {
     return @intCast(axis);
 }
 
 /// Source `i` of `t`, narrowed: `[*c]` array fields must not be indexed
 /// through (Zig miscompiles `p.*.arr[i]` there), so every source is
 /// read through this before its `ne` or `nb` is touched.
-inline fn srcOf(t: *const mod.impl.c.ggml_tensor, i: usize) *mod.impl.c.ggml_tensor {
-    return mod.impl.one(mod.impl.c.ggml_tensor, t.src[i]);
+inline fn srcOf(t: *const mod.impl.ggml_c.ggml_tensor, i: usize) *mod.impl.ggml_c.ggml_tensor {
+    return mod.impl.one(mod.impl.ggml_c.ggml_tensor, t.src[i]);
 }
 
 /// Source `i` of `t`, or null.
-inline fn srcOpt(t: *const mod.impl.c.ggml_tensor, i: usize) ?*mod.impl.c.ggml_tensor {
+inline fn srcOpt(t: *const mod.impl.ggml_c.ggml_tensor, i: usize) ?*mod.impl.ggml_c.ggml_tensor {
     return t.src[i];
 }
 
 /// True for the C's `tensor->src[i] == nullptr || tensor->src[i] == tensor`.
-inline fn srcAbsentOrSelf(t: *const mod.impl.c.ggml_tensor, i: usize) bool {
+inline fn srcAbsentOrSelf(t: *const mod.impl.ggml_c.ggml_tensor, i: usize) bool {
     const s = srcOpt(t, i) orelse return true;
     return s == t;
 }
@@ -148,19 +146,19 @@ inline fn srcAbsentOrSelf(t: *const mod.impl.c.ggml_tensor, i: usize) bool {
 /// Return: a NUL-terminated string owned by the caller.
 fn metaName(names: []const [*c]const u8) [:0]u8 {
     var out: std.ArrayList(u8) = .empty;
-    out.appendSlice(allocator, "Meta(") catch oom();
+    out.appendSlice(std.heap.c_allocator, "Meta(") catch oom();
     for (names, 0..) |n, i| {
-        if (i > 0) out.append(allocator, ',') catch oom();
-        out.appendSlice(allocator, std.mem.span(n)) catch oom();
+        if (i > 0) out.append(std.heap.c_allocator, ',') catch oom();
+        out.appendSlice(std.heap.c_allocator, std.mem.span(n)) catch oom();
     }
-    out.append(allocator, ')') catch oom();
-    return out.toOwnedSliceSentinel(allocator, 0) catch oom();
+    out.append(std.heap.c_allocator, ')') catch oom();
+    return out.toOwnedSliceSentinel(std.heap.c_allocator, 0) catch oom();
 }
 
 /// Ports `ggml_backend_meta_split_axis_name` (ggml-backend-meta.cpp:27 @b1b770d90).
 ///
 /// Return: a static string; aborts on a value outside the enum.
-pub export fn ggml_backend_meta_split_axis_name(split_axis: mod.impl.c.enum_ggml_backend_meta_split_axis) callconv(.c) [*c]const u8 {
+pub fn ggml_backend_meta_split_axis_name(split_axis: mod.impl.ggml_c.enum_ggml_backend_meta_split_axis) callconv(.c) [*c]const u8 {
     return switch (split_axis) {
         axis_0 => "0",
         axis_1 => "1",
@@ -179,8 +177,8 @@ pub export fn ggml_backend_meta_split_axis_name(split_axis: mod.impl.c.enum_ggml
 
 /// Ports `struct ggml_backend_meta_device_context` (ggml-backend-meta.cpp:54 @b1b770d90).
 const DeviceContext = struct {
-    simple_devs: []mod.impl.c.ggml_backend_dev_t,
-    get_split_state: mod.impl.c.ggml_backend_meta_get_split_state_t,
+    simple_devs: []mod.impl.ggml_c.ggml_backend_dev_t,
+    get_split_state: mod.impl.ggml_c.ggml_backend_meta_get_split_state_t,
     get_split_state_ud: ?*anyopaque,
 
     name: [:0]u8,
@@ -198,7 +196,7 @@ const DeviceContext = struct {
     /// Parameters:
     /// - `simple_devs`: the devices, owned by the result from here on.
     /// - `get_split_state`, `get_split_state_ud`: the caller's callback.
-    fn init(simple_devs: []mod.impl.c.ggml_backend_dev_t, get_split_state: mod.impl.c.ggml_backend_meta_get_split_state_t, get_split_state_ud: ?*anyopaque) DeviceContext {
+    fn init(simple_devs: []mod.impl.ggml_c.ggml_backend_dev_t, get_split_state: mod.impl.ggml_c.ggml_backend_meta_get_split_state_t, get_split_state_ud: ?*anyopaque) DeviceContext {
         const moved_from: []const [*c]const u8 = &.{};
         return .{
             .simple_devs = simple_devs,
@@ -210,9 +208,9 @@ const DeviceContext = struct {
     }
 
     fn deinit(self: *DeviceContext) void {
-        allocator.free(self.description);
-        allocator.free(self.name);
-        allocator.free(self.simple_devs);
+        std.heap.c_allocator.free(self.description);
+        std.heap.c_allocator.free(self.name);
+        std.heap.c_allocator.free(self.simple_devs);
     }
 
     /// Equivalence under the operator< of `ggml_backend_meta_device_context`
@@ -227,18 +225,18 @@ const DeviceContext = struct {
     }
 };
 
-inline fn deviceCtx(dev: mod.impl.c.ggml_backend_dev_t) *DeviceContext {
+inline fn deviceCtx(dev: mod.impl.ggml_c.ggml_backend_dev_t) *DeviceContext {
     return @ptrCast(@alignCast(dev.*.context));
 }
 
 /// Ports `ggml_backend_meta_device_get_name` (ggml-backend-meta.cpp:87 @b1b770d90).
-fn deviceGetName(dev: mod.impl.c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
+fn deviceGetName(dev: mod.impl.ggml_c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
     mod.impl.assert(devIsMeta(dev), "ggml_backend_dev_is_meta(dev)");
     return deviceCtx(dev).name.ptr;
 }
 
 /// Ports `ggml_backend_meta_device_get_description` (ggml-backend-meta.cpp:93 @b1b770d90).
-fn deviceGetDescription(dev: mod.impl.c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
+fn deviceGetDescription(dev: mod.impl.ggml_c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
     mod.impl.assert(devIsMeta(dev), "ggml_backend_dev_is_meta(dev)");
     return deviceCtx(dev).description.ptr;
 }
@@ -247,7 +245,7 @@ fn deviceGetDescription(dev: mod.impl.c.ggml_backend_dev_t) callconv(.c) [*c]con
 ///
 /// The sum over the simple devices — of the same physical device, when one is
 /// listed twice, which counts its memory twice. The C++ does the same.
-fn deviceGetMemory(dev: mod.impl.c.ggml_backend_dev_t, free: [*c]usize, total: [*c]usize) callconv(.c) void {
+fn deviceGetMemory(dev: mod.impl.ggml_c.ggml_backend_dev_t, free: [*c]usize, total: [*c]usize) callconv(.c) void {
     mod.impl.assert(devIsMeta(dev), "ggml_backend_dev_is_meta(dev)");
     const meta_dev_ctx = deviceCtx(dev);
     free.* = 0;
@@ -255,16 +253,16 @@ fn deviceGetMemory(dev: mod.impl.c.ggml_backend_dev_t, free: [*c]usize, total: [
     for (meta_dev_ctx.simple_devs) |simple_dev| {
         var tmp_free: usize = undefined;
         var tmp_total: usize = undefined;
-        mod.impl.c.ggml_backend_dev_memory(simple_dev, &tmp_free, &tmp_total);
+        mod.impl.ggml_c.ggml_backend_dev_memory(simple_dev, &tmp_free, &tmp_total);
         free.* += tmp_free;
         total.* += tmp_total;
     }
 }
 
 /// Ports `ggml_backend_meta_device_get_type` (ggml-backend-meta.cpp:112 @b1b770d90).
-fn deviceGetType(dev: mod.impl.c.ggml_backend_dev_t) callconv(.c) mod.impl.c.enum_ggml_backend_dev_type {
+fn deviceGetType(dev: mod.impl.ggml_c.ggml_backend_dev_t) callconv(.c) mod.impl.ggml_c.enum_ggml_backend_dev_type {
     _ = dev;
-    return mod.impl.c.GGML_BACKEND_DEVICE_TYPE_META;
+    return mod.impl.ggml_c.GGML_BACKEND_DEVICE_TYPE_META;
 }
 
 /// Ports `ggml_backend_meta_device_get_props` (ggml-backend-meta.cpp:118 @b1b770d90).
@@ -272,10 +270,10 @@ fn deviceGetType(dev: mod.impl.c.ggml_backend_dev_t) callconv(.c) mod.impl.c.enu
 /// The capabilities start from the C++'s placeholders — async and mmap on,
 /// host buffers, host pointers and events off ("Not implemented") — and are
 /// AND-ed with every simple device's.
-fn deviceGetProps(dev: mod.impl.c.ggml_backend_dev_t, props_: [*c]mod.impl.c.struct_ggml_backend_dev_props) callconv(.c) void {
+fn deviceGetProps(dev: mod.impl.ggml_c.ggml_backend_dev_t, props_: [*c]mod.impl.ggml_c.struct_ggml_backend_dev_props) callconv(.c) void {
     mod.impl.assert(devIsMeta(dev), "ggml_backend_dev_is_meta(dev)");
     const meta_dev_ctx = deviceCtx(dev);
-    const props = mod.impl.one(mod.impl.c.struct_ggml_backend_dev_props, props_);
+    const props = mod.impl.one(mod.impl.ggml_c.struct_ggml_backend_dev_props, props_);
 
     // TODO replace placeholders
     props.name = deviceGetName(dev);
@@ -293,8 +291,8 @@ fn deviceGetProps(dev: mod.impl.c.ggml_backend_dev_t, props_: [*c]mod.impl.c.str
         .mmap_support = true,
     };
     for (meta_dev_ctx.simple_devs) |simple_dev| {
-        var tmp_props: mod.impl.c.struct_ggml_backend_dev_props = undefined;
-        mod.impl.c.ggml_backend_dev_get_props(simple_dev, &tmp_props);
+        var tmp_props: mod.impl.ggml_c.struct_ggml_backend_dev_props = undefined;
+        mod.impl.ggml_c.ggml_backend_dev_get_props(simple_dev, &tmp_props);
         props.caps.async = props.caps.async and tmp_props.caps.async;
         props.caps.host_buffer = props.caps.host_buffer and tmp_props.caps.host_buffer;
         props.caps.buffer_from_host_ptr = props.caps.buffer_from_host_ptr and tmp_props.caps.buffer_from_host_ptr;
@@ -307,10 +305,10 @@ fn deviceGetProps(dev: mod.impl.c.ggml_backend_dev_t, props_: [*c]mod.impl.c.str
 ///
 /// Return: true when every simple device supports `op` (short-circuiting, as
 /// `std::all_of` does).
-fn deviceSupportsOp(dev: mod.impl.c.ggml_backend_dev_t, op: [*c]const mod.impl.c.ggml_tensor) callconv(.c) bool {
+fn deviceSupportsOp(dev: mod.impl.ggml_c.ggml_backend_dev_t, op: [*c]const mod.impl.ggml_c.ggml_tensor) callconv(.c) bool {
     mod.impl.assert(devIsMeta(dev), "ggml_backend_dev_is_meta(dev)");
     for (deviceCtx(dev).simple_devs) |simple_dev| {
-        if (!mod.impl.c.ggml_backend_dev_supports_op(simple_dev, op)) return false;
+        if (!mod.impl.ggml_c.ggml_backend_dev_supports_op(simple_dev, op)) return false;
     }
     return true;
 }
@@ -319,9 +317,9 @@ fn deviceSupportsOp(dev: mod.impl.c.ggml_backend_dev_t, op: [*c]const mod.impl.c
 ///
 /// Return: true only for a meta buffer type over the same simple devices, in
 /// the same order.
-fn deviceSupportsBuft(dev: mod.impl.c.ggml_backend_dev_t, buft: mod.impl.c.ggml_backend_buffer_type_t) callconv(.c) bool {
+fn deviceSupportsBuft(dev: mod.impl.ggml_c.ggml_backend_dev_t, buft: mod.impl.ggml_c.ggml_backend_buffer_type_t) callconv(.c) bool {
     mod.impl.assert(devIsMeta(dev), "ggml_backend_dev_is_meta(dev)");
-    const dev_buft = mod.impl.c.ggml_backend_buft_get_device(buft);
+    const dev_buft = mod.impl.ggml_c.ggml_backend_buft_get_device(buft);
     if (!devIsMeta(dev_buft)) {
         return false;
     }
@@ -337,7 +335,7 @@ fn deviceSupportsBuft(dev: mod.impl.c.ggml_backend_dev_t, buft: mod.impl.c.ggml_
 }
 
 /// Ports `ggml_backend_meta_device_iface` (ggml-backend-meta.cpp:180 @b1b770d90).
-const device_iface: mod.impl.c.struct_ggml_backend_device_i = .{
+const device_iface: mod.impl.ggml_c.struct_ggml_backend_device_i = .{
     .get_name = &deviceGetName,
     .get_description = &deviceGetDescription,
     .get_memory = &deviceGetMemory,
@@ -360,18 +358,18 @@ const device_iface: mod.impl.c.struct_ggml_backend_device_i = .{
 /// Identity is the `get_name` function's address, so a device made by another
 /// implementation of this file (the reference, in `scripts/meta-diff`) is not
 /// one of ours.
-fn devIsMeta(dev: mod.impl.c.ggml_backend_dev_t) bool {
+fn devIsMeta(dev: mod.impl.ggml_c.ggml_backend_dev_t) bool {
     return dev != null and dev.*.iface.get_name == device_iface.get_name;
 }
 
 /// Ports `ggml_backend_meta_dev_n_devs` (ggml-backend-meta.cpp:202 @b1b770d90).
-fn devNDevs(meta_dev: mod.impl.c.ggml_backend_dev_t) usize {
+fn devNDevs(meta_dev: mod.impl.ggml_c.ggml_backend_dev_t) usize {
     mod.impl.assert(devIsMeta(meta_dev), "ggml_backend_dev_is_meta(meta_dev)");
     return deviceCtx(meta_dev).simple_devs.len;
 }
 
 /// Ports `ggml_backend_meta_dev_simple_dev` (ggml-backend-meta.cpp:208 @b1b770d90).
-fn devSimpleDev(meta_dev: mod.impl.c.ggml_backend_dev_t, index: usize) mod.impl.c.ggml_backend_dev_t {
+fn devSimpleDev(meta_dev: mod.impl.ggml_c.ggml_backend_dev_t, index: usize) mod.impl.ggml_c.ggml_backend_dev_t {
     mod.impl.assert(devIsMeta(meta_dev), "ggml_backend_dev_is_meta(meta_dev)");
     const meta_dev_ctx = deviceCtx(meta_dev);
     mod.impl.assert(index < meta_dev_ctx.simple_devs.len, "index < meta_dev_ctx->simple_devs.size()");
@@ -383,7 +381,7 @@ fn devSimpleDev(meta_dev: mod.impl.c.ggml_backend_dev_t, index: usize) mod.impl.
 /// `context` pointer and the device itself stay put for the process.
 const DeviceEntry = struct {
     ctx: DeviceContext,
-    dev: mod.impl.c.struct_ggml_backend_device,
+    dev: mod.impl.ggml_c.struct_ggml_backend_device,
 };
 
 /// The C++'s two function-local statics in `ggml_backend_meta_device`. Only
@@ -402,16 +400,16 @@ var meta_devs: std.ArrayList(*DeviceEntry) = .empty;
 ///   statically allocated tensors.
 ///
 /// Return: the meta device; never freed.
-pub export fn ggml_backend_meta_device(
-    devs: [*c]mod.impl.c.ggml_backend_dev_t,
+pub fn ggml_backend_meta_device(
+    devs: [*c]mod.impl.ggml_c.ggml_backend_dev_t,
     n_devs: usize,
-    get_split_state: mod.impl.c.ggml_backend_meta_get_split_state_t,
+    get_split_state: mod.impl.ggml_c.ggml_backend_meta_get_split_state_t,
     get_split_state_ud: ?*anyopaque,
-) callconv(.c) mod.impl.c.ggml_backend_dev_t {
+) callconv(.c) mod.impl.ggml_c.ggml_backend_dev_t {
     mod.impl.assert(n_devs <= max_devices, "n_devs <= GGML_BACKEND_META_MAX_DEVICES");
     // TODO: this is not thread-safe - needs to be fixed
 
-    const simple_devs = allocator.alloc(mod.impl.c.ggml_backend_dev_t, n_devs) catch oom();
+    const simple_devs = std.heap.c_allocator.alloc(mod.impl.ggml_c.ggml_backend_dev_t, n_devs) catch oom();
     for (0..n_devs) |i| {
         simple_devs[i] = devs[i];
     }
@@ -424,14 +422,14 @@ pub export fn ggml_backend_meta_device(
         }
     }
 
-    const entry = allocator.create(DeviceEntry) catch oom();
+    const entry = std.heap.c_allocator.create(DeviceEntry) catch oom();
     entry.ctx = ctx;
     entry.dev = .{
         .iface = device_iface,
         .reg = null,
         .context = &entry.ctx,
     };
-    meta_devs.append(allocator, entry) catch oom();
+    meta_devs.append(std.heap.c_allocator, entry) catch oom();
     return &entry.dev;
 }
 
@@ -440,7 +438,7 @@ pub export fn ggml_backend_meta_device(
 
 /// Ports `struct ggml_backend_meta_buffer_type_context` (ggml-backend-meta.cpp:251 @b1b770d90).
 const BufferTypeContext = struct {
-    simple_bufts: []mod.impl.c.ggml_backend_buffer_type_t,
+    simple_bufts: []mod.impl.ggml_c.ggml_backend_buffer_type_t,
 
     name: [:0]u8,
 
@@ -448,30 +446,30 @@ const BufferTypeContext = struct {
     ///
     /// The same shadowed-parameter quirk as `DeviceContext.init`: the loop
     /// reads the moved-from argument, so the name is `Meta()`.
-    fn init(simple_bufts: []mod.impl.c.ggml_backend_buffer_type_t) BufferTypeContext {
+    fn init(simple_bufts: []mod.impl.ggml_c.ggml_backend_buffer_type_t) BufferTypeContext {
         const moved_from: []const [*c]const u8 = &.{};
         return .{ .simple_bufts = simple_bufts, .name = metaName(moved_from) };
     }
 };
 
-inline fn buftCtx(buft: mod.impl.c.ggml_backend_buffer_type_t) *BufferTypeContext {
+inline fn buftCtx(buft: mod.impl.ggml_c.ggml_backend_buffer_type_t) *BufferTypeContext {
     return @ptrCast(@alignCast(buft.*.context));
 }
 
 /// Ports `ggml_backend_meta_buft_n_bufts` (ggml-backend-meta.cpp:272 @b1b770d90).
-fn buftNBufts(meta_buft: mod.impl.c.ggml_backend_buffer_type_t) usize {
+fn buftNBufts(meta_buft: mod.impl.ggml_c.ggml_backend_buffer_type_t) usize {
     mod.impl.assert(ggml_backend_buft_is_meta(meta_buft), "ggml_backend_buft_is_meta(meta_buft)");
     return buftCtx(meta_buft).simple_bufts.len;
 }
 
 /// Ports `ggml_backend_meta_buffer_type_get_name` (ggml-backend-meta.cpp:278 @b1b770d90).
-fn buftGetName(buft: mod.impl.c.ggml_backend_buffer_type_t) callconv(.c) [*c]const u8 {
+fn buftGetName(buft: mod.impl.ggml_c.ggml_backend_buffer_type_t) callconv(.c) [*c]const u8 {
     mod.impl.assert(ggml_backend_buft_is_meta(buft), "ggml_backend_buft_is_meta(buft)");
     return buftCtx(buft).name.ptr;
 }
 
 /// Ports `ggml_backend_meta_buft_simple_buft` (ggml-backend-meta.cpp:284 @b1b770d90).
-fn buftSimpleBuft(meta_buft: mod.impl.c.ggml_backend_buffer_type_t, index: usize) mod.impl.c.ggml_backend_buffer_type_t {
+fn buftSimpleBuft(meta_buft: mod.impl.ggml_c.ggml_backend_buffer_type_t, index: usize) mod.impl.ggml_c.ggml_backend_buffer_type_t {
     mod.impl.assert(ggml_backend_buft_is_meta(meta_buft), "ggml_backend_buft_is_meta(meta_buft)");
     const meta_buft_ctx = buftCtx(meta_buft);
     mod.impl.assert(index < meta_buft_ctx.simple_bufts.len, "index < meta_buft_ctx->simple_bufts.size()");
@@ -482,11 +480,11 @@ fn buftSimpleBuft(meta_buft: mod.impl.c.ggml_backend_buffer_type_t, index: usize
 ///
 /// Return: the largest simple alignment, which must be a multiple of every
 /// other one.
-fn buftGetAlignment(buft: mod.impl.c.ggml_backend_buffer_type_t) callconv(.c) usize {
+fn buftGetAlignment(buft: mod.impl.ggml_c.ggml_backend_buffer_type_t) callconv(.c) usize {
     const n_simple_bufts = buftNBufts(buft);
     var max_alignment: usize = 1;
     for (0..n_simple_bufts) |i| {
-        const alignment = mod.impl.c.ggml_backend_buft_get_alignment(buftSimpleBuft(buft, i));
+        const alignment = mod.impl.ggml_c.ggml_backend_buft_get_alignment(buftSimpleBuft(buft, i));
         max_alignment = @max(max_alignment, alignment);
         mod.impl.assert(max_alignment % alignment == 0, "max_alignment % alignment == 0");
     }
@@ -494,11 +492,11 @@ fn buftGetAlignment(buft: mod.impl.c.ggml_backend_buffer_type_t) callconv(.c) us
 }
 
 /// Ports `ggml_backend_meta_buffer_type_get_max_size` (ggml-backend-meta.cpp:306 @b1b770d90).
-fn buftGetMaxSize(buft: mod.impl.c.ggml_backend_buffer_type_t) callconv(.c) usize {
+fn buftGetMaxSize(buft: mod.impl.ggml_c.ggml_backend_buffer_type_t) callconv(.c) usize {
     const n_simple_bufts = buftNBufts(buft);
     var max_size: usize = std.math.maxInt(usize);
     for (0..n_simple_bufts) |i| {
-        max_size = @min(max_size, mod.impl.c.ggml_backend_buft_get_max_size(buftSimpleBuft(buft, i)));
+        max_size = @min(max_size, mod.impl.ggml_c.ggml_backend_buft_get_max_size(buftSimpleBuft(buft, i)));
     }
     return max_size;
 }
@@ -507,21 +505,21 @@ fn buftGetMaxSize(buft: mod.impl.c.ggml_backend_buffer_type_t) callconv(.c) usiz
 ///
 /// Asks each simple buffer type about the *whole* meta tensor and takes the
 /// largest answer — an over-estimate of what a slice needs, as in the C++.
-fn buftGetAllocSize(buft: mod.impl.c.ggml_backend_buffer_type_t, tensor: [*c]const mod.impl.c.ggml_tensor) callconv(.c) usize {
+fn buftGetAllocSize(buft: mod.impl.ggml_c.ggml_backend_buffer_type_t, tensor: [*c]const mod.impl.ggml_c.ggml_tensor) callconv(.c) usize {
     const n_simple_bufts = buftNBufts(buft);
     var max_alloc_size: usize = 0;
     for (0..n_simple_bufts) |i| {
-        const alloc_size = mod.impl.c.ggml_backend_buft_get_alloc_size(buftSimpleBuft(buft, i), tensor);
+        const alloc_size = mod.impl.ggml_c.ggml_backend_buft_get_alloc_size(buftSimpleBuft(buft, i), tensor);
         max_alloc_size = @max(max_alloc_size, alloc_size);
     }
     return max_alloc_size;
 }
 
 /// Ports `ggml_backend_meta_buffer_type_is_host` (ggml-backend-meta.cpp:325 @b1b770d90).
-fn buftIsHost(buft: mod.impl.c.ggml_backend_buffer_type_t) callconv(.c) bool {
+fn buftIsHost(buft: mod.impl.ggml_c.ggml_backend_buffer_type_t) callconv(.c) bool {
     const n_simple_bufts = buftNBufts(buft);
     for (0..n_simple_bufts) |i| {
-        if (!mod.impl.c.ggml_backend_buft_is_host(buftSimpleBuft(buft, i))) {
+        if (!mod.impl.ggml_c.ggml_backend_buft_is_host(buftSimpleBuft(buft, i))) {
             return false;
         }
     }
@@ -532,7 +530,7 @@ fn buftIsHost(buft: mod.impl.c.ggml_backend_buffer_type_t) callconv(.c) bool {
 ///
 /// The one buffer type with its own `alloc_buffer_n`; `get_alloc_size_n`
 /// takes the default.
-const buffer_type_iface: mod.impl.c.struct_ggml_backend_buffer_type_i = .{
+const buffer_type_iface: mod.impl.ggml_c.struct_ggml_backend_buffer_type_i = .{
     .get_name = &buftGetName,
     .alloc_buffer = &buftAllocBuffer,
     .alloc_buffer_n = &buftAllocBufferN,
@@ -544,14 +542,14 @@ const buffer_type_iface: mod.impl.c.struct_ggml_backend_buffer_type_i = .{
 };
 
 /// Ports `ggml_backend_buft_is_meta` (ggml-backend-meta.cpp:346 @b1b770d90).
-pub export fn ggml_backend_buft_is_meta(buft: mod.impl.c.ggml_backend_buffer_type_t) callconv(.c) bool {
+pub fn ggml_backend_buft_is_meta(buft: mod.impl.ggml_c.ggml_backend_buffer_type_t) callconv(.c) bool {
     return buft != null and buft.*.iface.get_name == buffer_type_iface.get_name;
 }
 
 /// One meta buffer type per meta device, at a stable address.
 const BuftEntry = struct {
-    dev: mod.impl.c.ggml_backend_dev_t,
-    buft: mod.impl.c.struct_ggml_backend_buffer_type,
+    dev: mod.impl.ggml_c.ggml_backend_dev_t,
+    buft: mod.impl.ggml_c.struct_ggml_backend_buffer_type,
 };
 
 /// The C++'s function-local `std::map<dev, buffer_type>`; only searched by key.
@@ -561,21 +559,21 @@ var meta_bufts: std.ArrayList(*BuftEntry) = .empty;
 ///
 /// Return: the device's meta buffer type, created on first request and kept
 /// for the process.
-fn deviceGetBufferType(dev: mod.impl.c.ggml_backend_dev_t) callconv(.c) mod.impl.c.ggml_backend_buffer_type_t {
+fn deviceGetBufferType(dev: mod.impl.ggml_c.ggml_backend_dev_t) callconv(.c) mod.impl.ggml_c.ggml_backend_buffer_type_t {
     mod.impl.assert(devIsMeta(dev), "ggml_backend_dev_is_meta(dev)");
     for (meta_bufts.items) |entry| {
         if (entry.dev == dev) return &entry.buft;
     }
 
     const n_devs = devNDevs(dev);
-    const simple_bufts = allocator.alloc(mod.impl.c.ggml_backend_buffer_type_t, n_devs) catch oom();
+    const simple_bufts = std.heap.c_allocator.alloc(mod.impl.ggml_c.ggml_backend_buffer_type_t, n_devs) catch oom();
     for (0..n_devs) |i| {
-        simple_bufts[i] = mod.impl.c.ggml_backend_dev_buffer_type(devSimpleDev(dev, i));
+        simple_bufts[i] = mod.impl.ggml_c.ggml_backend_dev_buffer_type(devSimpleDev(dev, i));
     }
-    const buft_ctx = allocator.create(BufferTypeContext) catch oom();
+    const buft_ctx = std.heap.c_allocator.create(BufferTypeContext) catch oom();
     buft_ctx.* = BufferTypeContext.init(simple_bufts);
 
-    const entry = allocator.create(BuftEntry) catch oom();
+    const entry = std.heap.c_allocator.create(BuftEntry) catch oom();
     entry.* = .{
         .dev = dev,
         .buft = .{
@@ -584,7 +582,7 @@ fn deviceGetBufferType(dev: mod.impl.c.ggml_backend_dev_t) callconv(.c) mod.impl
             .context = buft_ctx,
         },
     };
-    meta_bufts.append(allocator, entry) catch oom();
+    meta_bufts.append(std.heap.c_allocator, entry) catch oom();
     return &entry.buft;
 }
 
@@ -597,11 +595,11 @@ fn deviceGetBufferType(dev: mod.impl.c.ggml_backend_dev_t) callconv(.c) mod.impl
 /// Metal nor the CPU device has a host buffer type, so the loop always
 /// returns at its first null. CUDA's pinned host buffer type is what would
 /// reach the rest.
-fn deviceGetHostBufferType(dev: mod.impl.c.ggml_backend_dev_t) callconv(.c) mod.impl.c.ggml_backend_buffer_type_t {
+fn deviceGetHostBufferType(dev: mod.impl.ggml_c.ggml_backend_dev_t) callconv(.c) mod.impl.ggml_c.ggml_backend_buffer_type_t {
     mod.impl.assert(devIsMeta(dev), "ggml_backend_dev_is_meta(dev)");
-    var host_buft: mod.impl.c.ggml_backend_buffer_type_t = null;
+    var host_buft: mod.impl.ggml_c.ggml_backend_buffer_type_t = null;
     for (deviceCtx(dev).simple_devs) |simple_dev| {
-        const simple_host_buft = mod.impl.c.ggml_backend_dev_host_buffer_type(simple_dev);
+        const simple_host_buft = mod.impl.ggml_c.ggml_backend_dev_host_buffer_type(simple_dev);
         if (simple_host_buft == null) {
             return null;
         }
@@ -622,24 +620,24 @@ fn deviceGetHostBufferType(dev: mod.impl.c.ggml_backend_dev_t) callconv(.c) mod.
 /// One meta tensor's simple tensors, indexed by device. The C++ holds a
 /// `std::vector` of `n_bufs`; at most `GGML_BACKEND_META_MAX_DEVICES`, so an
 /// array does.
-const SimpleTensors = [max_devices]?*mod.impl.c.ggml_tensor;
+const SimpleTensors = [max_devices]?*mod.impl.ggml_c.ggml_tensor;
 
 /// Ports `struct ggml_backend_meta_simple_tensor_container` (ggml-backend-meta.cpp:403 @b1b770d90).
 ///
 /// The `std::map` is only ever looked up, assigned and cleared — never
 /// iterated — so a hash map stands in for it.
 const SimpleTensorContainer = struct {
-    ctxs: std.ArrayList(?*mod.impl.c.ggml_context) = .empty,
-    simple_tensors: std.AutoHashMapUnmanaged(*const mod.impl.c.ggml_tensor, SimpleTensors) = .empty,
+    ctxs: std.ArrayList(?*mod.impl.ggml_c.ggml_context) = .empty,
+    simple_tensors: std.AutoHashMapUnmanaged(*const mod.impl.ggml_c.ggml_tensor, SimpleTensors) = .empty,
 
     /// Ports the sized `ggml_backend_meta_simple_tensor_container` constructor (ggml-backend-meta.cpp:407 @b1b770d90): one
     /// context per simple buffer. The default constructor (line 409), which
     /// makes none, is `.{}`.
-    fn initCtxs(params: mod.impl.c.struct_ggml_init_params, n_simple: usize) SimpleTensorContainer {
+    fn initCtxs(params: mod.impl.ggml_c.struct_ggml_init_params, n_simple: usize) SimpleTensorContainer {
         var self: SimpleTensorContainer = .{};
-        self.ctxs.ensureTotalCapacity(allocator, n_simple) catch oom();
+        self.ctxs.ensureTotalCapacity(std.heap.c_allocator, n_simple) catch oom();
         for (0..n_simple) |_| {
-            self.ctxs.appendAssumeCapacity(mod.impl.c.ggml_init(params));
+            self.ctxs.appendAssumeCapacity(mod.impl.ggml_c.ggml_init(params));
         }
         return self;
     }
@@ -647,28 +645,28 @@ const SimpleTensorContainer = struct {
     /// The destructor: members in reverse declaration order, and the
     /// contexts last to first, as `~vector` destroys them.
     fn deinit(self: *SimpleTensorContainer) void {
-        self.simple_tensors.deinit(allocator);
+        self.simple_tensors.deinit(std.heap.c_allocator);
         var i = self.ctxs.items.len;
         while (i > 0) {
             i -= 1;
-            if (self.ctxs.items[i]) |ctx| mod.impl.c.ggml_free(ctx);
+            if (self.ctxs.items[i]) |ctx| mod.impl.ggml_c.ggml_free(ctx);
         }
-        self.ctxs.deinit(allocator);
+        self.ctxs.deinit(std.heap.c_allocator);
     }
 };
 
 /// In `ggml_backend_meta_buffer_context`, ports `nbtc` (ggml-backend-meta.cpp:433 @b1b770d90):
 /// the bytes of a tensor the split-state cache compares, everything but the
 /// trailing padding.
-const nbtc = @sizeOf(mod.impl.c.ggml_tensor) - @sizeOf(@FieldType(mod.impl.c.ggml_tensor, "padding"));
+const nbtc = @sizeOf(mod.impl.ggml_c.ggml_tensor) - @sizeOf(@FieldType(mod.impl.ggml_c.ggml_tensor, "padding"));
 
 const CacheKey = struct {
-    tensor: *const mod.impl.c.ggml_tensor,
+    tensor: *const mod.impl.ggml_c.ggml_tensor,
     assume_sync: bool,
 };
 
 const CacheEntry = struct {
-    ss: mod.impl.c.struct_ggml_backend_meta_split_state,
+    ss: mod.impl.ggml_c.struct_ggml_backend_meta_split_state,
     bytes: [nbtc]u8,
 };
 
@@ -686,7 +684,7 @@ const BufferContext = struct {
     stc_compute_index: c_int = 0,
     stc_compute_index_next: c_int = 0,
     /// Owning: `ggml_backend_buffer_ptr` in the C++. May hold nulls.
-    bufs: std.ArrayList(mod.impl.c.ggml_backend_buffer_t) = .empty,
+    bufs: std.ArrayList(mod.impl.ggml_c.ggml_backend_buffer_t) = .empty,
 
     // FIXME
     // The size of the split state cache is unbounded and can theoretically grow infinitely large.
@@ -706,15 +704,15 @@ const BufferContext = struct {
         stc_static: SimpleTensorContainer,
         stc_compute_0: SimpleTensorContainer,
         stc_compute_1: SimpleTensorContainer,
-        bufs: []const mod.impl.c.ggml_backend_buffer_t,
+        bufs: []const mod.impl.ggml_c.ggml_backend_buffer_t,
     ) *BufferContext {
-        const self = allocator.create(BufferContext) catch oom();
+        const self = std.heap.c_allocator.create(BufferContext) catch oom();
         self.* = .{
             .stc_static = stc_static,
             .stc_compute = .{ stc_compute_0, stc_compute_1 },
             .debug = 0,
         };
-        self.bufs.ensureTotalCapacity(allocator, bufs.len) catch oom();
+        self.bufs.ensureTotalCapacity(std.heap.c_allocator, bufs.len) catch oom();
         for (bufs) |buf| self.bufs.appendAssumeCapacity(buf);
         const GGML_META_DEBUG = stdlib.env.getenv("GGML_META_DEBUG");
         self.debug = if (GGML_META_DEBUG) |s| stdlib.num.atoiC(s) else 0;
@@ -724,21 +722,21 @@ const BufferContext = struct {
     /// The destructor: members in reverse declaration order — the cache, then
     /// the buffers (last to first, as `~vector` runs), then the containers.
     fn destroy(self: *BufferContext) void {
-        self.split_state_cache.deinit(allocator);
+        self.split_state_cache.deinit(std.heap.c_allocator);
         var i = self.bufs.items.len;
         while (i > 0) {
             i -= 1;
-            if (self.bufs.items[i] != null) mod.impl.c.ggml_backend_buffer_free(self.bufs.items[i]);
+            if (self.bufs.items[i] != null) mod.impl.ggml_c.ggml_backend_buffer_free(self.bufs.items[i]);
         }
-        self.bufs.deinit(allocator);
+        self.bufs.deinit(std.heap.c_allocator);
         self.stc_compute[1].deinit();
         self.stc_compute[0].deinit();
         self.stc_static.deinit();
-        allocator.destroy(self);
+        std.heap.c_allocator.destroy(self);
     }
 
     /// Ports `get_simple_tensor_container` (ggml-backend-meta.cpp:452 @b1b770d90).
-    fn getSimpleTensorContainer(self: *BufferContext, tensor: *const mod.impl.c.ggml_tensor) *SimpleTensorContainer {
+    fn getSimpleTensorContainer(self: *BufferContext, tensor: *const mod.impl.ggml_c.ggml_tensor) *SimpleTensorContainer {
         if (self.stc_static.simple_tensors.contains(tensor)) {
             return &self.stc_static;
         }
@@ -749,35 +747,35 @@ const BufferContext = struct {
     /// was absent, as `std::map::operator[]` does. The pointer is valid only
     /// until the cache is next changed.
     fn cacheIndex(self: *BufferContext, key: CacheKey) *CacheEntry {
-        const gop = self.split_state_cache.getOrPut(allocator, key) catch oom();
+        const gop = self.split_state_cache.getOrPut(std.heap.c_allocator, key) catch oom();
         if (!gop.found_existing) gop.value_ptr.* = std.mem.zeroes(CacheEntry);
         return gop.value_ptr;
     }
 };
 
-inline fn bufferCtx(buffer: mod.impl.c.ggml_backend_buffer_t) *BufferContext {
+inline fn bufferCtx(buffer: mod.impl.ggml_c.ggml_backend_buffer_t) *BufferContext {
     return @ptrCast(@alignCast(buffer.*.context));
 }
 
 /// The first `nbtc` bytes of a tensor, which the split-state cache compares.
-inline fn tensorBytes(tensor: *const mod.impl.c.ggml_tensor) *const [nbtc]u8 {
+inline fn tensorBytes(tensor: *const mod.impl.ggml_c.ggml_tensor) *const [nbtc]u8 {
     return @ptrCast(tensor);
 }
 
 /// Ports `ggml_backend_meta_buffer_free_buffer` (ggml-backend-meta.cpp:460 @b1b770d90).
-fn bufferFreeBuffer(buffer: mod.impl.c.ggml_backend_buffer_t) callconv(.c) void {
+fn bufferFreeBuffer(buffer: mod.impl.ggml_c.ggml_backend_buffer_t) callconv(.c) void {
     mod.impl.assert(ggml_backend_buffer_is_meta(buffer), "ggml_backend_buffer_is_meta(buffer)");
     bufferCtx(buffer).destroy();
 }
 
 /// Ports `ggml_backend_meta_buffer_n_bufs` (ggml-backend-meta.cpp:466 @b1b770d90).
-fn bufferNBufs(meta_buf: mod.impl.c.ggml_backend_buffer_t) usize {
+fn bufferNBufs(meta_buf: mod.impl.ggml_c.ggml_backend_buffer_t) usize {
     mod.impl.assert(ggml_backend_buffer_is_meta(meta_buf), "ggml_backend_buffer_is_meta(meta_buf)");
     return bufferCtx(meta_buf).bufs.items.len;
 }
 
 /// Ports `ggml_backend_meta_buffer_simple_buffer` (ggml-backend-meta.cpp:472 @b1b770d90).
-fn bufferSimpleBuffer(meta_buf: mod.impl.c.ggml_backend_buffer_t, index: usize) mod.impl.c.ggml_backend_buffer_t {
+fn bufferSimpleBuffer(meta_buf: mod.impl.ggml_c.ggml_backend_buffer_t, index: usize) mod.impl.ggml_c.ggml_backend_buffer_t {
     mod.impl.assert(ggml_backend_buffer_is_meta(meta_buf), "ggml_backend_buffer_is_meta(meta_buf)");
     const buf_ctx = bufferCtx(meta_buf);
     mod.impl.assert(index < buf_ctx.bufs.items.len, "index < buf_ctx->bufs.size()");
@@ -788,7 +786,7 @@ fn bufferSimpleBuffer(meta_buf: mod.impl.c.ggml_backend_buffer_t, index: usize) 
 ///
 /// Return: the slice of `tensor` on device `index`, or null when the tensor
 /// has not been initialised in this buffer's current container.
-fn bufferSimpleTensor(tensor: *const mod.impl.c.ggml_tensor, index: usize) ?*mod.impl.c.ggml_tensor {
+fn bufferSimpleTensor(tensor: *const mod.impl.ggml_c.ggml_tensor, index: usize) ?*mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(ggml_backend_buffer_is_meta(tensor.buffer), "ggml_backend_buffer_is_meta(tensor->buffer)");
     const buf_ctx = bufferCtx(tensor.buffer);
     mod.impl.assert(index < buf_ctx.bufs.items.len, "index < buf_ctx->bufs.size()");
@@ -800,7 +798,7 @@ fn bufferSimpleTensor(tensor: *const mod.impl.c.ggml_tensor, index: usize) ?*mod
 
 /// Ports `ggml_backend_meta_inner_extent` (ggml-backend-meta.cpp:493 @b1b770d90):
 /// the bytes spanned by every dimension of `tensor` but `skip_dim`.
-fn innerExtent(tensor: *const mod.impl.c.ggml_tensor, skip_dim: usize) usize {
+fn innerExtent(tensor: *const mod.impl.ggml_c.ggml_tensor, skip_dim: usize) usize {
     var extent: usize = 0;
     for (0..max_dims) |i| {
         if (i != skip_dim and tensor.ne[i] > 1) {
@@ -813,7 +811,7 @@ fn innerExtent(tensor: *const mod.impl.c.ggml_tensor, skip_dim: usize) usize {
 /// Ports `ggml_backend_meta_view_slab_dim` (ggml-backend-meta.cpp:505 @b1b770d90):
 /// the dimension of `view` that holds `src`'s split axis `axis`, or -1. Every
 /// other dimension of `src` and of `view` must stay inside one slab of it.
-fn viewSlabDim(view: *const mod.impl.c.ggml_tensor, src: *const mod.impl.c.ggml_tensor, axis: usize) c_int {
+fn viewSlabDim(view: *const mod.impl.ggml_c.ggml_tensor, src: *const mod.impl.ggml_c.ggml_tensor, axis: usize) c_int {
     const slab = src.nb[axis];
     if (innerExtent(src, axis) >= slab) {
         return -1;
@@ -830,13 +828,13 @@ fn viewSlabDim(view: *const mod.impl.c.ggml_tensor, src: *const mod.impl.c.ggml_
 /// which all capture the same four values.
 const Propagate = struct {
     stc: *SimpleTensorContainer,
-    tensor: *const mod.impl.c.ggml_tensor,
+    tensor: *const mod.impl.ggml_c.ggml_tensor,
     n_bufs: usize,
     assume_sync: bool,
 
     /// Ports the `split_states_equal` lambda (ggml-backend-meta.cpp:528 @b1b770d90):
     /// same axis and the same total per device, segments and repeats folded.
-    fn equal(p: *const Propagate, a: *const mod.impl.c.struct_ggml_backend_meta_split_state, b: *const mod.impl.c.struct_ggml_backend_meta_split_state) bool {
+    fn equal(p: *const Propagate, a: *const mod.impl.ggml_c.struct_ggml_backend_meta_split_state, b: *const mod.impl.ggml_c.struct_ggml_backend_meta_split_state) bool {
         if (a.axis != b.axis) {
             return false;
         }
@@ -859,7 +857,7 @@ const Propagate = struct {
     /// Ports the `handle_generic` lambda (ggml-backend-meta.cpp:548 @b1b770d90):
     /// every source must agree, and a `scalar_only` op cannot take a dimension
     /// split.
-    fn generic(p: *const Propagate, src_ss: []const mod.impl.c.struct_ggml_backend_meta_split_state, scalar_only: bool) mod.impl.c.struct_ggml_backend_meta_split_state {
+    fn generic(p: *const Propagate, src_ss: []const mod.impl.ggml_c.struct_ggml_backend_meta_split_state, scalar_only: bool) mod.impl.ggml_c.struct_ggml_backend_meta_split_state {
         const tensor = p.tensor;
         var ret = ssMake(axis_none);
         for (0..max_src) |i| {
@@ -884,14 +882,14 @@ const Propagate = struct {
     }
 
     /// Ports the `handle_per_row` lambda (ggml-backend-meta.cpp:572 @b1b770d90).
-    fn perRow(p: *const Propagate, src_ss: []const mod.impl.c.struct_ggml_backend_meta_split_state) mod.impl.c.struct_ggml_backend_meta_split_state {
+    fn perRow(p: *const Propagate, src_ss: []const mod.impl.ggml_c.struct_ggml_backend_meta_split_state) mod.impl.ggml_c.struct_ggml_backend_meta_split_state {
         _ = p;
         mod.impl.assert(src_ss[0].axis != axis_0, "src_ss[0].axis != GGML_BACKEND_SPLIT_AXIS_0");
         return src_ss[0];
     }
 
     /// Ports the `handle_bin_bcast` lambda (ggml-backend-meta.cpp:578 @b1b770d90).
-    fn binBcast(p: *const Propagate, src_ss: []const mod.impl.c.struct_ggml_backend_meta_split_state) mod.impl.c.struct_ggml_backend_meta_split_state {
+    fn binBcast(p: *const Propagate, src_ss: []const mod.impl.ggml_c.struct_ggml_backend_meta_split_state) mod.impl.ggml_c.struct_ggml_backend_meta_split_state {
         const tensor = p.tensor;
         if (isDim(src_ss[0].axis) and
             srcOf(tensor, 1).ne[src_ss[0].axis] == 1 and src_ss[1].axis == axis_mirrored)
@@ -908,8 +906,8 @@ const Propagate = struct {
     }
 
     /// Ports the `handle_concat` lambda (ggml-backend-meta.cpp:591 @b1b770d90).
-    fn concat(p: *const Propagate, src_ss: []const mod.impl.c.struct_ggml_backend_meta_split_state) mod.impl.c.struct_ggml_backend_meta_split_state {
-        const concat_axis: mod.impl.c.enum_ggml_backend_meta_split_axis = @bitCast(mod.impl.getOpParamsI32(p.tensor, 0));
+    fn concat(p: *const Propagate, src_ss: []const mod.impl.ggml_c.struct_ggml_backend_meta_split_state) mod.impl.ggml_c.struct_ggml_backend_meta_split_state {
+        const concat_axis: mod.impl.ggml_c.enum_ggml_backend_meta_split_axis = @bitCast(mod.impl.getOpParamsI32(p.tensor, 0));
         if (src_ss[0].axis == axis_mirrored and isDim(src_ss[1].axis)) {
             mod.impl.assert(concat_axis != src_ss[1].axis, "concat_axis != src_ss[1].axis");
             return src_ss[1];
@@ -930,7 +928,7 @@ const Propagate = struct {
     /// gives an output split along axis 0; split along its columns (axis 0)
     /// against an activation split the same way gives a partial sum, which
     /// is `MIRRORED` once the caller assumes it has been all-reduced.
-    fn mulMat(p: *const Propagate, src_ss: []const mod.impl.c.struct_ggml_backend_meta_split_state) mod.impl.c.struct_ggml_backend_meta_split_state {
+    fn mulMat(p: *const Propagate, src_ss: []const mod.impl.ggml_c.struct_ggml_backend_meta_split_state) mod.impl.ggml_c.struct_ggml_backend_meta_split_state {
         const tensor = p.tensor;
         if (src_ss[0].axis == axis_mirrored and src_ss[1].axis == axis_mirrored) {
             return ssMake(axis_mirrored);
@@ -972,7 +970,7 @@ const Propagate = struct {
     /// whose running element count is a multiple of the input's count up to
     /// and including the split axis — the outer dimensions that survive the
     /// reshape unchanged.
-    fn reshape(p: *const Propagate, src_ss: []const mod.impl.c.struct_ggml_backend_meta_split_state) mod.impl.c.struct_ggml_backend_meta_split_state {
+    fn reshape(p: *const Propagate, src_ss: []const mod.impl.ggml_c.struct_ggml_backend_meta_split_state) mod.impl.ggml_c.struct_ggml_backend_meta_split_state {
         const tensor = p.tensor;
         switch (src_ss[0].axis) {
             axis_0, axis_1, axis_2, axis_3 => {
@@ -984,8 +982,8 @@ const Propagate = struct {
                 }
                 if (src_ss[0].n_segments == 1) {
                     base_ne_in = @divTrunc(base_ne_in, @as(i64, src_ss[0].nr[0]));
-                    if (axisInt(src_ss[0].axis) == mod.impl.c.ggml_n_dims(src0) - 1 and src_ss[0].nr[0] == 1) {
-                        return ssMake(@intCast(mod.impl.c.ggml_n_dims(tensor) - 1));
+                    if (axisInt(src_ss[0].axis) == mod.impl.ggml_c.ggml_n_dims(src0) - 1 and src_ss[0].nr[0] == 1) {
+                        return ssMake(@intCast(mod.impl.ggml_c.ggml_n_dims(tensor) - 1));
                     }
                     if (src_ss[0].axis == axis_0 and tensor.ne[0] == src0.ne[0] and
                         tensor.ne[1] == 1 and src_ss[0].nr[0] == 1)
@@ -1017,7 +1015,7 @@ const Propagate = struct {
                         return ssMake(@intCast(d));
                     }
                 }
-                abortFmt(681, "shape mismatch for %s", .{mod.impl.c.ggml_op_name(tensor.op)});
+                abortFmt(681, "shape mismatch for %s", .{mod.impl.ggml_c.ggml_op_name(tensor.op)});
             },
             axis_mirrored, axis_partial => {
                 return src_ss[0];
@@ -1029,7 +1027,7 @@ const Propagate = struct {
     }
 
     /// Ports the `handle_cpy` lambda (ggml-backend-meta.cpp:694 @b1b770d90).
-    fn cpy(p: *const Propagate, src_ss: []const mod.impl.c.struct_ggml_backend_meta_split_state) mod.impl.c.struct_ggml_backend_meta_split_state {
+    fn cpy(p: *const Propagate, src_ss: []const mod.impl.ggml_c.struct_ggml_backend_meta_split_state) mod.impl.ggml_c.struct_ggml_backend_meta_split_state {
         if (isDim(src_ss[0].axis)) {
             return p.reshape(src_ss);
         }
@@ -1037,10 +1035,10 @@ const Propagate = struct {
     }
 
     /// Ports the `handle_view` lambda (ggml-backend-meta.cpp:701 @b1b770d90).
-    fn view(p: *const Propagate, src_ss: []const mod.impl.c.struct_ggml_backend_meta_split_state) mod.impl.c.struct_ggml_backend_meta_split_state {
+    fn view(p: *const Propagate, src_ss: []const mod.impl.ggml_c.struct_ggml_backend_meta_split_state) mod.impl.ggml_c.struct_ggml_backend_meta_split_state {
         const tensor = p.tensor;
         const src0 = srcOf(tensor, 0);
-        if (mod.impl.c.ggml_is_contiguous(tensor) and mod.impl.c.ggml_is_contiguous(src0)) {
+        if (mod.impl.ggml_c.ggml_is_contiguous(tensor) and mod.impl.ggml_c.ggml_is_contiguous(src0)) {
             return p.reshape(src_ss);
         }
         const axis: c_int = axisInt(src_ss[0].axis);
@@ -1059,7 +1057,7 @@ const Propagate = struct {
                 return src_ss[0];
             }
         }
-        if (!mod.impl.c.ggml_is_permuted(tensor) and !mod.impl.c.ggml_is_permuted(src0) and axis >= 0 and axis < max_dims - 1) {
+        if (!mod.impl.ggml_c.ggml_is_permuted(tensor) and !mod.impl.ggml_c.ggml_is_permuted(src0) and axis >= 0 and axis < max_dims - 1) {
             for (0..max_dims - 1) |dim| {
                 if (tensor.nb[dim + 1] == src0.nb[@as(usize, @intCast(axis)) + 1]) {
                     return ssMake(@intCast(dim));
@@ -1068,7 +1066,7 @@ const Propagate = struct {
             mod.impl.abort("fatal error");
         }
         // permuted view: split the view dim that spans the src split axis, other dims must be inside one element of it or outside the span
-        if (mod.impl.c.ggml_is_permuted(tensor) and !mod.impl.c.ggml_is_permuted(src0) and axis >= 0 and axis < max_dims - 1) {
+        if (mod.impl.ggml_c.ggml_is_permuted(tensor) and !mod.impl.ggml_c.ggml_is_permuted(src0) and axis >= 0 and axis < max_dims - 1) {
             const ax: usize = @intCast(axis);
             const nb_axis = src0.nb[ax];
             const nb_next = src0.nb[ax + 1];
@@ -1106,7 +1104,7 @@ const Propagate = struct {
     }
 
     /// Ports the `handle_permute` lambda (ggml-backend-meta.cpp:766 @b1b770d90).
-    fn permute(p: *const Propagate, src_ss: []const mod.impl.c.struct_ggml_backend_meta_split_state) mod.impl.c.struct_ggml_backend_meta_split_state {
+    fn permute(p: *const Propagate, src_ss: []const mod.impl.ggml_c.struct_ggml_backend_meta_split_state) mod.impl.ggml_c.struct_ggml_backend_meta_split_state {
         switch (src_ss[0].axis) {
             axis_0, axis_1, axis_2, axis_3 => {
                 mod.impl.assert(src_ss[0].n_segments == 1 or src_ss[0].nr[0] == 1, "src_ss[0].n_segments == 1 || src_ss[0].nr[0] == 1");
@@ -1124,7 +1122,7 @@ const Propagate = struct {
     }
 
     /// Ports the `handle_transpose` lambda (ggml-backend-meta.cpp:786 @b1b770d90).
-    fn transpose(p: *const Propagate, src_ss: []const mod.impl.c.struct_ggml_backend_meta_split_state) mod.impl.c.struct_ggml_backend_meta_split_state {
+    fn transpose(p: *const Propagate, src_ss: []const mod.impl.ggml_c.struct_ggml_backend_meta_split_state) mod.impl.ggml_c.struct_ggml_backend_meta_split_state {
         _ = p;
         switch (src_ss[0].axis) {
             axis_0, axis_1 => {
@@ -1143,7 +1141,7 @@ const Propagate = struct {
     }
 
     /// Ports the `handle_get_rows` lambda (ggml-backend-meta.cpp:806 @b1b770d90).
-    fn getRows(p: *const Propagate, src_ss: []const mod.impl.c.struct_ggml_backend_meta_split_state) mod.impl.c.struct_ggml_backend_meta_split_state {
+    fn getRows(p: *const Propagate, src_ss: []const mod.impl.ggml_c.struct_ggml_backend_meta_split_state) mod.impl.ggml_c.struct_ggml_backend_meta_split_state {
         if (src_ss[0].axis == axis_0 and src_ss[1].axis == axis_mirrored) {
             return src_ss[0];
         }
@@ -1151,7 +1149,7 @@ const Propagate = struct {
     }
 
     /// Ports the `handle_set_rows` lambda (ggml-backend-meta.cpp:813 @b1b770d90).
-    fn setRows(p: *const Propagate, src_ss: []const mod.impl.c.struct_ggml_backend_meta_split_state) mod.impl.c.struct_ggml_backend_meta_split_state {
+    fn setRows(p: *const Propagate, src_ss: []const mod.impl.ggml_c.struct_ggml_backend_meta_split_state) mod.impl.ggml_c.struct_ggml_backend_meta_split_state {
         mod.impl.assert(src_ss[0].axis != axis_1, "src_ss[0].axis != GGML_BACKEND_SPLIT_AXIS_1");
         mod.impl.assert(src_ss[1].axis == axis_mirrored, "src_ss[1].axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED");
         mod.impl.assert(p.equal(&src_ss[0], &src_ss[2]), "split_states_equal(src_ss[0], src_ss[2])");
@@ -1159,14 +1157,14 @@ const Propagate = struct {
     }
 
     /// Ports the `handle_rope` lambda (ggml-backend-meta.cpp:820 @b1b770d90).
-    fn rope(p: *const Propagate, src_ss: []const mod.impl.c.struct_ggml_backend_meta_split_state) mod.impl.c.struct_ggml_backend_meta_split_state {
+    fn rope(p: *const Propagate, src_ss: []const mod.impl.ggml_c.struct_ggml_backend_meta_split_state) mod.impl.ggml_c.struct_ggml_backend_meta_split_state {
         _ = p;
         mod.impl.assert(src_ss[1].axis == axis_mirrored, "src_ss[1].axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED");
         return src_ss[0];
     }
 
     /// Ports the `handle_pad` lambda (ggml-backend-meta.cpp:825 @b1b770d90).
-    fn pad(p: *const Propagate, src_ss: []const mod.impl.c.struct_ggml_backend_meta_split_state) mod.impl.c.struct_ggml_backend_meta_split_state {
+    fn pad(p: *const Propagate, src_ss: []const mod.impl.ggml_c.struct_ggml_backend_meta_split_state) mod.impl.ggml_c.struct_ggml_backend_meta_split_state {
         if (isDim(src_ss[0].axis)) {
             mod.impl.assert(p.tensor.op_params[2 * src_ss[0].axis + 0] == 0, "tensor->op_params[2*src_ss[0].axis + 0] == 0");
             mod.impl.assert(p.tensor.op_params[2 * src_ss[0].axis + 1] == 0, "tensor->op_params[2*src_ss[0].axis + 1] == 0");
@@ -1175,7 +1173,7 @@ const Propagate = struct {
     }
 
     /// Ports the `handle_flash_attn_ext` lambda (ggml-backend-meta.cpp:833 @b1b770d90).
-    fn flashAttnExt(p: *const Propagate, src_ss: []const mod.impl.c.struct_ggml_backend_meta_split_state) mod.impl.c.struct_ggml_backend_meta_split_state {
+    fn flashAttnExt(p: *const Propagate, src_ss: []const mod.impl.ggml_c.struct_ggml_backend_meta_split_state) mod.impl.ggml_c.struct_ggml_backend_meta_split_state {
         const tensor = p.tensor;
         mod.impl.assert(srcOpt(tensor, 3) == null or src_ss[3].axis == axis_mirrored, "tensor->src[3] == nullptr || src_ss[3].axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED");
 
@@ -1195,7 +1193,7 @@ const Propagate = struct {
     }
 
     /// Ports the `handle_lightning_indexer` lambda (ggml-backend-meta.cpp:853 @b1b770d90).
-    fn lightningIndexer(p: *const Propagate, src_ss: []const mod.impl.c.struct_ggml_backend_meta_split_state) mod.impl.c.struct_ggml_backend_meta_split_state {
+    fn lightningIndexer(p: *const Propagate, src_ss: []const mod.impl.ggml_c.struct_ggml_backend_meta_split_state) mod.impl.ggml_c.struct_ggml_backend_meta_split_state {
         _ = p;
         for (0..4) |i| {
             mod.impl.assert(src_ss[i].axis == axis_mirrored, "src_ss[i].axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED");
@@ -1204,7 +1202,7 @@ const Propagate = struct {
     }
 
     /// Ports the `handle_ssm_conv` lambda (ggml-backend-meta.cpp:861 @b1b770d90).
-    fn ssmConv(p: *const Propagate, src_ss: []const mod.impl.c.struct_ggml_backend_meta_split_state) mod.impl.c.struct_ggml_backend_meta_split_state {
+    fn ssmConv(p: *const Propagate, src_ss: []const mod.impl.ggml_c.struct_ggml_backend_meta_split_state) mod.impl.ggml_c.struct_ggml_backend_meta_split_state {
         if (src_ss[0].axis == src_ss[1].axis) {
             if (src_ss[0].axis == axis_0) {
                 return ssMake(axis_1);
@@ -1217,7 +1215,7 @@ const Propagate = struct {
     }
 
     /// Ports the `handle_gated_delta_net` lambda (ggml-backend-meta.cpp:873 @b1b770d90).
-    fn gatedDeltaNet(p: *const Propagate, src_ss: []const mod.impl.c.struct_ggml_backend_meta_split_state) mod.impl.c.struct_ggml_backend_meta_split_state {
+    fn gatedDeltaNet(p: *const Propagate, src_ss: []const mod.impl.ggml_c.struct_ggml_backend_meta_split_state) mod.impl.ggml_c.struct_ggml_backend_meta_split_state {
         _ = p;
         if (src_ss[0].axis == axis_mirrored and src_ss[1].axis == axis_mirrored and
             src_ss[2].axis == axis_mirrored and src_ss[3].axis == axis_mirrored and
@@ -1242,18 +1240,18 @@ const Propagate = struct {
     /// answer checked; anything else derives its state from its sources' by
     /// op, then takes over the first dimension-split source's per-device
     /// ratio, rescaled to its own extent along the split axis.
-    fn calculate(p: *const Propagate) mod.impl.c.struct_ggml_backend_meta_split_state {
+    fn calculate(p: *const Propagate) mod.impl.ggml_c.struct_ggml_backend_meta_split_state {
         const tensor = p.tensor;
         const n_bufs = p.n_bufs;
-        if (mod.impl.c.ggml_nelements(tensor) == 0) {
+        if (mod.impl.ggml_c.ggml_nelements(tensor) == 0) {
             return ssMake(axis_unknown);
         }
-        if (mod.impl.c.ggml_backend_buffer_get_usage(tensor.buffer) != mod.impl.c.GGML_BACKEND_BUFFER_USAGE_COMPUTE and tensor.view_src == null) {
-            const dev = mod.impl.c.ggml_backend_buft_get_device(mod.impl.c.ggml_backend_buffer_get_type(tensor.buffer));
+        if (mod.impl.ggml_c.ggml_backend_buffer_get_usage(tensor.buffer) != mod.impl.ggml_c.GGML_BACKEND_BUFFER_USAGE_COMPUTE and tensor.view_src == null) {
+            const dev = mod.impl.ggml_c.ggml_backend_buft_get_device(mod.impl.ggml_c.ggml_backend_buffer_get_type(tensor.buffer));
             const dev_ctx = deviceCtx(dev);
             const ret = dev_ctx.get_split_state.?(tensor, dev_ctx.get_split_state_ud);
             if (isDim(ret.axis)) {
-                const granularity: i64 = if (ret.axis == axis_0) mod.impl.c.ggml_blck_size(tensor.type) else 1;
+                const granularity: i64 = if (ret.axis == axis_0) mod.impl.ggml_c.ggml_blck_size(tensor.type) else 1;
                 var ne_sum: i64 = 0;
                 for (0..ret.n_segments) |s| {
                     for (0..n_bufs) |j| {
@@ -1272,8 +1270,8 @@ const Propagate = struct {
         // A std::vector in the C++, so on the heap: this recurses once per
         // uncached source, and ten 2 KiB states per frame on the stack would
         // not survive a deep graph.
-        const src_ss = allocator.alloc(mod.impl.c.struct_ggml_backend_meta_split_state, max_src) catch oom();
-        defer allocator.free(src_ss);
+        const src_ss = std.heap.c_allocator.alloc(mod.impl.ggml_c.struct_ggml_backend_meta_split_state, max_src) catch oom();
+        defer std.heap.c_allocator.free(src_ss);
         for (src_ss) |*ss| ss.* = ssMake(axis_none);
         for (0..max_src) |i| {
             if (srcAbsentOrSelf(tensor, i)) {
@@ -1284,84 +1282,84 @@ const Propagate = struct {
             mod.impl.assert(src_ss[i].axis != axis_unknown, "src_ss[i].axis != GGML_BACKEND_SPLIT_AXIS_UNKNOWN");
         }
 
-        var split_state: mod.impl.c.struct_ggml_backend_meta_split_state = switch (tensor.op) {
+        var split_state: mod.impl.ggml_c.struct_ggml_backend_meta_split_state = switch (tensor.op) {
             // a full-tensor view created with ggml_view_tensor is transparent
             // for the split state
-            mod.impl.c.GGML_OP_NONE => if (tensor.view_src != null)
-                getSplitState(p.stc, mod.impl.one(mod.impl.c.ggml_tensor, tensor.view_src), p.assume_sync)
+            mod.impl.ggml_c.GGML_OP_NONE => if (tensor.view_src != null)
+                getSplitState(p.stc, mod.impl.one(mod.impl.ggml_c.ggml_tensor, tensor.view_src), p.assume_sync)
             else
                 ssMake(axis_mirrored),
-            mod.impl.c.GGML_OP_DUP => p.generic(src_ss, true),
-            mod.impl.c.GGML_OP_ADD, mod.impl.c.GGML_OP_ADD_ID => p.binBcast(src_ss),
-            mod.impl.c.GGML_OP_ACC => p.generic(src_ss, true),
-            mod.impl.c.GGML_OP_SUB, mod.impl.c.GGML_OP_MUL, mod.impl.c.GGML_OP_DIV => p.binBcast(src_ss),
-            mod.impl.c.GGML_OP_SQR, mod.impl.c.GGML_OP_SQRT, mod.impl.c.GGML_OP_LOG, mod.impl.c.GGML_OP_SIN, mod.impl.c.GGML_OP_COS => p.generic(src_ss, false),
-            mod.impl.c.GGML_OP_SUM => p.generic(src_ss, true),
-            mod.impl.c.GGML_OP_SUM_ROWS, mod.impl.c.GGML_OP_CUMSUM, mod.impl.c.GGML_OP_MEAN, mod.impl.c.GGML_OP_ARGMAX, mod.impl.c.GGML_OP_COUNT_EQUAL => p.perRow(src_ss),
-            mod.impl.c.GGML_OP_REPEAT, mod.impl.c.GGML_OP_REPEAT_BACK => p.generic(src_ss, false),
-            mod.impl.c.GGML_OP_CONCAT => p.concat(src_ss),
-            mod.impl.c.GGML_OP_SILU_BACK => p.generic(src_ss, false),
-            mod.impl.c.GGML_OP_NORM, mod.impl.c.GGML_OP_RMS_NORM, mod.impl.c.GGML_OP_RMS_NORM_BACK, mod.impl.c.GGML_OP_GROUP_NORM, mod.impl.c.GGML_OP_L2_NORM => p.perRow(src_ss),
-            mod.impl.c.GGML_OP_MUL_MAT, mod.impl.c.GGML_OP_MUL_MAT_ID => p.mulMat(src_ss),
-            mod.impl.c.GGML_OP_OUT_PROD => p.generic(src_ss, true),
-            mod.impl.c.GGML_OP_SCALE => p.generic(src_ss, false),
-            mod.impl.c.GGML_OP_SET => p.generic(src_ss, true),
-            mod.impl.c.GGML_OP_CPY => p.cpy(src_ss),
-            mod.impl.c.GGML_OP_CONT, mod.impl.c.GGML_OP_RESHAPE => p.reshape(src_ss),
-            mod.impl.c.GGML_OP_VIEW => p.view(src_ss),
-            mod.impl.c.GGML_OP_PERMUTE => p.permute(src_ss),
-            mod.impl.c.GGML_OP_TRANSPOSE => p.transpose(src_ss),
-            mod.impl.c.GGML_OP_GET_ROWS => p.getRows(src_ss),
-            mod.impl.c.GGML_OP_GET_ROWS_BACK => p.generic(src_ss, true),
-            mod.impl.c.GGML_OP_SET_ROWS => p.setRows(src_ss),
-            mod.impl.c.GGML_OP_DIAG => p.generic(src_ss, true),
-            mod.impl.c.GGML_OP_SOFT_MAX, mod.impl.c.GGML_OP_SOFT_MAX_BACK => p.generic(src_ss, false),
-            mod.impl.c.GGML_OP_ROPE => p.rope(src_ss),
-            mod.impl.c.GGML_OP_ROPE_BACK => p.rope(src_ss),
-            mod.impl.c.GGML_OP_CLAMP => p.generic(src_ss, false),
-            mod.impl.c.GGML_OP_CONV_TRANSPOSE_1D,
-            mod.impl.c.GGML_OP_IM2COL,
-            mod.impl.c.GGML_OP_IM2COL_BACK,
-            mod.impl.c.GGML_OP_IM2COL_3D,
-            mod.impl.c.GGML_OP_CONV_2D,
-            mod.impl.c.GGML_OP_CONV_3D,
-            mod.impl.c.GGML_OP_CONV_2D_DW,
-            mod.impl.c.GGML_OP_CONV_TRANSPOSE_2D,
-            mod.impl.c.GGML_OP_POOL_1D,
-            mod.impl.c.GGML_OP_POOL_2D,
-            mod.impl.c.GGML_OP_POOL_2D_BACK,
-            mod.impl.c.GGML_OP_UPSCALE,
+            mod.impl.ggml_c.GGML_OP_DUP => p.generic(src_ss, true),
+            mod.impl.ggml_c.GGML_OP_ADD, mod.impl.ggml_c.GGML_OP_ADD_ID => p.binBcast(src_ss),
+            mod.impl.ggml_c.GGML_OP_ACC => p.generic(src_ss, true),
+            mod.impl.ggml_c.GGML_OP_SUB, mod.impl.ggml_c.GGML_OP_MUL, mod.impl.ggml_c.GGML_OP_DIV => p.binBcast(src_ss),
+            mod.impl.ggml_c.GGML_OP_SQR, mod.impl.ggml_c.GGML_OP_SQRT, mod.impl.ggml_c.GGML_OP_LOG, mod.impl.ggml_c.GGML_OP_SIN, mod.impl.ggml_c.GGML_OP_COS => p.generic(src_ss, false),
+            mod.impl.ggml_c.GGML_OP_SUM => p.generic(src_ss, true),
+            mod.impl.ggml_c.GGML_OP_SUM_ROWS, mod.impl.ggml_c.GGML_OP_CUMSUM, mod.impl.ggml_c.GGML_OP_MEAN, mod.impl.ggml_c.GGML_OP_ARGMAX, mod.impl.ggml_c.GGML_OP_COUNT_EQUAL => p.perRow(src_ss),
+            mod.impl.ggml_c.GGML_OP_REPEAT, mod.impl.ggml_c.GGML_OP_REPEAT_BACK => p.generic(src_ss, false),
+            mod.impl.ggml_c.GGML_OP_CONCAT => p.concat(src_ss),
+            mod.impl.ggml_c.GGML_OP_SILU_BACK => p.generic(src_ss, false),
+            mod.impl.ggml_c.GGML_OP_NORM, mod.impl.ggml_c.GGML_OP_RMS_NORM, mod.impl.ggml_c.GGML_OP_RMS_NORM_BACK, mod.impl.ggml_c.GGML_OP_GROUP_NORM, mod.impl.ggml_c.GGML_OP_L2_NORM => p.perRow(src_ss),
+            mod.impl.ggml_c.GGML_OP_MUL_MAT, mod.impl.ggml_c.GGML_OP_MUL_MAT_ID => p.mulMat(src_ss),
+            mod.impl.ggml_c.GGML_OP_OUT_PROD => p.generic(src_ss, true),
+            mod.impl.ggml_c.GGML_OP_SCALE => p.generic(src_ss, false),
+            mod.impl.ggml_c.GGML_OP_SET => p.generic(src_ss, true),
+            mod.impl.ggml_c.GGML_OP_CPY => p.cpy(src_ss),
+            mod.impl.ggml_c.GGML_OP_CONT, mod.impl.ggml_c.GGML_OP_RESHAPE => p.reshape(src_ss),
+            mod.impl.ggml_c.GGML_OP_VIEW => p.view(src_ss),
+            mod.impl.ggml_c.GGML_OP_PERMUTE => p.permute(src_ss),
+            mod.impl.ggml_c.GGML_OP_TRANSPOSE => p.transpose(src_ss),
+            mod.impl.ggml_c.GGML_OP_GET_ROWS => p.getRows(src_ss),
+            mod.impl.ggml_c.GGML_OP_GET_ROWS_BACK => p.generic(src_ss, true),
+            mod.impl.ggml_c.GGML_OP_SET_ROWS => p.setRows(src_ss),
+            mod.impl.ggml_c.GGML_OP_DIAG => p.generic(src_ss, true),
+            mod.impl.ggml_c.GGML_OP_SOFT_MAX, mod.impl.ggml_c.GGML_OP_SOFT_MAX_BACK => p.generic(src_ss, false),
+            mod.impl.ggml_c.GGML_OP_ROPE => p.rope(src_ss),
+            mod.impl.ggml_c.GGML_OP_ROPE_BACK => p.rope(src_ss),
+            mod.impl.ggml_c.GGML_OP_CLAMP => p.generic(src_ss, false),
+            mod.impl.ggml_c.GGML_OP_CONV_TRANSPOSE_1D,
+            mod.impl.ggml_c.GGML_OP_IM2COL,
+            mod.impl.ggml_c.GGML_OP_IM2COL_BACK,
+            mod.impl.ggml_c.GGML_OP_IM2COL_3D,
+            mod.impl.ggml_c.GGML_OP_CONV_2D,
+            mod.impl.ggml_c.GGML_OP_CONV_3D,
+            mod.impl.ggml_c.GGML_OP_CONV_2D_DW,
+            mod.impl.ggml_c.GGML_OP_CONV_TRANSPOSE_2D,
+            mod.impl.ggml_c.GGML_OP_POOL_1D,
+            mod.impl.ggml_c.GGML_OP_POOL_2D,
+            mod.impl.ggml_c.GGML_OP_POOL_2D_BACK,
+            mod.impl.ggml_c.GGML_OP_UPSCALE,
             => p.generic(src_ss, true),
-            mod.impl.c.GGML_OP_PAD => p.pad(src_ss),
-            mod.impl.c.GGML_OP_PAD_REFLECT_1D, mod.impl.c.GGML_OP_ROLL => p.generic(src_ss, true),
+            mod.impl.ggml_c.GGML_OP_PAD => p.pad(src_ss),
+            mod.impl.ggml_c.GGML_OP_PAD_REFLECT_1D, mod.impl.ggml_c.GGML_OP_ROLL => p.generic(src_ss, true),
             // no sources, every device computes the full range
-            mod.impl.c.GGML_OP_ARANGE => ssMake(axis_mirrored),
-            mod.impl.c.GGML_OP_TIMESTEP_EMBEDDING => p.generic(src_ss, true),
-            mod.impl.c.GGML_OP_ARGSORT, mod.impl.c.GGML_OP_TOP_K => p.perRow(src_ss),
-            mod.impl.c.GGML_OP_LEAKY_RELU => p.generic(src_ss, false),
-            mod.impl.c.GGML_OP_TRI => p.generic(src_ss, true),
-            mod.impl.c.GGML_OP_FILL => p.generic(src_ss, false),
-            mod.impl.c.GGML_OP_FLASH_ATTN_EXT => p.flashAttnExt(src_ss),
-            mod.impl.c.GGML_OP_FLASH_ATTN_BACK => p.generic(src_ss, true),
-            mod.impl.c.GGML_OP_SSM_CONV => p.ssmConv(src_ss),
-            mod.impl.c.GGML_OP_SSM_SCAN,
-            mod.impl.c.GGML_OP_WIN_PART,
-            mod.impl.c.GGML_OP_WIN_UNPART,
-            mod.impl.c.GGML_OP_GET_REL_POS,
-            mod.impl.c.GGML_OP_ADD_REL_POS,
-            mod.impl.c.GGML_OP_RWKV_WKV6,
-            mod.impl.c.GGML_OP_GATED_LINEAR_ATTN,
-            mod.impl.c.GGML_OP_RWKV_WKV7,
-            mod.impl.c.GGML_OP_SOLVE_TRI,
+            mod.impl.ggml_c.GGML_OP_ARANGE => ssMake(axis_mirrored),
+            mod.impl.ggml_c.GGML_OP_TIMESTEP_EMBEDDING => p.generic(src_ss, true),
+            mod.impl.ggml_c.GGML_OP_ARGSORT, mod.impl.ggml_c.GGML_OP_TOP_K => p.perRow(src_ss),
+            mod.impl.ggml_c.GGML_OP_LEAKY_RELU => p.generic(src_ss, false),
+            mod.impl.ggml_c.GGML_OP_TRI => p.generic(src_ss, true),
+            mod.impl.ggml_c.GGML_OP_FILL => p.generic(src_ss, false),
+            mod.impl.ggml_c.GGML_OP_FLASH_ATTN_EXT => p.flashAttnExt(src_ss),
+            mod.impl.ggml_c.GGML_OP_FLASH_ATTN_BACK => p.generic(src_ss, true),
+            mod.impl.ggml_c.GGML_OP_SSM_CONV => p.ssmConv(src_ss),
+            mod.impl.ggml_c.GGML_OP_SSM_SCAN,
+            mod.impl.ggml_c.GGML_OP_WIN_PART,
+            mod.impl.ggml_c.GGML_OP_WIN_UNPART,
+            mod.impl.ggml_c.GGML_OP_GET_REL_POS,
+            mod.impl.ggml_c.GGML_OP_ADD_REL_POS,
+            mod.impl.ggml_c.GGML_OP_RWKV_WKV6,
+            mod.impl.ggml_c.GGML_OP_GATED_LINEAR_ATTN,
+            mod.impl.ggml_c.GGML_OP_RWKV_WKV7,
+            mod.impl.ggml_c.GGML_OP_SOLVE_TRI,
             => p.generic(src_ss, true),
-            mod.impl.c.GGML_OP_GATED_DELTA_NET => p.gatedDeltaNet(src_ss),
-            mod.impl.c.GGML_OP_LIGHTNING_INDEXER => p.lightningIndexer(src_ss),
-            mod.impl.c.GGML_OP_DSV4_HC_COMB, mod.impl.c.GGML_OP_DSV4_HC_PRE, mod.impl.c.GGML_OP_DSV4_HC_POST, mod.impl.c.GGML_OP_TOP_K_MASK => p.generic(src_ss, true),
-            mod.impl.c.GGML_OP_UNARY => p.generic(src_ss, false),
-            mod.impl.c.GGML_OP_MAP_CUSTOM1, mod.impl.c.GGML_OP_MAP_CUSTOM2, mod.impl.c.GGML_OP_MAP_CUSTOM3, mod.impl.c.GGML_OP_CUSTOM => p.generic(src_ss, true),
-            mod.impl.c.GGML_OP_CROSS_ENTROPY_LOSS, mod.impl.c.GGML_OP_CROSS_ENTROPY_LOSS_BACK => p.perRow(src_ss),
-            mod.impl.c.GGML_OP_OPT_STEP_ADAMW, mod.impl.c.GGML_OP_OPT_STEP_SGD, mod.impl.c.GGML_OP_GLU => p.generic(src_ss, false),
-            else => abortFmt(1130, "ggml op not implemented: %s", .{mod.impl.c.ggml_op_name(tensor.op)}),
+            mod.impl.ggml_c.GGML_OP_GATED_DELTA_NET => p.gatedDeltaNet(src_ss),
+            mod.impl.ggml_c.GGML_OP_LIGHTNING_INDEXER => p.lightningIndexer(src_ss),
+            mod.impl.ggml_c.GGML_OP_DSV4_HC_COMB, mod.impl.ggml_c.GGML_OP_DSV4_HC_PRE, mod.impl.ggml_c.GGML_OP_DSV4_HC_POST, mod.impl.ggml_c.GGML_OP_TOP_K_MASK => p.generic(src_ss, true),
+            mod.impl.ggml_c.GGML_OP_UNARY => p.generic(src_ss, false),
+            mod.impl.ggml_c.GGML_OP_MAP_CUSTOM1, mod.impl.ggml_c.GGML_OP_MAP_CUSTOM2, mod.impl.ggml_c.GGML_OP_MAP_CUSTOM3, mod.impl.ggml_c.GGML_OP_CUSTOM => p.generic(src_ss, true),
+            mod.impl.ggml_c.GGML_OP_CROSS_ENTROPY_LOSS, mod.impl.ggml_c.GGML_OP_CROSS_ENTROPY_LOSS_BACK => p.perRow(src_ss),
+            mod.impl.ggml_c.GGML_OP_OPT_STEP_ADAMW, mod.impl.ggml_c.GGML_OP_OPT_STEP_SGD, mod.impl.ggml_c.GGML_OP_GLU => p.generic(src_ss, false),
+            else => abortFmt(1130, "ggml op not implemented: %s", .{mod.impl.ggml_c.ggml_op_name(tensor.op)}),
         };
         if (isDim(split_state.axis)) {
             var first_src_split_by_axis = true;
@@ -1410,10 +1408,10 @@ const Propagate = struct {
 
 /// Appends `ne[j]x nr[0]` for every buffer, comma-separated — the C++'s
 /// `std::to_string(ne) + "x" + std::to_string(nr)` loop.
-fn appendNeInfo(out: *std.ArrayList(u8), ss: *const mod.impl.c.struct_ggml_backend_meta_split_state, n_bufs: usize) void {
+fn appendNeInfo(out: *std.ArrayList(u8), ss: *const mod.impl.ggml_c.struct_ggml_backend_meta_split_state, n_bufs: usize) void {
     for (0..n_bufs) |j| {
-        if (out.items.len != 0) out.appendSlice(allocator, ", ") catch oom();
-        out.print(allocator, "{d}x{d}", .{ ss.ne[j], ss.nr[0] }) catch oom();
+        if (out.items.len != 0) out.appendSlice(std.heap.c_allocator, ", ") catch oom();
+        out.print(std.heap.c_allocator, "{d}x{d}", .{ ss.ne[j], ss.nr[0] }) catch oom();
     }
 }
 
@@ -1431,7 +1429,7 @@ fn appendNeInfo(out: *std.ArrayList(u8), ss: *const mod.impl.c.struct_ggml_backe
 /// - `assume_sync`: whether a partial sum counts as already all-reduced.
 ///
 /// Return: the split state; never `NONE`.
-fn getSplitState(stc: *SimpleTensorContainer, tensor: *const mod.impl.c.ggml_tensor, assume_sync: bool) mod.impl.c.struct_ggml_backend_meta_split_state {
+fn getSplitState(stc: *SimpleTensorContainer, tensor: *const mod.impl.ggml_c.ggml_tensor, assume_sync: bool) mod.impl.ggml_c.struct_ggml_backend_meta_split_state {
     // FIXME Currently this function preserves/erases the information in n_segments and nr in an inconsistent way.
     // Since the operations in question are developed specifically for llama.cpp this currently does not manifest as a bug there.
     // However, in a broader ggml context with arbitrary ggml graphs this can lead to unexpected results.
@@ -1457,43 +1455,43 @@ fn getSplitState(stc: *SimpleTensorContainer, tensor: *const mod.impl.c.ggml_ten
         @memcpy(&buf_ctx.cacheIndex(key).bytes, tensorBytes(tensor));
         if (buf_ctx.debug > 0) {
             var srcs_info: std.ArrayList(u8) = .empty;
-            defer srcs_info.deinit(allocator);
+            defer srcs_info.deinit(std.heap.c_allocator);
             for (0..max_src) |i| {
                 if (srcAbsentOrSelf(tensor, i)) {
                     continue;
                 }
                 if (srcs_info.items.len != 0) {
-                    srcs_info.appendSlice(allocator, ", ") catch oom();
+                    srcs_info.appendSlice(std.heap.c_allocator, ", ") catch oom();
                 }
                 const src = srcOf(tensor, i);
                 const split_state = getSplitStateAuto(src, true);
                 mod.impl.assert(split_state.n_segments == 1, "split_state.n_segments == 1");
                 const axis_name = ggml_backend_meta_split_axis_name(split_state.axis);
                 var ne_info: std.ArrayList(u8) = .empty;
-                defer ne_info.deinit(allocator);
+                defer ne_info.deinit(std.heap.c_allocator);
                 appendNeInfo(&ne_info, &split_state, n_bufs);
-                srcs_info.print(allocator, "{s}[{s}, {s}, {{{s}}}]", .{
+                srcs_info.print(std.heap.c_allocator, "{s}[{s}, {s}, {{{s}}}]", .{
                     std.mem.sliceTo(&src.name, 0),
-                    std.mem.span(mod.impl.c.ggml_op_name(src.op)),
+                    std.mem.span(mod.impl.ggml_c.ggml_op_name(src.op)),
                     std.mem.span(axis_name),
                     ne_info.items,
                 }) catch oom();
             }
             var ne_info: std.ArrayList(u8) = .empty;
-            defer ne_info.deinit(allocator);
+            defer ne_info.deinit(std.heap.c_allocator);
             for (0..n_bufs) |j| {
                 if (ne_info.items.len != 0) {
-                    ne_info.appendSlice(allocator, ", ") catch oom();
+                    ne_info.appendSlice(std.heap.c_allocator, ", ") catch oom();
                 }
                 const ss = buf_ctx.cacheIndex(key).ss;
-                ne_info.print(allocator, "{d}x{d}", .{ ss.ne[j], ss.nr[0] }) catch oom();
+                ne_info.print(std.heap.c_allocator, "{d}x{d}", .{ ss.ne[j], ss.nr[0] }) catch oom();
             }
-            srcs_info.append(allocator, 0) catch oom();
-            ne_info.append(allocator, 0) catch oom();
+            srcs_info.append(std.heap.c_allocator, 0) catch oom();
+            ne_info.append(std.heap.c_allocator, 0) catch oom();
             mod.impl.logDebug("SPLIT_STATE: {%s} -> %s[%s, %s, {%s}]\n", .{
                 @as([*c]const u8, srcs_info.items.ptr),
                 @as([*c]const u8, &tensor.name),
-                mod.impl.c.ggml_op_name(tensor.op),
+                mod.impl.ggml_c.ggml_op_name(tensor.op),
                 ggml_backend_meta_split_axis_name(buf_ctx.cacheIndex(key).ss.axis),
                 @as([*c]const u8, ne_info.items.ptr),
             });
@@ -1508,8 +1506,8 @@ fn getSplitState(stc: *SimpleTensorContainer, tensor: *const mod.impl.c.ggml_ten
 }
 
 /// Ports `ggml_backend_meta_is_host_view` (ggml-backend-meta.cpp:1238 @b1b770d90).
-fn isHostView(tensor: *const mod.impl.c.ggml_tensor) bool {
-    return mod.impl.c.ggml_is_view(tensor) and mod.impl.c.ggml_backend_buffer_is_host(tensor.view_src.*.buffer);
+fn isHostView(tensor: *const mod.impl.ggml_c.ggml_tensor) bool {
+    return mod.impl.ggml_c.ggml_is_view(tensor) and mod.impl.ggml_c.ggml_backend_buffer_is_host(tensor.view_src.*.buffer);
 }
 
 /// Ports `ggml_backend_meta_get_split_state` (ggml-backend-meta.cpp:1242 @b1b770d90),
@@ -1517,7 +1515,7 @@ fn isHostView(tensor: *const mod.impl.c.ggml_tensor) bool {
 ///
 /// A tensor outside a meta buffer must be a view of host memory
 /// ([TAG_META_HOST_VIEWS]); it is not split across the sub-devices.
-fn getSplitStateAuto(tensor: *const mod.impl.c.ggml_tensor, assume_sync: bool) mod.impl.c.struct_ggml_backend_meta_split_state {
+fn getSplitStateAuto(tensor: *const mod.impl.ggml_c.ggml_tensor, assume_sync: bool) mod.impl.ggml_c.struct_ggml_backend_meta_split_state {
     // [TAG_META_HOST_VIEWS]
     // TODO: technically, this check should not be needed if the backend
     //       scheduler correctly prevents assigning such host-buffer views to the
@@ -1539,7 +1537,7 @@ fn getSplitStateAuto(tensor: *const mod.impl.c.ggml_tensor, assume_sync: bool) m
 ///
 /// A fixed, never-dereferenced address: the allocator only needs offsets from
 /// it, which `bufferInitTensorImpl` carries over to each simple buffer.
-fn bufferGetBase(buffer: mod.impl.c.ggml_backend_buffer_t) callconv(.c) ?*anyopaque {
+fn bufferGetBase(buffer: mod.impl.ggml_c.ggml_backend_buffer_t) callconv(.c) ?*anyopaque {
     _ = buffer;
     return @ptrFromInt(0x1000000000000000); // FIXME
 }
@@ -1552,13 +1550,13 @@ fn bufferGetBase(buffer: mod.impl.c.ggml_backend_buffer_t) callconv(.c) ?*anyopa
 /// into the device's buffer. A view of a meta tensor takes its source
 /// slice's concrete buffer, and is initialised by that buffer. A device whose
 /// source slice is empty has the node's compute flag cleared.
-fn bufferInitTensorImpl(stc: *SimpleTensorContainer, tensor: *mod.impl.c.ggml_tensor) mod.impl.c.enum_ggml_status {
+fn bufferInitTensorImpl(stc: *SimpleTensorContainer, tensor: *mod.impl.ggml_c.ggml_tensor) mod.impl.ggml_c.enum_ggml_status {
     mod.impl.assert(ggml_backend_buffer_is_meta(tensor.buffer), "ggml_backend_buffer_is_meta(tensor->buffer)");
     const buf_ctx = bufferCtx(tensor.buffer);
     const n_simple_bufs = bufferNBufs(tensor.buffer);
 
     const split_state = getSplitState(stc, tensor, true);
-    mod.impl.assert(mod.impl.c.ggml_nelements(tensor) == 0 or split_state.axis != axis_unknown, "ggml_nelements(tensor) == 0 || split_state.axis != GGML_BACKEND_SPLIT_AXIS_UNKNOWN");
+    mod.impl.assert(mod.impl.ggml_c.ggml_nelements(tensor) == 0 or split_state.axis != axis_unknown, "ggml_nelements(tensor) == 0 || split_state.axis != GGML_BACKEND_SPLIT_AXIS_UNKNOWN");
     mod.impl.assert(split_state.n_segments <= 16, "split_state.n_segments <= 16");
 
     const split_dim: c_int = axisInt(split_state.axis);
@@ -1591,19 +1589,19 @@ fn bufferInitTensorImpl(stc: *SimpleTensorContainer, tensor: *mod.impl.c.ggml_te
             }
         }
 
-        const t_ij = mod.impl.one(mod.impl.c.ggml_tensor, mod.impl.c.ggml_new_tensor(simple_ctx, tensor.type, max_dims, &ne));
+        const t_ij = mod.impl.one(mod.impl.ggml_c.ggml_tensor, mod.impl.ggml_c.ggml_new_tensor(simple_ctx, tensor.type, max_dims, &ne));
         t_ij.op = tensor.op;
         for (0..max_dims) |i| {
             t_ij.nb[i] = nb[i];
         }
         t_ij.flags = tensor.flags;
         t_ij.op_params = tensor.op_params;
-        _ = mod.impl.c.ggml_set_name(t_ij, &tensor.name);
+        _ = mod.impl.ggml_c.ggml_set_name(t_ij, &tensor.name);
         t_ij.buffer = simple_buf;
         t_ij.view_src = tensor.view_src;
         t_ij.view_offs = tensor.view_offs;
         if (t_ij.view_src != null and ggml_backend_buffer_is_meta(t_ij.view_src.*.buffer)) {
-            const view_src = mod.impl.one(mod.impl.c.ggml_tensor, tensor.view_src);
+            const view_src = mod.impl.one(mod.impl.ggml_c.ggml_tensor, tensor.view_src);
             t_ij.view_src = bufferSimpleTensor(view_src, j);
             if (t_ij.view_offs > 0 and split_is_dim) {
                 mod.impl.assert(tensor.ne[sd] != 0, "tensor->ne[split_dim] != 0");
@@ -1637,16 +1635,16 @@ fn bufferInitTensorImpl(stc: *SimpleTensorContainer, tensor: *mod.impl.c.ggml_te
                 init_buf = t_ij.view_src.*.buffer;
             }
         } else if (simple_buf != null) {
-            if (mod.impl.c.ggml_backend_buffer_is_multi_buffer(simple_buf)) {
+            if (mod.impl.ggml_c.ggml_backend_buffer_is_multi_buffer(simple_buf)) {
                 mod.impl.abort("multi buffers are not supported by the meta backend");
             }
-            t_ij.data = @ptrFromInt(@intFromPtr(mod.impl.c.ggml_backend_buffer_get_base(simple_buf)) +%
-                @intFromPtr(tensor.data) -% @intFromPtr(mod.impl.c.ggml_backend_buffer_get_base(tensor.buffer)));
+            t_ij.data = @ptrFromInt(@intFromPtr(mod.impl.ggml_c.ggml_backend_buffer_get_base(simple_buf)) +%
+                @intFromPtr(tensor.data) -% @intFromPtr(mod.impl.ggml_c.ggml_backend_buffer_get_base(tensor.buffer)));
         }
 
         if (init_buf != null) {
             // the backend that owns the buffer will set .extra
-            _ = mod.impl.c.ggml_backend_buffer_init_tensor(init_buf, t_ij);
+            _ = mod.impl.ggml_c.ggml_backend_buffer_init_tensor(init_buf, t_ij);
         } else {
             t_ij.extra = tensor.extra;
         }
@@ -1680,14 +1678,14 @@ fn bufferInitTensorImpl(stc: *SimpleTensorContainer, tensor: *mod.impl.c.ggml_te
                 ne_sum += split_state_src.ne[s * n_simple_bufs + j] * @as(i64, split_state_src.nr[s]);
             }
             if (ne_sum == 0) {
-                simple_tensors[j].?.flags &= ~@as(i32, mod.impl.c.GGML_TENSOR_FLAG_COMPUTE);
+                simple_tensors[j].?.flags &= ~@as(i32, mod.impl.ggml_c.GGML_TENSOR_FLAG_COMPUTE);
             }
         }
     }
 
-    stc.simple_tensors.put(allocator, tensor, simple_tensors) catch oom();
+    stc.simple_tensors.put(std.heap.c_allocator, tensor, simple_tensors) catch oom();
 
-    return mod.impl.c.GGML_STATUS_SUCCESS;
+    return mod.impl.ggml_c.GGML_STATUS_SUCCESS;
 }
 
 /// Ports `ggml_backend_meta_buffer_init_tensor` (ggml-backend-meta.cpp:1396 @b1b770d90).
@@ -1695,10 +1693,10 @@ fn bufferInitTensorImpl(stc: *SimpleTensorContainer, tensor: *mod.impl.c.ggml_te
 /// Makes the next compute container current first: `graph_compute` flips
 /// `stc_compute_index_next` when it rebuilds, and the flip takes effect on
 /// the first tensor initialised after it.
-fn bufferInitTensor(buffer: mod.impl.c.ggml_backend_buffer_t, tensor: [*c]mod.impl.c.ggml_tensor) callconv(.c) mod.impl.c.enum_ggml_status {
+fn bufferInitTensor(buffer: mod.impl.ggml_c.ggml_backend_buffer_t, tensor: [*c]mod.impl.ggml_c.ggml_tensor) callconv(.c) mod.impl.ggml_c.enum_ggml_status {
     mod.impl.assert(ggml_backend_buffer_is_meta(buffer), "ggml_backend_buffer_is_meta(buffer)");
     const buf_ctx = bufferCtx(buffer);
-    const t = mod.impl.one(mod.impl.c.ggml_tensor, tensor);
+    const t = mod.impl.one(mod.impl.ggml_c.ggml_tensor, tensor);
     buf_ctx.stc_compute_index = buf_ctx.stc_compute_index_next;
     return bufferInitTensorImpl(buf_ctx.getSimpleTensorContainer(t), t);
 }
@@ -1726,7 +1724,7 @@ const ChunkRange = struct {
     start: i64,
     stop: i64,
 
-    fn of(tensor: *const mod.impl.c.ggml_tensor, axis: mod.impl.c.enum_ggml_backend_meta_split_axis, offset: usize, size: usize) ChunkRange {
+    fn of(tensor: *const mod.impl.ggml_c.ggml_tensor, axis: mod.impl.ggml_c.enum_ggml_backend_meta_split_axis, offset: usize, size: usize) ChunkRange {
         const chunk_size_full = tensor.nb[axis + 1];
         mod.impl.assert(offset % chunk_size_full == 0, "offset % chunk_size_full == 0");
         mod.impl.assert(size % chunk_size_full == 0, "size   % chunk_size_full == 0");
@@ -1739,18 +1737,18 @@ const ChunkRange = struct {
 };
 
 /// The common preamble of the segmented arms: `n_segments != 1 || nr[0] != 1`.
-fn checkSegmented(tensor: *const mod.impl.c.ggml_tensor, split_state: *const mod.impl.c.struct_ggml_backend_meta_split_state) void {
+fn checkSegmented(tensor: *const mod.impl.ggml_c.ggml_tensor, split_state: *const mod.impl.ggml_c.struct_ggml_backend_meta_split_state) void {
     mod.impl.assert(isDim(split_state.axis), "split_state.axis >= 0 && split_state.axis < GGML_MAX_DIMS");
     mod.impl.assert(split_state.nr[0] != 0, "split_state.nr[0] != 0");
     mod.impl.assert(tensor.ne[3] == 1, "tensor->ne[3] == 1");
 }
 
 /// Ports `ggml_backend_meta_buffer_memset_tensor` (ggml-backend-meta.cpp:1403 @b1b770d90).
-fn bufferMemsetTensor(buffer: mod.impl.c.ggml_backend_buffer_t, tensor_: [*c]mod.impl.c.ggml_tensor, value: u8, offset: usize, size: usize) callconv(.c) void {
-    const tensor = mod.impl.one(mod.impl.c.ggml_tensor, tensor_);
+fn bufferMemsetTensor(buffer: mod.impl.ggml_c.ggml_backend_buffer_t, tensor_: [*c]mod.impl.ggml_c.ggml_tensor, value: u8, offset: usize, size: usize) callconv(.c) void {
+    const tensor = mod.impl.one(mod.impl.ggml_c.ggml_tensor, tensor_);
     const n_bufs = bufferNBufs(buffer);
     const split_state = getSplitStateAuto(tensor, false);
-    mod.impl.assert(mod.impl.c.ggml_is_contiguous(tensor) or split_state.axis == axis_mirrored, "ggml_is_contiguous(tensor) || split_state.axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED");
+    mod.impl.assert(mod.impl.ggml_c.ggml_is_contiguous(tensor) or split_state.axis == axis_mirrored, "ggml_is_contiguous(tensor) || split_state.axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED");
 
     if (split_state.n_segments != 1 or split_state.nr[0] != 1) {
         checkSegmented(tensor, &split_state);
@@ -1761,7 +1759,7 @@ fn bufferMemsetTensor(buffer: mod.impl.c.ggml_backend_buffer_t, tensor_: [*c]mod
 
             const rows = RowRange.of(offset, size, tensor.nb[1], tensor.ne[1]);
 
-            const blck_size: i64 = mod.impl.c.ggml_blck_size(tensor.type);
+            const blck_size: i64 = mod.impl.ggml_c.ggml_blck_size(tensor.type);
             for (0..split_state.n_segments) |s| {
                 for (0..split_state.nr[s]) |_| {
                     for (0..n_bufs) |j| {
@@ -1770,7 +1768,7 @@ fn bufferMemsetTensor(buffer: mod.impl.c.ggml_backend_buffer_t, tensor_: [*c]mod
                         const nbytes: usize = @as(usize, @intCast(@divTrunc(split_state.ne[s * n_bufs + j], blck_size))) * tensor.nb[0];
                         var row: i64 = 0;
                         while (row < rows.count) : (row += 1) {
-                            mod.impl.c.ggml_backend_tensor_memset(simple_tensor, value, simple_offsets[j] + @as(usize, @intCast(rows.start + row)) * simple_tensor.nb[1], nbytes);
+                            mod.impl.ggml_c.ggml_backend_tensor_memset(simple_tensor, value, simple_offsets[j] + @as(usize, @intCast(rows.start + row)) * simple_tensor.nb[1], nbytes);
                         }
                         simple_offsets[j] += nbytes;
                     }
@@ -1790,7 +1788,7 @@ fn bufferMemsetTensor(buffer: mod.impl.c.ggml_backend_buffer_t, tensor_: [*c]mod
                     const nbytes: usize = @as(usize, @intCast(split_state.ne[s * n_bufs + j])) * tensor.nb[1];
                     var row: i64 = 0;
                     while (row < rows.count) : (row += 1) {
-                        mod.impl.c.ggml_backend_tensor_memset(simple_tensor, value, simple_offsets[j] + @as(usize, @intCast(rows.start + row)) * simple_tensor.nb[2], nbytes);
+                        mod.impl.ggml_c.ggml_backend_tensor_memset(simple_tensor, value, simple_offsets[j] + @as(usize, @intCast(rows.start + row)) * simple_tensor.nb[2], nbytes);
                     }
                     simple_offsets[j] += nbytes;
                 }
@@ -1810,7 +1808,7 @@ fn bufferMemsetTensor(buffer: mod.impl.c.ggml_backend_buffer_t, tensor_: [*c]mod
                 }
                 var i = chunks.start;
                 while (i < chunks.stop) : (i += 1) {
-                    mod.impl.c.ggml_backend_tensor_memset(simple_tensor, value, @as(usize, @intCast(i)) * chunk_size, chunk_size);
+                    mod.impl.ggml_c.ggml_backend_tensor_memset(simple_tensor, value, @as(usize, @intCast(i)) * chunk_size, chunk_size);
                 }
             }
         },
@@ -1821,7 +1819,7 @@ fn bufferMemsetTensor(buffer: mod.impl.c.ggml_backend_buffer_t, tensor_: [*c]mod
             // [[fallthrough]] from PARTIAL
             for (0..n_bufs) |j| {
                 const simple_tensor = bufferSimpleTensor(tensor, j).?;
-                mod.impl.c.ggml_backend_tensor_memset(simple_tensor, value, offset, size);
+                mod.impl.ggml_c.ggml_backend_tensor_memset(simple_tensor, value, offset, size);
             }
         },
         else => {
@@ -1837,12 +1835,12 @@ fn bufferMemsetTensor(buffer: mod.impl.c.ggml_backend_buffer_t, tensor_: [*c]mod
 /// takes one 2-D copy per device; a mirrored tensor is copied whole to every
 /// device; a partial one is divided evenly between the devices that
 /// contribute to it, and zeroed on the rest.
-fn bufferSetTensor(buffer: mod.impl.c.ggml_backend_buffer_t, tensor_: [*c]mod.impl.c.ggml_tensor, data: ?*const anyopaque, offset: usize, size: usize) callconv(.c) void {
-    const tensor = mod.impl.one(mod.impl.c.ggml_tensor, tensor_);
+fn bufferSetTensor(buffer: mod.impl.ggml_c.ggml_backend_buffer_t, tensor_: [*c]mod.impl.ggml_c.ggml_tensor, data: ?*const anyopaque, offset: usize, size: usize) callconv(.c) void {
+    const tensor = mod.impl.one(mod.impl.ggml_c.ggml_tensor, tensor_);
     const bytes: [*]const u8 = @ptrCast(data);
     const n_bufs = bufferNBufs(buffer);
     const split_state = getSplitStateAuto(tensor, false);
-    mod.impl.assert(mod.impl.c.ggml_is_contiguous(tensor) or split_state.axis == axis_mirrored, "ggml_is_contiguous(tensor) || split_state.axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED");
+    mod.impl.assert(mod.impl.ggml_c.ggml_is_contiguous(tensor) or split_state.axis == axis_mirrored, "ggml_is_contiguous(tensor) || split_state.axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED");
 
     if (split_state.n_segments != 1 or split_state.nr[0] != 1) {
         checkSegmented(tensor, &split_state);
@@ -1854,14 +1852,14 @@ fn bufferSetTensor(buffer: mod.impl.c.ggml_backend_buffer_t, tensor_: [*c]mod.im
 
             const rows = RowRange.of(offset, size, tensor.nb[1], tensor.ne[1]);
 
-            const blck_size: i64 = mod.impl.c.ggml_blck_size(tensor.type);
+            const blck_size: i64 = mod.impl.ggml_c.ggml_blck_size(tensor.type);
             for (0..split_state.n_segments) |s| {
                 for (0..split_state.nr[s]) |_| {
                     for (0..n_bufs) |j| {
                         const simple_tensor = bufferSimpleTensor(tensor, j).?;
                         mod.impl.assert(@rem(split_state.ne[s * n_bufs + j], blck_size) == 0, "split_state.ne[s*n_bufs + j] % blck_size == 0");
                         const nbytes: usize = @as(usize, @intCast(@divTrunc(split_state.ne[s * n_bufs + j], blck_size))) * tensor.nb[0];
-                        mod.impl.c.ggml_backend_tensor_set_2d(simple_tensor, bytes + offset_data, simple_offsets[j] + @as(usize, @intCast(rows.start)) * simple_tensor.nb[1], nbytes, @intCast(rows.count), simple_tensor.nb[1], tensor.nb[1]);
+                        mod.impl.ggml_c.ggml_backend_tensor_set_2d(simple_tensor, bytes + offset_data, simple_offsets[j] + @as(usize, @intCast(rows.start)) * simple_tensor.nb[1], nbytes, @intCast(rows.count), simple_tensor.nb[1], tensor.nb[1]);
                         offset_data += nbytes;
                         simple_offsets[j] += nbytes;
                     }
@@ -1879,7 +1877,7 @@ fn bufferSetTensor(buffer: mod.impl.c.ggml_backend_buffer_t, tensor_: [*c]mod.im
                 for (0..n_bufs) |j| {
                     const simple_tensor = bufferSimpleTensor(tensor, j).?;
                     const nbytes: usize = @as(usize, @intCast(split_state.ne[s * n_bufs + j])) * tensor.nb[1];
-                    mod.impl.c.ggml_backend_tensor_set_2d(simple_tensor, bytes + offset_data, simple_offsets[j] + @as(usize, @intCast(rows.start)) * simple_tensor.nb[2], nbytes, @intCast(rows.count), simple_tensor.nb[2], tensor.nb[2]);
+                    mod.impl.ggml_c.ggml_backend_tensor_set_2d(simple_tensor, bytes + offset_data, simple_offsets[j] + @as(usize, @intCast(rows.start)) * simple_tensor.nb[2], nbytes, @intCast(rows.count), simple_tensor.nb[2], tensor.nb[2]);
                     offset_data += nbytes;
                     simple_offsets[j] += nbytes;
                 }
@@ -1901,7 +1899,7 @@ fn bufferSetTensor(buffer: mod.impl.c.ggml_backend_buffer_t, tensor_: [*c]mod.im
                     continue;
                 }
                 const simple_offset = @as(usize, @intCast(chunks.start)) * chunk_size_j;
-                mod.impl.c.ggml_backend_tensor_set_2d(simple_tensor, bytes + offset_j, simple_offset, chunk_size_j, @intCast(chunks.stop - chunks.start), chunk_size_j, chunks.size_full);
+                mod.impl.ggml_c.ggml_backend_tensor_set_2d(simple_tensor, bytes + offset_j, simple_offset, chunk_size_j, @intCast(chunks.stop - chunks.start), chunk_size_j, chunks.size_full);
                 offset_j += chunk_size_j;
             }
             mod.impl.assert(offset_j == chunks.size_full, "offset_j == chunk_size_full");
@@ -1909,11 +1907,11 @@ fn bufferSetTensor(buffer: mod.impl.c.ggml_backend_buffer_t, tensor_: [*c]mod.im
         axis_mirrored => {
             for (0..n_bufs) |j| {
                 const simple_tensor = bufferSimpleTensor(tensor, j).?;
-                mod.impl.c.ggml_backend_tensor_set(simple_tensor, data, offset, size);
+                mod.impl.ggml_c.ggml_backend_tensor_set(simple_tensor, data, offset, size);
             }
         },
         axis_partial => {
-            mod.impl.assert(tensor.type == mod.impl.c.GGML_TYPE_F32, "tensor->type == GGML_TYPE_F32");
+            mod.impl.assert(tensor.type == mod.impl.ggml_c.GGML_TYPE_F32, "tensor->type == GGML_TYPE_F32");
             mod.impl.assert(offset % @sizeOf(f32) == 0, "offset % sizeof(float) == 0");
             mod.impl.assert(size % @sizeOf(f32) == 0, "size   % sizeof(float) == 0");
             const n_values = size / @sizeOf(f32);
@@ -1926,21 +1924,21 @@ fn bufferSetTensor(buffer: mod.impl.c.ggml_backend_buffer_t, tensor_: [*c]mod.im
                 n_contributors = n_bufs;
             }
             const values: [*]align(1) const f32 = @ptrCast(data);
-            const tmp = allocator.alloc(f32, n_values) catch oom();
-            defer allocator.free(tmp);
+            const tmp = std.heap.c_allocator.alloc(f32, n_values) catch oom();
+            defer std.heap.c_allocator.free(tmp);
             for (0..n_values) |i| {
                 tmp[i] = values[i] / @as(f32, @floatFromInt(n_contributors));
             }
             var zero: []f32 = &.{};
-            defer if (zero.len != 0) allocator.free(zero);
+            defer if (zero.len != 0) std.heap.c_allocator.free(zero);
             if (has_contributor_mask) {
-                zero = allocator.alloc(f32, n_values) catch oom();
+                zero = std.heap.c_allocator.alloc(f32, n_values) catch oom();
                 @memset(zero, 0.0);
             }
             for (0..n_bufs) |j| {
                 const simple_tensor = bufferSimpleTensor(tensor, j).?;
                 const partial: [*]const f32 = if (has_contributor_mask and split_state.ne[j] == 0) zero.ptr else tmp.ptr;
-                mod.impl.c.ggml_backend_tensor_set(simple_tensor, partial, offset, size);
+                mod.impl.ggml_c.ggml_backend_tensor_set(simple_tensor, partial, offset, size);
             }
         },
         else => {
@@ -1953,12 +1951,12 @@ fn bufferSetTensor(buffer: mod.impl.c.ggml_backend_buffer_t, tensor_: [*c]mod.im
 ///
 /// The gather that mirrors `bufferSetTensor`. A mirrored tensor is read from
 /// device 0; a partial one cannot be read at all and aborts.
-fn bufferGetTensor(buffer: mod.impl.c.ggml_backend_buffer_t, tensor_: [*c]const mod.impl.c.ggml_tensor, data: ?*anyopaque, offset: usize, size: usize) callconv(.c) void {
-    const tensor: *const mod.impl.c.ggml_tensor = @ptrCast(tensor_);
+fn bufferGetTensor(buffer: mod.impl.ggml_c.ggml_backend_buffer_t, tensor_: [*c]const mod.impl.ggml_c.ggml_tensor, data: ?*anyopaque, offset: usize, size: usize) callconv(.c) void {
+    const tensor: *const mod.impl.ggml_c.ggml_tensor = @ptrCast(tensor_);
     const bytes: [*]u8 = @ptrCast(data);
     const n_bufs = bufferNBufs(buffer);
     const split_state = getSplitStateAuto(tensor, false);
-    mod.impl.assert(mod.impl.c.ggml_is_contiguous(tensor) or split_state.axis == axis_mirrored, "ggml_is_contiguous(tensor) || split_state.axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED");
+    mod.impl.assert(mod.impl.ggml_c.ggml_is_contiguous(tensor) or split_state.axis == axis_mirrored, "ggml_is_contiguous(tensor) || split_state.axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED");
 
     if (split_state.n_segments != 1 or split_state.nr[0] != 1) {
         checkSegmented(tensor, &split_state);
@@ -1970,14 +1968,14 @@ fn bufferGetTensor(buffer: mod.impl.c.ggml_backend_buffer_t, tensor_: [*c]const 
 
             const rows = RowRange.of(offset, size, tensor.nb[1], tensor.ne[1]);
 
-            const blck_size: i64 = mod.impl.c.ggml_blck_size(tensor.type);
+            const blck_size: i64 = mod.impl.ggml_c.ggml_blck_size(tensor.type);
             for (0..split_state.n_segments) |s| {
                 for (0..split_state.nr[s]) |_| {
                     for (0..n_bufs) |j| {
                         const simple_tensor = bufferSimpleTensor(tensor, j).?;
                         mod.impl.assert(@rem(split_state.ne[s * n_bufs + j], blck_size) == 0, "split_state.ne[s*n_bufs + j] % blck_size == 0");
                         const nbytes: usize = @as(usize, @intCast(@divTrunc(split_state.ne[s * n_bufs + j], blck_size))) * tensor.nb[0];
-                        mod.impl.c.ggml_backend_tensor_get_2d(simple_tensor, bytes + offset_data, simple_offsets[j] + @as(usize, @intCast(rows.start)) * simple_tensor.nb[1], nbytes, @intCast(rows.count), simple_tensor.nb[1], tensor.nb[1]);
+                        mod.impl.ggml_c.ggml_backend_tensor_get_2d(simple_tensor, bytes + offset_data, simple_offsets[j] + @as(usize, @intCast(rows.start)) * simple_tensor.nb[1], nbytes, @intCast(rows.count), simple_tensor.nb[1], tensor.nb[1]);
                         offset_data += nbytes;
                         simple_offsets[j] += nbytes;
                     }
@@ -1995,7 +1993,7 @@ fn bufferGetTensor(buffer: mod.impl.c.ggml_backend_buffer_t, tensor_: [*c]const 
                 for (0..n_bufs) |j| {
                     const simple_tensor = bufferSimpleTensor(tensor, j).?;
                     const nbytes: usize = @as(usize, @intCast(split_state.ne[s * n_bufs + j])) * tensor.nb[1];
-                    mod.impl.c.ggml_backend_tensor_get_2d(simple_tensor, bytes + offset_data, simple_offsets[j] + @as(usize, @intCast(rows.start)) * simple_tensor.nb[2], nbytes, @intCast(rows.count), simple_tensor.nb[2], tensor.nb[2]);
+                    mod.impl.ggml_c.ggml_backend_tensor_get_2d(simple_tensor, bytes + offset_data, simple_offsets[j] + @as(usize, @intCast(rows.start)) * simple_tensor.nb[2], nbytes, @intCast(rows.count), simple_tensor.nb[2], tensor.nb[2]);
                     offset_data += nbytes;
                     simple_offsets[j] += nbytes;
                 }
@@ -2017,7 +2015,7 @@ fn bufferGetTensor(buffer: mod.impl.c.ggml_backend_buffer_t, tensor_: [*c]const 
                     continue;
                 }
                 const simple_offset = @as(usize, @intCast(chunks.start)) * chunk_size_j;
-                mod.impl.c.ggml_backend_tensor_get_2d(simple_tensor, bytes + offset_j, simple_offset, chunk_size_j, @intCast(chunks.stop - chunks.start), chunk_size_j, chunks.size_full);
+                mod.impl.ggml_c.ggml_backend_tensor_get_2d(simple_tensor, bytes + offset_j, simple_offset, chunk_size_j, @intCast(chunks.stop - chunks.start), chunk_size_j, chunks.size_full);
                 offset_j += chunk_size_j;
             }
             mod.impl.assert(offset_j == chunks.size_full, "offset_j == chunk_size_full");
@@ -2025,7 +2023,7 @@ fn bufferGetTensor(buffer: mod.impl.c.ggml_backend_buffer_t, tensor_: [*c]const 
         axis_mirrored => {
             // TODO other simple backend may be better
             const simple_tensor = bufferSimpleTensor(tensor, 0).?;
-            mod.impl.c.ggml_backend_tensor_get(simple_tensor, data, offset, size);
+            mod.impl.ggml_c.ggml_backend_tensor_get(simple_tensor, data, offset, size);
         },
         else => {
             mod.impl.abort("fatal error");
@@ -2034,19 +2032,19 @@ fn bufferGetTensor(buffer: mod.impl.c.ggml_backend_buffer_t, tensor_: [*c]const 
 }
 
 /// Ports `ggml_backend_meta_buffer_clear` (ggml-backend-meta.cpp:1733 @b1b770d90).
-fn bufferClear(buffer: mod.impl.c.ggml_backend_buffer_t, value: u8) callconv(.c) void {
+fn bufferClear(buffer: mod.impl.ggml_c.ggml_backend_buffer_t, value: u8) callconv(.c) void {
     const n_buffers = bufferNBufs(buffer);
     for (0..n_buffers) |i| {
-        mod.impl.c.ggml_backend_buffer_clear(bufferSimpleBuffer(buffer, i), value);
+        mod.impl.ggml_c.ggml_backend_buffer_clear(bufferSimpleBuffer(buffer, i), value);
     }
 }
 
 /// Ports `ggml_backend_meta_buffer_reset` (ggml-backend-meta.cpp:1740 @b1b770d90).
-fn bufferReset(buffer: mod.impl.c.ggml_backend_buffer_t) callconv(.c) void {
+fn bufferReset(buffer: mod.impl.ggml_c.ggml_backend_buffer_t) callconv(.c) void {
     mod.impl.assert(ggml_backend_buffer_is_meta(buffer), "ggml_backend_buffer_is_meta(buffer)");
     const buf_ctx = bufferCtx(buffer);
     for (0..buf_ctx.bufs.items.len) |i| {
-        mod.impl.c.ggml_backend_buffer_reset(bufferSimpleBuffer(buffer, i));
+        mod.impl.ggml_c.ggml_backend_buffer_reset(bufferSimpleBuffer(buffer, i));
     }
 }
 
@@ -2056,7 +2054,7 @@ fn bufferReset(buffer: mod.impl.c.ggml_backend_buffer_t) callconv(.c) void {
 /// `cpy_tensor_n`) are null here as in the C, and listed explicitly:
 /// translate-c gives every field a null default, so leaving them out would
 /// compile and read as an oversight.
-const buffer_iface: mod.impl.c.struct_ggml_backend_buffer_i = .{
+const buffer_iface: mod.impl.ggml_c.struct_ggml_backend_buffer_i = .{
     .free_buffer = &bufferFreeBuffer,
     .get_base = &bufferGetBase,
     .init_tensor = &bufferInitTensor,
@@ -2074,7 +2072,7 @@ const buffer_iface: mod.impl.c.struct_ggml_backend_buffer_i = .{
 };
 
 /// Ports `ggml_backend_buffer_is_meta` (ggml-backend-meta.cpp:1765 @b1b770d90).
-pub export fn ggml_backend_buffer_is_meta(buf: mod.impl.c.ggml_backend_buffer_t) callconv(.c) bool {
+pub fn ggml_backend_buffer_is_meta(buf: mod.impl.ggml_c.ggml_backend_buffer_t) callconv(.c) bool {
     return buf != null and buf.*.iface.free_buffer == buffer_iface.free_buffer;
 }
 
@@ -2082,11 +2080,11 @@ pub export fn ggml_backend_buffer_is_meta(buf: mod.impl.c.ggml_backend_buffer_t)
 ///
 /// Forwards the usage to every simple buffer the meta buffer owns, as
 /// `ggml_backend_multi_buffer_set_usage` does for a multi-buffer.
-pub export fn ggml_backend_meta_buffer_set_usage(buffer: mod.impl.c.ggml_backend_buffer_t, usage: mod.impl.c.enum_ggml_backend_buffer_usage) callconv(.c) void {
+pub fn ggml_backend_meta_buffer_set_usage(buffer: mod.impl.ggml_c.ggml_backend_buffer_t, usage: mod.impl.ggml_c.enum_ggml_backend_buffer_usage) callconv(.c) void {
     mod.impl.assert(ggml_backend_buffer_is_meta(buffer), "ggml_backend_buffer_is_meta(buffer)");
     const buf_ctx = bufferCtx(buffer);
     for (buf_ctx.bufs.items) |buf| {
-        if (buf != null) mod.impl.c.ggml_backend_buffer_set_usage(buf, usage);
+        if (buf != null) mod.impl.ggml_c.ggml_backend_buffer_set_usage(buf, usage);
     }
 }
 
@@ -2096,11 +2094,11 @@ pub export fn ggml_backend_meta_buffer_set_usage(buffer: mod.impl.c.ggml_backend
 /// a share — plus two compute containers sized for a million tensors. A
 /// buffer made this way has no static container, so every tensor in it is a
 /// compute tensor.
-fn buftAllocBuffer(buft: mod.impl.c.ggml_backend_buffer_type_t, size: usize) callconv(.c) mod.impl.c.ggml_backend_buffer_t {
+fn buftAllocBuffer(buft: mod.impl.ggml_c.ggml_backend_buffer_type_t, size: usize) callconv(.c) mod.impl.ggml_c.ggml_backend_buffer_t {
     const n_simple_bufts = buftNBufts(buft);
 
-    const params: mod.impl.c.struct_ggml_init_params = .{
-        .mem_size = 1024 * 1024 * mod.impl.c.ggml_tensor_overhead(), // FIXME
+    const params: mod.impl.ggml_c.struct_ggml_init_params = .{
+        .mem_size = 1024 * 1024 * mod.impl.ggml_c.ggml_tensor_overhead(), // FIXME
         .mem_buffer = null,
         .no_alloc = true,
     };
@@ -2109,15 +2107,15 @@ fn buftAllocBuffer(buft: mod.impl.c.ggml_backend_buffer_type_t, size: usize) cal
     const stc_compute_1 = SimpleTensorContainer.initCtxs(params, n_simple_bufts);
 
     var max_size: usize = 0;
-    var bufs: [max_devices]mod.impl.c.ggml_backend_buffer_t = @splat(null);
+    var bufs: [max_devices]mod.impl.ggml_c.ggml_backend_buffer_t = @splat(null);
     for (0..n_simple_bufts) |i| {
-        bufs[i] = mod.impl.c.ggml_backend_buft_alloc_buffer(buftSimpleBuft(buft, i), size);
+        bufs[i] = mod.impl.ggml_c.ggml_backend_buft_alloc_buffer(buftSimpleBuft(buft, i), size);
         mod.impl.assert(bufs[i] != null, "bufs.back() != nullptr");
-        max_size = @max(max_size, mod.impl.c.ggml_backend_buffer_get_size(bufs[i]));
+        max_size = @max(max_size, mod.impl.ggml_c.ggml_backend_buffer_get_size(bufs[i]));
     }
     const buf_ctx = BufferContext.create(stc_static, stc_compute_0, stc_compute_1, bufs[0..n_simple_bufts]);
 
-    return mod.impl.c.ggml_backend_buffer_init(buft, buffer_iface, buf_ctx, max_size);
+    return mod.impl.ggml_c.ggml_backend_buffer_init(buft, buffer_iface, buf_ctx, max_size);
 }
 
 /// Ports `ggml_backend_meta_buffer_type_alloc_buffer_n`
@@ -2134,19 +2132,19 @@ fn buftAllocBuffer(buft: mod.impl.c.ggml_backend_buffer_type_t, size: usize) cal
 ///
 /// Return: the meta buffer, owned by the caller; its size is the largest
 /// simple buffer's.
-fn buftAllocBufferN(buft: mod.impl.c.ggml_backend_buffer_type_t, tensors: [*c][*c]mod.impl.c.ggml_tensor, n_tensors: c_int) callconv(.c) mod.impl.c.ggml_backend_buffer_t {
+fn buftAllocBufferN(buft: mod.impl.ggml_c.ggml_backend_buffer_type_t, tensors: [*c][*c]mod.impl.ggml_c.ggml_tensor, n_tensors: c_int) callconv(.c) mod.impl.ggml_c.ggml_backend_buffer_t {
     const n_simple_bufts = buftNBufts(buft);
 
     const compute_headroom: usize = 16; // Maximum number of views per statically allocated tensor that can be created between evals.
     const compute_headroom_min: usize = 256; // A buffer with few tensors can still get many views, e.g. a KV cache shared by many layers.
     const n: usize = @intCast(n_tensors);
-    const params_static: mod.impl.c.struct_ggml_init_params = .{
-        .mem_size = n * mod.impl.c.ggml_tensor_overhead(),
+    const params_static: mod.impl.ggml_c.struct_ggml_init_params = .{
+        .mem_size = n * mod.impl.ggml_c.ggml_tensor_overhead(),
         .mem_buffer = null,
         .no_alloc = true,
     };
-    const params_compute: mod.impl.c.struct_ggml_init_params = .{
-        .mem_size = @max(compute_headroom * n, compute_headroom_min) * mod.impl.c.ggml_tensor_overhead(),
+    const params_compute: mod.impl.ggml_c.struct_ggml_init_params = .{
+        .mem_size = @max(compute_headroom * n, compute_headroom_min) * mod.impl.ggml_c.ggml_tensor_overhead(),
         .mem_buffer = null,
         .no_alloc = true,
     };
@@ -2154,12 +2152,12 @@ fn buftAllocBufferN(buft: mod.impl.c.ggml_backend_buffer_type_t, tensors: [*c][*
     const stc_compute_0 = SimpleTensorContainer.initCtxs(params_compute, n_simple_bufts);
     const stc_compute_1 = SimpleTensorContainer.initCtxs(params_compute, n_simple_bufts);
 
-    const bufs: [max_devices]mod.impl.c.ggml_backend_buffer_t = @splat(null);
+    const bufs: [max_devices]mod.impl.ggml_c.ggml_backend_buffer_t = @splat(null);
     const meta_buf_ctx = BufferContext.create(stc_static, stc_compute_0, stc_compute_1, bufs[0..n_simple_bufts]);
 
-    const meta_buf = mod.impl.c.ggml_backend_buffer_init(buft, buffer_iface, meta_buf_ctx, 0);
+    const meta_buf = mod.impl.ggml_c.ggml_backend_buffer_init(buft, buffer_iface, meta_buf_ctx, 0);
     for (0..n) |i| {
-        const tensor = mod.impl.one(mod.impl.c.ggml_tensor, tensors[i]);
+        const tensor = mod.impl.one(mod.impl.ggml_c.ggml_tensor, tensors[i]);
         tensor.buffer = meta_buf;
         _ = bufferInitTensorImpl(&meta_buf_ctx.stc_static, tensor);
         tensor.data = @ptrFromInt(0x2000000000000000); // FIXME
@@ -2171,9 +2169,9 @@ fn buftAllocBufferN(buft: mod.impl.c.ggml_backend_buffer_type_t, tensors: [*c][*
         // If a ggml_context only has zero-sized tensors, ggml_backend_alloc_ctx_tensors_from_buft returns NULL.
         // For those edge cases, allocate a dummy buffer instead.
         var any_nonzero_slice = false;
-        var st = mod.impl.c.ggml_get_first_tensor(simple_ctx);
-        while (st != null) : (st = mod.impl.c.ggml_get_next_tensor(simple_ctx, st)) {
-            if (mod.impl.c.ggml_nelements(st) != 0) {
+        var st = mod.impl.ggml_c.ggml_get_first_tensor(simple_ctx);
+        while (st != null) : (st = mod.impl.ggml_c.ggml_get_next_tensor(simple_ctx, st)) {
+            if (mod.impl.ggml_c.ggml_nelements(st) != 0) {
                 any_nonzero_slice = true;
                 break;
             }
@@ -2181,35 +2179,35 @@ fn buftAllocBufferN(buft: mod.impl.c.ggml_backend_buffer_type_t, tensors: [*c][*
         // `bufs[i].reset(new)`: the new buffer exists before the old (always
         // null here) would be released.
         if (any_nonzero_slice) {
-            replaceBuffer(&meta_buf_ctx.bufs.items[i], mod.impl.c.ggml_backend_alloc_ctx_tensors_from_buft(simple_ctx, simple_buft));
+            replaceBuffer(&meta_buf_ctx.bufs.items[i], mod.impl.ggml_c.ggml_backend_alloc_ctx_tensors_from_buft(simple_ctx, simple_buft));
         } else {
-            replaceBuffer(&meta_buf_ctx.bufs.items[i], mod.impl.c.ggml_backend_buft_alloc_buffer(simple_buft, 0));
-            st = mod.impl.c.ggml_get_first_tensor(simple_ctx);
-            while (st != null) : (st = mod.impl.c.ggml_get_next_tensor(simple_ctx, st)) {
+            replaceBuffer(&meta_buf_ctx.bufs.items[i], mod.impl.ggml_c.ggml_backend_buft_alloc_buffer(simple_buft, 0));
+            st = mod.impl.ggml_c.ggml_get_first_tensor(simple_ctx);
+            while (st != null) : (st = mod.impl.ggml_c.ggml_get_next_tensor(simple_ctx, st)) {
                 st.*.buffer = meta_buf_ctx.bufs.items[i];
             }
         }
         mod.impl.assert(meta_buf_ctx.bufs.items[i] != null, "meta_buf_ctx->bufs[i]");
-        meta_buf.*.size = @max(meta_buf.*.size, mod.impl.c.ggml_backend_buffer_get_size(meta_buf_ctx.bufs.items[i]));
+        meta_buf.*.size = @max(meta_buf.*.size, mod.impl.ggml_c.ggml_backend_buffer_get_size(meta_buf_ctx.bufs.items[i]));
     }
     return meta_buf;
 }
 
 /// `ggml_backend_buffer_ptr::reset`: install the new buffer, then free the old.
-fn replaceBuffer(slot: *mod.impl.c.ggml_backend_buffer_t, new: mod.impl.c.ggml_backend_buffer_t) void {
+fn replaceBuffer(slot: *mod.impl.ggml_c.ggml_backend_buffer_t, new: mod.impl.ggml_c.ggml_backend_buffer_t) void {
     const old = slot.*;
     slot.* = new;
-    if (old != null) mod.impl.c.ggml_backend_buffer_free(old);
+    if (old != null) mod.impl.ggml_c.ggml_backend_buffer_free(old);
 }
 
 // -----------------------------------------------------------------------------
 // Meta backend
 
 /// Ports the `guid` in `ggml_backend_meta_guid` (ggml-backend-meta.cpp:1864 @b1b770d90).
-var meta_guid: mod.impl.c.ggml_guid = .{ 0xf1, 0x0e, 0x34, 0xcf, 0x9c, 0x6f, 0x43, 0xcb, 0x96, 0x92, 0xbe, 0x8e, 0xbb, 0x71, 0x3f, 0xda };
+var meta_guid: mod.impl.ggml_c.ggml_guid = .{ 0xf1, 0x0e, 0x34, 0xcf, 0x9c, 0x6f, 0x43, 0xcb, 0x96, 0x92, 0xbe, 0x8e, 0xbb, 0x71, 0x3f, 0xda };
 
 /// Ports `ggml_backend_meta_guid` (ggml-backend-meta.cpp:1864 @b1b770d90).
-fn backendGuid() mod.impl.c.ggml_guid_t {
+fn backendGuid() mod.impl.ggml_c.ggml_guid_t {
     return &meta_guid;
 }
 
@@ -2223,16 +2221,16 @@ const CgraphConfig = struct {
 
 /// In `ggml_backend_meta_context`, ports `backend_config` (ggml-backend-meta.cpp:1876 @b1b770d90).
 const BackendConfig = struct {
-    backend: mod.impl.c.ggml_backend_t,
+    backend: mod.impl.ggml_c.ggml_backend_t,
 
     cgraphs: std.ArrayList(CgraphConfig) = .empty,
-    nodes: std.ArrayList(?*mod.impl.c.ggml_tensor) = .empty,
+    nodes: std.ArrayList(?*mod.impl.ggml_c.ggml_tensor) = .empty,
     /// Owning, one per reduction step; null until first allocated.
-    bufs: std.ArrayList(mod.impl.c.ggml_backend_buffer_t) = .empty,
+    bufs: std.ArrayList(mod.impl.ggml_c.ggml_backend_buffer_t) = .empty,
 
-    fn init(backend: mod.impl.c.ggml_backend_t, n_reduce_steps: usize) BackendConfig {
+    fn init(backend: mod.impl.ggml_c.ggml_backend_t, n_reduce_steps: usize) BackendConfig {
         var self: BackendConfig = .{ .backend = backend };
-        self.bufs.appendNTimes(allocator, null, n_reduce_steps) catch oom();
+        self.bufs.appendNTimes(std.heap.c_allocator, null, n_reduce_steps) catch oom();
         return self;
     }
 
@@ -2241,11 +2239,11 @@ const BackendConfig = struct {
         var i = self.bufs.items.len;
         while (i > 0) {
             i -= 1;
-            if (self.bufs.items[i] != null) mod.impl.c.ggml_backend_buffer_free(self.bufs.items[i]);
+            if (self.bufs.items[i] != null) mod.impl.ggml_c.ggml_backend_buffer_free(self.bufs.items[i]);
         }
-        self.bufs.deinit(allocator);
-        self.nodes.deinit(allocator);
-        self.cgraphs.deinit(allocator);
+        self.bufs.deinit(std.heap.c_allocator);
+        self.nodes.deinit(std.heap.c_allocator);
+        self.cgraphs.deinit(std.heap.c_allocator);
     }
 };
 
@@ -2254,9 +2252,9 @@ const BackendContext = struct {
     name: [:0]u8,
     backend_configs: std.ArrayList(BackendConfig) = .empty,
     /// Owning (`ggml_context_ptr`): the graphs and auxiliary nodes below.
-    ctx: ?*mod.impl.c.ggml_context = null,
+    ctx: ?*mod.impl.ggml_c.ggml_context = null,
     cgraphs_aux: std.ArrayList(?*mod.impl.CGraph) = .empty,
-    nodes_aux: std.ArrayList(?*mod.impl.c.ggml_tensor) = .empty,
+    nodes_aux: std.ArrayList(?*mod.impl.ggml_c.ggml_tensor) = .empty,
     n_reduce_steps: usize,
     max_nnodes: c_int = 0,
     max_tmp_size: usize = 0,
@@ -2265,7 +2263,7 @@ const BackendContext = struct {
     uid: u64 = 0,
 
     comm_ctx: ?*anyopaque = null,
-    comm_allreduce: mod.impl.c.ggml_backend_comm_allreduce_tensor_t = null,
+    comm_allreduce: mod.impl.ggml_c.ggml_backend_comm_allreduce_tensor_t = null,
 
     /// Ports the `ggml_backend_meta_context` constructor (ggml-backend-meta.cpp:1902 @b1b770d90).
     ///
@@ -2273,28 +2271,28 @@ const BackendContext = struct {
     /// registry for a communicator. **Ungated on this machine (one GPU)**: no
     /// backend on macOS exports `ggml_backend_comm_init`, so `comm_ctx` stays
     /// null here and the butterfly fallback carries every all-reduce.
-    fn create(meta_dev: mod.impl.c.ggml_backend_dev_t, params: [*c]const u8) *BackendContext {
+    fn create(meta_dev: mod.impl.ggml_c.ggml_backend_dev_t, params: [*c]const u8) *BackendContext {
         const n_devs = devNDevs(meta_dev);
-        const self = allocator.create(BackendContext) catch oom();
+        const self = std.heap.c_allocator.create(BackendContext) catch oom();
         self.* = .{
             .name = undefined,
             // std::ceil(std::log2(n_devs)), through double as in the C++.
             .n_reduce_steps = @intFromFloat(@ceil(@log2(@as(f64, @floatFromInt(n_devs))))),
         };
         var names: [max_devices][*c]const u8 = undefined;
-        var simple_backends: [max_devices]mod.impl.c.ggml_backend_t = undefined;
-        self.backend_configs.ensureTotalCapacity(allocator, n_devs) catch oom();
+        var simple_backends: [max_devices]mod.impl.ggml_c.ggml_backend_t = undefined;
+        self.backend_configs.ensureTotalCapacity(std.heap.c_allocator, n_devs) catch oom();
         for (0..n_devs) |i| {
             const simple_dev = devSimpleDev(meta_dev, i);
-            names[i] = mod.impl.c.ggml_backend_dev_name(simple_dev);
-            simple_backends[i] = mod.impl.c.ggml_backend_dev_init(simple_dev, params);
+            names[i] = mod.impl.ggml_c.ggml_backend_dev_name(simple_dev);
+            simple_backends[i] = mod.impl.ggml_c.ggml_backend_dev_init(simple_dev, params);
             self.backend_configs.appendAssumeCapacity(BackendConfig.init(simple_backends[i], self.n_reduce_steps));
         }
         self.name = metaName(names[0..n_devs]);
 
         if (n_devs > 1) {
-            const comm_init: mod.impl.c.ggml_backend_comm_init_t = @ptrCast(@alignCast(mod.impl.c.ggml_backend_reg_get_proc_address(
-                mod.impl.c.ggml_backend_dev_backend_reg(mod.impl.c.ggml_backend_get_device(simple_backends[0])),
+            const comm_init: mod.impl.ggml_c.ggml_backend_comm_init_t = @ptrCast(@alignCast(mod.impl.ggml_c.ggml_backend_reg_get_proc_address(
+                mod.impl.ggml_c.ggml_backend_dev_backend_reg(mod.impl.ggml_c.ggml_backend_get_device(simple_backends[0])),
                 "ggml_backend_comm_init",
             )));
             if (comm_init) |init_fn| {
@@ -2302,8 +2300,8 @@ const BackendContext = struct {
             }
         }
         if (self.comm_ctx != null) {
-            self.comm_allreduce = @ptrCast(@alignCast(mod.impl.c.ggml_backend_reg_get_proc_address(
-                mod.impl.c.ggml_backend_dev_backend_reg(mod.impl.c.ggml_backend_get_device(simple_backends[0])),
+            self.comm_allreduce = @ptrCast(@alignCast(mod.impl.ggml_c.ggml_backend_reg_get_proc_address(
+                mod.impl.ggml_c.ggml_backend_dev_backend_reg(mod.impl.ggml_c.ggml_backend_get_device(simple_backends[0])),
                 "ggml_backend_comm_allreduce_tensor",
             )));
             mod.impl.assert(self.comm_allreduce != null, "comm_allreduce != nullptr");
@@ -2319,46 +2317,46 @@ const BackendContext = struct {
     /// creating it is.
     fn destroy(self: *BackendContext) void {
         if (self.comm_ctx != null) {
-            const comm_free: mod.impl.c.ggml_backend_comm_free_t = @ptrCast(@alignCast(mod.impl.c.ggml_backend_reg_get_proc_address(
-                mod.impl.c.ggml_backend_dev_backend_reg(mod.impl.c.ggml_backend_get_device(self.backend_configs.items[0].backend)),
+            const comm_free: mod.impl.ggml_c.ggml_backend_comm_free_t = @ptrCast(@alignCast(mod.impl.ggml_c.ggml_backend_reg_get_proc_address(
+                mod.impl.ggml_c.ggml_backend_dev_backend_reg(mod.impl.ggml_c.ggml_backend_get_device(self.backend_configs.items[0].backend)),
                 "ggml_backend_comm_free",
             )));
             mod.impl.assert(comm_free != null, "comm_free != nullptr");
             comm_free.?(self.comm_ctx);
         }
         for (self.backend_configs.items) |bc| {
-            mod.impl.c.ggml_backend_free(bc.backend);
+            mod.impl.ggml_c.ggml_backend_free(bc.backend);
         }
 
-        self.nodes_aux.deinit(allocator);
-        self.cgraphs_aux.deinit(allocator);
-        if (self.ctx) |ctx| mod.impl.c.ggml_free(ctx);
+        self.nodes_aux.deinit(std.heap.c_allocator);
+        self.cgraphs_aux.deinit(std.heap.c_allocator);
+        if (self.ctx) |ctx| mod.impl.ggml_c.ggml_free(ctx);
         var i = self.backend_configs.items.len;
         while (i > 0) {
             i -= 1;
             self.backend_configs.items[i].deinit();
         }
-        self.backend_configs.deinit(allocator);
-        allocator.free(self.name);
-        allocator.destroy(self);
+        self.backend_configs.deinit(std.heap.c_allocator);
+        std.heap.c_allocator.free(self.name);
+        std.heap.c_allocator.destroy(self);
     }
 };
 
-inline fn backendCtx(backend: mod.impl.c.ggml_backend_t) *BackendContext {
+inline fn backendCtx(backend: mod.impl.ggml_c.ggml_backend_t) *BackendContext {
     return @ptrCast(@alignCast(backend.*.context));
 }
 
 /// Ports `ggml_backend_meta_get_name` (ggml-backend-meta.cpp:1948 @b1b770d90).
-fn backendGetName(backend: mod.impl.c.ggml_backend_t) callconv(.c) [*c]const u8 {
+fn backendGetName(backend: mod.impl.ggml_c.ggml_backend_t) callconv(.c) [*c]const u8 {
     mod.impl.assert(ggml_backend_is_meta(backend), "ggml_backend_is_meta(backend)");
     return backendCtx(backend).name.ptr;
 }
 
 /// Ports `ggml_backend_meta_free` (ggml-backend-meta.cpp:1954 @b1b770d90).
-fn backendFree(backend: mod.impl.c.ggml_backend_t) callconv(.c) void {
+fn backendFree(backend: mod.impl.ggml_c.ggml_backend_t) callconv(.c) void {
     mod.impl.assert(ggml_backend_is_meta(backend), "ggml_backend_is_meta(backend)");
     backendCtx(backend).destroy();
-    allocator.destroy(mod.impl.one(mod.impl.c.struct_ggml_backend, backend));
+    std.heap.c_allocator.destroy(mod.impl.one(mod.impl.ggml_c.struct_ggml_backend, backend));
 }
 
 /// Ports `ggml_backend_meta_set_tensor_async` (ggml-backend-meta.cpp:1961 @b1b770d90).
@@ -2366,12 +2364,12 @@ fn backendFree(backend: mod.impl.c.ggml_backend_t) callconv(.c) void {
 /// Whole contiguous tensors only (`offset == 0`), one segment. Each device's
 /// copy is written at `offset` — always 0 — rather than at the chunk start
 /// the synchronous path computes, which is the same thing when `offset` is 0.
-fn backendSetTensorAsync(backend: mod.impl.c.ggml_backend_t, tensor_: [*c]mod.impl.c.ggml_tensor, data: ?*const anyopaque, offset: usize, size: usize) callconv(.c) void {
-    const tensor = mod.impl.one(mod.impl.c.ggml_tensor, tensor_);
+fn backendSetTensorAsync(backend: mod.impl.ggml_c.ggml_backend_t, tensor_: [*c]mod.impl.ggml_c.ggml_tensor, data: ?*const anyopaque, offset: usize, size: usize) callconv(.c) void {
+    const tensor = mod.impl.one(mod.impl.ggml_c.ggml_tensor, tensor_);
     const bytes: [*]const u8 = @ptrCast(data);
     const n_backends = ggml_backend_meta_n_backends(backend);
     mod.impl.assert(offset == 0, "offset == 0");
-    mod.impl.assert(mod.impl.c.ggml_is_contiguous(tensor), "ggml_is_contiguous(tensor)");
+    mod.impl.assert(mod.impl.ggml_c.ggml_is_contiguous(tensor), "ggml_is_contiguous(tensor)");
 
     const split_state = getSplitStateAuto(tensor, false);
     mod.impl.assert(split_state.n_segments == 1, "split_state.n_segments == 1");
@@ -2389,14 +2387,14 @@ fn backendSetTensorAsync(backend: mod.impl.c.ggml_backend_t, tensor_: [*c]mod.im
                 if (chunk_size_j == 0) {
                     continue;
                 }
-                mod.impl.c.ggml_backend_tensor_set_2d_async(simple_backend, simple_tensor, bytes + offset_j, offset, chunk_size_j, @intCast(chunks.stop - chunks.start), chunk_size_j, chunks.size_full);
+                mod.impl.ggml_c.ggml_backend_tensor_set_2d_async(simple_backend, simple_tensor, bytes + offset_j, offset, chunk_size_j, @intCast(chunks.stop - chunks.start), chunk_size_j, chunks.size_full);
                 offset_j += chunk_size_j;
             }
             mod.impl.assert(offset_j == chunks.size_full, "offset_j == chunk_size_full");
         },
         axis_mirrored => {
             for (0..n_backends) |j| {
-                mod.impl.c.ggml_backend_tensor_set_async(ggml_backend_meta_simple_backend(backend, j), bufferSimpleTensor(tensor, j), data, offset, size);
+                mod.impl.ggml_c.ggml_backend_tensor_set_async(ggml_backend_meta_simple_backend(backend, j), bufferSimpleTensor(tensor, j), data, offset, size);
             }
         },
         else => {
@@ -2406,12 +2404,12 @@ fn backendSetTensorAsync(backend: mod.impl.c.ggml_backend_t, tensor_: [*c]mod.im
 }
 
 /// Ports `ggml_backend_meta_get_tensor_async` (ggml-backend-meta.cpp:2006 @b1b770d90).
-fn backendGetTensorAsync(backend: mod.impl.c.ggml_backend_t, tensor_: [*c]const mod.impl.c.ggml_tensor, data: ?*anyopaque, offset: usize, size: usize) callconv(.c) void {
-    const tensor: *const mod.impl.c.ggml_tensor = @ptrCast(tensor_);
+fn backendGetTensorAsync(backend: mod.impl.ggml_c.ggml_backend_t, tensor_: [*c]const mod.impl.ggml_c.ggml_tensor, data: ?*anyopaque, offset: usize, size: usize) callconv(.c) void {
+    const tensor: *const mod.impl.ggml_c.ggml_tensor = @ptrCast(tensor_);
     const bytes: [*]u8 = @ptrCast(data);
     const n_backends = ggml_backend_meta_n_backends(backend);
     mod.impl.assert(offset == 0, "offset == 0");
-    mod.impl.assert(mod.impl.c.ggml_is_contiguous(tensor), "ggml_is_contiguous(tensor)");
+    mod.impl.assert(mod.impl.ggml_c.ggml_is_contiguous(tensor), "ggml_is_contiguous(tensor)");
 
     const split_state = getSplitStateAuto(tensor, false);
     mod.impl.assert(split_state.n_segments == 1, "split_state.n_segments == 1");
@@ -2429,7 +2427,7 @@ fn backendGetTensorAsync(backend: mod.impl.c.ggml_backend_t, tensor_: [*c]const 
                 if (chunk_size_j == 0) {
                     continue;
                 }
-                mod.impl.c.ggml_backend_tensor_get_2d_async(simple_backend, simple_tensor, bytes + offset_j, offset, chunk_size_j, @intCast(chunks.stop - chunks.start), chunk_size_j, chunks.size_full);
+                mod.impl.ggml_c.ggml_backend_tensor_get_2d_async(simple_backend, simple_tensor, bytes + offset_j, offset, chunk_size_j, @intCast(chunks.stop - chunks.start), chunk_size_j, chunks.size_full);
                 offset_j += chunk_size_j;
             }
             mod.impl.assert(offset_j == chunks.size_full, "offset_j == chunk_size_full");
@@ -2438,7 +2436,7 @@ fn backendGetTensorAsync(backend: mod.impl.c.ggml_backend_t, tensor_: [*c]const 
             // TODO other simple backend may be better
             const simple_backend = ggml_backend_meta_simple_backend(backend, 0);
             const simple_tensor = bufferSimpleTensor(tensor, 0);
-            mod.impl.c.ggml_backend_tensor_get_async(simple_backend, simple_tensor, data, offset, size);
+            mod.impl.ggml_c.ggml_backend_tensor_get_async(simple_backend, simple_tensor, data, offset, size);
         },
         else => {
             mod.impl.abort("fatal error");
@@ -2447,10 +2445,10 @@ fn backendGetTensorAsync(backend: mod.impl.c.ggml_backend_t, tensor_: [*c]const 
 }
 
 /// Ports `ggml_backend_meta_synchronize` (ggml-backend-meta.cpp:2051 @b1b770d90).
-fn backendSynchronize(backend: mod.impl.c.ggml_backend_t) callconv(.c) void {
+fn backendSynchronize(backend: mod.impl.ggml_c.ggml_backend_t) callconv(.c) void {
     const n_backends = ggml_backend_meta_n_backends(backend);
     for (0..n_backends) |i| {
-        mod.impl.c.ggml_backend_synchronize(ggml_backend_meta_simple_backend(backend, i));
+        mod.impl.ggml_c.ggml_backend_synchronize(ggml_backend_meta_simple_backend(backend, i));
     }
 }
 
@@ -2473,7 +2471,7 @@ const Delay = struct {
     backend_ctx: *BackendContext,
     n_backends: usize,
 
-    inline fn node(d: *const Delay, i: c_int) *mod.impl.c.ggml_tensor {
+    inline fn node(d: *const Delay, i: c_int) *mod.impl.ggml_c.ggml_tensor {
         return d.cgraph.nodes[@intCast(i)].?;
     }
 
@@ -2495,7 +2493,7 @@ const Delay = struct {
 
         // Skip MIRRORED nodes that don't consume node
         const skipUnrelated = struct {
-            fn f(dd: *const Delay, idp: *c_int, nd: *mod.impl.c.ggml_tensor) void {
+            fn f(dd: *const Delay, idp: *c_int, nd: *mod.impl.ggml_c.ggml_tensor) void {
                 while (idp.* + 1 < dd.cgraph.n_nodes) {
                     const next = dd.node(idp.* + 1);
                     if (getSplitStateAuto(next, false).axis != axis_mirrored) {
@@ -2527,7 +2525,7 @@ const Delay = struct {
         }
         {
             const next = d.node(id + 1);
-            if (next.op == mod.impl.c.GGML_OP_ADD_ID and srcOpt(next, 0) == cur and
+            if (next.op == mod.impl.ggml_c.GGML_OP_ADD_ID and srcOpt(next, 0) == cur and
                 getSplitStateAuto(srcOf(next, 1), false).axis == axis_partial and
                 getSplitStateAuto(srcOf(next, 2), false).axis == axis_mirrored)
             {
@@ -2544,7 +2542,7 @@ const Delay = struct {
                 return idr;
             }
             const next = d.node(id + 1);
-            if (next.op == mod.impl.c.GGML_OP_MUL and srcOpt(next, 0) == cur and
+            if (next.op == mod.impl.ggml_c.GGML_OP_MUL and srcOpt(next, 0) == cur and
                 getSplitStateAuto(srcOf(next, 1), false).axis == axis_mirrored)
             {
                 cur = next;
@@ -2562,7 +2560,7 @@ const Delay = struct {
         var k: i32 = 0;
         while (k < n_used) : (k += 1) {
             const next = d.node(id + 1);
-            if (next.op != mod.impl.c.GGML_OP_VIEW or next.view_src != @as([*c]mod.impl.c.ggml_tensor, cur) or
+            if (next.op != mod.impl.ggml_c.GGML_OP_VIEW or next.view_src != @as([*c]mod.impl.ggml_c.ggml_tensor, cur) or
                 next.view_offs != @as(usize, @intCast(k)) *% cur.nb[1] or
                 next.ne[0] != cur.ne[0] or next.ne[1] != cur.ne[2] or next.nb[1] != cur.nb[2] or
                 nodeGetUseCount(cgraph, id + 1) != 1)
@@ -2573,7 +2571,7 @@ const Delay = struct {
         }
         {
             const next = d.node(id + 1);
-            if (next.op != mod.impl.c.GGML_OP_ADD or srcOpt(next, 0) != d.node(id - (n_used - 1)) or
+            if (next.op != mod.impl.ggml_c.GGML_OP_ADD or srcOpt(next, 0) != d.node(id - (n_used - 1)) or
                 srcOpt(next, 1) != d.node(id - (n_used - 2)) or nodeGetUseCount(cgraph, id + 1) != 1)
             {
                 return idr;
@@ -2583,7 +2581,7 @@ const Delay = struct {
         k = 0;
         while (k < n_used - 2) : (k += 1) {
             const next = d.node(id + 1);
-            if (next.op != mod.impl.c.GGML_OP_ADD or srcOpt(next, 0) != d.node(id) or
+            if (next.op != mod.impl.ggml_c.GGML_OP_ADD or srcOpt(next, 0) != d.node(id) or
                 srcOpt(next, 1) != d.node(id - (n_used - 2)) or nodeGetUseCount(cgraph, id + 1) != 1)
             {
                 return idr;
@@ -2611,7 +2609,7 @@ const Delay = struct {
         var id: c_int = i_delayed + 1;
         while (id < cgraph.n_nodes) : (id += 1) {
             const next = d.node(id);
-            if (next.view_src == @as([*c]mod.impl.c.ggml_tensor, cur)) {
+            if (next.view_src == @as([*c]mod.impl.ggml_c.ggml_tensor, cur)) {
                 return i_delayed;
             }
             for (0..max_src) |s| {
@@ -2620,7 +2618,7 @@ const Delay = struct {
                 }
             }
 
-            if (next.view_src != null and next.view_src.*.op == mod.impl.c.GGML_OP_NONE and mod.impl.c.ggml_backend_buffer_is_host(next.view_src.*.buffer)) {
+            if (next.view_src != null and next.view_src.*.op == mod.impl.ggml_c.GGML_OP_NONE and mod.impl.ggml_c.ggml_backend_buffer_is_host(next.view_src.*.buffer)) {
                 continue;
             }
             if (getSplitStateAuto(next, false).axis != axis_partial) {
@@ -2635,8 +2633,8 @@ const Delay = struct {
             }
 
             const sum = d.node(i_other_delayed + 1);
-            if (sum.op != mod.impl.c.GGML_OP_ADD or
-                !mod.impl.c.ggml_are_same_shape(cur, other) or cur.type != other.type or sum.type != cur.type or
+            if (sum.op != mod.impl.ggml_c.GGML_OP_ADD or
+                !mod.impl.ggml_c.ggml_are_same_shape(cur, other) or cur.type != other.type or sum.type != cur.type or
                 !((srcOpt(sum, 0) == cur and srcOpt(sum, 1) == other) or
                     (srcOpt(sum, 0) == other and srcOpt(sum, 1) == cur)) or
                 getSplitStateAuto(sum, false).axis != axis_mirrored)
@@ -2645,8 +2643,8 @@ const Delay = struct {
             }
 
             for (d.backend_ctx.backend_configs.items[0..d.n_backends]) |*bcj| {
-                const compute = (bcj.nodes.items[@intCast(i)].?.flags & mod.impl.c.GGML_TENSOR_FLAG_COMPUTE) != 0;
-                const compute_other = (bcj.nodes.items[@intCast(i_other)].?.flags & mod.impl.c.GGML_TENSOR_FLAG_COMPUTE) != 0;
+                const compute = (bcj.nodes.items[@intCast(i)].?.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_COMPUTE) != 0;
+                const compute_other = (bcj.nodes.items[@intCast(i_other)].?.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_COMPUTE) != 0;
                 if (compute != compute_other) {
                     return i_delayed;
                 }
@@ -2664,15 +2662,15 @@ const Delay = struct {
 ///
 /// Its true arm is **ungated on this machine (one GPU)**: it needs a meta
 /// device whose buffers are host memory.
-inline fn isHostLeafView(node: *const mod.impl.c.ggml_tensor) bool {
-    return node.view_src != null and node.view_src.*.op == mod.impl.c.GGML_OP_NONE and mod.impl.c.ggml_backend_buffer_is_host(node.view_src.*.buffer);
+inline fn isHostLeafView(node: *const mod.impl.ggml_c.ggml_tensor) bool {
+    return node.view_src != null and node.view_src.*.op == mod.impl.ggml_c.GGML_OP_NONE and mod.impl.ggml_c.ggml_backend_buffer_is_host(node.view_src.*.buffer);
 }
 
 /// Grows `list` to `n` items, filling with `value`, as `std::vector::resize`
 /// does; never shrinks below the current length in the one place it is used.
 fn resizeFill(comptime T: type, list: *std.ArrayList(T), n: usize, value: T) void {
     if (n > list.items.len) {
-        list.appendNTimes(allocator, value, n - list.items.len) catch oom();
+        list.appendNTimes(std.heap.c_allocator, value, n - list.items.len) catch oom();
     } else {
         list.shrinkRetainingCapacity(n);
     }
@@ -2689,11 +2687,11 @@ const Aux = struct {
 
     /// Ports the `get_node_aux` lambda (ggml-backend-meta.cpp:2387 @b1b770d90):
     /// the next preallocated scratch tensor, cleared and shaped like `t`.
-    fn getNodeAux(a: *Aux, t: *const mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+    fn getNodeAux(a: *Aux, t: *const mod.impl.ggml_c.ggml_tensor) *mod.impl.ggml_c.ggml_tensor {
         const ret = a.backend_ctx.nodes_aux.items[a.ina].?;
         a.ina += 1;
-        ret.* = std.mem.zeroes(mod.impl.c.ggml_tensor);
-        ret.op = mod.impl.c.GGML_OP_NONE;
+        ret.* = std.mem.zeroes(mod.impl.ggml_c.ggml_tensor);
+        ret.op = mod.impl.ggml_c.GGML_OP_NONE;
         ret.type = t.type;
         for (0..max_dims) |k| {
             ret.ne[k] = t.ne[k];
@@ -2705,14 +2703,14 @@ const Aux = struct {
     /// Ports the `set_tmp_data` lambda (ggml-backend-meta.cpp:2398 @b1b770d90):
     /// points `tensor` at device `j`'s scratch buffer for step `i_buf`,
     /// growing it to `max_tmp_size` first if it is missing or too small.
-    fn setTmpData(a: *Aux, tensor: *mod.impl.c.ggml_tensor, j: usize, i_buf: usize) void {
+    fn setTmpData(a: *Aux, tensor: *mod.impl.ggml_c.ggml_tensor, j: usize, i_buf: usize) void {
         const bcj = &a.backend_ctx.backend_configs.items[j];
         const buf_ptr = &bcj.bufs.items[i_buf];
-        if (buf_ptr.* == null or mod.impl.c.ggml_backend_buffer_get_size(buf_ptr.*) < a.backend_ctx.max_tmp_size) {
-            replaceBuffer(buf_ptr, mod.impl.c.ggml_backend_alloc_buffer(bcj.backend, a.backend_ctx.max_tmp_size));
+        if (buf_ptr.* == null or mod.impl.ggml_c.ggml_backend_buffer_get_size(buf_ptr.*) < a.backend_ctx.max_tmp_size) {
+            replaceBuffer(buf_ptr, mod.impl.ggml_c.ggml_backend_alloc_buffer(bcj.backend, a.backend_ctx.max_tmp_size));
         }
         tensor.buffer = buf_ptr.*;
-        tensor.data = mod.impl.c.ggml_backend_buffer_get_base(buf_ptr.*);
+        tensor.data = mod.impl.ggml_c.ggml_backend_buffer_get_base(buf_ptr.*);
     }
 
     // FIXME usage_counts
@@ -2725,13 +2723,13 @@ const Aux = struct {
 };
 
 /// The last node of device `j`'s subgraph `i` — the partial sum to reduce.
-inline fn lastNode(bcj: *const BackendConfig, i: usize) *mod.impl.c.ggml_tensor {
+inline fn lastNode(bcj: *const BackendConfig, i: usize) *mod.impl.ggml_c.ggml_tensor {
     const cg = bcj.cgraphs.items[i].cgraph_main.?;
     return cg.nodes[@intCast(cg.n_nodes - 1)].?;
 }
 
-inline fn computeAsync(backend: mod.impl.c.ggml_backend_t, cgraph: *mod.impl.CGraph) mod.impl.c.enum_ggml_status {
-    return mod.impl.c.ggml_backend_graph_compute_async(backend, @ptrCast(cgraph));
+inline fn computeAsync(backend: mod.impl.ggml_c.ggml_backend_t, cgraph: *mod.impl.CGraph) mod.impl.ggml_c.enum_ggml_status {
+    return mod.impl.ggml_c.ggml_backend_graph_compute_async(backend, @ptrCast(cgraph));
 }
 
 /// Ports the `allreduce_fallback` lambda (ggml-backend-meta.cpp:2414 @b1b770d90).
@@ -2747,7 +2745,7 @@ inline fn computeAsync(backend: mod.impl.c.ggml_backend_t, cgraph: *mod.impl.CGr
 /// backend here fails a compute.
 ///
 /// Return: the first failing status, or success.
-fn allreduceFallback(aux: *Aux, n_backends: usize, i: usize) mod.impl.c.enum_ggml_status {
+fn allreduceFallback(aux: *Aux, n_backends: usize, i: usize) mod.impl.ggml_c.enum_ggml_status {
     const backend_ctx = aux.backend_ctx;
     var step_cgraphs: [max_devices]?*mod.impl.CGraph = @splat(null);
 
@@ -2755,24 +2753,24 @@ fn allreduceFallback(aux: *Aux, n_backends: usize, i: usize) mod.impl.c.enum_ggm
     for (0..n_backends) |j| {
         const bcj = &backend_ctx.backend_configs.items[j];
         const node = lastNode(bcj, i);
-        if ((node.flags & mod.impl.c.GGML_TENSOR_FLAG_COMPUTE) != 0) {
+        if ((node.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_COMPUTE) != 0) {
             continue;
         }
-        if (mod.impl.c.ggml_nelements(node) > 0) {
+        if (mod.impl.ggml_c.ggml_nelements(node) > 0) {
             const node_zero = aux.getNodeAux(node);
-            node_zero.op = mod.impl.c.GGML_OP_FILL;
+            node_zero.op = mod.impl.ggml_c.GGML_OP_FILL;
             node_zero.src[0] = node; // only used for the shape, the data is not read
             mod.impl.setOpParamsF32(node_zero, 0, 0.0);
             node_zero.data = node.data;
             node_zero.buffer = node.buffer;
-            node_zero.flags |= mod.impl.c.GGML_TENSOR_FLAG_COMPUTE;
+            node_zero.flags |= mod.impl.ggml_c.GGML_TENSOR_FLAG_COMPUTE;
 
             const cg = aux.getCgraphAux();
             step_cgraphs[j] = cg;
             cg.nodes[0] = node_zero;
             cg.n_nodes = 1;
             const status = computeAsync(bcj.backend, cg);
-            if (status != mod.impl.c.GGML_STATUS_SUCCESS) {
+            if (status != mod.impl.ggml_c.GGML_STATUS_SUCCESS) {
                 return status;
             }
         }
@@ -2790,22 +2788,22 @@ fn allreduceFallback(aux: *Aux, n_backends: usize, i: usize) mod.impl.c.enum_ggm
 
             const node_src = lastNode(bcj_src, ii);
             const node_dst = lastNode(bcj_dst, ii);
-            mod.impl.assert(mod.impl.c.ggml_is_contiguous(node_src), "ggml_is_contiguous(node_src)");
-            mod.impl.assert(mod.impl.c.ggml_is_contiguous(node_dst), "ggml_is_contiguous(node_dst)");
+            mod.impl.assert(mod.impl.ggml_c.ggml_is_contiguous(node_src), "ggml_is_contiguous(node_src)");
+            mod.impl.assert(mod.impl.ggml_c.ggml_is_contiguous(node_dst), "ggml_is_contiguous(node_dst)");
 
             const node_tmp = ax.getNodeAux(node_dst);
             ax.setTmpData(node_tmp, j_dst, i_buf);
 
-            mod.impl.c.ggml_backend_tensor_copy_async(bcj_src.backend, bcj_dst.backend, node_src, node_tmp);
+            mod.impl.ggml_c.ggml_backend_tensor_copy_async(bcj_src.backend, bcj_dst.backend, node_src, node_tmp);
 
             const node_red = ax.getNodeAux(node_dst);
             node_red.view_src = if (node_dst.view_src == null) node_dst else node_dst.view_src;
             node_red.view_offs = node_dst.view_offs;
-            node_red.op = mod.impl.c.GGML_OP_ADD;
+            node_red.op = mod.impl.ggml_c.GGML_OP_ADD;
             node_red.src[0] = node_dst;
             node_red.src[1] = node_tmp;
-            node_red.flags |= mod.impl.c.GGML_TENSOR_FLAG_COMPUTE;
-            _ = mod.impl.c.ggml_backend_view_init(node_red);
+            node_red.flags |= mod.impl.ggml_c.GGML_TENSOR_FLAG_COMPUTE;
+            _ = mod.impl.ggml_c.ggml_backend_view_init(node_red);
 
             const cgraph_aux = ax.getCgraphAux();
             cgraph_aux.nodes[0] = node_red;
@@ -2827,7 +2825,7 @@ fn allreduceFallback(aux: *Aux, n_backends: usize, i: usize) mod.impl.c.enum_ggm
         const j_dst = j_src - 2 * offset_j_max;
         pushData(aux, &step_cgraphs, i, j_src, j_dst, i_buf);
         const status = computeAsync(backend_ctx.backend_configs.items[j_dst].backend, step_cgraphs[j_dst].?);
-        if (status != mod.impl.c.GGML_STATUS_SUCCESS) {
+        if (status != mod.impl.ggml_c.GGML_STATUS_SUCCESS) {
             return status;
         }
         i_buf = 1;
@@ -2849,7 +2847,7 @@ fn allreduceFallback(aux: *Aux, n_backends: usize, i: usize) mod.impl.c.enum_ggm
             const cg = step_cgraphs[j] orelse continue;
             const bcj = &backend_ctx.backend_configs.items[j];
             const status = computeAsync(bcj.backend, cg);
-            if (status != mod.impl.c.GGML_STATUS_SUCCESS) {
+            if (status != mod.impl.ggml_c.GGML_STATUS_SUCCESS) {
                 return status;
             }
         }
@@ -2865,10 +2863,10 @@ fn allreduceFallback(aux: *Aux, n_backends: usize, i: usize) mod.impl.c.enum_ggm
 
         const node_src = lastNode(bcj_src, i);
         const node_dst = lastNode(bcj_dst, i);
-        mod.impl.c.ggml_backend_tensor_copy_async(bcj_src.backend, bcj_dst.backend, node_src, node_dst);
+        mod.impl.ggml_c.ggml_backend_tensor_copy_async(bcj_src.backend, bcj_dst.backend, node_src, node_dst);
     }
 
-    return mod.impl.c.GGML_STATUS_SUCCESS;
+    return mod.impl.ggml_c.GGML_STATUS_SUCCESS;
 }
 
 /// Ports `ggml_backend_meta_graph_compute` (ggml-backend-meta.cpp:2058 @b1b770d90).
@@ -2879,7 +2877,7 @@ fn allreduceFallback(aux: *Aux, n_backends: usize, i: usize) mod.impl.c.enum_ggm
 /// reduction can be delayed), grows the scratch buffers and graph storage,
 /// and fills one subgraph per cut per device. Then runs each subgraph on
 /// every device and all-reduces between them.
-fn backendGraphCompute(backend: mod.impl.c.ggml_backend_t, cgraph_: ?*mod.impl.c.struct_ggml_cgraph) callconv(.c) mod.impl.c.enum_ggml_status {
+fn backendGraphCompute(backend: mod.impl.ggml_c.ggml_backend_t, cgraph_: ?*mod.impl.ggml_c.struct_ggml_cgraph) callconv(.c) mod.impl.ggml_c.enum_ggml_status {
     const cgraph: *mod.impl.CGraph = @ptrCast(@alignCast(cgraph_.?));
     mod.impl.assert(cgraph.grads == null, "cgraph->grads == nullptr");
     const n_backends = ggml_backend_meta_n_backends(backend);
@@ -2892,7 +2890,7 @@ fn backendGraphCompute(backend: mod.impl.c.ggml_backend_t, cgraph_: ?*mod.impl.c
     var max_nnodes_raised = false;
     if (cgraph.n_nodes > backend_ctx.max_nnodes) {
         for (configs) |*bcj| {
-            resizeFill(?*mod.impl.c.ggml_tensor, &bcj.nodes, @intCast(cgraph.n_nodes), null);
+            resizeFill(?*mod.impl.ggml_c.ggml_tensor, &bcj.nodes, @intCast(cgraph.n_nodes), null);
             resizeFill(CgraphConfig, &bcj.cgraphs, @intCast(cgraph.n_nodes), .{});
         }
         backend_ctx.max_nnodes = cgraph.n_nodes;
@@ -2904,17 +2902,17 @@ fn backendGraphCompute(backend: mod.impl.c.ggml_backend_t, cgraph_: ?*mod.impl.c
         // std::set<ggml_backend_buffer_t>: deduplicated and visited in address
         // order. The work per buffer is independent, but the order is kept.
         var used_buffers: std.ArrayList(usize) = .empty;
-        defer used_buffers.deinit(allocator);
+        defer used_buffers.deinit(std.heap.c_allocator);
         for (0..@intCast(cgraph.n_leafs)) |i| {
             const leaf = cgraph.leafs[i].?;
             if (ggml_backend_buffer_is_meta(leaf.buffer)) {
-                used_buffers.append(allocator, @intFromPtr(leaf.buffer)) catch oom();
+                used_buffers.append(std.heap.c_allocator, @intFromPtr(leaf.buffer)) catch oom();
             }
         }
         for (0..@intCast(cgraph.n_nodes)) |i| {
             const node = cgraph.nodes[i].?;
             if (ggml_backend_buffer_is_meta(node.buffer)) {
-                used_buffers.append(allocator, @intFromPtr(node.buffer)) catch oom();
+                used_buffers.append(std.heap.c_allocator, @intFromPtr(node.buffer)) catch oom();
             }
         }
         std.mem.sort(usize, used_buffers.items, {}, std.sort.asc(usize));
@@ -2922,12 +2920,12 @@ fn backendGraphCompute(backend: mod.impl.c.ggml_backend_t, cgraph_: ?*mod.impl.c
         for (used_buffers.items) |addr| {
             if (addr == prev) continue;
             prev = addr;
-            const buf: mod.impl.c.ggml_backend_buffer_t = @ptrFromInt(addr);
+            const buf: mod.impl.ggml_c.ggml_backend_buffer_t = @ptrFromInt(addr);
             const buf_ctx = bufferCtx(buf);
             buf_ctx.stc_compute_index_next = buf_ctx.stc_compute_index ^ 1;
             const stc = &buf_ctx.stc_compute[@intCast(buf_ctx.stc_compute_index_next)];
             for (stc.ctxs.items) |ctx| {
-                mod.impl.c.ggml_reset(ctx);
+                mod.impl.ggml_c.ggml_reset(ctx);
             }
             stc.simple_tensors.clearRetainingCapacity();
         }
@@ -2962,7 +2960,7 @@ fn backendGraphCompute(backend: mod.impl.c.ggml_backend_t, cgraph_: ?*mod.impl.c
                 }
                 const split_state = getSplitStateAuto(node, false);
                 if (split_state.axis == axis_partial) {
-                    max_tmp_size = @max(max_tmp_size, mod.impl.c.ggml_nbytes(node));
+                    max_tmp_size = @max(max_tmp_size, mod.impl.ggml_c.ggml_nbytes(node));
                 }
                 const new_subgraph = i + 1 == cgraph.n_nodes or split_state.axis == axis_partial;
                 if (!new_subgraph) {
@@ -2977,10 +2975,10 @@ fn backendGraphCompute(backend: mod.impl.c.ggml_backend_t, cgraph_: ?*mod.impl.c
                 // If the AllReduce is delayed then the nodes until that point also need to have their compute flag disabled.
                 if (i_delayed > i) {
                     for (configs) |*bcj| {
-                        if ((bcj.nodes.items[@intCast(i)].?.flags & mod.impl.c.GGML_TENSOR_FLAG_COMPUTE) == 0) {
+                        if ((bcj.nodes.items[@intCast(i)].?.flags & mod.impl.ggml_c.GGML_TENSOR_FLAG_COMPUTE) == 0) {
                             var ii: c_int = i + 1;
                             while (ii <= i_delayed) : (ii += 1) {
-                                bcj.nodes.items[@intCast(ii)].?.flags &= ~@as(i32, mod.impl.c.GGML_TENSOR_FLAG_COMPUTE);
+                                bcj.nodes.items[@intCast(ii)].?.flags &= ~@as(i32, mod.impl.ggml_c.GGML_TENSOR_FLAG_COMPUTE);
                             }
                         }
                     }
@@ -3003,7 +3001,7 @@ fn backendGraphCompute(backend: mod.impl.c.ggml_backend_t, cgraph_: ?*mod.impl.c
         if (max_tmp_size > backend_ctx.max_tmp_size) {
             for (configs) |*bcj| {
                 for (0..backend_ctx.n_reduce_steps) |i| {
-                    replaceBuffer(&bcj.bufs.items[i], mod.impl.c.ggml_backend_alloc_buffer(bcj.backend, max_tmp_size));
+                    replaceBuffer(&bcj.bufs.items[i], mod.impl.ggml_c.ggml_backend_alloc_buffer(bcj.backend, max_tmp_size));
                 }
             }
             backend_ctx.max_tmp_size = max_tmp_size;
@@ -3014,31 +3012,31 @@ fn backendGraphCompute(backend: mod.impl.c.ggml_backend_t, cgraph_: ?*mod.impl.c
             const n_nodes_per_device = 3 * backend_ctx.n_reduce_steps; // tmp + ADD (+zeroing) graph per step and device
             const n_cgraphs_per_device = 2 * backend_ctx.n_reduce_steps; // ADD ( + zeroing) graph per step and device
             const grads = cgraph.grads != null;
-            const mem_per_device_graphs_main = backend_ctx.max_subgraphs * mod.impl.c.ggml_graph_overhead_custom(@intCast(backend_ctx.max_nnodes), grads);
-            const mem_per_device_graphs_aux = n_cgraphs_per_device * backend_ctx.max_subgraphs * mod.impl.c.ggml_graph_overhead_custom(1, grads);
-            const mem_per_device_nodes_aux = n_nodes_per_device * backend_ctx.max_subgraphs * mod.impl.c.ggml_tensor_overhead();
-            const params: mod.impl.c.struct_ggml_init_params = .{
+            const mem_per_device_graphs_main = backend_ctx.max_subgraphs * mod.impl.ggml_c.ggml_graph_overhead_custom(@intCast(backend_ctx.max_nnodes), grads);
+            const mem_per_device_graphs_aux = n_cgraphs_per_device * backend_ctx.max_subgraphs * mod.impl.ggml_c.ggml_graph_overhead_custom(1, grads);
+            const mem_per_device_nodes_aux = n_nodes_per_device * backend_ctx.max_subgraphs * mod.impl.ggml_c.ggml_tensor_overhead();
+            const params: mod.impl.ggml_c.struct_ggml_init_params = .{
                 .mem_size = n_backends * (mem_per_device_graphs_main + mem_per_device_graphs_aux + mem_per_device_nodes_aux),
                 .mem_buffer = null,
                 .no_alloc = true,
             };
             // ctx.reset(ggml_init(params)): the new context exists before the old is freed.
-            const new_ctx = mod.impl.c.ggml_init(params);
+            const new_ctx = mod.impl.ggml_c.ggml_init(params);
             const old_ctx = backend_ctx.ctx;
             backend_ctx.ctx = new_ctx;
-            if (old_ctx) |old| mod.impl.c.ggml_free(old);
+            if (old_ctx) |old| mod.impl.ggml_c.ggml_free(old);
             for (configs) |*bcj| {
                 for (0..backend_ctx.max_subgraphs) |i| {
-                    bcj.cgraphs.items[i].cgraph_main = @ptrCast(@alignCast(mod.impl.c.ggml_new_graph_custom(backend_ctx.ctx, @intCast(backend_ctx.max_nnodes), false)));
+                    bcj.cgraphs.items[i].cgraph_main = @ptrCast(@alignCast(mod.impl.ggml_c.ggml_new_graph_custom(backend_ctx.ctx, @intCast(backend_ctx.max_nnodes), false)));
                 }
             }
             resizeFill(?*mod.impl.CGraph, &backend_ctx.cgraphs_aux, n_backends * n_cgraphs_per_device * backend_ctx.max_subgraphs, null);
             for (backend_ctx.cgraphs_aux.items) |*cg| {
-                cg.* = @ptrCast(@alignCast(mod.impl.c.ggml_new_graph_custom(backend_ctx.ctx, 1, grads)));
+                cg.* = @ptrCast(@alignCast(mod.impl.ggml_c.ggml_new_graph_custom(backend_ctx.ctx, 1, grads)));
             }
-            resizeFill(?*mod.impl.c.ggml_tensor, &backend_ctx.nodes_aux, n_backends * n_nodes_per_device * backend_ctx.max_subgraphs, null);
+            resizeFill(?*mod.impl.ggml_c.ggml_tensor, &backend_ctx.nodes_aux, n_backends * n_nodes_per_device * backend_ctx.max_subgraphs, null);
             for (backend_ctx.nodes_aux.items) |*t| {
-                t.* = mod.impl.c.ggml_new_tensor_1d(backend_ctx.ctx, mod.impl.c.GGML_TYPE_F32, 1);
+                t.* = mod.impl.ggml_c.ggml_new_tensor_1d(backend_ctx.ctx, mod.impl.ggml_c.GGML_TYPE_F32, 1);
             }
         }
 
@@ -3066,7 +3064,7 @@ fn backendGraphCompute(backend: mod.impl.c.ggml_backend_t, cgraph_: ?*mod.impl.c
     for (0..backend_ctx.n_subgraphs) |i| {
         for (configs) |*bcj| {
             const status = computeAsync(bcj.backend, bcj.cgraphs.items[i].cgraph_main.?);
-            if (status != mod.impl.c.GGML_STATUS_SUCCESS) {
+            if (status != mod.impl.ggml_c.GGML_STATUS_SUCCESS) {
                 return status;
             }
         }
@@ -3076,7 +3074,7 @@ fn backendGraphCompute(backend: mod.impl.c.ggml_backend_t, cgraph_: ?*mod.impl.c
             if (backend_ctx.comm_ctx != null) {
                 // Preferentially use backend-specific allreduce_tensor_async (e.g. NCCL for CUDA).
                 // Ungated on this machine (one GPU): no macOS backend provides one.
-                var nodes: [max_devices][*c]mod.impl.c.ggml_tensor = undefined;
+                var nodes: [max_devices][*c]mod.impl.ggml_c.ggml_tensor = undefined;
                 for (configs, 0..) |*bcj, j| {
                     nodes[j] = lastNode(bcj, i);
                 }
@@ -3086,17 +3084,17 @@ fn backendGraphCompute(backend: mod.impl.c.ggml_backend_t, cgraph_: ?*mod.impl.c
             if (!backend_allreduce_success) {
                 // use a generic fallback if unavailable:
                 const status = allreduceFallback(&aux, n_backends, i);
-                if (status != mod.impl.c.GGML_STATUS_SUCCESS) {
+                if (status != mod.impl.ggml_c.GGML_STATUS_SUCCESS) {
                     return status;
                 }
             }
         }
     }
-    return mod.impl.c.GGML_STATUS_SUCCESS;
+    return mod.impl.ggml_c.GGML_STATUS_SUCCESS;
 }
 
 /// Ports `ggml_backend_meta_i` (ggml-backend-meta.cpp:2565 @b1b770d90).
-const backend_iface: mod.impl.c.struct_ggml_backend_i = .{
+const backend_iface: mod.impl.ggml_c.struct_ggml_backend_i = .{
     .get_name = &backendGetName,
     .free = &backendFree,
     .set_tensor_async = &backendSetTensorAsync,
@@ -3116,7 +3114,7 @@ const backend_iface: mod.impl.c.struct_ggml_backend_i = .{
 };
 
 /// Ports `ggml_backend_is_meta` (ggml-backend-meta.cpp:2584 @b1b770d90).
-pub export fn ggml_backend_is_meta(backend: mod.impl.c.ggml_backend_t) callconv(.c) bool {
+pub fn ggml_backend_is_meta(backend: mod.impl.ggml_c.ggml_backend_t) callconv(.c) bool {
     return backend != null and backend.*.iface.get_name == backend_iface.get_name;
 }
 
@@ -3124,10 +3122,10 @@ pub export fn ggml_backend_is_meta(backend: mod.impl.c.ggml_backend_t) callconv(
 ///
 /// Return: a meta backend owning one simple backend per device, released
 /// with `ggml_backend_free`.
-fn deviceInitBackend(dev: mod.impl.c.ggml_backend_dev_t, params: [*c]const u8) callconv(.c) mod.impl.c.ggml_backend_t {
+fn deviceInitBackend(dev: mod.impl.ggml_c.ggml_backend_dev_t, params: [*c]const u8) callconv(.c) mod.impl.ggml_c.ggml_backend_t {
     const backend_ctx = BackendContext.create(dev, params);
 
-    const backend = allocator.create(mod.impl.c.struct_ggml_backend) catch oom();
+    const backend = std.heap.c_allocator.create(mod.impl.ggml_c.struct_ggml_backend) catch oom();
     backend.guid = backendGuid();
     backend.iface = backend_iface;
     backend.device = dev;
@@ -3136,7 +3134,7 @@ fn deviceInitBackend(dev: mod.impl.c.ggml_backend_dev_t, params: [*c]const u8) c
 }
 
 /// Ports `ggml_backend_meta_n_backends` (ggml-backend-meta.cpp:2599 @b1b770d90).
-pub export fn ggml_backend_meta_n_backends(meta_backend: mod.impl.c.ggml_backend_t) callconv(.c) usize {
+pub fn ggml_backend_meta_n_backends(meta_backend: mod.impl.ggml_c.ggml_backend_t) callconv(.c) usize {
     mod.impl.assert(ggml_backend_is_meta(meta_backend), "ggml_backend_is_meta(meta_backend)");
     return backendCtx(meta_backend).backend_configs.items.len;
 }
@@ -3144,7 +3142,7 @@ pub export fn ggml_backend_meta_n_backends(meta_backend: mod.impl.c.ggml_backend
 /// Ports `ggml_backend_meta_simple_backend` (ggml-backend-meta.cpp:2605 @b1b770d90).
 ///
 /// `index` is unchecked, as `std::vector::operator[]` is.
-pub export fn ggml_backend_meta_simple_backend(meta_backend: mod.impl.c.ggml_backend_t, index: usize) callconv(.c) mod.impl.c.ggml_backend_t {
+pub fn ggml_backend_meta_simple_backend(meta_backend: mod.impl.ggml_c.ggml_backend_t, index: usize) callconv(.c) mod.impl.ggml_c.ggml_backend_t {
     mod.impl.assert(ggml_backend_is_meta(meta_backend), "ggml_backend_is_meta(meta_backend)");
     return backendCtx(meta_backend).backend_configs.items.ptr[index].backend;
 }
@@ -3195,13 +3193,13 @@ test "ssMake is the C's {axis, {0}, {1}, 1}" {
 
 test "the device and buffer-type names are Meta(), as the shadowed loop makes them" {
     // The reference logs `assigned to device Meta()`; see the module doc.
-    var ctx = DeviceContext.init(try allocator.alloc(mod.impl.c.ggml_backend_dev_t, 0), null, null);
+    var ctx = DeviceContext.init(try std.heap.c_allocator.alloc(mod.impl.ggml_c.ggml_backend_dev_t, 0), null, null);
     defer ctx.deinit();
     try std.testing.expectEqualStrings("Meta()", ctx.name);
     try std.testing.expectEqualStrings("Meta()", ctx.description);
     const parts = [_][*c]const u8{ "MTL0", "CPU" };
     const name = metaName(&parts);
-    defer allocator.free(name);
+    defer std.heap.c_allocator.free(name);
     try std.testing.expectEqualStrings("Meta(MTL0,CPU)", name);
 }
 
@@ -3213,6 +3211,6 @@ test "null is never meta" {
 }
 
 test "the cache compares every tensor byte but the padding" {
-    try std.testing.expectEqual(@sizeOf(mod.impl.c.ggml_tensor) - 8, nbtc);
-    try std.testing.expectEqual(@offsetOf(mod.impl.c.ggml_tensor, "padding"), nbtc);
+    try std.testing.expectEqual(@sizeOf(mod.impl.ggml_c.ggml_tensor) - 8, nbtc);
+    try std.testing.expectEqual(@offsetOf(mod.impl.ggml_c.ggml_tensor, "padding"), nbtc);
 }

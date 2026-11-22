@@ -87,7 +87,7 @@ pub fn loadArchTensors(self: *llama.model.Model, ml: *llama.loader.Loader, exc: 
         }
 
         const rope_dup: u32 = if (i != 0) dup else 0;
-        if (hp.rope_scaling_type_train == llama.impl.c.LLAMA_ROPE_SCALING_TYPE_LONGROPE) {
+        if (hp.rope_scaling_type_train == llama.impl.llama_c.LLAMA_ROPE_SCALING_TYPE_LONGROPE) {
             layer.rope_long = try self.createTensor(.{ .tensor = .rope_factors_long, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, nr | rope_dup, exc);
             layer.rope_short = try self.createTensor(.{ .tensor = .rope_factors_short, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, nr | rope_dup, exc);
         } else {
@@ -124,7 +124,7 @@ pub fn loadArchTensors(self: *llama.model.Model, ml: *llama.loader.Loader, exc: 
 /// the whole session.
 const InputTCond = struct {
     /// F32 `[n_embd]`.
-    t_cond: ?*llama.impl.c.ggml_tensor = null,
+    t_cond: ?*llama.impl.llama_c.ggml_tensor = null,
     data: []f32,
 
     /// `input_t_cond`'s constructor (models/mistral3.cpp:101 @b1b770d90).
@@ -151,7 +151,7 @@ const InputTCond = struct {
 
     /// `input_t_cond`'s `set_input` (models/mistral3.cpp:110 @b1b770d90).
     pub fn setInput(self: *InputTCond, _: ?*const llama.batch.Ubatch) void {
-        llama.impl.c.ggml_backend_tensor_set(self.t_cond, self.data.ptr, 0, llama.impl.c.ggml_nbytes(self.t_cond));
+        llama.impl.llama_c.ggml_backend_tensor_set(self.t_cond, self.data.ptr, 0, llama.impl.llama_c.ggml_nbytes(self.t_cond));
     }
 
     /// `input_t_cond`'s `can_reuse` (models/mistral3.cpp:116 @b1b770d90):
@@ -183,7 +183,7 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
     const inp_pos = b.buildInpPos();
 
     // Optional temperature tuning.
-    var inp_attn_scale: ?*llama.impl.c.ggml_tensor = null;
+    var inp_attn_scale: ?*llama.impl.llama_c.ggml_tensor = null;
     if (hp.f_attn_temp_scale != 0.0) {
         inp_attn_scale = b.buildInpAttnScale();
     }
@@ -191,11 +191,11 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
     const inp_attn = b.buildAttnInpKv();
 
     // (Optional) the time conditioning of the adaptive RMS norm.
-    var t_cond: ?*llama.impl.c.ggml_tensor = null;
+    var t_cond: ?*llama.impl.llama_c.ggml_tensor = null;
     if (model.layers[0].ffn_norm_ada_down != null) {
         const inp = InputTCond.create(hp.n_tokens_delay, b.n_embd);
-        t_cond = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_F32, b.n_embd);
-        llama.impl.c.ggml_set_input(t_cond);
+        t_cond = llama.impl.llama_c.ggml_new_tensor_1d(ctx, llama.impl.llama_c.GGML_TYPE_F32, b.n_embd);
+        llama.impl.llama_c.ggml_set_input(t_cond);
         b.cb(t_cond.?, "inp_t_cond", -1);
         inp.t_cond = t_cond;
         _ = b.res.addInput(InputTCond, inp);
@@ -231,7 +231,7 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
 
             if (inp_attn_scale) |scale| {
                 // Llama 4's temperature scaling.
-                Qcur = llama.impl.c.ggml_mul(ctx, Qcur, scale);
+                Qcur = llama.impl.llama_c.ggml_mul(ctx, Qcur, scale);
                 b.cb(Qcur, "Qcur_attn_temp_scaled", il);
             }
 
@@ -239,10 +239,10 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
             b.cb(cur, "attn_out", il);
         }
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         if (layer.ffn_gate_inp == null) {
@@ -254,7 +254,7 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
                 // The adaptive RMS norm: scale the normalized input by
                 // (1 + mlp(t_cond)).
                 const ada = b.buildFfn(tc, layer.ffn_norm_ada_down, null, null, null, null, null, layer.ffn_norm_ada_up, null, null, null, .gelu_erf, .seq, il);
-                cur = llama.impl.c.ggml_add(ctx, cur, llama.impl.c.ggml_mul(ctx, cur, ada));
+                cur = llama.impl.llama_c.ggml_add(ctx, cur, llama.impl.llama_c.ggml_mul(ctx, cur, ada));
                 b.cb(cur, "ffn_norm_ada", il);
             }
 
@@ -282,7 +282,7 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
             }, il);
             b.cb(cur, "ffn_moe_out", il);
         }
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
         b.cb(cur, "ffn_out", il);
 
         cur = b.buildCvec(cur, il);

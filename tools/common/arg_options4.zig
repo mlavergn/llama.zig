@@ -18,9 +18,9 @@
 //! is where this port refuses it.
 
 const std = @import("std");
+const llama = @import("llama");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const c = @import("tools_h");
 
 const S = [:0]const u8;
 
@@ -205,13 +205,13 @@ pub fn add(ctx: *mod.arg.Context) !void {
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4145
-    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-type-k", "-ctkd", "--cache-type-k-draft" }, .value_hint = "TYPE", .help = try ctx.fmt("KV cache data type for K for the draft model\nallowed values: %s\n(default: %s)", .{ kv_types.ptr, c.ggml_type_name(p.speculative.draft.cache_type_k) }), .handler = .{ .string = struct {
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-type-k", "-ctkd", "--cache-type-k-draft" }, .value_hint = "TYPE", .help = try ctx.fmt("KV cache data type for K for the draft model\nallowed values: %s\n(default: %s)", .{ kv_types.ptr, llama.impl.llama_c.ggml_type_name(p.speculative.draft.cache_type_k) }), .handler = .{ .string = struct {
         fn f(q: *mod.params.Params, value: S) !void {
             q.speculative.draft.cache_type_k = try mod.arg_options2.kvCacheTypeFromStr(value);
         }
     }.f } }).setEnv("LLAMA_ARG_SPEC_DRAFT_CACHE_TYPE_K"));
     // arg.cpp:4158
-    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-type-v", "-ctvd", "--cache-type-v-draft" }, .value_hint = "TYPE", .help = try ctx.fmt("KV cache data type for V for the draft model\nallowed values: %s\n(default: %s)", .{ kv_types.ptr, c.ggml_type_name(p.speculative.draft.cache_type_v) }), .handler = .{ .string = struct {
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-type-v", "-ctvd", "--cache-type-v-draft" }, .value_hint = "TYPE", .help = try ctx.fmt("KV cache data type for V for the draft model\nallowed values: %s\n(default: %s)", .{ kv_types.ptr, llama.impl.llama_c.ggml_type_name(p.speculative.draft.cache_type_v) }), .handler = .{ .string = struct {
         fn f(q: *mod.params.Params, value: S) !void {
             q.speculative.draft.cache_type_v = try mod.arg_options2.kvCacheTypeFromStr(value);
         }
@@ -230,7 +230,7 @@ pub fn add(ctx: *mod.arg.Context) !void {
             .void_ = struct {
                 fn f(q: *mod.params.Params) !void {
                     // `llm_ffn_exps_cpu_override` (common/common.h:1287 @b1b770d90)
-                    try q.speculative.draft.tensor_buft_overrides.append(q.arena, .{ .pattern = mod.arg_options2.llm_ffn_exps_regex, .buft = c.ggml_backend_cpu_buffer_type() });
+                    try q.speculative.draft.tensor_buft_overrides.append(q.arena, .{ .pattern = mod.arg_options2.llm_ffn_exps_regex, .buft = llama.impl.llama_c.ggml_backend_cpu_buffer_type() });
                 }
             }.f,
         },
@@ -332,7 +332,7 @@ pub fn add(ctx: *mod.arg.Context) !void {
             } else {
                 q.speculative.draft.n_gpu_layers = try mod.arg.stoi(value);
             }
-            if (!c.llama_supports_gpu_offload()) {
+            if (!llama.api.llama.llama_supports_gpu_offload()) {
                 mod.io.eprintf("warning: no usable GPU found, --gpu-layers-draft option will be ignored\n", .{});
                 mod.io.eprintf("warning: one possible reason is that llama.cpp was compiled without GPU support\n", .{});
                 mod.io.eprintf("warning: consult docs/build.md for compilation instructions\n", .{});

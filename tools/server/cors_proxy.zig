@@ -11,11 +11,10 @@
 //! forwarding itself is `proxy.zig`'s `server_http_proxy`.
 
 const std = @import("std");
+const common_chat = @import("common_chat");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const tc = @import("tools_common");
-
-const Allocator = std.mem.Allocator;
+const tools_common = @import("tools_common");
 
 /// Ports `common_http_url` (common/http.h:17 @b1b770d90).
 pub const HttpUrl = struct {
@@ -29,24 +28,24 @@ pub const HttpUrl = struct {
 
 /// `std::stoi`: `std::invalid_argument` for no digits, `std::out_of_range`
 /// past an `int`.
-fn stoi(a: Allocator, s: []const u8) !c_int {
+fn stoi(a: std.mem.Allocator, s: []const u8) !c_int {
     const zs = try a.dupeSentinel(u8, s, 0);
-    return tc.arg.stoi(zs) catch {
-        const w = tc.arg.what();
-        if (std.mem.eql(u8, w, "stoi: no conversion")) return mod.common.throw(error.InvalidArgument, "{s}", .{w});
-        return mod.common.throw(error.RuntimeError, "{s}", .{w});
+    return tools_common.arg.stoi(zs) catch {
+        const w = tools_common.arg.what();
+        if (std.mem.eql(u8, w, "stoi: no conversion")) return common_chat.exception.throw(error.InvalidArgument, "{s}", .{w});
+        return common_chat.exception.throw(error.RuntimeError, "{s}", .{w});
     };
 }
 
 /// Ports `common_http_parse_url` (common/http.h:31 @b1b770d90): scheme, user and
 /// password, host (an IPv6 literal unbracketed), port and path.
-pub fn parseUrl(a: Allocator, url: []const u8) !HttpUrl {
+pub fn parseUrl(a: std.mem.Allocator, url: []const u8) !HttpUrl {
     var parts: HttpUrl = .{};
-    const scheme_end = std.mem.find(u8, url, "://") orelse return mod.common.throw(error.RuntimeError, "invalid URL: no scheme", .{});
+    const scheme_end = std.mem.find(u8, url, "://") orelse return common_chat.exception.throw(error.RuntimeError, "invalid URL: no scheme", .{});
     parts.scheme = url[0..scheme_end];
 
     if (!std.mem.eql(u8, parts.scheme, "http") and !std.mem.eql(u8, parts.scheme, "https")) {
-        return mod.common.throw(error.RuntimeError, "unsupported URL scheme: {s}", .{parts.scheme});
+        return common_chat.exception.throw(error.RuntimeError, "unsupported URL scheme: {s}", .{parts.scheme});
     }
 
     var rest = url[scheme_end + 3 ..];
@@ -73,7 +72,7 @@ pub fn parseUrl(a: Allocator, url: []const u8) !HttpUrl {
     var port_str: []const u8 = "";
     if (parts.host.len != 0 and parts.host[0] == '[') {
         const close = std.mem.findScalar(u8, parts.host, ']') orelse
-            return mod.common.throw(error.RuntimeError, "invalid IPv6 URL authority: {s}", .{parts.host});
+            return common_chat.exception.throw(error.RuntimeError, "invalid IPv6 URL authority: {s}", .{parts.host});
         const after = parts.host[close + 1 ..];
         if (after.len != 0 and after[0] == ':') port_str = after[1..];
         parts.host = parts.host[1..close];
@@ -93,7 +92,7 @@ pub fn parseUrl(a: Allocator, url: []const u8) !HttpUrl {
 }
 
 /// Ports `proxy_header_to_lower` (server-cors-proxy.h:16 @b1b770d90).
-fn proxyHeaderToLower(a: Allocator, header: []const u8) ![]u8 {
+fn proxyHeaderToLower(a: std.mem.Allocator, header: []const u8) ![]u8 {
     return std.ascii.allocLowerString(a, header);
 }
 
@@ -111,11 +110,11 @@ fn proxyRequest(req: *const mod.http.Req, method: []const u8) !*mod.http.Res {
     const target_url = req.getParam("url", "");
     var parsed_url = try parseUrl(a, target_url);
 
-    if (parsed_url.host.len == 0) return mod.common.throw(error.RuntimeError, "invalid target URL: missing host", .{});
+    if (parsed_url.host.len == 0) return common_chat.exception.throw(error.RuntimeError, "invalid target URL: missing host", .{});
     if (parsed_url.path.len == 0) parsed_url.path = "/";
-    if (parsed_url.password.len != 0) return mod.common.throw(error.RuntimeError, "authentication in target URL is not supported", .{});
+    if (parsed_url.password.len != 0) return common_chat.exception.throw(error.RuntimeError, "authentication in target URL is not supported", .{});
     if (!std.mem.eql(u8, parsed_url.scheme, "http") and !std.mem.eql(u8, parsed_url.scheme, "https")) {
-        return mod.common.throw(error.RuntimeError, "unsupported URL scheme in target URL: {s}", .{parsed_url.scheme});
+        return common_chat.exception.throw(error.RuntimeError, "unsupported URL scheme in target URL: {s}", .{parsed_url.scheme});
     }
 
     {

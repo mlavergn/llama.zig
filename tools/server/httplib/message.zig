@@ -936,7 +936,7 @@ pub fn makeContentRangeHeaderField(a: std.mem.Allocator, offset: usize, length: 
 pub fn makeMultipartDataBoundary(a: std.mem.Allocator) error{OutOfMemory}![]u8 {
     const data = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
     var out: [16]u8 = undefined;
-    @import("ws.zig").fillRandomBytes(&out);
+    mod.ws.fillRandomBytes(&out);
     for (&out) |*c| c.* = data[c.* % data.len];
     return std.mem.concat(a, u8, &.{ "--cpp-httplib-multipart-data-", &out });
 }

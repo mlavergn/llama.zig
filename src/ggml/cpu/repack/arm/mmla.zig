@@ -67,7 +67,7 @@ inline fn combineHigh(a: ggml.cpu.quants.arch.neon.i32x4, b: ggml.cpu.quants.arc
 
 /// Four `f16` deltas from an interleaved block, widened: `vcvt_f32_f16(
 /// vld1_f16(p + 4 * j))`.
-inline fn deltas(p: *const [8]ggml.impl.c.ggml_half, j: usize) ggml.cpu.quants.arch.neon.f32x4 {
+inline fn deltas(p: *const [8]ggml.impl.ggml_c.ggml_half, j: usize) ggml.cpu.quants.arch.neon.f32x4 {
     return ggml.cpu.quants.arch.neon.cvt_f32_f16(ggml.cpu.quants.arch.neon.load_f16x4(@as([*]const u16, @ptrCast(p)) + 4 * j));
 }
 
@@ -900,7 +900,7 @@ pub fn gemmQ6_K_8x8(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *c
 /// is a row-major 2x2 tile -- `[r0c0, r0c1, r1c0, r1c1]` -- and four
 /// recombines make whole rows, with no zip.
 pub fn gemmQ8_0_4x8(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void {
-    const nb: usize = @intCast(@divTrunc(n, ggml.impl.c.QK8_0));
+    const nb: usize = @intCast(@divTrunc(n, ggml.impl.ggml_c.QK8_0));
     const ncols_interleaved = 4;
 
     const b_ptr_base: [*]const ggml.cpu.repack.blocks.block_q8_0x4 = @ptrCast(@alignCast(vx));

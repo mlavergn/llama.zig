@@ -22,12 +22,12 @@ fn int(x: i64) c_int {
     return @truncate(x);
 }
 
-fn srcData(dst: *const ggml.impl.c.ggml_tensor, i: usize) ?*const anyopaque {
-    return ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[i]).data;
+fn srcData(dst: *const ggml.impl.ggml_c.ggml_tensor, i: usize) ?*const anyopaque {
+    return ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[i]).data;
 }
 
 /// Ports `ggml_cuda_op_rwkv_wkv6` (wkv.cu:193 @b1b770d90).
-pub fn opRwkvWkv6(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+pub fn opRwkvWkv6(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const k_d = srcData(dst, 0);
     const v_d = srcData(dst, 1);
     const r_d = srcData(dst, 2);
@@ -44,7 +44,7 @@ pub fn opRwkvWkv6(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor)
 
     const stream = ctx.stream();
 
-    ggml.impl.assert(dst.src[5].*.type == ggml.impl.c.GGML_TYPE_F32, "dst->src[5]->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.src[5].*.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->src[5]->type == GGML_TYPE_F32");
     ggml.impl.assert(@rem(C, H) == 0, "C % H == 0");
     ggml.impl.assert(@divTrunc(C, H) == block_size or @divTrunc(C, H) == block_size * 2, "C / H == CUDA_WKV_BLOCK_SIZE || C / H == CUDA_WKV_BLOCK_SIZE * 2");
 
@@ -58,7 +58,7 @@ pub fn opRwkvWkv6(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor)
 }
 
 /// Ports `ggml_cuda_op_rwkv_wkv7` (wkv.cu:221 @b1b770d90).
-pub fn opRwkvWkv7(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+pub fn opRwkvWkv7(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const r_d = srcData(dst, 0);
     const w_d = srcData(dst, 1);
     const k_d = srcData(dst, 2);
@@ -76,7 +76,7 @@ pub fn opRwkvWkv7(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor)
 
     const stream = ctx.stream();
 
-    ggml.impl.assert(dst.src[6].*.type == ggml.impl.c.GGML_TYPE_F32, "dst->src[6]->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.src[6].*.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->src[6]->type == GGML_TYPE_F32");
     ggml.impl.assert(@rem(C, H) == 0, "C % H == 0");
     ggml.impl.assert(@divTrunc(C, H) == block_size or @divTrunc(C, H) == block_size * 2, "C / H == CUDA_WKV_BLOCK_SIZE || C / H == CUDA_WKV_BLOCK_SIZE * 2");
 

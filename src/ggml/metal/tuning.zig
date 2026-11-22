@@ -209,16 +209,16 @@ pub fn pick(
 // `ggml-metal-device.cpp` link unchanged. Verified against `nm` on the
 // reference object, not constructed by hand.
 
-fn abiNe11Bucket(ne11: i64) callconv(.c) c_int {
+pub fn abiNe11Bucket(ne11: i64) callconv(.c) c_int {
     return ne11Bucket(ne11);
 }
-fn abiNe01Bucket(ne01: i64) callconv(.c) c_int {
+pub fn abiNe01Bucket(ne01: i64) callconv(.c) c_int {
     return ne01Bucket(ne01);
 }
-fn abiBaselineNe(dk: c_int, dv: c_int) callconv(.c) c_int {
+pub fn abiBaselineNe(dk: c_int, dv: c_int) callconv(.c) c_int {
     return baselineNe(dk, dv);
 }
-fn abiBaselineCfg(dk: c_int, dv: c_int) callconv(.c) ggml.metal.tuning_table.Cfg {
+pub fn abiBaselineCfg(dk: c_int, dv: c_int) callconv(.c) ggml.metal.tuning_table.Cfg {
     return baselineCfg(dk, dv);
 }
 
@@ -226,13 +226,13 @@ fn abiBaselineCfg(dk: c_int, dv: c_int) callconv(.c) ggml.metal.tuning_table.Cfg
 /// Zig 0.16 receives as zeros. The thunk takes the same two bytes as a
 /// `u16` instead; the caller is unchanged, since that is what the register
 /// holds either way.
-fn abiSetOverride(bits: u16) callconv(.c) void {
+pub fn abiSetOverride(bits: u16) callconv(.c) void {
     setOverride(std.mem.bytesToValue(ggml.metal.tuning_table.Cfg, std.mem.asBytes(&bits)));
 }
-fn abiClearOverride() callconv(.c) void {
+pub fn abiClearOverride() callconv(.c) void {
     clearOverride();
 }
-fn abiPick(
+pub fn abiPick(
     gpu_family: c_int,
     dtype: c_int,
     dk: c_int,
@@ -241,16 +241,6 @@ fn abiPick(
     ne01: i64,
 ) callconv(.c) ggml.metal.tuning_table.Cfg {
     return pick(gpu_family, dtype, dk, dv, ne11, ne01);
-}
-
-comptime {
-    @export(&abiNe11Bucket, .{ .name = "_ZN17ggml_metal_tuning18fa_vec_ne11_bucketEx" });
-    @export(&abiNe01Bucket, .{ .name = "_ZN17ggml_metal_tuning18fa_vec_ne01_bucketEx" });
-    @export(&abiBaselineNe, .{ .name = "_ZN17ggml_metal_tuning18fa_vec_baseline_neEii" });
-    @export(&abiBaselineCfg, .{ .name = "_ZN17ggml_metal_tuning19fa_vec_baseline_cfgEii" });
-    @export(&abiSetOverride, .{ .name = "_ZN17ggml_metal_tuning19fa_vec_set_overrideENS_12fa_vec_cfg_tE" });
-    @export(&abiClearOverride, .{ .name = "_ZN17ggml_metal_tuning21fa_vec_clear_overrideEv" });
-    @export(&abiPick, .{ .name = "_ZN17ggml_metal_tuning11fa_vec_pickEiiiixx" });
 }
 
 // -----------------------------------------------------------------------------
@@ -285,25 +275,25 @@ test "the bucket edges are half-open on the low side" {
 
 test "a short KV always takes the baseline, whatever the table says" {
     // ne11 < FA_VEC_NE11_BUCKETS[0] short-circuits before any lookup.
-    const got = pick(9, ggml.impl.c.GGML_TYPE_F16, 128, 128, 512, 1);
+    const got = pick(9, ggml.impl.ggml_c.GGML_TYPE_F16, 128, 128, 512, 1);
     try std.testing.expectEqual(baselineCfg(128, 128), got);
 }
 
 test "the override wins over everything, and clearing restores the table" {
     defer abiClearOverride();
-    const before = pick(9, ggml.impl.c.GGML_TYPE_F16, 128, 128, 8192, 1);
+    const before = pick(9, ggml.impl.ggml_c.GGML_TYPE_F16, 128, 128, 8192, 1);
 
     const forced: ggml.metal.tuning_table.Cfg = .{ .Q = 7, .NE = 3 };
     abiSetOverride(@bitCast(std.mem.toBytes(forced)));
-    try std.testing.expectEqual(forced, pick(9, ggml.impl.c.GGML_TYPE_F16, 128, 128, 8192, 1));
+    try std.testing.expectEqual(forced, pick(9, ggml.impl.ggml_c.GGML_TYPE_F16, 128, 128, 8192, 1));
 
     abiClearOverride();
-    try std.testing.expectEqual(before, pick(9, ggml.impl.c.GGML_TYPE_F16, 128, 128, 8192, 1));
+    try std.testing.expectEqual(before, pick(9, ggml.impl.ggml_c.GGML_TYPE_F16, 128, 128, 8192, 1));
 }
 
 test "an untuned family gets the baseline" {
     // Family 0 means unknown; family 6 predates the table. Neither has a
     // row, and there is no fallback to a representative.
-    try std.testing.expectEqual(baselineCfg(128, 128), pick(0, ggml.impl.c.GGML_TYPE_F16, 128, 128, 8192, 1));
-    try std.testing.expectEqual(baselineCfg(128, 128), pick(6, ggml.impl.c.GGML_TYPE_F16, 128, 128, 8192, 1));
+    try std.testing.expectEqual(baselineCfg(128, 128), pick(0, ggml.impl.ggml_c.GGML_TYPE_F16, 128, 128, 8192, 1));
+    try std.testing.expectEqual(baselineCfg(128, 128), pick(6, ggml.impl.ggml_c.GGML_TYPE_F16, 128, 128, 8192, 1));
 }

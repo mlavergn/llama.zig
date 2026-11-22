@@ -16,10 +16,6 @@
 const std = @import("std");
 const harness_root = @import("harness_root");
 
-const Lru = harness_root.moe_cache.Lru;
-const CpuShare = harness_root.moe_cache.CpuShare;
-const gpa = std.heap.c_allocator;
-
 extern fn slru_ref_new(n_layer: c_int, n_expert: c_int, n_slots: c_int) ?*anyopaque;
 extern fn slru_ref_free(p: ?*anyopaque) void;
 extern fn slru_ref_set_map(p: ?*anyopaque, il: c_int, data: [*]i32) void;
@@ -49,14 +45,14 @@ fn run(seed: u64, n_layer: usize, n_expert: i32, n_slots: i32, n_steps: usize, s
     const r = prng.random();
 
     const ne: usize = @intCast(n_expert);
-    const ref_maps = gpa.alloc(i32, n_layer * ne) catch unreachable;
-    defer gpa.free(ref_maps);
-    const port_maps = gpa.alloc(i32, n_layer * ne) catch unreachable;
-    defer gpa.free(port_maps);
+    const ref_maps = std.heap.c_allocator.alloc(i32, n_layer * ne) catch unreachable;
+    defer std.heap.c_allocator.free(ref_maps);
+    const port_maps = std.heap.c_allocator.alloc(i32, n_layer * ne) catch unreachable;
+    defer std.heap.c_allocator.free(port_maps);
 
     const ref = slru_ref_new(@intCast(n_layer), n_expert, n_slots);
     defer slru_ref_free(ref);
-    var port: Lru = .{};
+    var port: harness_root.moe_cache.Lru = .{};
     defer port.deinit();
     port.init(n_layer, n_expert, n_slots);
     // the slot maps start at `empty`, as the cache fills them
@@ -76,10 +72,10 @@ fn run(seed: u64, n_layer: usize, n_expert: i32, n_slots: i32, n_steps: usize, s
     var ids: [256]i32 = undefined;
     var ref_fills: [1024]i32 = undefined;
     var ref_cpu: [1024]i32 = undefined;
-    var port_fills: std.ArrayList(Lru.Fill) = .empty;
-    defer port_fills.deinit(gpa);
-    var port_cpu: std.ArrayList(Lru.Fill) = .empty;
-    defer port_cpu.deinit(gpa);
+    var port_fills: std.ArrayList(harness_root.moe_cache.Lru.Fill) = .empty;
+    defer port_fills.deinit(std.heap.c_allocator);
+    var port_cpu: std.ArrayList(harness_root.moe_cache.Lru.Fill) = .empty;
+    defer port_cpu.deinit(std.heap.c_allocator);
 
     for (0..n_steps) |step| {
         const il = r.uintLessThan(usize, n_layer);
@@ -130,7 +126,7 @@ fn run(seed: u64, n_layer: usize, n_expert: i32, n_slots: i32, n_steps: usize, s
         var ref_hit: usize = 0;
         const ref_ok = slru_ref_plan(ref, @intCast(il), &ids, n_ids, @intCast(n_tokens), @intCast(n_used), n_zero, sq, &ref_acc[il], &ref_fills, &ref_n_fills, &ref_cpu, &ref_n_cpu, &ref_hit);
         var port_hit: usize = 0;
-        const port_ok = port.plan(@intCast(il), ids[0..n_ids], @intCast(n_tokens), @intCast(n_used), n_zero, CpuShare{ .share_q = sq, .acc = &port_acc[il] }, &port_fills, &port_cpu, &port_hit);
+        const port_ok = port.plan(@intCast(il), ids[0..n_ids], @intCast(n_tokens), @intCast(n_used), n_zero, harness_root.moe_cache.CpuShare{ .share_q = sq, .acc = &port_acc[il] }, &port_fills, &port_cpu, &port_hit);
 
         expect("plan", seed, step, ref_ok, @intFromBool(port_ok));
         if (ref_ok == 0) refused += 1;

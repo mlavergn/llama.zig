@@ -45,13 +45,13 @@ inline fn maxF(a: f32, b: f32) f32 {
 // soft_max
 
 /// Ports `ggml_compute_forward_soft_max_f32` (ops.cpp:5709 @b1b770d90).
-fn softMaxF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1: ?*ggml.impl.c.ggml_tensor = dst.src[1];
-    const src2: ?*ggml.impl.c.ggml_tensor = dst.src[2];
+fn softMaxF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1: ?*ggml.impl.ggml_c.ggml_tensor = dst.src[1];
+    const src2: ?*ggml.impl.ggml_c.ggml_tensor = dst.src[2];
 
-    std.debug.assert(ggml.impl.c.ggml_is_contiguous(dst));
-    std.debug.assert(ggml.impl.c.ggml_are_same_shape(src0, dst));
+    std.debug.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst));
+    std.debug.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst));
 
     const scale = ggml.impl.getOpParamsF32(dst, 0);
     const max_bias = ggml.impl.getOpParamsF32(dst, 1);
@@ -79,7 +79,7 @@ fn softMaxF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml
     const wbase: [*]f32 = @ptrCast(@alignCast(params.wdata.?));
     const wp = wbase + (@as(usize, @intCast(l.ne00)) + ggml.cpu.ops.common.cache_line_size_f32) * @as(usize, @intCast(ith));
 
-    const use_f16 = if (src1) |t| t.type == ggml.impl.c.GGML_TYPE_F16 else false;
+    const use_f16 = if (src1) |t| t.type == ggml.impl.ggml_c.GGML_TYPE_F16 else false;
 
     // sinks
     const sk: ?[*]const f32 = if (src2) |t| ggml.cpu.ops.common.ptr(f32, t.data, 0) else null;
@@ -117,7 +117,7 @@ fn softMaxF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml
                     // `wp[i] += slope*mask` is one expression, and clang
                     // fuses it: one rounding, not two.
                     if (use_f16) {
-                        const mp_f16 = ggml.cpu.ops.common.ptr(ggml.impl.c.ggml_fp16_t, m.data, moff);
+                        const mp_f16 = ggml.cpu.ops.common.ptr(ggml.impl.ggml_c.ggml_fp16_t, m.data, moff);
                         for (0..nc) |i| wp[i] = @mulAdd(f32, slope, ggml.impl.fp16ToFp32(mp_f16[i]), wp[i]);
                     } else {
                         const mp_f32 = ggml.cpu.ops.common.ptr(f32, m.data, moff);
@@ -152,11 +152,11 @@ fn softMaxF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml
 }
 
 /// Ports `ggml_compute_forward_soft_max` (ops.cpp:5821 @b1b770d90).
-pub export fn ggml_compute_forward_soft_max(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_soft_max(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => softMaxF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => softMaxF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -170,15 +170,15 @@ pub export fn ggml_compute_forward_soft_max(params: *const ggml.cpu.defs.Compute
 /// order: one loop, not four passes, so `(dy - dot)*y` is not rounded
 /// before scaling.
 /// No product in it is added to anything, so there is nothing to contract.
-fn softMaxExtBackF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
-    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+fn softMaxExtBackF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(src1), "ggml_is_contiguous(src1)");
-    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
-    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
-    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src1, dst), "ggml_are_same_shape(src1, dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src1), "ggml_is_contiguous(src1)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src1, dst), "ggml_are_same_shape(src1, dst)");
 
     const scale = ggml.impl.getOpParamsF32(dst, 0);
     const max_bias = ggml.impl.getOpParamsF32(dst, 1);
@@ -191,7 +191,7 @@ fn softMaxExtBackF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl
     const nth: i64 = params.nth;
 
     const nc: i64 = src0.ne[0];
-    const nr: i64 = ggml.impl.c.ggml_nrows(src0);
+    const nr: i64 = ggml.impl.ggml_c.ggml_nrows(src0);
 
     // rows per thread
     const dr = @divTrunc(nr + nth - 1, nth);
@@ -216,11 +216,11 @@ fn softMaxExtBackF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl
 }
 
 /// Ports `ggml_compute_forward_soft_max_ext_back` (ops.cpp:5925 @b1b770d90).
-pub export fn ggml_compute_forward_soft_max_ext_back(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_soft_max_ext_back(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => softMaxExtBackF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => softMaxExtBackF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -236,8 +236,8 @@ pub export fn ggml_compute_forward_soft_max_ext_back(params: *const ggml.cpu.def
 /// behaviour included: a NaN `v` makes `MIN` return `max`. Each
 /// row is addressed through all three outer strides, so a non-contiguous view
 /// clamps the right rows.
-fn clamp(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+fn clamp(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     const min = ggml.impl.getOpParamsF32(dst, 0);
     const max = ggml.impl.getOpParamsF32(dst, 1);
@@ -245,7 +245,7 @@ fn clamp(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggm
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const n: i64 = ggml.impl.c.ggml_nrows(src0);
+    const n: i64 = ggml.impl.ggml_c.ggml_nrows(src0);
     const nc: usize = @intCast(src0.ne[0]);
 
     // GGML_TENSOR_UNARY_OP_LOCALS
@@ -280,12 +280,12 @@ fn clamp(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggm
 }
 
 /// Ports `ggml_compute_forward_clamp` (ops.cpp:6018 @b1b770d90).
-pub export fn ggml_compute_forward_clamp(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_clamp(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => clamp(f32, params, dst),
-        ggml.impl.c.GGML_TYPE_F16 => clamp(ggml.impl.c.ggml_fp16_t, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => clamp(f32, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F16 => clamp(ggml.impl.ggml_c.ggml_fp16_t, params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }

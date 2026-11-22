@@ -14,8 +14,7 @@ const std = @import("std");
 
 pub const args = @import("args.zig");
 pub const chat = @import("chat.zig");
-pub const fit = @import("cli_fit");
-pub const json = fit.json;
+pub const cli_fit = @import("cli_fit");
 pub const common_chat = @import("common_chat");
 pub const conversation = @import("conversation.zig");
 pub const reasoning_budget = @import("reasoning_budget.zig");

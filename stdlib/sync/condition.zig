@@ -13,7 +13,6 @@
 
 const std = @import("std");
 const stdlib = @import("../module.zig");
-const Mutex = @import("mutex.zig").Mutex;
 
 /// A condition variable. `.{}` is ready to use and needs no teardown.
 ///
@@ -29,7 +28,7 @@ pub const Condition = extern struct {
     /// - `m`: the mutex the caller holds.
     ///
     /// Return: nothing.
-    pub fn wait(self: *Condition, m: *Mutex) void {
+    pub fn wait(self: *Condition, m: *stdlib.sync.mutex.Mutex) void {
         _ = self.timedWait(m, null);
     }
 
@@ -41,7 +40,7 @@ pub const Condition = extern struct {
     ///
     /// Return: false when the timeout passed, true otherwise -- which includes
     /// a spurious wakeup.
-    pub fn timedWait(self: *Condition, m: *Mutex, timeout_ns: ?u64) bool {
+    pub fn timedWait(self: *Condition, m: *stdlib.sync.mutex.Mutex, timeout_ns: ?u64) bool {
         // Counted in before the sequence is read, both `seq_cst`, against
         // `wake`'s bump-then-read: a signaller that sees no waiter bumped the
         // sequence before this read it, so the sleep below returns at once.
@@ -63,7 +62,7 @@ pub const Condition = extern struct {
     ///
     /// Return: false when the deadline passed, true otherwise -- which
     /// includes a spurious wakeup.
-    pub fn waitUntil(self: *Condition, m: *Mutex, deadline_ns: i64) bool {
+    pub fn waitUntil(self: *Condition, m: *stdlib.sync.mutex.Mutex, deadline_ns: i64) bool {
         const now = stdlib.clock.steadyNs();
         if (now >= deadline_ns) return false;
         return self.timedWait(m, @intCast(deadline_ns - now));
@@ -97,7 +96,7 @@ test {
 }
 
 test "a timed wait with no signal times out holding the mutex" {
-    var m: Mutex = .{};
+    var m: stdlib.sync.mutex.Mutex = .{};
     var c: Condition = .{};
     m.lock();
     var spurious: usize = 0;
@@ -112,7 +111,7 @@ test "a timed wait with no signal times out holding the mutex" {
 test "broadcast releases every waiter" {
     const threads = 6;
     const Shared = struct {
-        m: Mutex = .{},
+        m: stdlib.sync.mutex.Mutex = .{},
         c: Condition = .{},
         go: bool = false,
         done: std.atomic.Value(u32) = .init(0),
@@ -137,7 +136,7 @@ test "broadcast releases every waiter" {
 test "a producer and consumer hand over every item through signal" {
     const items = 50_000;
     const Shared = struct {
-        m: Mutex = .{},
+        m: stdlib.sync.mutex.Mutex = .{},
         c: Condition = .{},
         queued: u32 = 0,
         taken: u32 = 0,
@@ -164,7 +163,7 @@ test "a producer and consumer hand over every item through signal" {
 }
 
 test "a signal before anyone waits is not kept for a later waiter" {
-    var m: Mutex = .{};
+    var m: stdlib.sync.mutex.Mutex = .{};
     var c: Condition = .{};
     c.signal();
     c.broadcast();

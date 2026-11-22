@@ -12,36 +12,3 @@
 //! `arm/fallback.zig` does the same for ARM's eight.
 
 const repack = @import("../module.zig");
-
-comptime {
-    @export(&repack.quantize.ggml_quantize_mat_q8_0_4x4_generic, .{ .name = "ggml_quantize_mat_q8_0_4x4" });
-    @export(&repack.quantize.ggml_quantize_mat_q8_K_4x4_generic, .{ .name = "ggml_quantize_mat_q8_K_4x4" });
-
-    @export(&repack.q1_0.ggml_gemv_q1_0_4x4_q8_0_generic, .{ .name = "ggml_gemv_q1_0_4x4_q8_0" });
-    @export(&repack.q1_0.ggml_gemv_q1_0_4x8_q8_0_generic, .{ .name = "ggml_gemv_q1_0_4x8_q8_0" });
-    @export(&repack.q4_0.ggml_gemv_q4_0_4x4_q8_0_generic, .{ .name = "ggml_gemv_q4_0_4x4_q8_0" });
-    @export(&repack.q4_0.ggml_gemv_q4_0_4x8_q8_0_generic, .{ .name = "ggml_gemv_q4_0_4x8_q8_0" });
-    @export(&repack.q4_k.ggml_gemv_q4_K_8x4_q8_K_generic, .{ .name = "ggml_gemv_q4_K_8x4_q8_K" });
-    @export(&repack.q5_k.ggml_gemv_q5_K_8x4_q8_K_generic, .{ .name = "ggml_gemv_q5_K_8x4_q8_K" });
-    @export(&repack.q5_k.ggml_gemv_q5_K_8x8_q8_K_generic, .{ .name = "ggml_gemv_q5_K_8x8_q8_K" });
-    @export(&repack.q6_k.ggml_gemv_q6_K_8x4_q8_K_generic, .{ .name = "ggml_gemv_q6_K_8x4_q8_K" });
-    @export(&repack.q6_k.ggml_gemv_q6_K_8x8_q8_K_generic, .{ .name = "ggml_gemv_q6_K_8x8_q8_K" });
-    @export(&repack.nibble4.ggml_gemv_iq4_nl_4x4_q8_0_generic, .{ .name = "ggml_gemv_iq4_nl_4x4_q8_0" });
-    @export(&repack.nibble4.ggml_gemv_mxfp4_4x4_q8_0_generic, .{ .name = "ggml_gemv_mxfp4_4x4_q8_0" });
-    @export(&repack.q8_0.ggml_gemv_q8_0_4x4_q8_0_generic, .{ .name = "ggml_gemv_q8_0_4x4_q8_0" });
-    @export(&repack.q8_0.ggml_gemv_q8_0_4x8_q8_0_generic, .{ .name = "ggml_gemv_q8_0_4x8_q8_0" });
-
-    @export(&repack.q1_0.ggml_gemm_q1_0_4x4_q8_0_generic, .{ .name = "ggml_gemm_q1_0_4x4_q8_0" });
-    @export(&repack.q1_0.ggml_gemm_q1_0_4x8_q8_0_generic, .{ .name = "ggml_gemm_q1_0_4x8_q8_0" });
-    @export(&repack.q4_0.ggml_gemm_q4_0_4x4_q8_0_generic, .{ .name = "ggml_gemm_q4_0_4x4_q8_0" });
-    @export(&repack.q4_0.ggml_gemm_q4_0_4x8_q8_0_generic, .{ .name = "ggml_gemm_q4_0_4x8_q8_0" });
-    @export(&repack.q4_k.ggml_gemm_q4_K_8x4_q8_K_generic, .{ .name = "ggml_gemm_q4_K_8x4_q8_K" });
-    @export(&repack.q5_k.ggml_gemm_q5_K_8x4_q8_K_generic, .{ .name = "ggml_gemm_q5_K_8x4_q8_K" });
-    @export(&repack.q5_k.ggml_gemm_q5_K_8x8_q8_K_generic, .{ .name = "ggml_gemm_q5_K_8x8_q8_K" });
-    @export(&repack.q6_k.ggml_gemm_q6_K_8x4_q8_K_generic, .{ .name = "ggml_gemm_q6_K_8x4_q8_K" });
-    @export(&repack.q6_k.ggml_gemm_q6_K_8x8_q8_K_generic, .{ .name = "ggml_gemm_q6_K_8x8_q8_K" });
-    @export(&repack.nibble4.ggml_gemm_iq4_nl_4x4_q8_0_generic, .{ .name = "ggml_gemm_iq4_nl_4x4_q8_0" });
-    @export(&repack.nibble4.ggml_gemm_mxfp4_4x4_q8_0_generic, .{ .name = "ggml_gemm_mxfp4_4x4_q8_0" });
-    @export(&repack.q8_0.ggml_gemm_q8_0_4x4_q8_0_generic, .{ .name = "ggml_gemm_q8_0_4x4_q8_0" });
-    @export(&repack.q8_0.ggml_gemm_q8_0_4x8_q8_0_generic, .{ .name = "ggml_gemm_q8_0_4x8_q8_0" });
-}

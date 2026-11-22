@@ -137,53 +137,53 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
-        inpL = llama.impl.c.ggml_reshape_3d(ctx, inpL, n_embd, n_seq_tokens, n_seqs);
+        inpL = llama.impl.llama_c.ggml_reshape_3d(ctx, inpL, n_embd, n_seq_tokens, n_seqs);
 
         var token_shift = b.buildRwkvTokenShiftLoad(rs_inp, ubatch, il);
 
-        const att_shift: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, token_shift, n_embd, 1, n_seqs, token_shift.nb[1], token_shift.nb[2], 0);
-        const ffn_shift: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, token_shift, n_embd, 1, n_seqs, token_shift.nb[1], token_shift.nb[2], @as(usize, @intCast(n_embd)) * llama.impl.c.ggml_element_size(token_shift));
+        const att_shift: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, token_shift, n_embd, 1, n_seqs, token_shift.nb[1], token_shift.nb[2], 0);
+        const ffn_shift: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_view_3d(ctx, token_shift, n_embd, 1, n_seqs, token_shift.nb[1], token_shift.nb[2], @as(usize, @intCast(n_embd)) * llama.impl.llama_c.ggml_element_size(token_shift));
 
         const att_norm = b.buildNorm(inpL, layer.attn_norm, layer.attn_norm_b, .norm, il);
         b.cb(att_norm, "attn_norm", il);
 
-        var x_prev: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_concat(ctx, att_shift, llama.impl.c.ggml_view_3d(ctx, att_norm, n_embd, n_seq_tokens - 1, n_seqs, att_norm.nb[1], att_norm.nb[2], 0), 1);
+        var x_prev: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_concat(ctx, att_shift, llama.impl.llama_c.ggml_view_3d(ctx, att_norm, n_embd, n_seq_tokens - 1, n_seqs, att_norm.nb[1], att_norm.nb[2], 0), 1);
 
         var cur = llama.models.rwkv6_base.buildRwkv6TimeMix(model, b, rs_inp, att_norm, x_prev, ubatch, il);
 
-        var ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpL);
+        var ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpL);
         b.cb(ffn_inp, "ffn_inp", il);
 
         var ffn_norm = b.buildNorm(ffn_inp, layer.attn_norm_2, layer.attn_norm_2_b, .norm, il);
         b.cb(ffn_norm, "ffn_norm", il);
 
-        x_prev = llama.impl.c.ggml_concat(ctx, ffn_shift, llama.impl.c.ggml_view_3d(ctx, ffn_norm, n_embd, n_seq_tokens - 1, n_seqs, ffn_norm.nb[1], ffn_norm.nb[2], 0), 1);
+        x_prev = llama.impl.llama_c.ggml_concat(ctx, ffn_shift, llama.impl.llama_c.ggml_view_3d(ctx, ffn_norm, n_embd, n_seq_tokens - 1, n_seqs, ffn_norm.nb[1], ffn_norm.nb[2], 0), 1);
 
         const last: usize = @intCast((n_seq_tokens - 1) * n_embd);
-        token_shift = llama.impl.c.ggml_concat(
+        token_shift = llama.impl.llama_c.ggml_concat(
             ctx,
-            llama.impl.c.ggml_view_3d(ctx, att_norm, n_embd, 1, n_seqs, att_norm.nb[1], att_norm.nb[2], last * llama.impl.c.ggml_element_size(att_norm)),
-            llama.impl.c.ggml_view_3d(ctx, ffn_norm, n_embd, 1, n_seqs, ffn_norm.nb[1], ffn_norm.nb[2], last * llama.impl.c.ggml_element_size(ffn_norm)),
+            llama.impl.llama_c.ggml_view_3d(ctx, att_norm, n_embd, 1, n_seqs, att_norm.nb[1], att_norm.nb[2], last * llama.impl.llama_c.ggml_element_size(att_norm)),
+            llama.impl.llama_c.ggml_view_3d(ctx, ffn_norm, n_embd, 1, n_seqs, ffn_norm.nb[1], ffn_norm.nb[2], last * llama.impl.llama_c.ggml_element_size(ffn_norm)),
             1,
         );
-        llama.impl.c.ggml_build_forward_expand(b.gf, b.buildRwkvTokenShiftStore(token_shift, ubatch, il));
+        llama.impl.llama_c.ggml_build_forward_expand(b.gf, b.buildRwkvTokenShiftStore(token_shift, ubatch, il));
 
-        ffn_inp = llama.impl.c.ggml_reshape_2d(ctx, ffn_inp, n_embd, n_tokens);
-        ffn_norm = llama.impl.c.ggml_reshape_2d(ctx, ffn_norm, n_embd, n_tokens);
-        x_prev = llama.impl.c.ggml_reshape_2d(ctx, x_prev, n_embd, n_tokens);
-        cur = llama.impl.c.ggml_reshape_2d(ctx, cur, n_embd, n_tokens);
+        ffn_inp = llama.impl.llama_c.ggml_reshape_2d(ctx, ffn_inp, n_embd, n_tokens);
+        ffn_norm = llama.impl.llama_c.ggml_reshape_2d(ctx, ffn_norm, n_embd, n_tokens);
+        x_prev = llama.impl.llama_c.ggml_reshape_2d(ctx, x_prev, n_embd, n_tokens);
+        cur = llama.impl.llama_c.ggml_reshape_2d(ctx, cur, n_embd, n_tokens);
 
         if (il == b.n_layer - 1) {
-            ffn_inp = llama.impl.c.ggml_get_rows(ctx, ffn_inp, inp_out_ids);
-            ffn_norm = llama.impl.c.ggml_get_rows(ctx, ffn_norm, inp_out_ids);
-            x_prev = llama.impl.c.ggml_get_rows(ctx, x_prev, inp_out_ids);
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            ffn_inp = llama.impl.llama_c.ggml_get_rows(ctx, ffn_inp, inp_out_ids);
+            ffn_norm = llama.impl.llama_c.ggml_get_rows(ctx, ffn_norm, inp_out_ids);
+            x_prev = llama.impl.llama_c.ggml_get_rows(ctx, x_prev, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
         }
         cur = llama.models.rwkv6_base.buildRwkv6ChannelMix(b, layer, ffn_norm, x_prev, .rwkv6);
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
 
         if (hp.rescale_every_n_layers != 0 and @as(u32, @intCast(il + 1)) % hp.rescale_every_n_layers == 0) {
-            cur = llama.impl.c.ggml_scale(ctx, cur, 0.5);
+            cur = llama.impl.llama_c.ggml_scale(ctx, cur, 0.5);
         }
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

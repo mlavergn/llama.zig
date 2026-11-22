@@ -73,7 +73,7 @@ pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *
         }
 
         const rope_dup: u32 = if (i != 0) dup else 0;
-        if (hp.rope_scaling_type_train == llama.impl.c.LLAMA_ROPE_SCALING_TYPE_LONGROPE) {
+        if (hp.rope_scaling_type_train == llama.impl.llama_c.LLAMA_ROPE_SCALING_TYPE_LONGROPE) {
             layer.rope_long = try self.createTensor(.{ .tensor = .rope_factors_long, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, nr | rope_dup, exc);
             layer.rope_short = try self.createTensor(.{ .tensor = .rope_factors_short, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, nr | rope_dup, exc);
         } else {
@@ -124,7 +124,7 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
         const n_head: i64 = hp.nHead(ilu);
         const n_ff: i64 = hp.nFf(ilu);
 
-        var cur: *llama.impl.c.ggml_tensor = undefined;
+        var cur: *llama.impl.llama_c.ggml_tensor = undefined;
         if (n_head == 0) {
             // The attention-free layer of Llama-3_1-Nemotron-51B.
             cur = inpL;
@@ -155,8 +155,8 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
             cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, kq_scale, il);
         }
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.llama_c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
         // The FFN-free layer of Llama-3_1-Nemotron-Ultra-253B, which leaves
         // the next layer's input where it was.
@@ -167,7 +167,7 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
         // Llama-3_1-Nemotron-51B.
         var ffn_inp = cur;
         if (n_head > 0) {
-            ffn_inp = llama.impl.c.ggml_add(ctx, cur, inpSA);
+            ffn_inp = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
             b.cb(ffn_inp, "ffn_inp", il);
         }
         // The feed-forward network.
@@ -178,7 +178,7 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
             cur = b.buildFfn(cur, layer.ffn_up, layer.ffn_up_b, null, layer.ffn_gate, layer.ffn_gate_b, null, layer.ffn_down, layer.ffn_down_b, null, null, .silu, .par, il);
             b.cb(cur, "ffn_out", il);
         }
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
         b.cb(cur, "ffn_out", il);
 
         cur = b.buildCvec(cur, il);

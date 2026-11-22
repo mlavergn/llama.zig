@@ -47,8 +47,8 @@ fn padF32Cuda(
 }
 
 /// Ports `ggml_cuda_op_pad` (pad.cu:79 @b1b770d90).
-pub fn opPad(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn opPad(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
     const src0_d: ?*const anyopaque = src0.data;
     const dst_d: ?*anyopaque = dst.data;
     const stream = ctx.stream();
@@ -59,8 +59,8 @@ pub fn opPad(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void
     const nb02 = src0.nb[2];
     const nb03 = src0.nb[3];
 
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
 
     const lp0: i32 = dst.op_params[0];
     const rp0: i32 = dst.op_params[1];
@@ -72,7 +72,7 @@ pub fn opPad(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void
     const rp3: i32 = dst.op_params[7];
     const circular: i32 = dst.op_params[8];
 
-    const ts = ggml.impl.c.ggml_type_size(src0.type);
+    const ts = ggml.impl.ggml_c.ggml_type_size(src0.type);
     const s00: usize = nb00 / ts;
     const s01: usize = nb01 / ts;
     const s02: usize = nb02 / ts;

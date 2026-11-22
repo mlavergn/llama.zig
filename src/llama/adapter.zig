@@ -51,7 +51,7 @@ fn endsWith(s: []const u8, suffix: []const u8) bool {
 const BuftCtxMap = struct {
     entries: std.ArrayList(Entry) = .empty,
 
-    const Entry = struct { buft: mod.impl.c.ggml_backend_buffer_type_t, ctx: *mod.impl.c.ggml_context };
+    const Entry = struct { buft: mod.impl.llama_c.ggml_backend_buffer_type_t, ctx: *mod.impl.llama_c.ggml_context };
 
     fn deinit(self: *BuftCtxMap) void {
         self.entries.deinit(std.heap.c_allocator);
@@ -60,7 +60,7 @@ const BuftCtxMap = struct {
     /// Return: the context for `buft`, created on first use with room for
     /// `mem_size` bytes of tensor metadata and appended to `ctxs`; null
     /// when `ggml_init` fails.
-    fn ctxForBuft(self: *BuftCtxMap, buft: mod.impl.c.ggml_backend_buffer_type_t, mem_size: usize, ctxs: *std.ArrayList(*mod.impl.c.ggml_context)) ?*mod.impl.c.ggml_context {
+    fn ctxForBuft(self: *BuftCtxMap, buft: mod.impl.llama_c.ggml_backend_buffer_type_t, mem_size: usize, ctxs: *std.ArrayList(*mod.impl.llama_c.ggml_context)) ?*mod.impl.llama_c.ggml_context {
         const key = @intFromPtr(buft);
         var at: usize = 0;
         while (at < self.entries.items.len) : (at += 1) {
@@ -68,7 +68,7 @@ const BuftCtxMap = struct {
             if (k == key) return self.entries.items[at].ctx;
             if (k > key) break;
         }
-        const ctx = mod.impl.c.ggml_init(.{ .mem_size = mem_size, .mem_buffer = null, .no_alloc = true }) orelse return null;
+        const ctx = mod.impl.llama_c.ggml_init(.{ .mem_size = mem_size, .mem_buffer = null, .no_alloc = true }) orelse return null;
         self.entries.insert(std.heap.c_allocator, at, .{ .buft = buft, .ctx = ctx }) catch oom();
         ctxs.append(std.heap.c_allocator, ctx) catch oom();
         return ctx;
@@ -80,16 +80,16 @@ const BuftCtxMap = struct {
 pub const Cvec = struct {
     layer_start: i32 = -1,
     layer_end: i32 = -1,
-    ctxs: std.ArrayList(*mod.impl.c.ggml_context) = .empty,
-    bufs: std.ArrayList(mod.impl.c.ggml_backend_buffer_t) = .empty,
+    ctxs: std.ArrayList(*mod.impl.llama_c.ggml_context) = .empty,
+    bufs: std.ArrayList(mod.impl.llama_c.ggml_backend_buffer_t) = .empty,
     /// Per layer; null where the vector has no direction.
-    tensors: std.ArrayList(?*mod.impl.c.ggml_tensor) = .empty,
+    tensors: std.ArrayList(?*mod.impl.llama_c.ggml_tensor) = .empty,
 
     /// Return: nothing.
     pub fn deinit(self: *Cvec) void {
-        for (self.ctxs.items) |ctx| mod.impl.c.ggml_free(ctx);
+        for (self.ctxs.items) |ctx| mod.impl.llama_c.ggml_free(ctx);
         self.ctxs.deinit(std.heap.c_allocator);
-        for (self.bufs.items) |buf| mod.impl.c.ggml_backend_buffer_free(buf);
+        for (self.bufs.items) |buf| mod.impl.llama_c.ggml_backend_buffer_free(buf);
         self.bufs.deinit(std.heap.c_allocator);
         self.tensors.deinit(std.heap.c_allocator);
     }
@@ -97,7 +97,7 @@ pub const Cvec = struct {
     /// Ports `llama_adapter_cvec`'s `tensor_for` (llama-adapter.cpp:16 @b1b770d90).
     ///
     /// Return: layer `il`'s direction, or null outside the active range.
-    pub fn tensorFor(self: *const Cvec, il: c_int) ?*mod.impl.c.ggml_tensor {
+    pub fn tensorFor(self: *const Cvec, il: c_int) ?*mod.impl.llama_c.ggml_tensor {
         if (il < 0 or il < self.layer_start or il > self.layer_end or @as(usize, @intCast(il)) >= self.tensors.items.len) {
             return null;
         }
@@ -107,8 +107,8 @@ pub const Cvec = struct {
     /// Ports `llama_adapter_cvec`'s `apply_to` (llama-adapter.cpp:24 @b1b770d90).
     ///
     /// Return: `cur` plus layer `il`'s direction, or `cur` when it has none.
-    pub fn applyTo(self: *const Cvec, ctx: *mod.impl.c.ggml_context, cur: *mod.impl.c.ggml_tensor, il: c_int) *mod.impl.c.ggml_tensor {
-        if (self.tensorFor(il)) |layer_dir| return mod.impl.c.ggml_add(ctx, cur, layer_dir);
+    pub fn applyTo(self: *const Cvec, ctx: *mod.impl.llama_c.ggml_context, cur: *mod.impl.llama_c.ggml_tensor, il: c_int) *mod.impl.llama_c.ggml_tensor {
+        if (self.tensorFor(il)) |layer_dir| return mod.impl.llama_c.ggml_add(ctx, cur, layer_dir);
         return cur;
     }
 
@@ -129,7 +129,7 @@ pub const Cvec = struct {
         var ctx_map: BuftCtxMap = .{};
         defer ctx_map.deinit();
         const n_layer = hparams.nLayer();
-        const mem_size = @as(usize, n_layer) * mod.impl.c.ggml_tensor_overhead();
+        const mem_size = @as(usize, n_layer) * mod.impl.llama_c.ggml_tensor_overhead();
 
         self.tensors.ensureTotalCapacity(std.heap.c_allocator, n_layer) catch oom();
         // There is never a tensor for layer 0.
@@ -144,17 +144,17 @@ pub const Cvec = struct {
                 mod.impl.logError("%s: failed to allocate context for control vector\n", .{func});
                 return false;
             };
-            const tensor = mod.impl.c.ggml_new_tensor_1d(ctx, mod.impl.c.GGML_TYPE_F32, hparams.n_embd);
+            const tensor = mod.impl.llama_c.ggml_new_tensor_1d(ctx, mod.impl.llama_c.GGML_TYPE_F32, hparams.n_embd);
             self.tensors.append(std.heap.c_allocator, tensor) catch oom();
         }
 
         self.bufs.ensureTotalCapacity(std.heap.c_allocator, ctx_map.entries.items.len) catch oom();
         for (ctx_map.entries.items) |e| {
-            const buf = mod.impl.c.ggml_backend_alloc_ctx_tensors_from_buft(e.ctx, e.buft) orelse {
+            const buf = mod.impl.llama_c.ggml_backend_alloc_ctx_tensors_from_buft(e.ctx, e.buft) orelse {
                 mod.impl.logError("%s: failed to allocate buffer for control vector\n", .{func});
                 return false;
             };
-            mod.impl.c.ggml_backend_buffer_clear(buf, 0);
+            mod.impl.llama_c.ggml_backend_buffer_clear(buf, 0);
             self.bufs.append(std.heap.c_allocator, buf) catch oom();
         }
         return true;
@@ -204,7 +204,7 @@ pub const Cvec = struct {
             const off = ne *% (il - 1);
             if (off +% ne <= len) {
                 const t = self.tensors.items[il].?;
-                mod.impl.c.ggml_backend_tensor_set(t, d + off, 0, ne *% mod.impl.c.ggml_element_size(t));
+                mod.impl.llama_c.ggml_backend_tensor_set(t, d + off, 0, ne *% mod.impl.llama_c.ggml_element_size(t));
             }
         }
         return true;
@@ -213,8 +213,8 @@ pub const Cvec = struct {
 
 /// Mirrors `llama_adapter_lora_weight` (llama-adapter.h:48 @b1b770d90).
 pub const LoraWeight = struct {
-    a: ?*mod.impl.c.ggml_tensor = null,
-    b: ?*mod.impl.c.ggml_tensor = null,
+    a: ?*mod.impl.llama_c.ggml_tensor = null,
+    b: ?*mod.impl.llama_c.ggml_tensor = null,
 
     /// Ports `llama_adapter_lora_weight`'s `get_scale` (llama-adapter.h:53
     /// @b1b770d90): the adapter's scale, times `alpha / rank` when the
@@ -235,12 +235,12 @@ pub const Lora = struct {
     model: ?*mod.model.Model = null,
     /// `ab_map`: a weight's name to its pair.
     ab_map: stdlib.libcxx.StringMap(LoraWeight),
-    ctxs: std.ArrayList(*mod.impl.c.ggml_context) = .empty,
-    bufs: std.ArrayList(mod.impl.c.ggml_backend_buffer_t) = .empty,
+    ctxs: std.ArrayList(*mod.impl.llama_c.ggml_context) = .empty,
+    bufs: std.ArrayList(mod.impl.llama_c.ggml_backend_buffer_t) = .empty,
     alpha: f32 = 0,
     /// The file's scalar metadata, as text.
     gguf_kv: stdlib.libcxx.StringMap([:0]u8),
-    alora_invocation_tokens: std.ArrayList(mod.impl.c.llama_token) = .empty,
+    alora_invocation_tokens: std.ArrayList(mod.impl.llama_c.llama_token) = .empty,
 
     /// Ports the constructor of `llama_adapter_lora` (llama-adapter.h:80
     /// @b1b770d90).
@@ -265,9 +265,9 @@ pub const Lora = struct {
         var it = self.gguf_kv.iterator();
         while (it.next()) |e| std.heap.c_allocator.free(e.value.*);
         self.gguf_kv.deinit();
-        for (self.bufs.items) |buf| mod.impl.c.ggml_backend_buffer_free(buf);
+        for (self.bufs.items) |buf| mod.impl.llama_c.ggml_backend_buffer_free(buf);
         self.bufs.deinit(std.heap.c_allocator);
-        for (self.ctxs.items) |ctx| mod.impl.c.ggml_free(ctx);
+        for (self.ctxs.items) |ctx| mod.impl.llama_c.ggml_free(ctx);
         self.ctxs.deinit(std.heap.c_allocator);
         self.ab_map.deinit();
         std.heap.c_allocator.destroy(self);
@@ -276,7 +276,7 @@ pub const Lora = struct {
     /// Ports `llama_adapter_lora`'s `get_weight` (llama-adapter.cpp:140 @b1b770d90).
     ///
     /// Return: the pair adapting `w`, borrowed from the adapter, or null.
-    pub fn getWeight(self: *Lora, w: *const mod.impl.c.ggml_tensor) ?*LoraWeight {
+    pub fn getWeight(self: *Lora, w: *const mod.impl.llama_c.ggml_tensor) ?*LoraWeight {
         return self.ab_map.get(std.mem.sliceTo(&w.name, 0));
     }
 
@@ -325,23 +325,23 @@ const PairMap = struct {
 
 /// `get_kv_str` in `llama_adapter_lora_init_impl`: the key's string value,
 /// or empty when the key is absent.
-fn kvStr(ctx: *const mod.impl.c.gguf_context, key: mod.arch_table.Kv) []const u8 {
+fn kvStr(ctx: *const mod.impl.llama_c.gguf_context, key: mod.arch_table.Kv) []const u8 {
     var name = mod.arch.kvName(.unknown, key, null);
     var z: [mod.arch.max_name + 1]u8 = undefined;
     @memcpy(z[0..name.len], name.slice());
     z[name.len] = 0;
-    const id = mod.impl.c.gguf_find_key(ctx, &z);
-    return if (id < 0) "" else mod.gguf_meta.cString(mod.impl.c.gguf_get_val_str(ctx, id));
+    const id = mod.impl.llama_c.gguf_find_key(ctx, &z);
+    return if (id < 0) "" else mod.gguf_meta.cString(mod.impl.llama_c.gguf_get_val_str(ctx, id));
 }
 
 /// `get_kv_f32` in `llama_adapter_lora_init_impl`: the key's value, or 0.
-fn kvF32(ctx: *const mod.impl.c.gguf_context, key: mod.arch_table.Kv) f32 {
+fn kvF32(ctx: *const mod.impl.llama_c.gguf_context, key: mod.arch_table.Kv) f32 {
     var name = mod.arch.kvName(.unknown, key, null);
     var z: [mod.arch.max_name + 1]u8 = undefined;
     @memcpy(z[0..name.len], name.slice());
     z[name.len] = 0;
-    const id = mod.impl.c.gguf_find_key(ctx, &z);
-    return if (id < 0) 0.0 else mod.impl.c.gguf_get_val_f32(ctx, id);
+    const id = mod.impl.llama_c.gguf_find_key(ctx, &z);
+    return if (id < 0) 0.0 else mod.impl.llama_c.gguf_get_val_f32(ctx, id);
 }
 
 /// `count(name)` on one of `llama_hadamard`'s maps.
@@ -359,17 +359,17 @@ fn blocksHas(m: ?stdlib.libcxx.StringMap(u32), name: []const u8) bool {
 ///
 /// Return: nothing, or `error.Thrown` with what the C++ throws. On success
 /// the adapter is registered with the model.
-fn loraInitImpl(model: *mod.model.Model, file: *mod.impl.c.FILE, adapter: *Lora, exc: *mod.impl.Exception) mod.impl.Thrown!void {
+fn loraInitImpl(model: *mod.model.Model, file: *mod.impl.llama_c.FILE, adapter: *Lora, exc: *mod.impl.Exception) mod.impl.Thrown!void {
     const func = "llama_adapter_lora_init_impl";
 
-    var ctx_init: ?*mod.impl.c.ggml_context = null;
-    const ctx_gguf = mod.impl.c.gguf_init_from_file_ptr(file, .{ .no_alloc = true, .ctx = @ptrCast(&ctx_init) }) orelse
+    var ctx_init: ?*mod.impl.llama_c.ggml_context = null;
+    const ctx_gguf = mod.impl.llama_c.gguf_init_from_file_ptr(file, .{ .no_alloc = true, .ctx = @ptrCast(&ctx_init) }) orelse
         return exc.throw(.runtime_error, "failed to load lora adapter from file", .{});
-    defer mod.impl.c.gguf_free(ctx_gguf);
+    defer mod.impl.llama_c.gguf_free(ctx_gguf);
 
     // Freed before the metadata, as the C++'s locals are destroyed.
     const ctx = ctx_init;
-    defer if (ctx) |p| mod.impl.c.ggml_free(p);
+    defer if (ctx) |p| mod.impl.llama_c.ggml_free(p);
 
     // must come after gguf_init_from_file_ptr, the llama_file constructor moves the file position
     var gguf_file = try mod.mmap.File.borrow(file, exc);
@@ -380,21 +380,21 @@ fn loraInitImpl(model: *mod.model.Model, file: *mod.impl.c.FILE, adapter: *Lora,
         mod.impl.logInfo("%s: Dumping metadata keys/values.\n", .{func});
 
         var i: c_int = 0;
-        while (i < mod.impl.c.gguf_get_n_kv(ctx_gguf)) : (i += 1) {
-            const ty = mod.impl.c.gguf_get_kv_type(ctx_gguf, i);
+        while (i < mod.impl.llama_c.gguf_get_n_kv(ctx_gguf)) : (i += 1) {
+            const ty = mod.impl.llama_c.gguf_get_kv_type(ctx_gguf, i);
             var type_name: [128]u8 = undefined;
-            const tn: [*:0]const u8 = if (ty == mod.impl.c.GGUF_TYPE_ARRAY) blk: {
-                _ = mod.impl.c.snprintf(&type_name, type_name.len, "%s[%s,%zu]", mod.impl.c.gguf_type_name(ty), mod.impl.c.gguf_type_name(mod.impl.c.gguf_get_arr_type(ctx_gguf, i)), mod.impl.c.gguf_get_arr_n(ctx_gguf, i));
+            const tn: [*:0]const u8 = if (ty == mod.impl.llama_c.GGUF_TYPE_ARRAY) blk: {
+                _ = mod.impl.llama_c.snprintf(&type_name, type_name.len, "%s[%s,%zu]", mod.impl.llama_c.gguf_type_name(ty), mod.impl.llama_c.gguf_type_name(mod.impl.llama_c.gguf_get_arr_type(ctx_gguf, i)), mod.impl.llama_c.gguf_get_arr_n(ctx_gguf, i));
                 break :blk @ptrCast(&type_name);
-            } else mod.impl.c.gguf_type_name(ty);
-            const name = mod.impl.c.gguf_get_key(ctx_gguf, i);
+            } else mod.impl.llama_c.gguf_type_name(ty);
+            const name = mod.impl.llama_c.gguf_get_key(ctx_gguf, i);
 
             var value: std.ArrayList(u8) = .empty;
             defer value.deinit(std.heap.c_allocator);
             const max_value_len = 40;
             mod.loader.kvToStr(ctx_gguf, i, max_value_len, &value);
 
-            if (ty != mod.impl.c.GGUF_TYPE_ARRAY) {
+            if (ty != mod.impl.llama_c.GGUF_TYPE_ARRAY) {
                 // `emplace`: the first of a repeated key is kept.
                 const slot = adapter.gguf_kv.getOrPut(mod.gguf_meta.cString(name), undefined) catch oom();
                 if (!slot.found) slot.value.* = std.heap.c_allocator.dupeSentinel(u8, value.items, 0) catch oom();
@@ -434,25 +434,25 @@ fn loraInitImpl(model: *mod.model.Model, file: *mod.impl.c.FILE, adapter: *Lora,
         var key_z: [mod.arch.max_name + 1]u8 = undefined;
         @memcpy(key_z[0..key.len], key.slice());
         key_z[key.len] = 0;
-        const kid = mod.impl.c.gguf_find_key(ctx_gguf, &key_z);
+        const kid = mod.impl.llama_c.gguf_find_key(ctx_gguf, &key_z);
         if (kid >= 0) {
-            if (mod.impl.c.gguf_get_kv_type(ctx_gguf, kid) != mod.impl.c.GGUF_TYPE_ARRAY) {
+            if (mod.impl.llama_c.gguf_get_kv_type(ctx_gguf, kid) != mod.impl.llama_c.GGUF_TYPE_ARRAY) {
                 return exc.throw(.runtime_error, "invalid gguf type for {s}", .{key.slice()});
             }
-            const arr_type = mod.impl.c.gguf_get_arr_type(ctx_gguf, kid);
-            if (arr_type != mod.impl.c.GGUF_TYPE_UINT32) {
+            const arr_type = mod.impl.llama_c.gguf_get_arr_type(ctx_gguf, kid);
+            if (arr_type != mod.impl.llama_c.GGUF_TYPE_UINT32) {
                 return exc.throw(.runtime_error, "invalid gguf element type for {s}", .{key.slice()});
             }
-            const seq_len = mod.impl.c.gguf_get_arr_n(ctx_gguf, kid);
-            const data: [*]const mod.impl.c.llama_token = @ptrCast(@alignCast(mod.impl.c.gguf_get_arr_data(ctx_gguf, kid)));
+            const seq_len = mod.impl.llama_c.gguf_get_arr_n(ctx_gguf, kid);
+            const data: [*]const mod.impl.llama_c.llama_token = @ptrCast(@alignCast(mod.impl.llama_c.gguf_get_arr_data(ctx_gguf, kid)));
             adapter.alora_invocation_tokens.resize(std.heap.c_allocator, seq_len) catch oom();
             @memcpy(adapter.alora_invocation_tokens.items, data[0..seq_len]);
         }
     }
 
     // `int n_tensors`: the count narrows.
-    const n_tensors: c_int = @truncate(mod.impl.c.gguf_get_n_tensors(ctx_gguf));
-    const mem_size = @as(usize, @bitCast(@as(isize, n_tensors))) *% mod.impl.c.ggml_tensor_overhead();
+    const n_tensors: c_int = @truncate(mod.impl.llama_c.gguf_get_n_tensors(ctx_gguf));
+    const mem_size = @as(usize, @bitCast(@as(isize, n_tensors))) *% mod.impl.llama_c.ggml_tensor_overhead();
 
     // contexts for each buffer type
     var ctx_map: BuftCtxMap = .{};
@@ -462,8 +462,8 @@ fn loraInitImpl(model: *mod.model.Model, file: *mod.impl.c.FILE, adapter: *Lora,
     var ab_map: PairMap = .{};
     defer ab_map.deinit();
 
-    var cur: ?*mod.impl.c.ggml_tensor = mod.impl.c.ggml_get_first_tensor(ctx);
-    while (cur) |t| : (cur = mod.impl.c.ggml_get_next_tensor(ctx, t)) {
+    var cur: ?*mod.impl.llama_c.ggml_tensor = mod.impl.llama_c.ggml_get_first_tensor(ctx);
+    while (cur) |t| : (cur = mod.impl.llama_c.ggml_get_next_tensor(ctx, t)) {
         var name: std.ArrayList(u8) = .empty;
         defer name.deinit(std.heap.c_allocator);
         name.appendSlice(std.heap.c_allocator, std.mem.sliceTo(&t.name, 0)) catch oom();
@@ -485,15 +485,15 @@ fn loraInitImpl(model: *mod.model.Model, file: *mod.impl.c.FILE, adapter: *Lora,
     // get extra buffer types of the CPU
     // TODO: a more general solution for non-CPU extra buft should be implemented in the future
     //       ref: https://github.com/ggml-org/llama.cpp/pull/12593#pullrequestreview-2718659948
-    var buft_extra: std.ArrayList(mod.impl.c.ggml_backend_buffer_type_t) = .empty;
+    var buft_extra: std.ArrayList(mod.impl.llama_c.ggml_backend_buffer_type_t) = .empty;
     defer buft_extra.deinit(std.heap.c_allocator);
     {
-        const cpu_dev = mod.impl.c.ggml_backend_dev_by_type(mod.impl.c.GGML_BACKEND_DEVICE_TYPE_CPU) orelse
+        const cpu_dev = mod.impl.llama_c.ggml_backend_dev_by_type(mod.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_CPU) orelse
             return exc.throw(.runtime_error, "{s}: no CPU backend found", .{func});
-        const cpu_reg = mod.impl.c.ggml_backend_dev_backend_reg(cpu_dev);
+        const cpu_reg = mod.impl.llama_c.ggml_backend_dev_backend_reg(cpu_dev);
 
-        const get_extra: ?*const fn (mod.impl.c.ggml_backend_dev_t) callconv(.c) [*c]mod.impl.c.ggml_backend_buffer_type_t =
-            @ptrCast(@alignCast(mod.impl.c.ggml_backend_reg_get_proc_address(cpu_reg, "ggml_backend_dev_get_extra_bufts")));
+        const get_extra: ?*const fn (mod.impl.llama_c.ggml_backend_dev_t) callconv(.c) [*c]mod.impl.llama_c.ggml_backend_buffer_type_t =
+            @ptrCast(@alignCast(mod.impl.llama_c.ggml_backend_reg_get_proc_address(cpu_reg, "ggml_backend_dev_get_extra_bufts")));
         if (get_extra) |f| {
             var extra_bufts = f(cpu_dev);
             while (extra_bufts != null and extra_bufts[0] != null) : (extra_bufts += 1) {
@@ -526,21 +526,21 @@ fn loraInitImpl(model: *mod.model.Model, file: *mod.impl.c.FILE, adapter: *Lora,
         }
         const mt_name: [*:0]const u8 = @ptrCast(&model_tensor.name);
 
-        var buft = mod.impl.c.ggml_backend_buffer_get_type(model_tensor.buffer);
+        var buft = mod.impl.llama_c.ggml_backend_buffer_get_type(model_tensor.buffer);
 
         // do not load loras to extra buffer types (i.e. bufts for repacking) -> use the CPU in that case
         for (buft_extra.items) |ex| {
             if (ex == buft) {
-                mod.impl.logWarn("%s: lora for '%s' cannot use buft '%s', fallback to CPU\n", .{ func, mt_name, mod.impl.c.ggml_backend_buft_name(buft) });
+                mod.impl.logWarn("%s: lora for '%s' cannot use buft '%s', fallback to CPU\n", .{ func, mt_name, mod.impl.llama_c.ggml_backend_buft_name(buft) });
 
-                const cpu_dev = mod.impl.c.ggml_backend_dev_by_type(mod.impl.c.GGML_BACKEND_DEVICE_TYPE_CPU) orelse
+                const cpu_dev = mod.impl.llama_c.ggml_backend_dev_by_type(mod.impl.llama_c.GGML_BACKEND_DEVICE_TYPE_CPU) orelse
                     return exc.throw(.runtime_error, "{s}: no CPU backend found", .{func});
-                buft = mod.impl.c.ggml_backend_dev_buffer_type(cpu_dev);
+                buft = mod.impl.llama_c.ggml_backend_dev_buffer_type(cpu_dev);
                 break;
             }
         }
 
-        mod.impl.logDebug("%s: lora for '%s' -> '%s'\n", .{ func, mt_name, mod.impl.c.ggml_backend_buft_name(buft) });
+        mod.impl.logDebug("%s: lora for '%s' -> '%s'\n", .{ func, mt_name, mod.impl.llama_c.ggml_backend_buft_name(buft) });
 
         const dev_ctx = ctx_map.ctxForBuft(buft, mem_size, &adapter.ctxs);
         // validate tensor shape
@@ -559,10 +559,10 @@ fn loraInitImpl(model: *mod.model.Model, file: *mod.impl.c.FILE, adapter: *Lora,
         }
 
         // save tensor to adapter
-        const tensor_a = mod.impl.c.ggml_dup_tensor(dev_ctx, wa);
-        const tensor_b = mod.impl.c.ggml_dup_tensor(dev_ctx, wb);
-        _ = mod.impl.c.ggml_set_name(tensor_a, &wa.name);
-        _ = mod.impl.c.ggml_set_name(tensor_b, &wb.name);
+        const tensor_a = mod.impl.llama_c.ggml_dup_tensor(dev_ctx, wa);
+        const tensor_b = mod.impl.llama_c.ggml_dup_tensor(dev_ctx, wb);
+        _ = mod.impl.llama_c.ggml_set_name(tensor_a, &wa.name);
+        _ = mod.impl.llama_c.ggml_set_name(tensor_b, &wb.name);
         const slot = adapter.ab_map.getOrPut(name, .{}) catch oom();
         slot.value.* = .{ .a = tensor_a, .b = tensor_b };
     }
@@ -572,10 +572,10 @@ fn loraInitImpl(model: *mod.model.Model, file: *mod.impl.c.FILE, adapter: *Lora,
         adapter.ctxs.ensureTotalCapacity(std.heap.c_allocator, ctx_map.entries.items.len) catch oom();
         adapter.bufs.ensureTotalCapacity(std.heap.c_allocator, ctx_map.entries.items.len) catch oom();
         for (ctx_map.entries.items) |e| {
-            const buf = mod.impl.c.ggml_backend_alloc_ctx_tensors_from_buft(e.ctx, e.buft) orelse
+            const buf = mod.impl.llama_c.ggml_backend_alloc_ctx_tensors_from_buft(e.ctx, e.buft) orelse
                 return exc.throw(.runtime_error, "failed to allocate buffer for lora adapter\n", .{});
             mod.impl.logInfo("%s: %10s LoRA buffer size = %8.2f MiB\n", .{
-                func, mod.impl.c.ggml_backend_buffer_name(buf), @as(f64, @floatFromInt(mod.impl.c.ggml_backend_buffer_get_size(buf))) / 1024.0 / 1024.0,
+                func, mod.impl.llama_c.ggml_backend_buffer_name(buf), @as(f64, @floatFromInt(mod.impl.llama_c.ggml_backend_buffer_get_size(buf))) / 1024.0 / 1024.0,
             });
             adapter.bufs.append(std.heap.c_allocator, buf) catch oom();
         }
@@ -586,16 +586,16 @@ fn loraInitImpl(model: *mod.model.Model, file: *mod.impl.c.FILE, adapter: *Lora,
         var read_buf: std.ArrayList(u8) = .empty;
         defer read_buf.deinit(std.heap.c_allocator);
         const SetTensor = struct {
-            fn run(g: *const mod.impl.c.gguf_context, gf: *mod.mmap.File, buf: *std.ArrayList(u8), orig: *mod.impl.c.ggml_tensor, dev: *mod.impl.c.ggml_tensor, e: *mod.impl.Exception) mod.impl.Thrown!void {
-                const offs = mod.impl.c.gguf_get_data_offset(g) +% mod.impl.c.gguf_get_tensor_offset(g, mod.impl.c.gguf_find_tensor(g, &orig.name));
-                const size = mod.impl.c.ggml_nbytes(orig);
+            fn run(g: *const mod.impl.llama_c.gguf_context, gf: *mod.mmap.File, buf: *std.ArrayList(u8), orig: *mod.impl.llama_c.ggml_tensor, dev: *mod.impl.llama_c.ggml_tensor, e: *mod.impl.Exception) mod.impl.Thrown!void {
+                const offs = mod.impl.llama_c.gguf_get_data_offset(g) +% mod.impl.llama_c.gguf_get_tensor_offset(g, mod.impl.llama_c.gguf_find_tensor(g, &orig.name));
+                const size = mod.impl.llama_c.ggml_nbytes(orig);
                 if (offs +% size < offs or offs +% size > gf.size) {
                     return e.throw(.runtime_error, "LoRA tensor '{s}' data is not within the file bounds, file is corrupted or incomplete", .{std.mem.sliceTo(&orig.name, 0)});
                 }
                 buf.resize(std.heap.c_allocator, size) catch oom();
-                try gf.seek(offs, mod.impl.c.SEEK_SET, e);
+                try gf.seek(offs, mod.impl.llama_c.SEEK_SET, e);
                 try gf.readRaw(buf.items.ptr, size, e);
-                mod.impl.c.ggml_backend_tensor_set(dev, buf.items.ptr, 0, size);
+                mod.impl.llama_c.ggml_backend_tensor_set(dev, buf.items.ptr, 0, size);
             }
         };
         var it = adapter.ab_map.iterator();
@@ -625,13 +625,13 @@ pub fn loraInit(model: *mod.model.Model, path_lora: [*:0]const u8) ?*Lora {
     const func = "llama_adapter_lora_init";
     mod.impl.logInfo("%s: loading lora adapter from '%s' ...\n", .{ func, path_lora });
 
-    const file = mod.impl.c.ggml_fopen(path_lora, "rb") orelse {
+    const file = mod.impl.llama_c.ggml_fopen(path_lora, "rb") orelse {
         mod.impl.logError("%s: failed to open '%s': %s\n", .{ func, path_lora, stdlib.errno.strerror(std.c._errno().*) });
         return null;
     };
 
     const adapter = loraInitFromFilePtr(model, file);
-    _ = mod.impl.c.fclose(file);
+    _ = mod.impl.llama_c.fclose(file);
 
     return adapter;
 }
@@ -645,7 +645,7 @@ pub fn loraInit(model: *mod.model.Model, path_lora: [*:0]const u8) ?*Lora {
 /// - `file`: the open file; borrowed, never closed here. Null is refused.
 ///
 /// Return: the adapter, or null with the reason logged.
-pub fn loraInitFromFilePtr(model: *mod.model.Model, file: ?*mod.impl.c.FILE) ?*Lora {
+pub fn loraInitFromFilePtr(model: *mod.model.Model, file: ?*mod.impl.llama_c.FILE) ?*Lora {
     const func = "llama_adapter_lora_init_from_file_ptr";
     const fp = file orelse {
         mod.impl.logError("%s: file is NULL\n", .{func});

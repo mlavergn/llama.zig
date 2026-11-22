@@ -109,10 +109,10 @@ inline fn bicubic(p0: f32, p1: f32, p2: f32, p3: f32, x: f32) f32 {
 }
 
 /// Ports `ggml_compute_forward_upscale_f32` (ops.cpp:8084 @b1b770d90).
-fn upscaleF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+fn upscaleF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
@@ -136,13 +136,13 @@ fn upscaleF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml
     const mode_flags = ggml.impl.getOpParamsI32(dst, 0);
     const mode = mode_flags & 0xFF;
 
-    if ((mode_flags & ggml.impl.c.GGML_SCALE_FLAG_ALIGN_CORNERS) != 0) {
+    if ((mode_flags & ggml.impl.ggml_c.GGML_SCALE_FLAG_ALIGN_CORNERS) != 0) {
         pixel_offset = 0.0;
         sf0 = if (l.ne0 > 1 and l.ne00 > 1) f(l.ne0 - 1) / f(l.ne00 - 1) else sf0;
         sf1 = if (l.ne1 > 1 and l.ne01 > 1) f(l.ne1 - 1) / f(l.ne01 - 1) else sf1;
     }
 
-    if (mode == ggml.impl.c.GGML_SCALE_MODE_NEAREST) {
+    if (mode == ggml.impl.ggml_c.GGML_SCALE_MODE_NEAREST) {
         var j3: i64 = 0;
         while (j3 < l.ne3) : (j3 += 1) {
             const j03 = trunc64(f(j3) / sf3);
@@ -164,7 +164,7 @@ fn upscaleF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml
                 }
             }
         }
-    } else if (mode == ggml.impl.c.GGML_SCALE_MODE_BILINEAR and (mode_flags & ggml.impl.c.GGML_SCALE_FLAG_ANTIALIAS) != 0) {
+    } else if (mode == ggml.impl.ggml_c.GGML_SCALE_MODE_BILINEAR and (mode_flags & ggml.impl.ggml_c.GGML_SCALE_FLAG_ANTIALIAS) != 0) {
         // Similar to F.interpolate(..., mode="bilinear", align_corners=False, antialias=True)
         // https://github.com/pytorch/pytorch/blob/8871ff29b743948d1225389d5b7068f37b22750b/aten/src/ATen/native/cpu/UpSampleKernel.cpp
 
@@ -224,7 +224,7 @@ fn upscaleF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml
                 }
             }
         }
-    } else if (mode == ggml.impl.c.GGML_SCALE_MODE_BILINEAR) {
+    } else if (mode == ggml.impl.ggml_c.GGML_SCALE_MODE_BILINEAR) {
         var j3: i64 = 0;
         while (j3 < l.ne3) : (j3 += 1) {
             const j03 = trunc64(f(j3) / sf3);
@@ -276,7 +276,7 @@ fn upscaleF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml
                 }
             }
         }
-    } else if (mode == ggml.impl.c.GGML_SCALE_MODE_BICUBIC) {
+    } else if (mode == ggml.impl.ggml_c.GGML_SCALE_MODE_BICUBIC) {
         // https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
         var j3: i64 = 0;
         while (j3 < l.ne3) : (j3 += 1) {
@@ -348,11 +348,11 @@ const BicubicTap = struct {
 };
 
 /// Ports `ggml_compute_forward_upscale` (ops.cpp:8280 @b1b770d90).
-pub export fn ggml_compute_forward_upscale(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_upscale(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => upscaleF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => upscaleF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -377,8 +377,8 @@ inline fn wrapAround(coord: i64, size: i64) i64 {
 /// non-circular row is zeroed whole when it lies in the padding, or filled
 /// with `memset`/`memcpy`/`memset` when the source row is contiguous and both
 /// pads along dimension 0 are non-negative.
-fn padF32(comptime circular: bool, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+fn padF32(comptime circular: bool, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     // assert(dst->nb[0] == sizeof(float)); -- compiled out under NDEBUG
 
@@ -458,11 +458,11 @@ fn padF32(comptime circular: bool, params: *const ggml.cpu.defs.ComputeParams, d
 }
 
 /// Ports `ggml_compute_forward_pad` (ops.cpp:8374 @b1b770d90).
-pub export fn ggml_compute_forward_pad(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_pad(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
     const circular = ggml.impl.getOpParamsI32(dst, 8) != 0;
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => if (circular) padF32(true, params, dst) else padF32(false, params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => if (circular) padF32(true, params, dst) else padF32(false, params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -471,11 +471,11 @@ pub export fn ggml_compute_forward_pad(params: *const ggml.cpu.defs.ComputeParam
 // pad_reflect_1d
 
 /// Ports `ggml_compute_forward_pad_reflect_1d` (ops.cpp:8397 @b1b770d90).
-pub export fn ggml_compute_forward_pad_reflect_1d(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_pad_reflect_1d(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
-    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
@@ -528,8 +528,8 @@ fn wrapIndex(i: i64, ne: i64) i64 {
 }
 
 /// Ports `ggml_compute_forward_roll_f32` (ops.cpp:8441 @b1b770d90).
-fn rollF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+fn rollF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
     const src_data: [*]const f32 = @ptrCast(@alignCast(src0.data.?));
     const dst_data: [*]f32 = @ptrCast(@alignCast(dst.data.?));
 
@@ -567,11 +567,11 @@ fn rollF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_te
 }
 
 /// Ports `ggml_compute_forward_roll` (ops.cpp:8479 @b1b770d90).
-pub export fn ggml_compute_forward_roll(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_roll(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => rollF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => rollF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -580,7 +580,7 @@ pub export fn ggml_compute_forward_roll(params: *const ggml.cpu.defs.ComputePara
 // arange
 
 /// Ports `ggml_compute_forward_arange_f32` (ops.cpp:8499 @b1b770d90).
-fn arangeF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+fn arangeF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     ggml.impl.assert(dst.nb[0] == @sizeOf(f32), "dst->nb[0] == sizeof(float)");
 
     const ith: i64 = params.ith;
@@ -592,7 +592,7 @@ fn arangeF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_
 
     const steps: i64 = @intFromFloat(@ceil((stop - start) / step));
 
-    ggml.impl.assert(ggml.impl.c.ggml_nelements(dst) == steps, "ggml_nelements(dst) == steps");
+    ggml.impl.assert(ggml.impl.ggml_c.ggml_nelements(dst) == steps, "ggml_nelements(dst) == steps");
 
     const d: [*]f32 = @ptrCast(@alignCast(dst.data.?));
     var i: i64 = ith;
@@ -605,9 +605,9 @@ fn arangeF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_
 }
 
 /// Ports `ggml_compute_forward_arange` (ops.cpp:8522 @b1b770d90).
-pub export fn ggml_compute_forward_arange(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+pub fn ggml_compute_forward_arange(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
     switch (dst.type) {
-        ggml.impl.c.GGML_TYPE_F32 => arangeF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => arangeF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }
@@ -616,8 +616,8 @@ pub export fn ggml_compute_forward_arange(params: *const ggml.cpu.defs.ComputePa
 // timestep_embedding
 
 /// Ports `ggml_compute_forward_timestep_embedding_f32` (ops.cpp:8537 @b1b770d90).
-fn timestepEmbeddingF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+fn timestepEmbeddingF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     ggml.impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
 
@@ -657,11 +657,11 @@ fn timestepEmbeddingF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.i
 }
 
 /// Ports `ggml_compute_forward_timestep_embedding` (ops.cpp:8570 @b1b770d90).
-pub export fn ggml_compute_forward_timestep_embedding(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
-    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+pub fn ggml_compute_forward_timestep_embedding(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        ggml.impl.c.GGML_TYPE_F32 => timestepEmbeddingF32(params, dst),
+        ggml.impl.ggml_c.GGML_TYPE_F32 => timestepEmbeddingF32(params, dst),
         else => ggml.impl.abort("fatal error"),
     }
 }

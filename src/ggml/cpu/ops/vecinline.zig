@@ -26,7 +26,7 @@ pub inline fn add_f32(n: i64, z: [*]f32, x: [*]const f32, y: [*]const f32) void 
 }
 
 /// Ports `ggml_vec_add_f16` (vec.h:104 @b1b770d90).
-pub inline fn add_f16(n: i64, z: [*]ggml.impl.c.ggml_fp16_t, x: [*]const ggml.impl.c.ggml_fp16_t, y: [*]const ggml.impl.c.ggml_fp16_t) void {
+pub inline fn add_f16(n: i64, z: [*]ggml.impl.ggml_c.ggml_fp16_t, x: [*]const ggml.impl.ggml_c.ggml_fp16_t, y: [*]const ggml.impl.ggml_c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
         z[i] = ggml.cpu.convert.cpuFp32ToFp16(ggml.impl.fp16ToFp32(x[i]) + ggml.impl.fp16ToFp32(y[i]));
@@ -105,7 +105,7 @@ pub inline fn sum_f32_ggf(n: i64, s: *f64, x: [*]const f32) void {
 
 /// Ports `ggml_vec_sum_f16_ggf` (vec.h:1700 @b1b770d90). Despite the `_ggf`,
 /// this one accumulates in `f32`; only the `f32` variant above widens.
-pub inline fn sum_f16_ggf(n: i64, s: *f32, x: [*]const ggml.impl.c.ggml_fp16_t) void {
+pub inline fn sum_f16_ggf(n: i64, s: *f32, x: [*]const ggml.impl.ggml_c.ggml_fp16_t) void {
     var sum: f32 = 0.0;
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) sum += ggml.impl.fp16ToFp32(x[i]);
@@ -113,7 +113,7 @@ pub inline fn sum_f16_ggf(n: i64, s: *f32, x: [*]const ggml.impl.c.ggml_fp16_t) 
 }
 
 /// Ports `ggml_vec_sum_bf16_ggf` (vec.h:1708 @b1b770d90).
-pub inline fn sum_bf16_ggf(n: i64, s: *f32, x: [*]const ggml.impl.c.ggml_bf16_t) void {
+pub inline fn sum_bf16_ggf(n: i64, s: *f32, x: [*]const ggml.impl.ggml_c.ggml_bf16_t) void {
     var sum: f32 = 0.0;
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) sum += ggml.impl.bf16ToFp32(x[i].bits);
@@ -165,7 +165,7 @@ pub inline fn cpy_i32(n: i64, y: [*]i32, x: [*]const i32) void {
 }
 
 /// Ports `ggml_vec_set_f16` (vec.h:86 @b1b770d90).
-pub inline fn set_f16(n: i64, x: [*]ggml.impl.c.ggml_fp16_t, v: ggml.impl.c.ggml_fp16_t) void {
+pub inline fn set_f16(n: i64, x: [*]ggml.impl.ggml_c.ggml_fp16_t, v: ggml.impl.ggml_c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) x[i] = v;
 }
@@ -219,7 +219,7 @@ pub inline fn mad_f32(n: i64, y: [*]f32, x: [*]const f32, v: f32) void {
 /// `__ARM_FP16_FORMAT_IEEE` hold on every aarch64 target) `vcvt_f32_f16` then
 /// `vfmaq_f32`, and the tail `y[i] += x*v` is one contracted expression. The
 /// widening is exact, so body and tail are one loop here, as for `mad_f32`.
-pub inline fn mad_f16_f32(n: i64, y: [*]f32, x: [*]const ggml.impl.c.ggml_fp16_t, v: f32) void {
+pub inline fn mad_f16_f32(n: i64, y: [*]f32, x: [*]const ggml.impl.ggml_c.ggml_fp16_t, v: f32) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] = @mulAdd(f32, ggml.impl.fp16ToFp32(x[i]), v, y[i]);
 }
@@ -231,7 +231,7 @@ pub inline fn mad_f16_f32(n: i64, y: [*]f32, x: [*]const ggml.impl.c.ggml_fp16_t
 /// Elements below `n & ~(GGML_F16_STEP - 1)` go through `vfmaq_f16` with `v`
 /// rounded to `f16` first — a fused multiply-add **in half precision**. The
 /// rest widen to `f32`, fuse there, and narrow once.
-pub inline fn mad_f16(n: i64, y: [*]ggml.impl.c.ggml_fp16_t, x: [*]const ggml.impl.c.ggml_fp16_t, v: f32) void {
+pub inline fn mad_f16(n: i64, y: [*]ggml.impl.ggml_c.ggml_fp16_t, x: [*]const ggml.impl.ggml_c.ggml_fp16_t, v: f32) void {
     if (comptime builtin.cpu.arch == .x86_64) return madF16Avx(n, y, x, v);
     const nn: usize = @intCast(n);
     const np = if (comptime ggml.cpu.simd.F16.half_precision) nn & ~@as(usize, ggml.cpu.simd.F16.step - 1) else 0;
@@ -253,7 +253,7 @@ pub inline fn mad_f16(n: i64, y: [*]ggml.impl.c.ggml_fp16_t, x: [*]const ggml.im
 /// the tail fuses the same way and narrows in software. The two narrowings
 /// agree on every number and differ on a NaN's payload, so the body is kept
 /// rather than folded into the tail.
-fn madF16Avx(n: i64, y: [*]ggml.impl.c.ggml_fp16_t, x: [*]const ggml.impl.c.ggml_fp16_t, v: f32) void {
+fn madF16Avx(n: i64, y: [*]ggml.impl.ggml_c.ggml_fp16_t, x: [*]const ggml.impl.ggml_c.ggml_fp16_t, v: f32) void {
     const F16 = ggml.cpu.simd.F16;
     const nn: usize = @intCast(n);
     const np = nn & ~@as(usize, F16.step - 1);
@@ -331,7 +331,7 @@ pub inline fn scale_f32(n: i64, y: [*]f32, v: f32) void {
 /// with `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC`: the body multiplies **in
 /// half precision** by `v` rounded to `f16`, the tail in `f32`. On x86 the
 /// AVX arm, `scaleF16Avx`.
-pub inline fn scale_f16(n: i64, y: [*]ggml.impl.c.ggml_fp16_t, v: f32) void {
+pub inline fn scale_f16(n: i64, y: [*]ggml.impl.ggml_c.ggml_fp16_t, v: f32) void {
     if (comptime builtin.cpu.arch == .x86_64) return scaleF16Avx(n, y, v);
     const nn: usize = @intCast(n);
     const np = if (comptime ggml.cpu.simd.F16.half_precision) nn & ~@as(usize, ggml.cpu.simd.F16.step - 1) else 0;
@@ -347,7 +347,7 @@ pub inline fn scale_f16(n: i64, y: [*]ggml.impl.c.ggml_fp16_t, v: f32) void {
 
 /// `ggml_vec_scale_f16`'s `GGML_SIMD` AVX arm: as `madF16Avx`, a multiply
 /// instead of the fused multiply-add.
-fn scaleF16Avx(n: i64, y: [*]ggml.impl.c.ggml_fp16_t, v: f32) void {
+fn scaleF16Avx(n: i64, y: [*]ggml.impl.ggml_c.ggml_fp16_t, v: f32) void {
     const F16 = ggml.cpu.simd.F16;
     const nn: usize = @intCast(n);
     const np = nn & ~@as(usize, F16.step - 1);
@@ -394,7 +394,7 @@ pub inline fn leaky_relu_f32(n: i64, y: [*]f32, x: [*]const f32, ns: f32) void {
 }
 
 /// Ports `ggml_vec_leaky_relu_f16` (vec.h:965 @b1b770d90).
-pub inline fn leaky_relu_f16(n: i64, y: [*]ggml.impl.c.ggml_fp16_t, x: [*]const ggml.impl.c.ggml_fp16_t, ns: f32) void {
+pub inline fn leaky_relu_f16(n: i64, y: [*]ggml.impl.ggml_c.ggml_fp16_t, x: [*]const ggml.impl.ggml_c.ggml_fp16_t, ns: f32) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
         const v = ggml.impl.fp16ToFp32(x[i]);
@@ -405,13 +405,13 @@ pub inline fn leaky_relu_f16(n: i64, y: [*]ggml.impl.c.ggml_fp16_t, x: [*]const 
 }
 
 /// Ports `ggml_vec_gelu_f16` (vec.h:1007 @b1b770d90): a straight table lookup.
-pub inline fn gelu_f16(n: i64, y: [*]ggml.impl.c.ggml_fp16_t, x: [*]const ggml.impl.c.ggml_fp16_t) void {
+pub inline fn gelu_f16(n: i64, y: [*]ggml.impl.ggml_c.ggml_fp16_t, x: [*]const ggml.impl.ggml_c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] = ggml.cpu.vec.ggml_table_gelu_f16[x[i]];
 }
 
 /// Ports `ggml_vec_gelu_erf_f16` (vec.h:1020 @b1b770d90).
-pub inline fn gelu_erf_f16(n: i64, y: [*]ggml.impl.c.ggml_fp16_t, x: [*]const ggml.impl.c.ggml_fp16_t) void {
+pub inline fn gelu_erf_f16(n: i64, y: [*]ggml.impl.ggml_c.ggml_fp16_t, x: [*]const ggml.impl.ggml_c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
         const xi = ggml.impl.fp16ToFp32(x[i]);
@@ -446,19 +446,19 @@ pub inline fn gelu_erf_f32(n: i64, y: [*]f32, x: [*]const f32) void {
 }
 
 /// Ports `ggml_vec_gelu_quick_f16` (vec.h:1069 @b1b770d90).
-pub inline fn gelu_quick_f16(n: i64, y: [*]ggml.impl.c.ggml_fp16_t, x: [*]const ggml.impl.c.ggml_fp16_t) void {
+pub inline fn gelu_quick_f16(n: i64, y: [*]ggml.impl.ggml_c.ggml_fp16_t, x: [*]const ggml.impl.ggml_c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] = ggml.cpu.vec.ggml_table_gelu_quick_f16[x[i]];
 }
 
 /// Ports `ggml_silu_f16` (vec.h:1099 @b1b770d90).
-inline fn siluF16(x: ggml.impl.c.ggml_fp16_t) ggml.impl.c.ggml_fp16_t {
+inline fn siluF16(x: ggml.impl.ggml_c.ggml_fp16_t) ggml.impl.ggml_c.ggml_fp16_t {
     const v = ggml.impl.fp16ToFp32(x);
     return ggml.cpu.convert.cpuFp32ToFp16(v / (1.0 + stdlib.libm.expf(-v)));
 }
 
 /// Ports `ggml_vec_silu_f16` (vec.h:1510 @b1b770d90).
-pub inline fn silu_f16(n: i64, y: [*]ggml.impl.c.ggml_fp16_t, x: [*]const ggml.impl.c.ggml_fp16_t) void {
+pub inline fn silu_f16(n: i64, y: [*]ggml.impl.ggml_c.ggml_fp16_t, x: [*]const ggml.impl.ggml_c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] = siluF16(x[i]);
 }
@@ -474,7 +474,7 @@ inline fn siluBackwardF32(x: f32, dy: f32) f32 {
 
 /// Ports `ggml_silu_backward_f16` (vec.h:1527 @b1b770d90), fused as
 /// `siluBackwardF32` is.
-inline fn siluBackwardF16(x: ggml.impl.c.ggml_fp16_t, dy: ggml.impl.c.ggml_fp16_t) ggml.impl.c.ggml_fp16_t {
+inline fn siluBackwardF16(x: ggml.impl.ggml_c.ggml_fp16_t, dy: ggml.impl.ggml_c.ggml_fp16_t) ggml.impl.ggml_c.ggml_fp16_t {
     const v = ggml.impl.fp16ToFp32(x);
     const s = 1.0 / (1.0 + stdlib.libm.expf(-v));
     return ggml.cpu.convert.cpuFp32ToFp16(ggml.impl.fp16ToFp32(dy) * s * @mulAdd(f32, v, 1.0 - s, 1.0));
@@ -487,7 +487,7 @@ pub inline fn silu_backward_f32(n: i64, dx: [*]f32, x: [*]const f32, dy: [*]cons
 }
 
 /// Ports `ggml_vec_silu_backward_f16` (vec.h:1539 @b1b770d90).
-pub inline fn silu_backward_f16(n: i64, dx: [*]ggml.impl.c.ggml_fp16_t, x: [*]const ggml.impl.c.ggml_fp16_t, dy: [*]const ggml.impl.c.ggml_fp16_t) void {
+pub inline fn silu_backward_f16(n: i64, dx: [*]ggml.impl.ggml_c.ggml_fp16_t, x: [*]const ggml.impl.ggml_c.ggml_fp16_t, dy: [*]const ggml.impl.ggml_c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) dx[i] = siluBackwardF16(x[i], dy[i]);
 }
@@ -502,7 +502,7 @@ pub inline fn reglu_f32(n: i64, y: [*]f32, x: [*]const f32, g: [*]const f32) voi
 }
 
 /// Ports `ggml_vec_reglu_f16` (vec.h:1551 @b1b770d90).
-pub inline fn reglu_f16(n: i64, y: [*]ggml.impl.c.ggml_fp16_t, x: [*]const ggml.impl.c.ggml_fp16_t, g: [*]const ggml.impl.c.ggml_fp16_t) void {
+pub inline fn reglu_f16(n: i64, y: [*]ggml.impl.ggml_c.ggml_fp16_t, x: [*]const ggml.impl.ggml_c.ggml_fp16_t, g: [*]const ggml.impl.ggml_c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
         const v = ggml.impl.fp16ToFp32(x[i]);
@@ -527,7 +527,7 @@ pub inline fn geglu_f32(n: i64, y: [*]f32, x: [*]const f32, g: [*]const f32) voi
 }
 
 /// Ports `ggml_vec_geglu_f16` (vec.h:1588 @b1b770d90).
-pub inline fn geglu_f16(n: i64, y: [*]ggml.impl.c.ggml_fp16_t, x: [*]const ggml.impl.c.ggml_fp16_t, g: [*]const ggml.impl.c.ggml_fp16_t) void {
+pub inline fn geglu_f16(n: i64, y: [*]ggml.impl.ggml_c.ggml_fp16_t, x: [*]const ggml.impl.ggml_c.ggml_fp16_t, g: [*]const ggml.impl.ggml_c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
         const v = ggml.impl.fp16ToFp32(g[i]);
@@ -536,7 +536,7 @@ pub inline fn geglu_f16(n: i64, y: [*]ggml.impl.c.ggml_fp16_t, x: [*]const ggml.
 }
 
 /// Ports `ggml_vec_swiglu_f16` (vec.h:1604 @b1b770d90).
-pub inline fn swiglu_f16(n: i64, y: [*]ggml.impl.c.ggml_fp16_t, x: [*]const ggml.impl.c.ggml_fp16_t, g: [*]const ggml.impl.c.ggml_fp16_t) void {
+pub inline fn swiglu_f16(n: i64, y: [*]ggml.impl.ggml_c.ggml_fp16_t, x: [*]const ggml.impl.ggml_c.ggml_fp16_t, g: [*]const ggml.impl.ggml_c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
         const xi = ggml.impl.fp16ToFp32(x[i]);
@@ -555,7 +555,7 @@ pub inline fn geglu_erf_f32(n: i64, y: [*]f32, x: [*]const f32, g: [*]const f32)
 }
 
 /// Ports `ggml_vec_geglu_erf_f16` (vec.h:1627 @b1b770d90).
-pub inline fn geglu_erf_f16(n: i64, y: [*]ggml.impl.c.ggml_fp16_t, x: [*]const ggml.impl.c.ggml_fp16_t, g: [*]const ggml.impl.c.ggml_fp16_t) void {
+pub inline fn geglu_erf_f16(n: i64, y: [*]ggml.impl.ggml_c.ggml_fp16_t, x: [*]const ggml.impl.ggml_c.ggml_fp16_t, g: [*]const ggml.impl.ggml_c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
         const xi = ggml.impl.fp16ToFp32(x[i]);
@@ -565,7 +565,7 @@ pub inline fn geglu_erf_f16(n: i64, y: [*]ggml.impl.c.ggml_fp16_t, x: [*]const g
 }
 
 /// Ports `ggml_vec_geglu_quick_f16` (vec.h:1656 @b1b770d90).
-pub inline fn geglu_quick_f16(n: i64, y: [*]ggml.impl.c.ggml_fp16_t, x: [*]const ggml.impl.c.ggml_fp16_t, g: [*]const ggml.impl.c.ggml_fp16_t) void {
+pub inline fn geglu_quick_f16(n: i64, y: [*]ggml.impl.ggml_c.ggml_fp16_t, x: [*]const ggml.impl.ggml_c.ggml_fp16_t, g: [*]const ggml.impl.ggml_c.ggml_fp16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
         const v = ggml.impl.fp16ToFp32(g[i]);
@@ -610,22 +610,22 @@ pub inline fn siluScalarF32(x: f32) f32 {
     return x / (1.0 + stdlib.libm.expf(-x));
 }
 
-inline fn toF32(v: ggml.impl.c.ggml_bf16_t) f32 {
+inline fn toF32(v: ggml.impl.ggml_c.ggml_bf16_t) f32 {
     return ggml.impl.bf16ToFp32(v.bits);
 }
 
-inline fn toBf16(v: f32) ggml.impl.c.ggml_bf16_t {
+inline fn toBf16(v: f32) ggml.impl.ggml_c.ggml_bf16_t {
     return .{ .bits = ggml.impl.fp32ToBf16(v) };
 }
 
 /// Ports `ggml_vec_gelu_bf16` (vec.h:1014 @b1b770d90).
-pub inline fn gelu_bf16(n: i64, y: [*]ggml.impl.c.ggml_bf16_t, x: [*]const ggml.impl.c.ggml_bf16_t) void {
+pub inline fn gelu_bf16(n: i64, y: [*]ggml.impl.ggml_c.ggml_bf16_t, x: [*]const ggml.impl.ggml_c.ggml_bf16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] = toBf16(geluScalarF32(toF32(x[i])));
 }
 
 /// Ports `ggml_vec_gelu_erf_bf16` (vec.h:1028 @b1b770d90).
-pub inline fn gelu_erf_bf16(n: i64, y: [*]ggml.impl.c.ggml_bf16_t, x: [*]const ggml.impl.c.ggml_bf16_t) void {
+pub inline fn gelu_erf_bf16(n: i64, y: [*]ggml.impl.ggml_c.ggml_bf16_t, x: [*]const ggml.impl.ggml_c.ggml_bf16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
         const xi = toF32(x[i]);
@@ -634,19 +634,19 @@ pub inline fn gelu_erf_bf16(n: i64, y: [*]ggml.impl.c.ggml_bf16_t, x: [*]const g
 }
 
 /// Ports `ggml_vec_gelu_quick_bf16` (vec.h:1076 @b1b770d90).
-pub inline fn gelu_quick_bf16(n: i64, y: [*]ggml.impl.c.ggml_bf16_t, x: [*]const ggml.impl.c.ggml_bf16_t) void {
+pub inline fn gelu_quick_bf16(n: i64, y: [*]ggml.impl.ggml_c.ggml_bf16_t, x: [*]const ggml.impl.ggml_c.ggml_bf16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] = toBf16(geluQuickScalarF32(toF32(x[i])));
 }
 
 /// Ports `ggml_vec_silu_bf16` (vec.h:1516 @b1b770d90).
-pub inline fn silu_bf16(n: i64, y: [*]ggml.impl.c.ggml_bf16_t, x: [*]const ggml.impl.c.ggml_bf16_t) void {
+pub inline fn silu_bf16(n: i64, y: [*]ggml.impl.ggml_c.ggml_bf16_t, x: [*]const ggml.impl.ggml_c.ggml_bf16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] = toBf16(siluScalarF32(toF32(x[i])));
 }
 
 /// Ports `ggml_vec_reglu_bf16` (vec.h:1558 @b1b770d90).
-pub inline fn reglu_bf16(n: i64, y: [*]ggml.impl.c.ggml_bf16_t, x: [*]const ggml.impl.c.ggml_bf16_t, g: [*]const ggml.impl.c.ggml_bf16_t) void {
+pub inline fn reglu_bf16(n: i64, y: [*]ggml.impl.ggml_c.ggml_bf16_t, x: [*]const ggml.impl.ggml_c.ggml_bf16_t, g: [*]const ggml.impl.ggml_c.ggml_bf16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
         const v = toF32(x[i]);
@@ -655,13 +655,13 @@ pub inline fn reglu_bf16(n: i64, y: [*]ggml.impl.c.ggml_bf16_t, x: [*]const ggml
 }
 
 /// Ports `ggml_vec_geglu_bf16` (vec.h:1596 @b1b770d90).
-pub inline fn geglu_bf16(n: i64, y: [*]ggml.impl.c.ggml_bf16_t, x: [*]const ggml.impl.c.ggml_bf16_t, g: [*]const ggml.impl.c.ggml_bf16_t) void {
+pub inline fn geglu_bf16(n: i64, y: [*]ggml.impl.ggml_c.ggml_bf16_t, x: [*]const ggml.impl.ggml_c.ggml_bf16_t, g: [*]const ggml.impl.ggml_c.ggml_bf16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] = toBf16(geluScalarF32(toF32(x[i])) * toF32(g[i]));
 }
 
 /// Ports `ggml_vec_swiglu_bf16` (vec.h:1612 @b1b770d90).
-pub inline fn swiglu_bf16(n: i64, y: [*]ggml.impl.c.ggml_bf16_t, x: [*]const ggml.impl.c.ggml_bf16_t, g: [*]const ggml.impl.c.ggml_bf16_t) void {
+pub inline fn swiglu_bf16(n: i64, y: [*]ggml.impl.ggml_c.ggml_bf16_t, x: [*]const ggml.impl.ggml_c.ggml_bf16_t, g: [*]const ggml.impl.ggml_c.ggml_bf16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
         const xi = toF32(x[i]);
@@ -671,7 +671,7 @@ pub inline fn swiglu_bf16(n: i64, y: [*]ggml.impl.c.ggml_bf16_t, x: [*]const ggm
 }
 
 /// Ports `ggml_vec_geglu_erf_bf16` (vec.h:1635 @b1b770d90).
-pub inline fn geglu_erf_bf16(n: i64, y: [*]ggml.impl.c.ggml_bf16_t, x: [*]const ggml.impl.c.ggml_bf16_t, g: [*]const ggml.impl.c.ggml_bf16_t) void {
+pub inline fn geglu_erf_bf16(n: i64, y: [*]ggml.impl.ggml_c.ggml_bf16_t, x: [*]const ggml.impl.ggml_c.ggml_bf16_t, g: [*]const ggml.impl.ggml_c.ggml_bf16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
         const xi = toF32(x[i]);
@@ -681,7 +681,7 @@ pub inline fn geglu_erf_bf16(n: i64, y: [*]ggml.impl.c.ggml_bf16_t, x: [*]const 
 }
 
 /// Ports `ggml_vec_geglu_quick_bf16` (vec.h:1664 @b1b770d90).
-pub inline fn geglu_quick_bf16(n: i64, y: [*]ggml.impl.c.ggml_bf16_t, x: [*]const ggml.impl.c.ggml_bf16_t, g: [*]const ggml.impl.c.ggml_bf16_t) void {
+pub inline fn geglu_quick_bf16(n: i64, y: [*]ggml.impl.ggml_c.ggml_bf16_t, x: [*]const ggml.impl.ggml_c.ggml_bf16_t, g: [*]const ggml.impl.ggml_c.ggml_bf16_t) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) y[i] = toBf16(geluQuickScalarF32(toF32(x[i])) * toF32(g[i]));
 }
@@ -700,14 +700,12 @@ pub inline fn geglu_quick_bf16(n: i64, y: [*]ggml.impl.c.ggml_bf16_t, x: [*]cons
 // `refAllDecls` alone does not. Every helper is called at least once below,
 // which is what makes a type error in an unused one visible.
 
-const testing = std.testing;
-
-fn h(v: f32) ggml.impl.c.ggml_fp16_t {
+fn h(v: f32) ggml.impl.ggml_c.ggml_fp16_t {
     return ggml.impl.fp32ToFp16(v);
 }
 
 test {
-    testing.refAllDecls(@This());
+    std.testing.refAllDecls(@This());
 }
 
 test "every f32 helper compiles and computes elementwise" {
@@ -717,42 +715,42 @@ test "every f32 helper compiles and computes elementwise" {
     const n: i64 = x.len;
 
     sub_f32(n, &y, &x, &g);
-    try testing.expectEqual(@as(f32, -3), y[0]);
+    try std.testing.expectEqual(@as(f32, -3), y[0]);
     mul_f32(n, &y, &x, &g);
-    try testing.expectEqual(@as(f32, -2), y[0]);
+    try std.testing.expectEqual(@as(f32, -2), y[0]);
     tanh_f32(n, &y, &x);
     leaky_relu_f32(n, &y, &x, 0.1);
-    try testing.expectEqual(@as(f32, -0.2), y[0]);
-    try testing.expectEqual(@as(f32, 2), y[4]);
+    try std.testing.expectEqual(@as(f32, -0.2), y[0]);
+    try std.testing.expectEqual(@as(f32, 2), y[4]);
     gelu_f32(n, &y, &x);
-    try testing.expectEqual(@as(f32, 12), y[5]);
-    try testing.expectEqual(@as(f32, 0), y[6]);
+    try std.testing.expectEqual(@as(f32, 12), y[5]);
+    try std.testing.expectEqual(@as(f32, 0), y[6]);
     gelu_erf_f32(n, &y, &x);
     ggml.cpu.vec.ggml_vec_gelu_quick_f32(@intCast(n), &y, &x);
     silu_backward_f32(n, &y, &x, &g);
     reglu_f32(n, &y, &x, &g);
-    try testing.expectEqual(@as(f32, 0), y[0]);
-    try testing.expectEqual(@as(f32, 10), y[4]);
+    try std.testing.expectEqual(@as(f32, 0), y[0]);
+    try std.testing.expectEqual(@as(f32, 10), y[4]);
     geglu_f32(n, &y, &x, &g);
-    try testing.expectEqual(@as(f32, 72), y[5]);
+    try std.testing.expectEqual(@as(f32, 72), y[5]);
     geglu_erf_f32(n, &y, &x, &g);
     ggml.cpu.vec.ggml_vec_geglu_quick_f32(@intCast(n), &y, &x, &g);
 
     @memcpy(&y, &g);
     scale_f32(n, &y, 2);
-    try testing.expectEqual(@as(f32, 16), y[7]);
+    try std.testing.expectEqual(@as(f32, 16), y[7]);
     mad1_f32(n, &y, &x, 2, 1);
-    try testing.expectEqual(@as(f32, -3), y[0]);
+    try std.testing.expectEqual(@as(f32, -3), y[0]);
 
     var iy = [_]i32{ 0, 0 };
     cpy_i32(2, &iy, &[_]i32{ 4, 5 });
-    try testing.expectEqual(@as(i32, 5), iy[1]);
+    try std.testing.expectEqual(@as(i32, 5), iy[1]);
 }
 
 test "every f16 helper compiles" {
-    var x: [40]ggml.impl.c.ggml_fp16_t = undefined;
-    var g: [40]ggml.impl.c.ggml_fp16_t = undefined;
-    var y: [40]ggml.impl.c.ggml_fp16_t = undefined;
+    var x: [40]ggml.impl.ggml_c.ggml_fp16_t = undefined;
+    var g: [40]ggml.impl.ggml_c.ggml_fp16_t = undefined;
+    var y: [40]ggml.impl.ggml_c.ggml_fp16_t = undefined;
     for (0..40) |i| {
         x[i] = h(@as(f32, @floatFromInt(i)) * 0.25 - 4);
         g[i] = h(0.5);
@@ -780,7 +778,7 @@ test "mad_f32 fuses, in body and tail alike" {
     var x: [17]f32 = @splat(e);
     var y: [17]f32 = @splat(-(1.0 + 0x1p-11));
     mad_f32(17, &y, &x, e);
-    for (y) |v| try testing.expectEqual(@as(f32, 0x1p-24), v);
+    for (y) |v| try std.testing.expectEqual(@as(f32, 0x1p-24), v);
 }
 
 test "mad_f16 and scale_f16 compute the first 32 in half precision" {
@@ -795,20 +793,20 @@ test "mad_f16 and scale_f16 compute the first 32 in half precision" {
     const tail: f32 = 3.0 + 0x1p-9;
     const body: f32 = if (ggml.cpu.simd.F16.half_precision) 3.0 + 0x1p-8 else tail;
 
-    var y: [33]ggml.impl.c.ggml_fp16_t = undefined;
-    var x: [33]ggml.impl.c.ggml_fp16_t = undefined;
+    var y: [33]ggml.impl.ggml_c.ggml_fp16_t = undefined;
+    var x: [33]ggml.impl.ggml_c.ggml_fp16_t = undefined;
     for (0..33) |i| y[i] = h(3);
     scale_f16(33, &y, v);
-    try testing.expectEqual(body, ggml.impl.fp16ToFp32(y[31]));
-    try testing.expectEqual(tail, ggml.impl.fp16ToFp32(y[32]));
+    try std.testing.expectEqual(body, ggml.impl.fp16ToFp32(y[31]));
+    try std.testing.expectEqual(tail, ggml.impl.fp16ToFp32(y[32]));
 
     for (0..33) |i| {
         y[i] = h(0);
         x[i] = h(3);
     }
     mad_f16(33, &y, &x, v);
-    try testing.expectEqual(body, ggml.impl.fp16ToFp32(y[31]));
-    try testing.expectEqual(tail, ggml.impl.fp16ToFp32(y[32]));
+    try std.testing.expectEqual(body, ggml.impl.fp16ToFp32(y[31]));
+    try std.testing.expectEqual(tail, ggml.impl.fp16ToFp32(y[32]));
 }
 
 test "mad_f32_unroll folds 32 rows in order" {
@@ -821,5 +819,5 @@ test "mad_f32_unroll folds 32 rows in order" {
     var y = [_]f32{ 0, 0, 0 };
     mad_f32_unroll(3, @sizeOf([3]f32), @sizeOf(f32), &y, &rows[0], &vs);
     // sum k for k < 32 is 496.
-    try testing.expectEqual([3]f32{ 496, 992, 1488 }, y);
+    try std.testing.expectEqual([3]f32{ 496, 992, 1488 }, y);
 }

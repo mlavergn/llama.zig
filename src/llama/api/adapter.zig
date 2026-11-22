@@ -20,7 +20,7 @@ const std = @import("std");
 const llama = @import("../module.zig");
 
 /// The port's adapter behind a `llama_adapter_lora *`.
-pub fn loraOf(a: ?*const llama.impl.c.struct_llama_adapter_lora) *llama.adapter.Lora {
+pub fn loraOf(a: ?*const llama.impl.llama_c.struct_llama_adapter_lora) *llama.adapter.Lora {
     return @ptrCast(@alignCast(@constCast(a.?)));
 }
 
@@ -38,18 +38,18 @@ fn metaAt(a: *llama.adapter.Lora, i: usize) struct { key: []const u8, value: [:0
 /// `snprintf(buf, buf_size, "%s", s)` for a string that is not
 /// NUL-terminated where it is stored.
 fn printStr(buf: [*c]u8, buf_size: usize, s: []const u8) i32 {
-    return llama.impl.c.snprintf(buf, buf_size, "%.*s", @as(c_int, @intCast(s.len)), s.ptr);
+    return llama.impl.llama_c.snprintf(buf, buf_size, "%.*s", @as(c_int, @intCast(s.len)), s.ptr);
 }
 
 /// Ports `llama_adapter_lora_init` (llama-adapter.cpp:430 @b1b770d90).
-pub fn llama_adapter_lora_init(model: ?*llama.impl.c.struct_llama_model, path_lora: [*c]const u8) callconv(.c) ?*llama.impl.c.struct_llama_adapter_lora {
+pub fn llama_adapter_lora_init(model: ?*llama.impl.llama_c.struct_llama_model, path_lora: [*c]const u8) callconv(.c) ?*llama.impl.llama_c.struct_llama_adapter_lora {
     const a = llama.adapter.loraInit(llama.api.context.modelOf(model), @ptrCast(path_lora)) orelse return null;
     return @ptrCast(a);
 }
 
 /// Ports `llama_adapter_lora_init_from_file_ptr` (llama-adapter.cpp:445
 /// @b1b770d90): the adapter read from `file`'s current position.
-pub fn llama_adapter_lora_init_from_file_ptr(model: ?*llama.impl.c.struct_llama_model, file: ?*llama.impl.c.FILE) callconv(.c) ?*llama.impl.c.struct_llama_adapter_lora {
+pub fn llama_adapter_lora_init_from_file_ptr(model: ?*llama.impl.llama_c.struct_llama_model, file: ?*llama.impl.llama_c.FILE) callconv(.c) ?*llama.impl.llama_c.struct_llama_adapter_lora {
     const a = llama.adapter.loraInitFromFilePtr(llama.api.context.modelOf(model), file) orelse return null;
     return @ptrCast(a);
 }
@@ -58,17 +58,17 @@ pub fn llama_adapter_lora_init_from_file_ptr(model: ?*llama.impl.c.struct_llama_
 ///
 /// Return: the length `snprintf` reports, or -1 with `buf` emptied when the
 /// key is absent.
-pub fn llama_adapter_meta_val_str(a: ?*const llama.impl.c.struct_llama_adapter_lora, key: [*c]const u8, buf: [*c]u8, buf_size: usize) callconv(.c) i32 {
+pub fn llama_adapter_meta_val_str(a: ?*const llama.impl.llama_c.struct_llama_adapter_lora, key: [*c]const u8, buf: [*c]u8, buf_size: usize) callconv(.c) i32 {
     const k: [*:0]const u8 = @ptrCast(key);
     const v = loraOf(a).gguf_kv.get(std.mem.span(k)) orelse {
         if (buf_size > 0) buf[0] = 0;
         return -1;
     };
-    return llama.impl.c.snprintf(buf, buf_size, "%s", v.*.ptr);
+    return llama.impl.llama_c.snprintf(buf, buf_size, "%s", v.*.ptr);
 }
 
 /// Ports `llama_adapter_meta_count` (llama-adapter.cpp:476 @b1b770d90).
-pub fn llama_adapter_meta_count(a: ?*const llama.impl.c.struct_llama_adapter_lora) callconv(.c) i32 {
+pub fn llama_adapter_meta_count(a: ?*const llama.impl.llama_c.struct_llama_adapter_lora) callconv(.c) i32 {
     return @truncate(@as(i64, @intCast(loraOf(a).gguf_kv.count())));
 }
 
@@ -76,7 +76,7 @@ pub fn llama_adapter_meta_count(a: ?*const llama.impl.c.struct_llama_adapter_lor
 ///
 /// Return: the length `snprintf` reports, or -1 with `buf` emptied when `i`
 /// is out of range.
-pub fn llama_adapter_meta_key_by_index(a: ?*const llama.impl.c.struct_llama_adapter_lora, i: i32, buf: [*c]u8, buf_size: usize) callconv(.c) i32 {
+pub fn llama_adapter_meta_key_by_index(a: ?*const llama.impl.llama_c.struct_llama_adapter_lora, i: i32, buf: [*c]u8, buf_size: usize) callconv(.c) i32 {
     const l = loraOf(a);
     if (i < 0 or i >= llama_adapter_meta_count(a)) {
         if (buf_size > 0) buf[0] = 0;
@@ -89,23 +89,23 @@ pub fn llama_adapter_meta_key_by_index(a: ?*const llama.impl.c.struct_llama_adap
 ///
 /// Return: the length `snprintf` reports, or -1 with `buf` emptied when `i`
 /// is out of range.
-pub fn llama_adapter_meta_val_str_by_index(a: ?*const llama.impl.c.struct_llama_adapter_lora, i: i32, buf: [*c]u8, buf_size: usize) callconv(.c) i32 {
+pub fn llama_adapter_meta_val_str_by_index(a: ?*const llama.impl.llama_c.struct_llama_adapter_lora, i: i32, buf: [*c]u8, buf_size: usize) callconv(.c) i32 {
     const l = loraOf(a);
     if (i < 0 or i >= llama_adapter_meta_count(a)) {
         if (buf_size > 0) buf[0] = 0;
         return -1;
     }
-    return llama.impl.c.snprintf(buf, buf_size, "%s", metaAt(l, @intCast(i)).value.ptr);
+    return llama.impl.llama_c.snprintf(buf, buf_size, "%s", metaAt(l, @intCast(i)).value.ptr);
 }
 
 /// Ports `llama_adapter_lora_free` (llama-adapter.cpp:504 @b1b770d90).
-pub fn llama_adapter_lora_free(a: ?*llama.impl.c.struct_llama_adapter_lora) callconv(.c) void {
+pub fn llama_adapter_lora_free(a: ?*llama.impl.llama_c.struct_llama_adapter_lora) callconv(.c) void {
     llama.adapter.loraFree(if (a == null) null else loraOf(a));
 }
 
 /// Ports `llama_adapter_get_alora_n_invocation_tokens` (llama-adapter.cpp:517
 /// @b1b770d90).
-pub fn llama_adapter_get_alora_n_invocation_tokens(a: ?*const llama.impl.c.struct_llama_adapter_lora) callconv(.c) u64 {
+pub fn llama_adapter_get_alora_n_invocation_tokens(a: ?*const llama.impl.llama_c.struct_llama_adapter_lora) callconv(.c) u64 {
     if (a == null) return 0;
     return loraOf(a).alora_invocation_tokens.items.len;
 }
@@ -115,7 +115,7 @@ pub fn llama_adapter_get_alora_n_invocation_tokens(a: ?*const llama.impl.c.struc
 ///
 /// Return: the tokens, borrowed from the adapter; null when the vector
 /// never allocated, as an empty `std::vector`'s `data()` is.
-pub fn llama_adapter_get_alora_invocation_tokens(a: ?*const llama.impl.c.struct_llama_adapter_lora) callconv(.c) [*c]const llama.impl.c.llama_token {
+pub fn llama_adapter_get_alora_invocation_tokens(a: ?*const llama.impl.llama_c.struct_llama_adapter_lora) callconv(.c) [*c]const llama.impl.llama_c.llama_token {
     llama.impl.assert(a != null, "llama-adapter.cpp", 525, "adapter");
     const toks = &loraOf(a).alora_invocation_tokens;
     if (toks.capacity == 0) return null;
@@ -125,7 +125,7 @@ pub fn llama_adapter_get_alora_invocation_tokens(a: ?*const llama.impl.c.struct_
 /// Ports `llama_set_adapters_lora` (llama-context.cpp:4846 @b1b770d90).
 ///
 /// Return: 0.
-pub fn llama_set_adapters_lora(ctx: ?*llama.impl.c.struct_llama_context, adapters: [*c]?*llama.impl.c.struct_llama_adapter_lora, n_adapters: usize, scales: [*c]f32) callconv(.c) i32 {
+pub fn llama_set_adapters_lora(ctx: ?*llama.impl.llama_c.struct_llama_context, adapters: [*c]?*llama.impl.llama_c.struct_llama_adapter_lora, n_adapters: usize, scales: [*c]f32) callconv(.c) i32 {
     if (adapters == null or scales == null) {
         llama.impl.assert(n_adapters == 0, "llama-context.cpp", 4852, "n_adapters == 0 && \"invalid llama_set_adapters_lora call\"");
     }
@@ -136,7 +136,7 @@ pub fn llama_set_adapters_lora(ctx: ?*llama.impl.c.struct_llama_context, adapter
 /// Ports `llama_set_adapter_cvec` (llama-context.cpp:4860 @b1b770d90).
 ///
 /// Return: 0 when the control vector was applied, -1 otherwise.
-pub fn llama_set_adapter_cvec(ctx: ?*llama.impl.c.struct_llama_context, data: [*c]const f32, len: usize, n_embd: i32, il_start: i32, il_end: i32) callconv(.c) i32 {
+pub fn llama_set_adapter_cvec(ctx: ?*llama.impl.llama_c.struct_llama_context, data: [*c]const f32, len: usize, n_embd: i32, il_start: i32, il_end: i32) callconv(.c) i32 {
     const res = llama.api.context.ctxOf(ctx).setAdapterCvec(data, len, n_embd, il_start, il_end);
     return if (res) 0 else -1;
 }

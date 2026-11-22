@@ -18,8 +18,6 @@ const std = @import("std");
 const common_chat = @import("../module.zig");
 const json = @import("json");
 
-const Allocator = std.mem.Allocator;
-
 /// Ports `trim_whitespace` (chat-auto-parser-helpers.cpp:12 @b1b770d90).
 pub fn trimWhitespace(str: []const u8) []const u8 {
     var start: usize = 0;
@@ -70,14 +68,14 @@ fn commonSuffixLen(left: []const u8, right: []const u8) usize {
     return n;
 }
 
-fn cat(a: Allocator, x: []const u8, y: []const u8) common_chat.exception.Error![]const u8 {
+fn cat(a: std.mem.Allocator, x: []const u8, y: []const u8) common_chat.exception.Error![]const u8 {
     return std.mem.concat(a, u8, &.{ x, y });
 }
 
 /// Ports `calculate_diff_split` (chat-auto-parser-helpers.cpp:84 @b1b770d90):
 /// the longest common prefix and suffix of two renders, each ending on a
 /// marker where one is in reach, and what is left of each between them.
-pub fn calculateDiffSplit(a: Allocator, left: []const u8, right: []const u8) common_chat.exception.Error!common_chat.autoparser.types.DiffSplit {
+pub fn calculateDiffSplit(a: std.mem.Allocator, left: []const u8, right: []const u8) common_chat.exception.Error!common_chat.autoparser.types.DiffSplit {
     var result: common_chat.autoparser.types.DiffSplit = .{};
 
     const left_seg = try segmentizeMarkers(a, left);
@@ -192,7 +190,7 @@ pub fn calculateDiffSplit(a: Allocator, left: []const u8, right: []const u8) com
 }
 
 /// `std`'s `accumulate` of the segments' values.
-fn joinSegments(a: Allocator, segs: []const common_chat.autoparser.types.Segment) common_chat.exception.Error![]const u8 {
+fn joinSegments(a: std.mem.Allocator, segs: []const common_chat.autoparser.types.Segment) common_chat.exception.Error![]const u8 {
     var out: std.ArrayList(u8) = .empty;
     for (segs) |s| try out.appendSlice(a, s.value);
     return out.items;
@@ -220,7 +218,7 @@ pub fn afterCommonSuffix(full: []const u8, left: []const u8, right: []const u8) 
 /// `<...>` and `[...]` runs as markers, everything between as text.
 ///
 /// Return: owned by `a`; each value borrowed from `text`.
-pub fn segmentizeMarkers(a: Allocator, text: []const u8) common_chat.exception.Error![]common_chat.autoparser.types.Segment {
+pub fn segmentizeMarkers(a: std.mem.Allocator, text: []const u8) common_chat.exception.Error![]common_chat.autoparser.types.Segment {
     var retval: std.ArrayList(common_chat.autoparser.types.Segment) = .empty;
     var in_marker = false;
     var marker_opener: u8 = 0;
@@ -248,7 +246,7 @@ pub fn segmentizeMarkers(a: Allocator, text: []const u8) common_chat.exception.E
 }
 
 /// Ports `prune_whitespace_segments` (chat-auto-parser-helpers.cpp:298 @b1b770d90).
-pub fn pruneWhitespaceSegments(a: Allocator, segments: []const common_chat.autoparser.types.Segment) common_chat.exception.Error![]common_chat.autoparser.types.Segment {
+pub fn pruneWhitespaceSegments(a: std.mem.Allocator, segments: []const common_chat.autoparser.types.Segment) common_chat.exception.Error![]common_chat.autoparser.types.Segment {
     var result: std.ArrayList(common_chat.autoparser.types.Segment) = .empty;
     for (segments) |seg| {
         if (trimWhitespace(seg.value).len != 0) try result.append(a, seg);
@@ -263,7 +261,7 @@ pub const err_tmpl = "#**ERROR**#";
 /// Ports `apply_template` (chat-auto-parser-helpers.cpp:312 @b1b770d90): a
 /// probe rendered, `enable_thinking` bound in the extra context too, and
 /// `err_tmpl` when the template fails.
-pub fn applyTemplate(a: Allocator, tmpl: *const common_chat.template.Template, params: *const common_chat.autoparser.types.TemplateParams) common_chat.exception.Error![]const u8 {
+pub fn applyTemplate(a: std.mem.Allocator, tmpl: *const common_chat.template.Template, params: *const common_chat.autoparser.types.TemplateParams) common_chat.exception.Error![]const u8 {
     var tmpl_params: common_chat.template.GenerationParams = .{};
     tmpl_params.messages = params.messages;
     tmpl_params.tools = params.tools;
@@ -287,7 +285,7 @@ pub fn applyTemplate(a: Allocator, tmpl: *const common_chat.template.Template, p
 /// the C++'s lambda modifies its copy.
 ///
 /// Return: null when either render fails.
-pub fn compareVariants(a: Allocator, tmpl: *const common_chat.template.Template, params_a: *const common_chat.autoparser.types.TemplateParams, params_b: *const common_chat.autoparser.types.TemplateParams) common_chat.exception.Error!?common_chat.autoparser.types.CompareVariantsResult {
+pub fn compareVariants(a: std.mem.Allocator, tmpl: *const common_chat.template.Template, params_a: *const common_chat.autoparser.types.TemplateParams, params_b: *const common_chat.autoparser.types.TemplateParams) common_chat.exception.Error!?common_chat.autoparser.types.CompareVariantsResult {
     const output_a = try applyTemplate(a, tmpl, params_a);
     const output_b = try applyTemplate(a, tmpl, params_b);
     if (std.mem.eql(u8, output_a, err_tmpl) or std.mem.eql(u8, output_b, err_tmpl)) return null;

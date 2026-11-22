@@ -20,15 +20,12 @@
 
 const std = @import("std");
 const common_chat = @import("common_chat");
-const json_mod = @import("json");
+const json = @import("json");
 
 extern fn tts_norm_ref_sub(text: [*]const u8, text_len: usize, pat: [*]const u8, pat_len: usize, repl: [*]const u8, repl_len: usize, out: *?[*]u8, out_len: *usize) c_int;
 extern fn tts_norm_ref_scan(text: [*]const u8, text_len: usize, pats: [*]const [*]const u8, pat_lens: [*]const usize, n: usize, out: *?[*]u8, out_len: *usize) c_int;
 extern fn tts_norm_ref_render(tmpl: [*]const u8, tmpl_len: usize, vars: [*]const u8, vars_len: usize, mark_input: c_int, out: *?[*]u8, out_len: *usize, parts: *?[*]u8) c_int;
 extern fn jinja_ref_free(p: ?*anyopaque) void;
-
-const tts_norm = common_chat.tts_norm;
-const gpa = std.heap.c_allocator;
 
 /// What the phase found.
 pub const Result = struct {
@@ -66,7 +63,7 @@ const text_pool = [_][]const u8{
 
 fn genText(r: std.Random, out: *std.ArrayList(u8)) !void {
     const n = r.uintLessThan(usize, 24);
-    for (0..n) |_| try out.appendSlice(gpa, text_pool[r.uintLessThan(usize, text_pool.len)]);
+    for (0..n) |_| try out.appendSlice(std.heap.c_allocator, text_pool[r.uintLessThan(usize, text_pool.len)]);
 }
 
 const atoms = [_][]const u8{
@@ -95,16 +92,16 @@ fn genSeq(r: std.Random, out: *std.ArrayList(u8), depth: usize) std.mem.Allocato
         if (roll < 2 and depth < 3) {
             const opens = [_][]const u8{ "(", "(?:", "(?=", "(?!" };
             const open = opens[r.uintLessThan(usize, opens.len)];
-            try out.appendSlice(gpa, open);
+            try out.appendSlice(std.heap.c_allocator, open);
             try genAlts(r, out, depth + 1);
-            try out.append(gpa, ')');
+            try out.append(std.heap.c_allocator, ')');
             // lookahead cannot be repeated
-            if (open.len < 3 or open[2] == ':') try out.appendSlice(gpa, quants[r.uintLessThan(usize, quants.len)]);
+            if (open.len < 3 or open[2] == ':') try out.appendSlice(std.heap.c_allocator, quants[r.uintLessThan(usize, quants.len)]);
         } else {
             const atom = atoms[r.uintLessThan(usize, atoms.len)];
-            try out.appendSlice(gpa, atom);
+            try out.appendSlice(std.heap.c_allocator, atom);
             const zero_width = std.mem.eql(u8, atom, "%b") or std.mem.eql(u8, atom, "^") or std.mem.eql(u8, atom, "$") or std.mem.startsWith(u8, atom, "(?<");
-            if (!zero_width) try out.appendSlice(gpa, quants[r.uintLessThan(usize, quants.len)]);
+            if (!zero_width) try out.appendSlice(std.heap.c_allocator, quants[r.uintLessThan(usize, quants.len)]);
         }
     }
 }
@@ -112,26 +109,26 @@ fn genSeq(r: std.Random, out: *std.ArrayList(u8), depth: usize) std.mem.Allocato
 fn genAlts(r: std.Random, out: *std.ArrayList(u8), depth: usize) std.mem.Allocator.Error!void {
     try genSeq(r, out, depth);
     while (r.uintLessThan(usize, 4) == 0) {
-        try out.append(gpa, '|');
+        try out.append(std.heap.c_allocator, '|');
         try genSeq(r, out, depth);
     }
 }
 
 fn genPattern(r: std.Random, out: *std.ArrayList(u8)) !void {
-    if (r.uintLessThan(usize, 6) == 0) try out.appendSlice(gpa, "(?i)");
+    if (r.uintLessThan(usize, 6) == 0) try out.appendSlice(std.heap.c_allocator, "(?i)");
     try genAlts(r, out, 0);
     // a malformed one now and then, spliced in at a random place
     if (r.uintLessThan(usize, 5) == 0) {
         const at = r.uintLessThan(usize, out.items.len + 1);
-        try out.insertSlice(gpa, at, bad[r.uintLessThan(usize, bad.len)]);
+        try out.insertSlice(std.heap.c_allocator, at, bad[r.uintLessThan(usize, bad.len)]);
     }
 }
 
 fn genRepl(r: std.Random, out: *std.ArrayList(u8)) !void {
     const pieces = [_][]const u8{ "X", "<", ">", " ", "%0", "%1", "%2", "%3", "%9", "%%", "é", "minus " };
     const n = r.uintLessThan(usize, 5);
-    for (0..n) |_| try out.appendSlice(gpa, pieces[r.uintLessThan(usize, pieces.len)]);
-    if (r.uintLessThan(usize, 12) == 0) try out.appendSlice(gpa, if (r.boolean()) "%" else "%x");
+    for (0..n) |_| try out.appendSlice(std.heap.c_allocator, pieces[r.uintLessThan(usize, pieces.len)]);
+    if (r.uintLessThan(usize, 12) == 0) try out.appendSlice(std.heap.c_allocator, if (r.boolean()) "%" else "%x");
 }
 
 // -----------------------------------------------------------------------------
@@ -144,16 +141,16 @@ fn checkSub(res: *Result, text: []const u8, pat: []const u8, repl: []const u8) !
     defer jinja_ref_free(out);
     const ref = out.?[0..out_len];
 
-    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    var arena_state = std.heap.ArenaAllocator.init(std.heap.c_allocator);
     defer arena_state.deinit();
     const a = arena_state.allocator();
     var port_rc: c_int = 0;
     const port: []const u8 = blk: {
-        const p = tts_norm.Pattern.init(a, pat) catch |e| {
+        const p = common_chat.tts_norm.Pattern.init(a, pat) catch |e| {
             port_rc = 1;
             break :blk try a.dupe(u8, common_chat.exception.what(e));
         };
-        break :blk tts_norm.sub(a, text, &p, repl) catch |e| {
+        break :blk common_chat.tts_norm.sub(a, text, &p, repl) catch |e| {
             port_rc = 1;
             break :blk try a.dupe(u8, common_chat.exception.what(e));
         };
@@ -180,23 +177,23 @@ fn checkScan(res: *Result, text: []const u8, pats: []const []const u8) !void {
     defer jinja_ref_free(out);
     const ref = out.?[0..out_len];
 
-    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    var arena_state = std.heap.ArenaAllocator.init(std.heap.c_allocator);
     defer arena_state.deinit();
     const a = arena_state.allocator();
     var port_rc: c_int = 0;
     var port: std.ArrayList(u8) = .empty;
     blk: {
-        const patterns = try a.alloc(tts_norm.Pattern, pats.len);
-        const pp = try a.alloc(*const tts_norm.Pattern, pats.len);
+        const patterns = try a.alloc(common_chat.tts_norm.Pattern, pats.len);
+        const pp = try a.alloc(*const common_chat.tts_norm.Pattern, pats.len);
         for (pats, 0..) |p, i| {
-            patterns[i] = tts_norm.Pattern.init(a, p) catch |e| {
+            patterns[i] = common_chat.tts_norm.Pattern.init(a, p) catch |e| {
                 port_rc = 1;
                 try port.appendSlice(a, common_chat.exception.what(e));
                 break :blk;
             };
             pp[i] = &patterns[i];
         }
-        const segs = tts_norm.scan(a, text, pp) catch |e| {
+        const segs = common_chat.tts_norm.scan(a, text, pp) catch |e| {
             port_rc = 1;
             try port.appendSlice(a, common_chat.exception.what(e));
             break :blk;
@@ -246,16 +243,16 @@ fn refRender(a: std.mem.Allocator, source: []const u8, vars: []const u8, mark: b
 }
 
 fn portRender(a: std.mem.Allocator, source: []const u8, vars: []const u8, mark: bool) !RenderOutcome {
-    var tmpl = common_chat.template.Template.init(gpa, source, "", "") catch |e| {
+    var tmpl = common_chat.template.Template.init(std.heap.c_allocator, source, "", "") catch |e| {
         if (e == error.OutOfMemory) return e;
         return .{ .failed = try a.dupe(u8, common_chat.exception.what(e)) };
     };
     defer tmpl.deinit();
-    var v = try json_mod.parse(a, vars);
+    var v = try json.parse(a, vars);
     var r: common_chat.template.Render = undefined;
-    r.init(gpa, false);
+    r.init(std.heap.c_allocator, false);
     defer r.deinit();
-    try tts_norm.addBuiltins(r.alloc(), &r, common_chat.template.Render.set);
+    try common_chat.tts_norm.addBuiltins(r.alloc(), &r, common_chat.template.Render.set);
     try r.bindJson(&v, mark);
     const prompt = r.runPrompt(&tmpl, a) catch |e| {
         if (e == error.OutOfMemory) return e;
@@ -271,7 +268,7 @@ fn portRender(a: std.mem.Allocator, source: []const u8, vars: []const u8, mark: 
 }
 
 fn checkRender(res: *Result, source: []const u8, vars: []const u8) !void {
-    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    var arena_state = std.heap.ArenaAllocator.init(std.heap.c_allocator);
     defer arena_state.deinit();
     const a = arena_state.allocator();
     for ([_]bool{ false, true }) |mark| {
@@ -350,13 +347,13 @@ pub fn run(seed: u64, n_random: usize) !Result {
     const r = prng.random();
 
     var text: std.ArrayList(u8) = .empty;
-    defer text.deinit(gpa);
+    defer text.deinit(std.heap.c_allocator);
     var pat: std.ArrayList(u8) = .empty;
-    defer pat.deinit(gpa);
+    defer pat.deinit(std.heap.c_allocator);
     var repl: std.ArrayList(u8) = .empty;
-    defer repl.deinit(gpa);
+    defer repl.deinit(std.heap.c_allocator);
     var pats: [3]std.ArrayList(u8) = .{ .empty, .empty, .empty };
-    defer for (&pats) |*p| p.deinit(gpa);
+    defer for (&pats) |*p| p.deinit(std.heap.c_allocator);
 
     for (0..n_random) |_| {
         text.clearRetainingCapacity();
@@ -378,15 +375,15 @@ pub fn run(seed: u64, n_random: usize) !Result {
     }
     // a pattern past the length limit
     {
-        const long = try gpa.alloc(u8, 4097);
-        defer gpa.free(long);
+        const long = try std.heap.c_allocator.alloc(u8, 4097);
+        defer std.heap.c_allocator.free(long);
         @memset(long, 'a');
         try checkSub(&res, "aaa", long, "x");
         try checkSub(&res, "aaa", long[0..4096], "x");
     }
 
     for (upstream_cases) |cs| try checkRender(&res, cs[0], cs[1]);
-    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    var arena_state = std.heap.ArenaAllocator.init(std.heap.c_allocator);
     defer arena_state.deinit();
     const a = arena_state.allocator();
     for (0..n_random / 8) |_| {

@@ -100,7 +100,7 @@ fn gemmFor(comptime b: Bloc, comptime inter: i64, comptime cols: i64) *const ker
 /// (ggml-cpu/repack.cpp:318, 324, 330, 336 @b1b770d90): four rows of
 /// activations at a time.
 fn quantizeMatFor(comptime inter: i64, comptime param: c_uint) *const fn ([*]const f32, *anyopaque, i64) callconv(.c) void {
-    return if (param == ggml.impl.c.GGML_TYPE_Q8_0)
+    return if (param == ggml.impl.ggml_c.GGML_TYPE_Q8_0)
         (if (inter == 4) &(if (builtin.cpu.arch == .x86_64) ggml.cpu.repack.quantize.ggml_quantize_mat_q8_0_4x4_generic else ggml.cpu.repack.arch.quantize.ggml_quantize_mat_q8_0_4x4) else &ggml.cpu.repack.arch.quantize.ggml_quantize_mat_q8_0_4x8)
     else
         (if (inter == 4) &ggml.cpu.repack.quantize.ggml_quantize_mat_q8_K_4x4_generic else &(if (builtin.cpu.arch == .x86_64) ggml.cpu.repack.arch.quantize.ggml_quantize_mat_q8_K_4x8 else ggml.cpu.repack.quantize.ggml_quantize_mat_q8_K_4x8_generic));
@@ -174,11 +174,11 @@ fn TensorTraits(
         /// `INTER_SIZE` is a template argument in the C, so it is baked in
         /// here too rather than carried as a field — the converter's
         /// second parameter is the only place it is still a value.
-        fn repackWithLog(t: *ggml.impl.c.ggml_tensor, data: *const anyopaque, data_size: usize) callconv(.c) c_int {
+        fn repackWithLog(t: *ggml.impl.ggml_c.ggml_tensor, data: *const anyopaque, data_size: usize) callconv(.c) c_int {
             ggml.impl.logDebug("%s: repack tensor %s with %s_%dx%d\n", .{
                 "repack",
                 @as([*:0]const u8, @ptrCast(&t.name)),
-                ggml.impl.c.ggml_type_name(t.type),
+                ggml.impl.ggml_c.ggml_type_name(t.type),
                 @as(c_int, nb_cols),
                 @as(c_int, inter_size),
             });
@@ -186,23 +186,23 @@ fn TensorTraits(
         }
 
         /// Ports `work_size` (ggml-cpu/repack.cpp:4557 @b1b770d90).
-        fn workSize(self: *const ggml.cpu.extra.TensorTraits, n_threads: c_int, op: *const ggml.impl.c.ggml_tensor, size: *usize) callconv(.c) bool {
+        fn workSize(self: *const ggml.cpu.extra.TensorTraits, n_threads: c_int, op: *const ggml.impl.ggml_c.ggml_tensor, size: *usize) callconv(.c) bool {
             _ = self;
             _ = n_threads;
             switch (op.op) {
                 // Not really a Q8_0, but the same size.
-                ggml.impl.c.GGML_OP_MUL_MAT => {
-                    size.* = ggml.impl.c.ggml_row_size(param_type, ggml.impl.c.ggml_nelements(op.src[1]));
+                ggml.impl.ggml_c.GGML_OP_MUL_MAT => {
+                    size.* = ggml.impl.ggml_c.ggml_row_size(param_type, ggml.impl.ggml_c.ggml_nelements(op.src[1]));
                     return true;
                 },
-                ggml.impl.c.GGML_OP_MUL_MAT_ID => {
-                    var sz = ggml.impl.c.ggml_row_size(param_type, ggml.impl.c.ggml_nelements(op.src[1]));
+                ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID => {
+                    var sz = ggml.impl.ggml_c.ggml_row_size(param_type, ggml.impl.ggml_c.ggml_nelements(op.src[1]));
                     sz = stdlib.num.pad(usize, sz, @sizeOf(i64)); // + padding for the next block
 
                     // `p.*.ne[2]` on a `[*c]` types as the whole `[4]i64`
                     // in Zig 0.16, so both are narrowed first.
-                    const ne02 = ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[0]).ne[2]; // n_as, n_expert
-                    const ne12 = ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[1]).ne[2]; // n_tokens
+                    const ne02 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[0]).ne[2]; // n_as, n_expert
+                    const ne12 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[1]).ne[2]; // n_tokens
 
                     const sizeof_mmid_row_mapping = @sizeOf(i64);
 
@@ -218,14 +218,14 @@ fn TensorTraits(
         }
 
         /// Ports `compute_forward` (ggml-cpu/repack.cpp:4586 @b1b770d90).
-        fn computeForward(self: *const ggml.cpu.extra.TensorTraits, params: *ggml.cpu.defs.ComputeParams, op: *ggml.impl.c.ggml_tensor) callconv(.c) bool {
+        fn computeForward(self: *const ggml.cpu.extra.TensorTraits, params: *ggml.cpu.defs.ComputeParams, op: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) bool {
             _ = self;
             switch (op.op) {
-                ggml.impl.c.GGML_OP_MUL_MAT => {
+                ggml.impl.ggml_c.GGML_OP_MUL_MAT => {
                     forwardMulMat(params, op);
                     return true;
                 },
-                ggml.impl.c.GGML_OP_MUL_MAT_ID => {
+                ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID => {
                     forwardMulMatId(params, op);
                     return true;
                 },
@@ -237,19 +237,19 @@ fn TensorTraits(
         /// Ports `forward_mul_mat_one_chunk` (ggml-cpu/repack.cpp:4601 @b1b770d90).
         fn forwardMulMatOneChunk(
             params: *ggml.cpu.defs.ComputeParams,
-            op: *ggml.impl.c.ggml_tensor,
+            op: *ggml.impl.ggml_c.ggml_tensor,
             src0_start: i64,
             src0_end: i64,
             src1_start: i64,
             src1_end: i64,
         ) void {
-            const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[0]);
-            const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[1]);
+            const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[0]);
+            const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[1]);
             const dst = op;
 
             const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
-            const src1_col_stride = ggml.impl.c.ggml_row_size(param_type, l.ne10);
+            const src1_col_stride = ggml.impl.ggml_c.ggml_row_size(param_type, l.ne10);
 
             ggml.impl.assert(l.ne03 == 1 and l.ne13 == 1, "ne03 == 1 && ne13 == 1");
             ggml.impl.assert(@rem(l.ne12, l.ne02) == 0, "ne12 % ne02 == 0");
@@ -307,9 +307,9 @@ fn TensorTraits(
         }
 
         /// Ports `forward_mul_mat` (ggml-cpu/repack.cpp:4650 @b1b770d90).
-        fn forwardMulMat(params: *ggml.cpu.defs.ComputeParams, op: *ggml.impl.c.ggml_tensor) void {
-            const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[0]);
-            const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[1]);
+        fn forwardMulMat(params: *ggml.cpu.defs.ComputeParams, op: *ggml.impl.ggml_c.ggml_tensor) void {
+            const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[0]);
+            const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[1]);
             const dst = op;
 
             const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
@@ -333,16 +333,16 @@ fn TensorTraits(
             ggml.impl.assert(l.ne13 == 1, "ne13 == 1");
             ggml.impl.assert(l.ne3 == 1, "ne3 == 1");
 
-            ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1 is f32");
-            ggml.impl.assert(ggml.impl.c.ggml_n_dims(src0) == 2, "src0 is 2D");
+            ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1 is f32");
+            ggml.impl.assert(ggml.impl.ggml_c.ggml_n_dims(src0) == 2, "src0 is 2D");
 
             const wdata: [*]u8 = @ptrCast(params.wdata.?);
-            const nbw1 = ggml.impl.c.ggml_row_size(param_type, l.ne10);
+            const nbw1 = ggml.impl.ggml_c.ggml_row_size(param_type, l.ne10);
             const nbw2 = nbw1 * @as(usize, @intCast(l.ne11));
 
             ggml.impl.assert(params.wsize >= nbw2 * @as(usize, @intCast(l.ne12)), "wsize is large enough");
 
-            const from_float = ggml.impl.c.ggml_get_type_traits_cpu(param_type).*.from_float.?;
+            const from_float = ggml.impl.ggml_c.ggml_get_type_traits_cpu(param_type).*.from_float.?;
 
             // Quantization is done in planes to avoid extra complexity in
             // chunking: flattening dimensions not a multiple of INTER_SIZE
@@ -376,7 +376,7 @@ fn TensorTraits(
             const disable_chunking = ggml.cpu.threading.ggml_is_numa();
 
             // 4x chunks per thread
-            const nr0 = ggml.impl.c.ggml_nrows(src0);
+            const nr0 = ggml.impl.ggml_c.ggml_nrows(src0);
 
             const nth_scaled = nth * 4;
             const chunk_size0 = @divTrunc(nr0 + nth_scaled - 1, nth_scaled);
@@ -447,10 +447,10 @@ fn TensorTraits(
         }
 
         /// Ports `forward_mul_mat_id` (ggml-cpu/repack.cpp:4783 @b1b770d90).
-        fn forwardMulMatId(params: *ggml.cpu.defs.ComputeParams, op: *ggml.impl.c.ggml_tensor) void {
-            const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[0]);
-            const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[1]);
-            const ids = ggml.impl.one(ggml.impl.c.ggml_tensor, op.src[2]);
+        fn forwardMulMatId(params: *ggml.cpu.defs.ComputeParams, op: *ggml.impl.ggml_c.ggml_tensor) void {
+            const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[0]);
+            const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[1]);
+            const ids = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[2]);
             const dst = op;
 
             const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
@@ -458,11 +458,11 @@ fn TensorTraits(
             const ith = params.ith;
             const nth = params.nth;
 
-            const from_float = ggml.impl.c.ggml_get_type_traits_cpu(param_type).*.from_float.?;
+            const from_float = ggml.impl.ggml_c.ggml_get_type_traits_cpu(param_type).*.from_float.?;
 
             // we don't support permuted src0 or src1
-            ggml.impl.assert(l.nb00 == ggml.impl.c.ggml_type_size(src0.type), "src0 is contiguous in its rows");
-            ggml.impl.assert(l.nb10 == ggml.impl.c.ggml_type_size(src1.type), "src1 is contiguous in its rows");
+            ggml.impl.assert(l.nb00 == ggml.impl.ggml_c.ggml_type_size(src0.type), "src0 is contiguous in its rows");
+            ggml.impl.assert(l.nb10 == ggml.impl.ggml_c.ggml_type_size(src1.type), "src1 is contiguous in its rows");
 
             // dst cannot be transposed or permuted
             ggml.impl.assert(l.nb0 == @sizeOf(f32), "nb0 == sizeof(float)");
@@ -474,13 +474,13 @@ fn TensorTraits(
             ggml.impl.assert(l.ne13 == 1, "ne13 == 1");
             ggml.impl.assert(l.ne3 == 1, "ne3 == 1");
 
-            ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1 is f32");
+            ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1 is f32");
 
             // row groups
             const n_ids = ids.ne[0]; // n_expert_used
             const n_as = l.ne02; // n_expert
 
-            const nbw1 = ggml.impl.c.ggml_row_size(param_type, l.ne10);
+            const nbw1 = ggml.impl.ggml_c.ggml_row_size(param_type, l.ne10);
             const nbw2 = nbw1 * @as(usize, @intCast(l.ne11));
             const nbw3 = nbw2 * @as(usize, @intCast(l.ne12));
 
@@ -623,35 +623,35 @@ const MmidRowMapping = extern struct {
 /// @b1b770d90). The five RISC-V ones beside them are behind `#if defined
 /// __riscv_zvfh` and are not here.
 const inst = struct {
-    const q1_0_4x4_q8_0 = TensorTraits(.q1_0, 4, 4, ggml.impl.c.GGML_TYPE_Q8_0);
-    const q1_0_4x8_q8_0 = TensorTraits(.q1_0, 8, 4, ggml.impl.c.GGML_TYPE_Q8_0);
-    const q4_0_4x4_q8_0 = TensorTraits(.q4_0, 4, 4, ggml.impl.c.GGML_TYPE_Q8_0);
-    const q4_0_4x8_q8_0 = TensorTraits(.q4_0, 8, 4, ggml.impl.c.GGML_TYPE_Q8_0);
-    const q4_0_8x8_q8_0 = TensorTraits(.q4_0, 8, 8, ggml.impl.c.GGML_TYPE_Q8_0);
-    const q4_K_8x4_q8_K = TensorTraits(.q4_K, 4, 8, ggml.impl.c.GGML_TYPE_Q8_K);
-    const q4_K_8x8_q8_K = TensorTraits(.q4_K, 8, 8, ggml.impl.c.GGML_TYPE_Q8_K);
-    const q5_K_8x4_q8_K = TensorTraits(.q5_K, 4, 8, ggml.impl.c.GGML_TYPE_Q8_K);
-    const q5_K_8x8_q8_K = TensorTraits(.q5_K, 8, 8, ggml.impl.c.GGML_TYPE_Q8_K);
-    const q6_K_8x4_q8_K = TensorTraits(.q6_K, 4, 8, ggml.impl.c.GGML_TYPE_Q8_K);
-    const q6_K_8x8_q8_K = TensorTraits(.q6_K, 8, 8, ggml.impl.c.GGML_TYPE_Q8_K);
-    const q2_K_8x8_q8_K = TensorTraits(.q2_K, 8, 8, ggml.impl.c.GGML_TYPE_Q8_K);
-    const iq4_nl_4x4_q8_0 = TensorTraits(.iq4_nl, 4, 4, ggml.impl.c.GGML_TYPE_Q8_0);
-    const iq4_nl_8x8_q8_0 = TensorTraits(.iq4_nl, 8, 8, ggml.impl.c.GGML_TYPE_Q8_0);
-    const mxfp4_4x4_q8_0 = TensorTraits(.mxfp4, 4, 4, ggml.impl.c.GGML_TYPE_Q8_0);
-    const mxfp4_8x8_q8_0 = TensorTraits(.mxfp4, 8, 8, ggml.impl.c.GGML_TYPE_Q8_0);
-    const q8_0_4x4_q8_0 = TensorTraits(.q8_0, 4, 4, ggml.impl.c.GGML_TYPE_Q8_0);
-    const q8_0_4x8_q8_0 = TensorTraits(.q8_0, 8, 4, ggml.impl.c.GGML_TYPE_Q8_0);
+    const q1_0_4x4_q8_0 = TensorTraits(.q1_0, 4, 4, ggml.impl.ggml_c.GGML_TYPE_Q8_0);
+    const q1_0_4x8_q8_0 = TensorTraits(.q1_0, 8, 4, ggml.impl.ggml_c.GGML_TYPE_Q8_0);
+    const q4_0_4x4_q8_0 = TensorTraits(.q4_0, 4, 4, ggml.impl.ggml_c.GGML_TYPE_Q8_0);
+    const q4_0_4x8_q8_0 = TensorTraits(.q4_0, 8, 4, ggml.impl.ggml_c.GGML_TYPE_Q8_0);
+    const q4_0_8x8_q8_0 = TensorTraits(.q4_0, 8, 8, ggml.impl.ggml_c.GGML_TYPE_Q8_0);
+    const q4_K_8x4_q8_K = TensorTraits(.q4_K, 4, 8, ggml.impl.ggml_c.GGML_TYPE_Q8_K);
+    const q4_K_8x8_q8_K = TensorTraits(.q4_K, 8, 8, ggml.impl.ggml_c.GGML_TYPE_Q8_K);
+    const q5_K_8x4_q8_K = TensorTraits(.q5_K, 4, 8, ggml.impl.ggml_c.GGML_TYPE_Q8_K);
+    const q5_K_8x8_q8_K = TensorTraits(.q5_K, 8, 8, ggml.impl.ggml_c.GGML_TYPE_Q8_K);
+    const q6_K_8x4_q8_K = TensorTraits(.q6_K, 4, 8, ggml.impl.ggml_c.GGML_TYPE_Q8_K);
+    const q6_K_8x8_q8_K = TensorTraits(.q6_K, 8, 8, ggml.impl.ggml_c.GGML_TYPE_Q8_K);
+    const q2_K_8x8_q8_K = TensorTraits(.q2_K, 8, 8, ggml.impl.ggml_c.GGML_TYPE_Q8_K);
+    const iq4_nl_4x4_q8_0 = TensorTraits(.iq4_nl, 4, 4, ggml.impl.ggml_c.GGML_TYPE_Q8_0);
+    const iq4_nl_8x8_q8_0 = TensorTraits(.iq4_nl, 8, 8, ggml.impl.ggml_c.GGML_TYPE_Q8_0);
+    const mxfp4_4x4_q8_0 = TensorTraits(.mxfp4, 4, 4, ggml.impl.ggml_c.GGML_TYPE_Q8_0);
+    const mxfp4_8x8_q8_0 = TensorTraits(.mxfp4, 8, 8, ggml.impl.ggml_c.GGML_TYPE_Q8_0);
+    const q8_0_4x4_q8_0 = TensorTraits(.q8_0, 4, 4, ggml.impl.ggml_c.GGML_TYPE_Q8_0);
+    const q8_0_4x8_q8_0 = TensorTraits(.q8_0, 8, 4, ggml.impl.ggml_c.GGML_TYPE_Q8_0);
 };
 
 /// The one method `tensor_traits_base` (ggml-cpu/repack.cpp:4550
 /// @b1b770d90) adds to the interface. Three parameters, like the C's:
 /// `INTER_SIZE` reaches the converter as a template argument, not an
 /// argument.
-const RepackFn = fn (*ggml.impl.c.ggml_tensor, *const anyopaque, usize) callconv(.c) c_int;
+const RepackFn = fn (*ggml.impl.ggml_c.ggml_tensor, *const anyopaque, usize) callconv(.c) c_int;
 
 /// `convert.zig`'s drivers, which *do* take the interleave as a value —
 /// the C's `repack_q4_0_to_q4_0_4_bl(t, 4, data, size)`.
-const ConvertFn = fn (*ggml.impl.c.ggml_tensor, c_int, *const anyopaque, usize) callconv(.c) c_int;
+const ConvertFn = fn (*ggml.impl.ggml_c.ggml_tensor, c_int, *const anyopaque, usize) callconv(.c) c_int;
 
 /// The `tensor_traits_base *` a tensor's `extra` holds: the vtable front,
 /// plus the `repack` entry only `set_tensor` reaches.
@@ -682,10 +682,10 @@ inline fn traitsOf(comptime T: type) *const ggml.cpu.extra.TensorTraits {
 /// Return: the traits to hang off `cur->extra`, or null when no
 /// interleaved kernel fits this type and shape. Borrowed; the instances
 /// are statics that live for the process.
-pub fn getOptimalRepackType(cur: *const ggml.impl.c.ggml_tensor) ?*const ggml.cpu.extra.TensorTraits {
+pub fn getOptimalRepackType(cur: *const ggml.impl.ggml_c.ggml_tensor) ?*const ggml.cpu.extra.TensorTraits {
     const ne1 = cur.ne[1];
 
-    if (cur.type == ggml.impl.c.GGML_TYPE_Q4_0) {
+    if (cur.type == ggml.impl.ggml_c.GGML_TYPE_Q4_0) {
         if (ggml.cpu.features.ggml_cpu_has_avx2() != 0 or
             (ggml.cpu.features.ggml_cpu_has_sve() != 0 and ggml.cpu.features.ggml_cpu_has_matmul_int8() != 0 and ggml.cpu.features.ggml_cpu_get_sve_cnt() == 32))
         {
@@ -703,7 +703,7 @@ pub fn getOptimalRepackType(cur: *const ggml.impl.c.ggml_tensor) ?*const ggml.cp
             if (@rem(ne1, 4) == 0) return traitsOf(inst.q4_0_4x4_q8_0);
         }
         // The C's `ggml_cpu_has_riscv_v()` arm is empty without __riscv_zvfh.
-    } else if (cur.type == ggml.impl.c.GGML_TYPE_Q4_K) {
+    } else if (cur.type == ggml.impl.ggml_c.GGML_TYPE_Q4_K) {
         if (ggml.cpu.features.ggml_cpu_has_avx2() != 0) {
             if (@rem(ne1, 8) == 0) return traitsOf(inst.q4_K_8x8_q8_K);
         }
@@ -713,46 +713,46 @@ pub fn getOptimalRepackType(cur: *const ggml.impl.c.ggml_tensor) ?*const ggml.cp
         if (ggml.cpu.features.ggml_cpu_has_neon() != 0 and ggml.cpu.features.ggml_cpu_has_dotprod() != 0) {
             if (@rem(ne1, 8) == 0) return traitsOf(inst.q4_K_8x4_q8_K);
         }
-    } else if (cur.type == ggml.impl.c.GGML_TYPE_Q2_K) {
+    } else if (cur.type == ggml.impl.ggml_c.GGML_TYPE_Q2_K) {
         if (ggml.cpu.features.ggml_cpu_has_avx512() != 0) {
             if (@rem(ne1, 8) == 0) return traitsOf(inst.q2_K_8x8_q8_K);
         }
-    } else if (cur.type == ggml.impl.c.GGML_TYPE_Q5_K) {
+    } else if (cur.type == ggml.impl.ggml_c.GGML_TYPE_Q5_K) {
         if (ggml.cpu.features.ggml_cpu_has_neon() != 0 and ggml.cpu.features.ggml_cpu_has_matmul_int8() != 0) {
             if (@rem(ne1, 8) == 0) return traitsOf(inst.q5_K_8x8_q8_K);
         }
         if (ggml.cpu.features.ggml_cpu_has_neon() != 0 and ggml.cpu.features.ggml_cpu_has_dotprod() != 0) {
             if (@rem(ne1, 8) == 0) return traitsOf(inst.q5_K_8x4_q8_K);
         }
-    } else if (cur.type == ggml.impl.c.GGML_TYPE_Q6_K) {
+    } else if (cur.type == ggml.impl.ggml_c.GGML_TYPE_Q6_K) {
         if (ggml.cpu.features.ggml_cpu_has_neon() != 0 and ggml.cpu.features.ggml_cpu_has_matmul_int8() != 0) {
             if (@rem(ne1, 8) == 0) return traitsOf(inst.q6_K_8x8_q8_K);
         }
         if (ggml.cpu.features.ggml_cpu_has_neon() != 0 and ggml.cpu.features.ggml_cpu_has_dotprod() != 0) {
             if (@rem(ne1, 8) == 0) return traitsOf(inst.q6_K_8x4_q8_K);
         }
-    } else if (cur.type == ggml.impl.c.GGML_TYPE_IQ4_NL) {
+    } else if (cur.type == ggml.impl.ggml_c.GGML_TYPE_IQ4_NL) {
         if (ggml.cpu.features.ggml_cpu_has_avx2() != 0) {
             if (@rem(ne1, 8) == 0) return traitsOf(inst.iq4_nl_8x8_q8_0);
         }
         if (ggml.cpu.features.ggml_cpu_has_neon() != 0 and ggml.cpu.features.ggml_cpu_has_dotprod() != 0) {
             if (@rem(ne1, 4) == 0) return traitsOf(inst.iq4_nl_4x4_q8_0);
         }
-    } else if (cur.type == ggml.impl.c.GGML_TYPE_MXFP4) {
+    } else if (cur.type == ggml.impl.ggml_c.GGML_TYPE_MXFP4) {
         if (ggml.cpu.features.ggml_cpu_has_avx2() != 0) {
             if (@rem(ne1, 8) == 0) return traitsOf(inst.mxfp4_8x8_q8_0);
         }
         if (ggml.cpu.features.ggml_cpu_has_neon() != 0 and ggml.cpu.features.ggml_cpu_has_dotprod() != 0) {
             if (@rem(ne1, 4) == 0) return traitsOf(inst.mxfp4_4x4_q8_0);
         }
-    } else if (cur.type == ggml.impl.c.GGML_TYPE_Q8_0) {
+    } else if (cur.type == ggml.impl.ggml_c.GGML_TYPE_Q8_0) {
         if (ggml.cpu.features.ggml_cpu_has_neon() != 0 and ggml.cpu.features.ggml_cpu_has_matmul_int8() != 0) {
             if (@rem(ne1, 4) == 0) return traitsOf(inst.q8_0_4x8_q8_0);
         }
         if (ggml.cpu.features.ggml_cpu_has_neon() != 0 and ggml.cpu.features.ggml_cpu_has_dotprod() != 0) {
             if (@rem(ne1, 4) == 0) return traitsOf(inst.q8_0_4x4_q8_0);
         }
-    } else if (cur.type == ggml.impl.c.GGML_TYPE_Q1_0) {
+    } else if (cur.type == ggml.impl.ggml_c.GGML_TYPE_Q1_0) {
         if (ggml.cpu.features.ggml_cpu_has_neon() != 0 and ggml.cpu.features.ggml_cpu_has_matmul_int8() != 0) {
             if (@rem(ne1, 4) == 0) return traitsOf(inst.q1_0_4x8_q8_0);
         }
@@ -769,11 +769,11 @@ pub fn getOptimalRepackType(cur: *const ggml.impl.c.ggml_tensor) ?*const ggml.cp
 
 /// Ports `ggml_backend_cpu_repack_buffer_init_tensor` (ggml-cpu/repack.cpp:5148
 /// @b1b770d90).
-fn bufferInitTensor(buffer: ggml.impl.c.ggml_backend_buffer_t, tensor: [*c]ggml.impl.c.ggml_tensor) callconv(.c) ggml.impl.c.ggml_status {
+fn bufferInitTensor(buffer: ggml.impl.ggml_c.ggml_backend_buffer_t, tensor: [*c]ggml.impl.ggml_c.ggml_tensor) callconv(.c) ggml.impl.ggml_c.ggml_status {
     _ = buffer;
-    const t = ggml.impl.one(ggml.impl.c.ggml_tensor, tensor);
+    const t = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, tensor);
     t.extra = @ptrCast(@constCast(getOptimalRepackType(t)));
-    return ggml.impl.c.GGML_STATUS_SUCCESS;
+    return ggml.impl.ggml_c.GGML_STATUS_SUCCESS;
 }
 
 /// Ports `ggml_backend_cpu_repack_buffer_set_tensor` (ggml-cpu/repack.cpp:5155
@@ -782,16 +782,16 @@ fn bufferInitTensor(buffer: ggml.impl.c.ggml_backend_buffer_t, tensor: [*c]ggml.
 /// This is where the weights are interleaved: the loader writes the stored
 /// blocks here once, and they are repacked in place of being copied.
 fn bufferSetTensor(
-    buffer: ggml.impl.c.ggml_backend_buffer_t,
-    tensor: [*c]ggml.impl.c.ggml_tensor,
+    buffer: ggml.impl.ggml_c.ggml_backend_buffer_t,
+    tensor: [*c]ggml.impl.ggml_c.ggml_tensor,
     data: ?*const anyopaque,
     offset: usize,
     size: usize,
 ) callconv(.c) void {
     _ = buffer;
-    const t = ggml.impl.one(ggml.impl.c.ggml_tensor, tensor);
+    const t = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, tensor);
     ggml.impl.assert(offset == 0, "offset == 0");
-    ggml.impl.assert(size == ggml.impl.c.ggml_nbytes(t), "size == ggml_nbytes(tensor)");
+    ggml.impl.assert(size == ggml.impl.ggml_c.ggml_nbytes(t), "size == ggml_nbytes(tensor)");
 
     // The C's downcast from `tensor_traits *` to `tensor_traits_base *`.
     const traits: *const Extended = @ptrCast(@alignCast(t.extra.?));
@@ -802,7 +802,7 @@ fn bufferSetTensor(
 
 /// Ports `ggml_backend_cpu_repack_buffer_type_get_name` (ggml-cpu/repack.cpp:5167
 /// @b1b770d90).
-fn buftGetName(buft: ggml.impl.c.ggml_backend_buffer_type_t) callconv(.c) [*c]const u8 {
+fn buftGetName(buft: ggml.impl.ggml_c.ggml_backend_buffer_type_t) callconv(.c) [*c]const u8 {
     _ = buft;
     return "CPU_REPACK";
 }
@@ -813,12 +813,12 @@ fn buftGetName(buft: ggml.impl.c.ggml_backend_buffer_type_t) callconv(.c) [*c]co
 /// The allocation itself is the plain CPU buffer type's; only three of the
 /// iface entries are swapped, which is what makes this a *view* of host
 /// memory with a different write path rather than a second allocator.
-fn buftAllocBuffer(buft: ggml.impl.c.ggml_backend_buffer_type_t, size: usize) callconv(.c) ggml.impl.c.ggml_backend_buffer_t {
-    const buffer = ggml.impl.c.ggml_backend_buft_alloc_buffer(ggml.impl.c.ggml_backend_cpu_buffer_type(), size);
+fn buftAllocBuffer(buft: ggml.impl.ggml_c.ggml_backend_buffer_type_t, size: usize) callconv(.c) ggml.impl.ggml_c.ggml_backend_buffer_t {
+    const buffer = ggml.impl.ggml_c.ggml_backend_buft_alloc_buffer(ggml.impl.ggml_c.ggml_backend_cpu_buffer_type(), size);
 
     if (buffer == null) return null;
 
-    const b = ggml.impl.one(ggml.impl.c.struct_ggml_backend_buffer, buffer);
+    const b = ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend_buffer, buffer);
     b.buft = buft;
     b.iface.init_tensor = bufferInitTensor;
     b.iface.set_tensor = bufferSetTensor;
@@ -829,7 +829,7 @@ fn buftAllocBuffer(buft: ggml.impl.c.ggml_backend_buffer_type_t, size: usize) ca
 
 /// Ports `ggml_backend_cpu_repack_buffer_type_get_alignment`
 /// (ggml-cpu/repack.cpp:5188 @b1b770d90).
-fn buftGetAlignment(buft: ggml.impl.c.ggml_backend_buffer_type_t) callconv(.c) usize {
+fn buftGetAlignment(buft: ggml.impl.ggml_c.ggml_backend_buffer_type_t) callconv(.c) usize {
     _ = buft;
     return ggml.impl.tensor_alignment;
 }
@@ -854,23 +854,23 @@ const ExtraBuffer = struct {
     /// The C writes two branches, `MUL_MAT` requiring a 2D `src[0]` and
     /// `MUL_MAT_ID` a 3D one, with identical bodies otherwise. They are
     /// folded here into one test on `dims`.
-    fn supportsOp(self: *const ggml.cpu.extra.ExtraBufferType, dev: ggml.impl.c.ggml_backend_dev_t, op: *const ggml.impl.c.ggml_tensor) callconv(.c) bool {
+    fn supportsOp(self: *const ggml.cpu.extra.ExtraBufferType, dev: ggml.impl.ggml_c.ggml_backend_dev_t, op: *const ggml.impl.ggml_c.ggml_tensor) callconv(.c) bool {
         _ = self;
         _ = dev;
         const src0 = op.src[0] orelse return false;
 
-        const dims: c_int = if (op.op == ggml.impl.c.GGML_OP_MUL_MAT) 2 else 3;
-        if ((op.op == ggml.impl.c.GGML_OP_MUL_MAT or op.op == ggml.impl.c.GGML_OP_MUL_MAT_ID) and
+        const dims: c_int = if (op.op == ggml.impl.ggml_c.GGML_OP_MUL_MAT) 2 else 3;
+        if ((op.op == ggml.impl.ggml_c.GGML_OP_MUL_MAT or op.op == ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID) and
             src0.*.buffer != null and
-            ggml.impl.c.ggml_n_dims(src0) == dims and
+            ggml.impl.ggml_c.ggml_n_dims(src0) == dims and
             src0.*.buffer.*.buft == bufferType() and
             getOptimalRepackType(src0) != null)
         {
             const src1 = op.src[1] orelse return false;
-            if (src1.*.buffer != null and !ggml.impl.c.ggml_backend_buft_is_host(src1.*.buffer.*.buft)) {
+            if (src1.*.buffer != null and !ggml.impl.ggml_c.ggml_backend_buft_is_host(src1.*.buffer.*.buft)) {
                 return false;
             }
-            if (src1.*.type == ggml.impl.c.GGML_TYPE_F32) return true;
+            if (src1.*.type == ggml.impl.ggml_c.GGML_TYPE_F32) return true;
             // The C has a commented-out GGML_TYPE_Q8_0 arm here: "may be
             // possible if Q8_0 packed".
         }
@@ -878,9 +878,9 @@ const ExtraBuffer = struct {
     }
 
     /// Ports `get_tensor_traits` (ggml-cpu/repack.cpp:5232 @b1b770d90).
-    fn getTensorTraits(self: *const ggml.cpu.extra.ExtraBufferType, op: *const ggml.impl.c.ggml_tensor) callconv(.c) ?*const ggml.cpu.extra.TensorTraits {
+    fn getTensorTraits(self: *const ggml.cpu.extra.ExtraBufferType, op: *const ggml.impl.ggml_c.ggml_tensor) callconv(.c) ?*const ggml.cpu.extra.TensorTraits {
         _ = self;
-        if (op.op == ggml.impl.c.GGML_OP_MUL_MAT or op.op == ggml.impl.c.GGML_OP_MUL_MAT_ID) {
+        if (op.op == ggml.impl.ggml_c.GGML_OP_MUL_MAT or op.op == ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID) {
             const src0 = op.src[0] orelse return null;
             if (src0.*.buffer != null and src0.*.buffer.*.buft == bufferType()) {
                 return @ptrCast(@alignCast(src0.*.extra));
@@ -898,11 +898,11 @@ const ExtraBuffer = struct {
 /// written out here. `cpu_backend.zig` uses the same pattern for its own
 /// magic statics, for the reason recorded there: Zig 0.16 has no
 /// `std.once`.
-var buft_storage: ggml.impl.c.struct_ggml_backend_buffer_type = undefined;
+var buft_storage: ggml.impl.ggml_c.struct_ggml_backend_buffer_type = undefined;
 var buft_ready = std.atomic.Value(bool).init(false);
 var buft_mutex: stdlib.sync.Mutex = .{};
 
-fn bufferType() ggml.impl.c.ggml_backend_buffer_type_t {
+fn bufferType() ggml.impl.ggml_c.ggml_backend_buffer_type_t {
     if (!buft_ready.load(.acquire)) {
         buft_mutex.lock();
         defer buft_mutex.unlock();
@@ -918,7 +918,7 @@ fn bufferType() ggml.impl.c.ggml_backend_buffer_type_t {
                     .get_alloc_size_n = null,
                     .is_host = null,
                 },
-                .device = ggml.impl.c.ggml_backend_reg_dev_get(ggml.impl.c.ggml_backend_cpu_reg(), 0),
+                .device = ggml.impl.ggml_c.ggml_backend_reg_dev_get(ggml.impl.ggml_c.ggml_backend_cpu_reg(), 0),
                 .context = @ptrCast(@constCast(&ExtraBuffer.instance)),
             };
             buft_ready.store(true, .release);
@@ -931,7 +931,7 @@ fn bufferType() ggml.impl.c.ggml_backend_buffer_type_t {
 ///
 /// Return: the `CPU_REPACK` buffer type, borrowed for the life of the
 /// process.
-pub fn ggml_backend_cpu_repack_buffer_type() ggml.impl.c.ggml_backend_buffer_type_t {
+pub fn ggml_backend_cpu_repack_buffer_type() ggml.impl.ggml_c.ggml_backend_buffer_type_t {
     return bufferType();
 }
 

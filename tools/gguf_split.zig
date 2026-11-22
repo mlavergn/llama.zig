@@ -22,14 +22,10 @@
 //! so a failed write terminates the process; here it aborts.
 
 const std = @import("std");
+const llama = @import("llama");
 const stdlib = @import("stdlib");
 const builtin = @import("builtin");
-const common = @import("tools_common");
-
-comptime {
-    // libllama, compiled in (see `build/tools.zig`).
-    _ = @import("llama").lib;
-}
+const tools_common = @import("tools_common");
 
 /// `PATH_MAX`, or `MAX_PATH` on Windows (gguf-split.cpp:24 @b1b770d90).
 const path_max = if (builtin.os.tag == .windows) 260 else if (builtin.os.tag.isDarwin()) 1024 else 4096;
@@ -56,22 +52,22 @@ const Params = struct {
 /// Ports `split_print_usage` (gguf-split.cpp:53 @b1b770d90).
 fn printUsage(executable: [*:0]const u8) void {
     const default_params: Params = .{};
-    common.io.printf("\n", .{});
-    common.io.printf("usage: %s [options] GGUF_IN GGUF_OUT\n", .{executable});
-    common.io.printf("\n", .{});
-    common.io.printf("Apply a GGUF operation on IN to OUT.", .{});
-    common.io.printf("\n", .{});
-    common.io.printf("options:\n", .{});
-    common.io.printf("  -h, --help              show this help message and exit\n", .{});
-    common.io.printf("  --version               show version and build info\n", .{});
-    common.io.printf("  --split                 split GGUF to multiple GGUF (enabled by default)\n", .{});
-    common.io.printf("  --merge                 merge multiple GGUF to a single GGUF\n", .{});
-    common.io.printf("  --split-max-tensors     max tensors in each split (default: %d)\n", .{default_params.n_split_tensors});
-    common.io.printf("  --split-max-size N(M|G) max size per split\n", .{});
-    common.io.printf("  --no-tensor-first-split do not add tensors to the first split (disabled by default)\n", .{});
-    common.io.printf("  --dry-run               only print out a split plan and exit, without writing any new files\n", .{});
-    common.io.printf("  --delete-splits         delete the split files during merge to free up disk space WARNING: this option is unsafe and will leave you in an unrecoverable state if something fails during the merge\n", .{});
-    common.io.printf("\n", .{});
+    tools_common.io.printf("\n", .{});
+    tools_common.io.printf("usage: %s [options] GGUF_IN GGUF_OUT\n", .{executable});
+    tools_common.io.printf("\n", .{});
+    tools_common.io.printf("Apply a GGUF operation on IN to OUT.", .{});
+    tools_common.io.printf("\n", .{});
+    tools_common.io.printf("options:\n", .{});
+    tools_common.io.printf("  -h, --help              show this help message and exit\n", .{});
+    tools_common.io.printf("  --version               show version and build info\n", .{});
+    tools_common.io.printf("  --split                 split GGUF to multiple GGUF (enabled by default)\n", .{});
+    tools_common.io.printf("  --merge                 merge multiple GGUF to a single GGUF\n", .{});
+    tools_common.io.printf("  --split-max-tensors     max tensors in each split (default: %d)\n", .{default_params.n_split_tensors});
+    tools_common.io.printf("  --split-max-size N(M|G) max size per split\n", .{});
+    tools_common.io.printf("  --no-tensor-first-split do not add tensors to the first split (disabled by default)\n", .{});
+    tools_common.io.printf("  --dry-run               only print out a split plan and exit, without writing any new files\n", .{});
+    tools_common.io.printf("  --delete-splits         delete the split files during merge to free up disk space WARNING: this option is unsafe and will leave you in an unrecoverable state if something fails during the merge\n", .{});
+    tools_common.io.printf("\n", .{});
 }
 
 /// What the C++ throws as `std::invalid_argument`: the message is printed,
@@ -139,7 +135,7 @@ fn parseEx(argv: []const [:0]const u8, params: *Params, err: *ParseError, arena:
             printUsage(argv[0].ptr);
             stdlib.stdio.exit(0);
         } else if (std.mem.eql(u8, arg, "--version")) {
-            common.build_info.print(common.c.llama_version(), stdlib.stdio.stderr());
+            tools_common.build_info.print(llama.api.llama.llama_version(), stdlib.stdio.stderr());
             stdlib.stdio.exit(0);
         } else if (std.mem.eql(u8, arg, "--dry-run")) {
             arg_found = true;
@@ -209,7 +205,7 @@ fn parse(argv: []const [:0]const u8, params: *Params, arena: std.mem.Allocator) 
     var err: ParseError = .{};
     parseEx(argv, params, &err, arena) catch |e| switch (e) {
         error.Invalid => {
-            common.io.eprintf("%.*s\n", .{ @as(c_int, @intCast(err.len)), &err.buf });
+            tools_common.io.eprintf("%.*s\n", .{ @as(c_int, @intCast(err.len)), &err.buf });
             printUsage(argv[0].ptr);
             stdlib.stdio.exit(1);
         },
@@ -222,7 +218,7 @@ fn parse(argv: []const [:0]const u8, params: *Params, arena: std.mem.Allocator) 
 
 /// An output stream's `failbit` exception, which nothing catches.
 fn terminate() noreturn {
-    common.io.eprintf("terminate called after throwing an instance of 'std::ios_base::failure'\n", .{});
+    tools_common.io.eprintf("terminate called after throwing an instance of 'std::ios_base::failure'\n", .{});
     std.process.abort();
 }
 
@@ -249,7 +245,7 @@ fn cstr(buf: *const [path_max:0]u8) [*:0]const u8 {
 
 /// `GGML_PAD(x, GGUF_DEFAULT_ALIGNMENT)`.
 fn pad(x: usize) usize {
-    return stdlib.num.pad(usize, x, common.c.GGUF_DEFAULT_ALIGNMENT);
+    return stdlib.num.pad(usize, x, llama.impl.llama_c.GGUF_DEFAULT_ALIGNMENT);
 }
 
 // -----------------------------------------------------------------------------
@@ -260,30 +256,30 @@ const Strategy = struct {
     params: Params,
     std_io: std.Io,
     f_input: std.Io.File,
-    ctx_gguf: *common.c.gguf_context,
-    ctx_meta: *common.c.ggml_context,
+    ctx_gguf: *llama.impl.llama_c.gguf_context,
+    ctx_meta: *llama.impl.llama_c.ggml_context,
     n_tensors: c_int,
     // one ctx_out per one output file
-    ctx_outs: std.ArrayList(*common.c.gguf_context) = .empty,
+    ctx_outs: std.ArrayList(*llama.impl.llama_c.gguf_context) = .empty,
     // temporary buffer for reading in tensor data
     read_buf: std.ArrayList(u8) = .empty,
     allocator: std.mem.Allocator,
 
     // because we need to know list of tensors for each file in advance, we
     // will build all the ctx_out for all output splits
-    fn init(allocator: std.mem.Allocator, std_io: std.Io, params: Params, f_input: std.Io.File, ctx_gguf: *common.c.gguf_context, ctx_meta: *common.c.ggml_context) !Strategy {
+    fn init(allocator: std.mem.Allocator, std_io: std.Io, params: Params, f_input: std.Io.File, ctx_gguf: *llama.impl.llama_c.gguf_context, ctx_meta: *llama.impl.llama_c.ggml_context) !Strategy {
         var self: Strategy = .{
             .params = params,
             .std_io = std_io,
             .f_input = f_input,
             .ctx_gguf = ctx_gguf,
             .ctx_meta = ctx_meta,
-            .n_tensors = @intCast(common.c.gguf_get_n_tensors(ctx_gguf)),
+            .n_tensors = @intCast(llama.impl.llama_c.gguf_get_n_tensors(ctx_gguf)),
             .allocator = allocator,
         };
 
         var i_split: c_int = -1;
-        var ctx_out: ?*common.c.gguf_context = null;
+        var ctx_out: ?*llama.impl.llama_c.gguf_context = null;
 
         // initialize ctx_out for the first split
         try self.newCtxOut(&i_split, &ctx_out, false);
@@ -295,9 +291,9 @@ const Strategy = struct {
         var curr_tensors_size: usize = 0; // current size by counting only tensors size (without metadata)
         var i: c_int = 0;
         while (i < self.n_tensors) : (i += 1) {
-            const t = common.c.ggml_get_tensor(ctx_meta, common.c.gguf_get_tensor_name(ctx_gguf, i));
+            const t = llama.impl.llama_c.ggml_get_tensor(ctx_meta, llama.impl.llama_c.gguf_get_tensor_name(ctx_gguf, i));
             // calculate the "imaginary" size = the current size + next tensor size
-            const n_bytes = pad(common.c.ggml_nbytes(t));
+            const n_bytes = pad(llama.impl.llama_c.ggml_nbytes(t));
             const next_tensors_size = curr_tensors_size + n_bytes;
             if (self.shouldSplit(i, next_tensors_size)) {
                 try self.newCtxOut(&i_split, &ctx_out, false);
@@ -305,38 +301,38 @@ const Strategy = struct {
             } else {
                 curr_tensors_size = next_tensors_size;
             }
-            common.c.gguf_add_tensor(ctx_out.?, t);
+            llama.impl.llama_c.gguf_add_tensor(ctx_out.?, t);
         }
 
         // push the last ctx_out
         try self.ctx_outs.append(allocator, ctx_out.?);
 
         // set the correct n_split for all ctx_out
-        for (self.ctx_outs.items) |ctx| common.c.gguf_set_val_u16(ctx, common.kv_split_count, @truncate(self.ctx_outs.items.len));
+        for (self.ctx_outs.items) |ctx| llama.impl.llama_c.gguf_set_val_u16(ctx, tools_common.kv_split_count, @truncate(self.ctx_outs.items.len));
         return self;
     }
 
     /// The C++ constructor's `new_ctx_out` lambda (gguf-split.cpp:229 @b1b770d90).
-    fn newCtxOut(self: *Strategy, i_split: *c_int, ctx_out: *?*common.c.gguf_context, allow_no_tensors: bool) !void {
+    fn newCtxOut(self: *Strategy, i_split: *c_int, ctx_out: *?*llama.impl.llama_c.gguf_context, allow_no_tensors: bool) !void {
         i_split.* += 1;
         if (ctx_out.*) |prev| {
-            if (common.c.gguf_get_n_tensors(prev) == 0 and !allow_no_tensors) {
-                common.io.eprintf("error: one of splits have 0 tensors. Maybe size or tensors limit is too small\n", .{});
+            if (llama.impl.llama_c.gguf_get_n_tensors(prev) == 0 and !allow_no_tensors) {
+                tools_common.io.eprintf("error: one of splits have 0 tensors. Maybe size or tensors limit is too small\n", .{});
                 stdlib.stdio.exit(1);
             }
             try self.ctx_outs.append(self.allocator, prev);
         }
-        const out = common.c.gguf_init_empty().?;
+        const out = llama.impl.llama_c.gguf_init_empty().?;
         ctx_out.* = out;
         // Save all metadata in first split only
-        if (i_split.* == 0) common.c.gguf_set_kv(out, self.ctx_gguf);
-        common.c.gguf_set_val_u16(out, common.kv_split_no, @truncate(@as(c_uint, @bitCast(i_split.*))));
-        common.c.gguf_set_val_u16(out, common.kv_split_count, 0); // placeholder
-        common.c.gguf_set_val_i32(out, common.kv_split_tensors_count, self.n_tensors);
+        if (i_split.* == 0) llama.impl.llama_c.gguf_set_kv(out, self.ctx_gguf);
+        llama.impl.llama_c.gguf_set_val_u16(out, tools_common.kv_split_no, @truncate(@as(c_uint, @bitCast(i_split.*))));
+        llama.impl.llama_c.gguf_set_val_u16(out, tools_common.kv_split_count, 0); // placeholder
+        llama.impl.llama_c.gguf_set_val_i32(out, tools_common.kv_split_tensors_count, self.n_tensors);
     }
 
     fn deinit(self: *Strategy) void {
-        for (self.ctx_outs.items) |ctx_out| common.c.gguf_free(ctx_out);
+        for (self.ctx_outs.items) |ctx_out| llama.impl.llama_c.gguf_free(ctx_out);
         self.ctx_outs.deinit(self.allocator);
         self.read_buf.deinit(self.allocator);
     }
@@ -349,24 +345,24 @@ const Strategy = struct {
             // split by number of tensors per file
             .tensor => i_tensor > 0 and i_tensor < self.n_tensors and @rem(i_tensor, self.params.n_split_tensors) == 0,
             // should never happen
-            .none => common.c.ggml_abort("gguf-split.cpp", 296, "invalid mode"),
+            .none => llama.impl.llama_c.ggml_abort("gguf-split.cpp", 296, "invalid mode"),
         };
     }
 
     /// Ports `print_info` (gguf-split.cpp:299 @b1b770d90).
     fn printInfo(self: *const Strategy) void {
-        common.io.printf("n_split: %zu\n", .{self.ctx_outs.items.len});
+        tools_common.io.printf("n_split: %zu\n", .{self.ctx_outs.items.len});
         var i_split: c_int = 0;
         for (self.ctx_outs.items) |ctx_out| {
             // re-calculate the real gguf size for each split (= metadata size + total size of all tensors)
-            var total_size: usize = common.c.gguf_get_meta_size(ctx_out);
+            var total_size: usize = llama.impl.llama_c.gguf_get_meta_size(ctx_out);
             var i: i64 = 0;
-            while (i < common.c.gguf_get_n_tensors(ctx_out)) : (i += 1) {
-                const t = common.c.ggml_get_tensor(self.ctx_meta, common.c.gguf_get_tensor_name(ctx_out, i));
-                total_size += common.c.ggml_nbytes(t);
+            while (i < llama.impl.llama_c.gguf_get_n_tensors(ctx_out)) : (i += 1) {
+                const t = llama.impl.llama_c.ggml_get_tensor(self.ctx_meta, llama.impl.llama_c.gguf_get_tensor_name(ctx_out, i));
+                total_size += llama.impl.llama_c.ggml_nbytes(t);
             }
             total_size = total_size / 1000 / 1000; // convert to megabytes
-            common.io.printf("split %05d: n_tensors = %lld, total_size = %zuM\n", .{ i_split + 1, @as(c_longlong, common.c.gguf_get_n_tensors(ctx_out)), total_size });
+            tools_common.io.printf("split %05d: n_tensors = %lld, total_size = %zuM\n", .{ i_split + 1, @as(c_longlong, llama.impl.llama_c.gguf_get_n_tensors(ctx_out)), total_size });
             i_split += 1;
         }
     }
@@ -378,38 +374,38 @@ const Strategy = struct {
         for (self.ctx_outs.items) |ctx_out| {
             // construct file path
             var split_path: [path_max:0]u8 = @splat(0);
-            _ = common.c.llama_split_path(&split_path, split_path.len, self.params.output.ptr, i_split, n_split);
+            _ = llama.api.llama.llama_split_path(&split_path, split_path.len, self.params.output.ptr, i_split, n_split);
 
             // open the output file
-            common.io.printf("Writing file %s ... ", .{cstr(&split_path)});
+            tools_common.io.printf("Writing file %s ... ", .{cstr(&split_path)});
             stdlib.stdio.stdout().flush();
             var fout = createOut(self.std_io, std.mem.sliceTo(&split_path, 0));
 
             // write metadata
-            const data = try self.allocator.alloc(u8, common.c.gguf_get_meta_size(ctx_out));
+            const data = try self.allocator.alloc(u8, llama.impl.llama_c.gguf_get_meta_size(ctx_out));
             defer self.allocator.free(data);
-            common.c.gguf_get_meta_data(ctx_out, data.ptr);
+            llama.impl.llama_c.gguf_get_meta_data(ctx_out, data.ptr);
             writeAll(&fout, data);
 
             // write tensors
             var i: i64 = 0;
-            while (i < common.c.gguf_get_n_tensors(ctx_out)) : (i += 1) {
+            while (i < llama.impl.llama_c.gguf_get_n_tensors(ctx_out)) : (i += 1) {
                 // read tensor meta and prepare buffer
-                const t_name = common.c.gguf_get_tensor_name(ctx_out, i);
-                const t = common.c.ggml_get_tensor(self.ctx_meta, t_name);
-                const n_bytes = common.c.ggml_nbytes(t);
+                const t_name = llama.impl.llama_c.gguf_get_tensor_name(ctx_out, i);
+                const t = llama.impl.llama_c.ggml_get_tensor(self.ctx_meta, t_name);
+                const n_bytes = llama.impl.llama_c.ggml_nbytes(t);
                 try self.read_buf.resize(self.allocator, n_bytes);
 
                 // calculate offset
-                const i_tensor_in = common.c.gguf_find_tensor(self.ctx_gguf, t_name); // idx of tensor in the input file
-                const offset = common.c.gguf_get_data_offset(self.ctx_gguf) + common.c.gguf_get_tensor_offset(self.ctx_gguf, i_tensor_in);
+                const i_tensor_in = llama.impl.llama_c.gguf_find_tensor(self.ctx_gguf, t_name); // idx of tensor in the input file
+                const offset = llama.impl.llama_c.gguf_get_data_offset(self.ctx_gguf) + llama.impl.llama_c.gguf_get_tensor_offset(self.ctx_gguf, i_tensor_in);
 
                 // copy tensor from input to output file
                 try self.copyFileToFile(&fout, offset, n_bytes);
                 zeros(&fout, pad(n_bytes) - n_bytes);
             }
 
-            common.io.printf("done\n", .{});
+            tools_common.io.printf("done\n", .{});
             // close the file
             fout.close(self.std_io);
             i_split += 1;
@@ -420,7 +416,7 @@ const Strategy = struct {
     fn copyFileToFile(self: *Strategy, f_out: *stdlib.file.Out, in_offset: usize, len: usize) !void {
         if (self.read_buf.items.len < len) try self.read_buf.resize(self.allocator, len);
         if (!stdlib.file.readAt(self.std_io, self.f_input, self.read_buf.items[0..len], in_offset)) {
-            common.io.eprintf("%s: failed to read %zu bytes at offset %zu, input file may be truncated\n", .{ "copy_file_to_file", len, in_offset });
+            tools_common.io.eprintf("%s: failed to read %zu bytes at offset %zu, input file may be truncated\n", .{ "copy_file_to_file", len, in_offset });
             stdlib.stdio.exit(1);
         }
         writeAll(f_out, self.read_buf.items[0..len]);
@@ -429,17 +425,17 @@ const Strategy = struct {
 
 /// Ports `gguf_split` (gguf-split.cpp:373 @b1b770d90).
 fn ggufSplit(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params) !void {
-    var ctx_meta: ?*common.c.ggml_context = null;
+    var ctx_meta: ?*llama.impl.llama_c.ggml_context = null;
 
-    const params: common.c.gguf_init_params = .{ .no_alloc = true, .ctx = &ctx_meta };
+    const params: llama.impl.llama_c.gguf_init_params = .{ .no_alloc = true, .ctx = &ctx_meta };
 
     const f_input = stdlib.file.openIn(std_io, split_params.input) catch {
-        common.io.eprintf("%s:  failed to open input GGUF from %s\n", .{ "gguf_split", split_params.input.ptr });
+        tools_common.io.eprintf("%s:  failed to open input GGUF from %s\n", .{ "gguf_split", split_params.input.ptr });
         stdlib.stdio.exit(1);
     };
 
-    const ctx_gguf = common.c.gguf_init_from_file(split_params.input.ptr, params) orelse {
-        common.io.eprintf("%s:  failed to load input GGUF from %s\n", .{ "gguf_split", split_params.input.ptr });
+    const ctx_gguf = llama.impl.llama_c.gguf_init_from_file(split_params.input.ptr, params) orelse {
+        tools_common.io.eprintf("%s:  failed to load input GGUF from %s\n", .{ "gguf_split", split_params.input.ptr });
         stdlib.stdio.exit(1);
     };
 
@@ -455,33 +451,33 @@ fn ggufSplit(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params)
     }
 
     // done, clean up
-    common.c.gguf_free(ctx_gguf);
+    llama.impl.llama_c.gguf_free(ctx_gguf);
     f_input.close(std_io);
 
-    common.io.eprintf("%s: %d gguf split written with a total of %d tensors.\n", .{ "gguf_split", n_split, strategy.n_tensors });
+    tools_common.io.eprintf("%s: %d gguf split written with a total of %d tensors.\n", .{ "gguf_split", n_split, strategy.n_tensors });
 }
 
 /// Ports `gguf_merge` (gguf-split.cpp:411 @b1b770d90).
 fn ggufMerge(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params) !void {
     const func = "gguf_merge";
-    common.io.eprintf("%s: %s -> %s\n", .{ func, split_params.input.ptr, split_params.output.ptr });
+    tools_common.io.eprintf("%s: %s -> %s\n", .{ func, split_params.input.ptr, split_params.output.ptr });
     var n_split: c_int = 1;
     var total_tensors: c_int = 0;
 
     // avoid overwriting existing output file
     if (stdlib.file.openIn(std_io, split_params.output)) |existing| {
         existing.close(std_io);
-        common.io.eprintf("%s: output file %s already exists\n", .{ func, split_params.output.ptr });
+        tools_common.io.eprintf("%s: output file %s already exists\n", .{ func, split_params.output.ptr });
         stdlib.stdio.exit(1);
     } else |_| {}
 
-    const ctx_out = common.c.gguf_init_empty().?;
+    const ctx_out = llama.impl.llama_c.gguf_init_empty().?;
 
     var read_data: std.ArrayList(u8) = .empty;
     defer read_data.deinit(allocator);
-    var ctx_metas: std.ArrayList(*common.c.ggml_context) = .empty;
+    var ctx_metas: std.ArrayList(*llama.impl.llama_c.ggml_context) = .empty;
     defer ctx_metas.deinit(allocator);
-    var ctx_ggufs: std.ArrayList(*common.c.gguf_context) = .empty;
+    var ctx_ggufs: std.ArrayList(*llama.impl.llama_c.gguf_context) = .empty;
     defer ctx_ggufs.deinit(allocator);
 
     var split_path: [path_max:0]u8 = @splat(0);
@@ -492,15 +488,15 @@ fn ggufMerge(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params)
     // First pass to find KV and tensors metadata
     var i_split: c_int = 0;
     while (i_split < n_split) : (i_split += 1) {
-        var ctx_meta: ?*common.c.ggml_context = null;
+        var ctx_meta: ?*llama.impl.llama_c.ggml_context = null;
 
-        const params: common.c.gguf_init_params = .{ .no_alloc = true, .ctx = &ctx_meta };
+        const params: llama.impl.llama_c.gguf_init_params = .{ .no_alloc = true, .ctx = &ctx_meta };
 
-        if (i_split > 0) _ = common.c.llama_split_path(&split_path, split_path.len, &split_prefix, i_split, n_split);
-        common.io.eprintf("%s: reading metadata %s ...", .{ func, cstr(&split_path) });
+        if (i_split > 0) _ = llama.api.llama.llama_split_path(&split_path, split_path.len, &split_prefix, i_split, n_split);
+        tools_common.io.eprintf("%s: reading metadata %s ...", .{ func, cstr(&split_path) });
 
-        const ctx_gguf = common.c.gguf_init_from_file(&split_path, params) orelse {
-            common.io.eprintf("\n%s:  failed to load input GGUF from %s\n", .{ func, split_params.input.ptr });
+        const ctx_gguf = llama.impl.llama_c.gguf_init_from_file(&split_path, params) orelse {
+            tools_common.io.eprintf("\n%s:  failed to load input GGUF from %s\n", .{ func, split_params.input.ptr });
             stdlib.stdio.exit(1);
         };
         try ctx_ggufs.append(allocator, ctx_gguf);
@@ -508,67 +504,67 @@ fn ggufMerge(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params)
 
         // Verify that this split belongs to the same set as the first one
         if (i_split > 0) {
-            const key_split_no = common.c.gguf_find_key(ctx_gguf, common.kv_split_no);
-            const key_split_count = common.c.gguf_find_key(ctx_gguf, common.kv_split_count);
-            if (key_split_no < 0 or common.c.gguf_get_val_u16(ctx_gguf, key_split_no) != i_split or
-                key_split_count < 0 or common.c.gguf_get_val_u16(ctx_gguf, key_split_count) != n_split)
+            const key_split_no = llama.impl.llama_c.gguf_find_key(ctx_gguf, tools_common.kv_split_no);
+            const key_split_count = llama.impl.llama_c.gguf_find_key(ctx_gguf, tools_common.kv_split_count);
+            if (key_split_no < 0 or llama.impl.llama_c.gguf_get_val_u16(ctx_gguf, key_split_no) != i_split or
+                key_split_count < 0 or llama.impl.llama_c.gguf_get_val_u16(ctx_gguf, key_split_count) != n_split)
             {
-                common.io.eprintf("\n%s: %s is not split %d of %d\n", .{ func, cstr(&split_path), i_split + 1, n_split });
+                tools_common.io.eprintf("\n%s: %s is not split %d of %d\n", .{ func, cstr(&split_path), i_split + 1, n_split });
                 stdlib.stdio.exit(1);
             }
         }
 
         if (i_split == 0) {
-            const key_n_split = common.c.gguf_find_key(ctx_gguf, common.kv_split_count);
+            const key_n_split = llama.impl.llama_c.gguf_find_key(ctx_gguf, tools_common.kv_split_count);
             if (key_n_split < 0) {
-                common.io.eprintf("\n%s: input file does not contain %s metadata\n", .{ func, common.kv_split_count.ptr });
-                common.c.gguf_free(ctx_gguf);
-                common.c.ggml_free(ctx_meta);
-                common.c.gguf_free(ctx_out);
+                tools_common.io.eprintf("\n%s: input file does not contain %s metadata\n", .{ func, tools_common.kv_split_count.ptr });
+                llama.impl.llama_c.gguf_free(ctx_gguf);
+                llama.impl.llama_c.ggml_free(ctx_meta);
+                llama.impl.llama_c.gguf_free(ctx_out);
                 stdlib.stdio.exit(1);
             }
 
-            n_split = common.c.gguf_get_val_u16(ctx_gguf, key_n_split);
+            n_split = llama.impl.llama_c.gguf_get_val_u16(ctx_gguf, key_n_split);
             if (n_split < 1) {
-                common.io.eprintf("\n%s: input file does not contain a valid split count %d\n", .{ func, n_split });
-                common.c.gguf_free(ctx_gguf);
-                common.c.ggml_free(ctx_meta);
-                common.c.gguf_free(ctx_out);
+                tools_common.io.eprintf("\n%s: input file does not contain a valid split count %d\n", .{ func, n_split });
+                llama.impl.llama_c.gguf_free(ctx_gguf);
+                llama.impl.llama_c.ggml_free(ctx_meta);
+                llama.impl.llama_c.gguf_free(ctx_out);
                 stdlib.stdio.exit(1);
             }
 
             // Verify the file naming and extract split_prefix
-            if (common.c.llama_split_prefix(&split_prefix, split_prefix.len, &split_path, i_split, n_split) == 0) {
-                common.io.eprintf("\n%s: unexpected input file name: %s i_split=%d n_split=%d\n", .{ func, cstr(&split_path), i_split, n_split });
-                common.c.gguf_free(ctx_gguf);
-                common.c.ggml_free(ctx_meta);
-                common.c.gguf_free(ctx_out);
+            if (llama.api.llama.llama_split_prefix(&split_prefix, split_prefix.len, &split_path, i_split, n_split) == 0) {
+                tools_common.io.eprintf("\n%s: unexpected input file name: %s i_split=%d n_split=%d\n", .{ func, cstr(&split_path), i_split, n_split });
+                llama.impl.llama_c.gguf_free(ctx_gguf);
+                llama.impl.llama_c.ggml_free(ctx_meta);
+                llama.impl.llama_c.gguf_free(ctx_out);
                 stdlib.stdio.exit(1);
             }
 
             // Do not trigger merge if we try to merge again the output
-            common.c.gguf_set_val_u16(ctx_gguf, common.kv_split_count, 0);
+            llama.impl.llama_c.gguf_set_val_u16(ctx_gguf, tools_common.kv_split_count, 0);
 
             // Set metadata from the first split
-            common.c.gguf_set_kv(ctx_out, ctx_gguf);
+            llama.impl.llama_c.gguf_set_kv(ctx_out, ctx_gguf);
         }
 
-        const n_tensors = common.c.gguf_get_n_tensors(ctx_gguf);
+        const n_tensors = llama.impl.llama_c.gguf_get_n_tensors(ctx_gguf);
         var i_tensor: i64 = 0;
         while (i_tensor < n_tensors) : (i_tensor += 1) {
-            const t_name = common.c.gguf_get_tensor_name(ctx_gguf, i_tensor);
-            const t = common.c.ggml_get_tensor(ctx_meta, t_name);
-            common.c.gguf_add_tensor(ctx_out, t);
+            const t_name = llama.impl.llama_c.gguf_get_tensor_name(ctx_gguf, i_tensor);
+            const t = llama.impl.llama_c.ggml_get_tensor(ctx_meta, t_name);
+            llama.impl.llama_c.gguf_add_tensor(ctx_out, t);
         }
         total_tensors += @intCast(n_tensors);
 
-        common.io.eprintf("\x1b[3Ddone\n", .{});
+        tools_common.io.eprintf("\x1b[3Ddone\n", .{});
     }
 
     // Verify that no tensor is missing
-    const key_n_tensors = common.c.gguf_find_key(ctx_ggufs.items[0], common.kv_split_tensors_count);
-    if (key_n_tensors < 0 or common.c.gguf_get_val_i32(ctx_ggufs.items[0], key_n_tensors) != total_tensors) {
-        common.io.eprintf("%s: splits contain %d tensors, which does not match %s\n", .{ func, total_tensors, common.kv_split_tensors_count.ptr });
+    const key_n_tensors = llama.impl.llama_c.gguf_find_key(ctx_ggufs.items[0], tools_common.kv_split_tensors_count);
+    if (key_n_tensors < 0 or llama.impl.llama_c.gguf_get_val_i32(ctx_ggufs.items[0], key_n_tensors) != total_tensors) {
+        tools_common.io.eprintf("%s: splits contain %d tensors, which does not match %s\n", .{ func, total_tensors, tools_common.kv_split_tensors_count.ptr });
         stdlib.stdio.exit(1);
     }
 
@@ -576,7 +572,7 @@ fn ggufMerge(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params)
     if (!split_params.dry_run) {
         fout = createOut(std_io, split_params.output);
         // placeholder for the meta data
-        const meta_size = common.c.gguf_get_meta_size(ctx_out);
+        const meta_size = llama.impl.llama_c.gguf_get_meta_size(ctx_out);
         zeros(&fout, meta_size);
     }
 
@@ -584,35 +580,35 @@ fn ggufMerge(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params)
     var merge_error = false;
     i_split = 0;
     while (i_split < n_split) : (i_split += 1) {
-        _ = common.c.llama_split_path(&split_path, split_path.len, &split_prefix, i_split, n_split);
+        _ = llama.api.llama.llama_split_path(&split_path, split_path.len, &split_prefix, i_split, n_split);
         const f_input = stdlib.file.openIn(std_io, std.mem.sliceTo(&split_path, 0)) catch {
-            common.io.eprintf("%s:  failed to open input GGUF from %s\n", .{ func, cstr(&split_path) });
+            tools_common.io.eprintf("%s:  failed to open input GGUF from %s\n", .{ func, cstr(&split_path) });
             for (ctx_ggufs.items, ctx_metas.items) |g, m| {
-                common.c.gguf_free(g);
-                common.c.ggml_free(m);
+                llama.impl.llama_c.gguf_free(g);
+                llama.impl.llama_c.ggml_free(m);
             }
-            common.c.gguf_free(ctx_out);
+            llama.impl.llama_c.gguf_free(ctx_out);
             if (!split_params.dry_run) fout.close(std_io);
             stdlib.stdio.exit(1);
         };
-        common.io.eprintf("%s: writing tensors %s ...", .{ func, cstr(&split_path) });
+        tools_common.io.eprintf("%s: writing tensors %s ...", .{ func, cstr(&split_path) });
 
         const ctx_gguf = ctx_ggufs.items[@intCast(i_split)];
         const ctx_meta = ctx_metas.items[@intCast(i_split)];
 
-        const n_tensors = common.c.gguf_get_n_tensors(ctx_gguf);
+        const n_tensors = llama.impl.llama_c.gguf_get_n_tensors(ctx_gguf);
         var i_tensor: i64 = 0;
         while (i_tensor < n_tensors) : (i_tensor += 1) {
-            const t_name = common.c.gguf_get_tensor_name(ctx_gguf, i_tensor);
-            const t = common.c.ggml_get_tensor(ctx_meta, t_name);
+            const t_name = llama.impl.llama_c.gguf_get_tensor_name(ctx_gguf, i_tensor);
+            const t = llama.impl.llama_c.ggml_get_tensor(ctx_meta, t_name);
 
-            const n_bytes = common.c.ggml_nbytes(t);
+            const n_bytes = llama.impl.llama_c.ggml_nbytes(t);
 
             if (read_data.items.len < n_bytes) try read_data.resize(allocator, n_bytes);
 
-            const offset = common.c.gguf_get_data_offset(ctx_gguf) + common.c.gguf_get_tensor_offset(ctx_gguf, i_tensor);
+            const offset = llama.impl.llama_c.gguf_get_data_offset(ctx_gguf) + llama.impl.llama_c.gguf_get_tensor_offset(ctx_gguf, i_tensor);
             if (!stdlib.file.readAt(std_io, f_input, read_data.items[0..n_bytes], offset)) {
-                common.io.eprintf("%s: failed to read %zu bytes at offset %zu, input file may be truncated\n", .{ func, n_bytes, offset });
+                tools_common.io.eprintf("%s: failed to read %zu bytes at offset %zu, input file may be truncated\n", .{ func, n_bytes, offset });
                 stdlib.stdio.exit(1);
             }
             if (!split_params.dry_run) {
@@ -622,17 +618,17 @@ fn ggufMerge(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params)
             }
         }
 
-        common.c.gguf_free(ctx_gguf);
-        common.c.ggml_free(ctx_meta);
+        llama.impl.llama_c.gguf_free(ctx_gguf);
+        llama.impl.llama_c.ggml_free(ctx_meta);
         f_input.close(std_io);
-        common.io.eprintf("\x1b[3Ddone\n", .{});
+        tools_common.io.eprintf("\x1b[3Ddone\n", .{});
 
         if (!split_params.dry_run and split_params.delete_splits) {
             if (stdlib.file.remove(std_io, std.mem.sliceTo(&split_path, 0))) {
-                common.io.eprintf("%s: deleted file %s\n", .{ func, cstr(&split_path) });
+                tools_common.io.eprintf("%s: deleted file %s\n", .{ func, cstr(&split_path) });
             } else {
                 merge_error = true;
-                common.io.eprintf("error: failed to delete %s\n", .{cstr(&split_path)});
+                tools_common.io.eprintf("error: failed to delete %s\n", .{cstr(&split_path)});
             }
         }
     }
@@ -640,15 +636,15 @@ fn ggufMerge(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params)
     if (!split_params.dry_run) {
         // go back to beginning of file and write the updated metadata
         fout.seek(0) catch terminate();
-        const data = try allocator.alloc(u8, common.c.gguf_get_meta_size(ctx_out));
+        const data = try allocator.alloc(u8, llama.impl.llama_c.gguf_get_meta_size(ctx_out));
         defer allocator.free(data);
-        common.c.gguf_get_meta_data(ctx_out, data.ptr);
+        llama.impl.llama_c.gguf_get_meta_data(ctx_out, data.ptr);
         writeAll(&fout, data);
         fout.close(std_io);
     }
-    common.c.gguf_free(ctx_out);
+    llama.impl.llama_c.gguf_free(ctx_out);
 
-    common.io.eprintf("%s: %s merged from %d split with %d tensors.\n", .{ func, split_params.output.ptr, n_split, total_tensors });
+    tools_common.io.eprintf("%s: %s merged from %d split with %d tensors.\n", .{ func, split_params.output.ptr, n_split, total_tensors });
 
     if (merge_error) stdlib.stdio.exit(1);
 }

@@ -2,7 +2,7 @@
 //!
 //! **Not a port.** The harness behind `scripts/jinja-diff`, linked with
 //! `harness/jinja_ref.cpp` and the unmodified `llama.cpp/common/jinja`.
-//! Our CLI renders chat templates through `zigjinja`; upstream's through its
+//! Our CLI renders chat templates through `jinja`; upstream's through its
 //! own engine. Nothing else checks that two
 //! independent Jinja implementations agree on the templates models ship.
 //!
@@ -34,7 +34,7 @@
 //! `common_chat_template_direct_apply_impl` binds them and rendered through
 //! `cli/common_chat/template.zig`; text and failure must agree. And the
 //! capabilities `caps_get` reads off each template must equal the port's
-//! (`cli/common_chat/caps.zig`, over zigjinja's usage statistics).
+//! (`cli/common_chat/caps.zig`, over jinja's usage statistics).
 //!
 //! Then the clock: `strftime_now` formats local time on both sides, and the
 //! conversations print a date only on some templates and differ only near
@@ -55,7 +55,7 @@
 const std = @import("std");
 const chat = @import("chat");
 const common_chat = @import("common_chat");
-const json_mod = @import("json");
+const json = @import("json");
 const jinja = @import("zigjinja");
 const inputs = @import("inputs");
 const tts_norm_phase = @import("tts_norm_phase.zig");
@@ -63,8 +63,6 @@ const tts_norm_phase = @import("tts_norm_phase.zig");
 extern fn jinja_ref_render(tmpl: [*]const u8, tmpl_len: usize, vars: [*]const u8, vars_len: usize, out: *?[*]u8, out_len: *usize, input: *?[*]u8, parts: *?[*]u8) c_int;
 extern fn jinja_ref_free(p: ?*anyopaque) void;
 extern fn jinja_ref_caps(tmpl: [*]const u8, tmpl_len: usize, out: *[9]u8, levels: [*]u8, levels_cap: usize) c_int;
-
-const gpa = std.heap.c_allocator;
 
 const bos = "<s>";
 const eos = "</s>";
@@ -129,7 +127,7 @@ const Outcome = union(enum) {
 };
 
 fn refRender(source: []const u8, conv: Conversation) !Outcome {
-    var vars: std.Io.Writer.Allocating = .init(gpa);
+    var vars: std.Io.Writer.Allocating = .init(std.heap.c_allocator);
     defer vars.deinit();
     var js: std.json.Stringify = .{ .writer = &vars.writer };
     try js.beginObject();
@@ -161,40 +159,40 @@ fn refRender(source: []const u8, conv: Conversation) !Outcome {
     defer jinja_ref_free(out);
     defer jinja_ref_free(input);
     defer jinja_ref_free(parts);
-    if (rc != 0) return .{ .failed = try gpa.dupe(u8, std.mem.span(@as([*:0]u8, @ptrCast(out.?)))) };
+    if (rc != 0) return .{ .failed = try std.heap.c_allocator.dupe(u8, std.mem.span(@as([*:0]u8, @ptrCast(out.?)))) };
     return .{ .ok = .{
-        .text = try gpa.dupe(u8, out.?[0..out_len]),
-        .input = try gpa.dupe(u8, input.?[0..out_len]),
-        .parts = try gpa.dupe(u8, std.mem.span(@as([*:0]u8, @ptrCast(parts.?)))),
+        .text = try std.heap.c_allocator.dupe(u8, out.?[0..out_len]),
+        .input = try std.heap.c_allocator.dupe(u8, input.?[0..out_len]),
+        .parts = try std.heap.c_allocator.dupe(u8, std.mem.span(@as([*:0]u8, @ptrCast(parts.?)))),
     } };
 }
 
 /// Ours, flattened: the text and, per byte, 1 where it is untrusted.
 fn portRender(source: []const u8, conv: Conversation) !Outcome {
-    var t = try chat.Template.init(gpa, source);
+    var t = try chat.Template.init(std.heap.c_allocator, source);
     defer t.deinit();
     const segs = t.applySegments(conv.messages, .{
         .add_generation_prompt = conv.add_generation_prompt,
         .bos_token = bos,
         .eos_token = eos,
-    }) catch |err| return .{ .failed = try std.fmt.allocPrint(gpa, "{s} ({s})", .{ @errorName(err), diagnose(source, conv) }) };
-    defer chat.freeSegments(gpa, segs);
+    }) catch |err| return .{ .failed = try std.fmt.allocPrint(std.heap.c_allocator, "{s} ({s})", .{ @errorName(err), diagnose(source, conv) }) };
+    defer chat.freeSegments(std.heap.c_allocator, segs);
     var text: std.ArrayList(u8) = .empty;
     var untrusted: std.ArrayList(u8) = .empty;
     var parts: std.ArrayList(u8) = .empty;
     for (segs) |seg| {
-        try text.appendSlice(gpa, seg.text);
-        try untrusted.appendNTimes(gpa, @intFromBool(!seg.trusted), seg.text.len);
-        try parts.print(gpa, "{s}{d},", .{ if (seg.trusted) "T" else "I", seg.text.len });
+        try text.appendSlice(std.heap.c_allocator, seg.text);
+        try untrusted.appendNTimes(std.heap.c_allocator, @intFromBool(!seg.trusted), seg.text.len);
+        try parts.print(std.heap.c_allocator, "{s}{d},", .{ if (seg.trusted) "T" else "I", seg.text.len });
     }
-    return .{ .ok = .{ .text = try text.toOwnedSlice(gpa), .input = try untrusted.toOwnedSlice(gpa), .parts = try parts.toOwnedSlice(gpa) } };
+    return .{ .ok = .{ .text = try text.toOwnedSlice(std.heap.c_allocator), .input = try untrusted.toOwnedSlice(std.heap.c_allocator), .parts = try parts.toOwnedSlice(std.heap.c_allocator) } };
 }
 
 /// Where ours failed: `chat.zig` folds every engine error into
-/// `TemplateFailed`, so its steps are repeated here against `zigjinja` to
+/// `TemplateFailed`, so its steps are repeated here against `jinja` to
 /// name the phase and the engine's error.
 fn diagnose(source: []const u8, conv: Conversation) []const u8 {
-    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    var arena_state = std.heap.ArenaAllocator.init(std.heap.c_allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
     var env = jinja.Environment.init(arena);
@@ -203,7 +201,7 @@ fn diagnose(source: []const u8, conv: Conversation) []const u8 {
     env.lstrip_blocks = true;
     // as `chat.zig` sets it: without it a macro that recurses for ever overflows the stack here
     env.llama_cpp_semantics = true;
-    const template = env.fromString(source, "chat") catch |e| return std.fmt.allocPrint(gpa, "parse: {s} near line {d}", .{ @errorName(e), env.last_syntax_error_line }) catch "parse";
+    const template = env.fromString(source, "chat") catch |e| return std.fmt.allocPrint(std.heap.c_allocator, "parse: {s} near line {d}", .{ @errorName(e), env.last_syntax_error_line }) catch "parse";
     var list = std.json.Array.init(arena);
     for (conv.messages) |m| {
         var obj: std.json.ObjectMap = .empty;
@@ -228,7 +226,7 @@ fn diagnose(source: []const u8, conv: Conversation) []const u8 {
 }
 
 fn phase(comptime name: []const u8, e: anyerror) []const u8 {
-    return std.fmt.allocPrint(gpa, name ++ ": {s}", .{@errorName(e)}) catch name;
+    return std.fmt.allocPrint(std.heap.c_allocator, name ++ ": {s}", .{@errorName(e)}) catch name;
 }
 
 /// Prints up to 60 bytes around `at`, escaped, for a differing render.
@@ -347,22 +345,22 @@ fn refProbe(source: []const u8, vars: []const u8) !ProbeOutcome {
     defer jinja_ref_free(out);
     defer jinja_ref_free(input);
     defer jinja_ref_free(parts);
-    if (rc != 0) return .{ .failed = try gpa.dupe(u8, std.mem.span(@as([*:0]u8, @ptrCast(out.?)))) };
-    return .{ .ok = try gpa.dupe(u8, out.?[0..out_len]) };
+    if (rc != 0) return .{ .failed = try std.heap.c_allocator.dupe(u8, std.mem.span(@as([*:0]u8, @ptrCast(out.?)))) };
+    return .{ .ok = try std.heap.c_allocator.dupe(u8, out.?[0..out_len]) };
 }
 
 fn portProbe(tmpl: *const common_chat.template.Template, vars: []const u8) !ProbeOutcome {
-    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    var arena_state = std.heap.ArenaAllocator.init(std.heap.c_allocator);
     defer arena_state.deinit();
     const a = arena_state.allocator();
-    var v = try json_mod.parse(a, vars);
+    var v = try json.parse(a, vars);
     var r: common_chat.template.Render = undefined;
-    r.init(gpa, false);
+    r.init(std.heap.c_allocator, false);
     defer r.deinit();
     try r.bindJson(&v, true);
-    const text = r.run(tmpl, gpa) catch |e| {
+    const text = r.run(tmpl, std.heap.c_allocator) catch |e| {
         if (e == error.OutOfMemory) return e;
-        return .{ .failed = try gpa.dupe(u8, common_chat.exception.what(e)) };
+        return .{ .failed = try std.heap.c_allocator.dupe(u8, common_chat.exception.what(e)) };
     };
     return .{ .ok = text };
 }
@@ -382,7 +380,7 @@ fn runProbes(filter: []const u8) !struct { renders: usize, differ: usize, caps_d
         var ref_caps: [9]u8 = undefined;
         var ref_levels: [128]u8 = undefined;
         const ref_rc = jinja_ref_caps(tmpl.source.ptr, tmpl.source.len, &ref_caps, &ref_levels, ref_levels.len);
-        var port = common_chat.template.Template.init(gpa, tmpl.source, bos, eos) catch |e| {
+        var port = common_chat.template.Template.init(std.heap.c_allocator, tmpl.source, bos, eos) catch |e| {
             if (ref_rc != 0) continue;
             std.debug.print("  {s}: ours fails to load: {s}\n", .{ tmpl.name, @errorName(e) });
             differ += 1;
@@ -402,8 +400,8 @@ fn runProbes(filter: []const u8) !struct { renders: usize, differ: usize, caps_d
                 std.debug.print("  {s}: caps {s}: upstream {d}, ours {}\n", .{ tmpl.name, e.name, ref_caps[i], e.value });
             }
         }
-        const port_levels = try std.mem.join(gpa, ",", port.caps.reasoning_effort_levels);
-        defer gpa.free(port_levels);
+        const port_levels = try std.mem.join(std.heap.c_allocator, ",", port.caps.reasoning_effort_levels);
+        defer std.heap.c_allocator.free(port_levels);
         const ref_levels_s = std.mem.sliceTo(&ref_levels, 0);
         if (!std.mem.eql(u8, port_levels, ref_levels_s)) {
             caps_differ += 1;
@@ -412,8 +410,8 @@ fn runProbes(filter: []const u8) !struct { renders: usize, differ: usize, caps_d
         var line: [probes.len * 4]u8 = undefined;
         for (probes, 0..) |p, k| {
             for ([_]bool{ false, true }, 0..) |gen, gi| for ([_]bool{ true, false }, 0..) |think, ti| {
-                const vars = try probeVars(gpa, p, gen, think);
-                defer gpa.free(vars);
+                const vars = try probeVars(std.heap.c_allocator, p, gen, think);
+                defer std.heap.c_allocator.free(vars);
                 const ref = try refProbe(tmpl.source, vars);
                 const ours = try portProbe(&port, vars);
                 renders += 1;
@@ -440,10 +438,10 @@ fn runProbes(filter: []const u8) !struct { renders: usize, differ: usize, caps_d
                     std.debug.print("  {s} / probe {s} gen={} think={}: {s} raises: {s}\n", .{ tmpl.name, p.name, gen, think, if (mark == 'E') "ours" else "upstream", if (mark == 'E') ours.failed else ref.failed });
                 }
                 switch (ref) {
-                    inline else => |x| gpa.free(x),
+                    inline else => |x| std.heap.c_allocator.free(x),
                 }
                 switch (ours) {
-                    inline else => |x| gpa.free(x),
+                    inline else => |x| std.heap.c_allocator.free(x),
                 }
                 line[k * 4 + gi * 2 + ti] = mark;
             };
@@ -512,7 +510,7 @@ pub fn main(init: std.process.Init) !void {
             if (verdict != .same and verdict != .both_failed) {
                 all_ok = false;
                 if (verdict == .port_failed) {
-                    const g = try reasons.getOrPut(gpa, port.failed);
+                    const g = try reasons.getOrPut(std.heap.c_allocator, port.failed);
                     if (!g.found_existing) g.value_ptr.* = 0;
                     g.value_ptr.* += 1;
                 }

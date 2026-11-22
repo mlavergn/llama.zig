@@ -16,7 +16,7 @@ const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 const llama = @import("llama");
 
-const token_null: mod.impl.c.llama_token = -1; // LLAMA_TOKEN_NULL
+const token_null: llama.impl.llama_c.llama_token = -1; // LLAMA_TOKEN_NULL
 
 // -----------------------------------------------------------------------------
 // mtmd-helper.h
@@ -41,7 +41,7 @@ pub const OutMode = enum(c_int) {
 /// Ports `mtmd_helper_gen_audio_inp` (mtmd-helper.h:247 @b1b770d90).
 pub const Inp = extern struct {
     stream: bool, // if true, output() must be called after each step_gen()
-    seq_id: mod.impl.c.llama_seq_id,
+    seq_id: llama.impl.llama_c.llama_seq_id,
 
     // the text to speak; for a model with a "tts" chat template (e.g. LFM3-Audio), the prompt rendered from it
     prompt: ?[*]const u8,
@@ -83,9 +83,9 @@ fn ttsResolveLang(lang: []const u8) []const u8 {
 
 /// Ports `find_special_token` (mtmd-helper-gen.cpp:45 @b1b770d90): the
 /// first token whose text is `piece`.
-fn findSpecialToken(vocab: ?*const mod.impl.c.struct_llama_vocab, piece: []const u8) mod.impl.c.llama_token {
+fn findSpecialToken(vocab: ?*const llama.impl.llama_c.struct_llama_vocab, piece: []const u8) llama.impl.llama_c.llama_token {
     const n = llama.api.vocab.llama_vocab_n_tokens(vocab);
-    var t: mod.impl.c.llama_token = 0;
+    var t: llama.impl.llama_c.llama_token = 0;
     while (t < n) : (t += 1) {
         const text = llama.api.vocab.llama_vocab_get_text(vocab, t);
         if (std.mem.eql(u8, piece, std.mem.span(@as([*:0]const u8, @ptrCast(text))))) return t;
@@ -158,16 +158,16 @@ const StreamOut = struct {
 /// Ports `mtmd_gen_audio_pipeline` (mtmd-helper-gen.cpp:90 @b1b770d90): what
 /// every pipeline holds.
 const Base = struct {
-    lctx: ?*mod.impl.c.struct_llama_context,
+    lctx: ?*llama.impl.llama_c.struct_llama_context,
     mctx: *mod.mtmd.Context,
-    model: ?*const mod.impl.c.struct_llama_model,
-    vocab: ?*const mod.impl.c.struct_llama_vocab,
+    model: ?*const llama.impl.llama_c.struct_llama_model,
+    vocab: ?*const llama.impl.llama_c.struct_llama_vocab,
     n_embd: c_int,
     info: mod.mtmd.GenAudioInfo,
     gen_state: ?*mod.mtmd.GenState = null,
-    logit_bias: std.ArrayList(mod.impl.c.llama_logit_bias) = .empty, // see mtmd_helper_gen_audio_get_logit_bias()
+    logit_bias: std.ArrayList(llama.impl.llama_c.llama_logit_bias) = .empty, // see mtmd_helper_gen_audio_get_logit_bias()
 
-    fn init(lctx: ?*mod.impl.c.struct_llama_context, mctx: *mod.mtmd.Context) Base {
+    fn init(lctx: ?*llama.impl.llama_c.struct_llama_context, mctx: *mod.mtmd.Context) Base {
         const model = llama.api.context.llama_get_model(lctx);
         return .{
             .lctx = lctx,
@@ -269,7 +269,7 @@ const Base = struct {
         const is_last_batch = (st.prompt_pos + n_tokens_batch) == st.n_prompt;
         if (is_last_batch) st.prompt_batch.?.logits.items[@intCast(st.prompt_pos + n_tokens_batch - 1)] = 1;
 
-        if (llama.api.context.llama_process(self.lctx, mod.impl.c.LLAMA_PROCESS_TYPE_DECODE, st.prompt_batch.?.render(self.lctx, st.prompt_pos, n_tokens_batch)) != 0) {
+        if (llama.api.context.llama_process(self.lctx, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, st.prompt_batch.?.render(self.lctx, st.prompt_pos, n_tokens_batch)) != 0) {
             mod.helper.logErr("mtmd_helper_gen_audio: prompt decode failed\n", .{});
             return -1;
         }
@@ -381,23 +381,23 @@ const Qwen3tts = struct {
 
     // vocab specials fixed across the whole session, looked up once
     specials_ok: bool = false,
-    codec_0: mod.impl.c.llama_token = token_null,
-    codec_bos: mod.impl.c.llama_token = token_null,
-    codec_eos: mod.impl.c.llama_token = token_null,
-    codec_pad: mod.impl.c.llama_token = token_null,
-    c_think: mod.impl.c.llama_token = token_null,
-    c_think_b: mod.impl.c.llama_token = token_null,
-    c_think_e: mod.impl.c.llama_token = token_null,
-    tts_pad: mod.impl.c.llama_token = token_null,
-    tts_bos: mod.impl.c.llama_token = token_null,
-    tts_eos: mod.impl.c.llama_token = token_null,
+    codec_0: llama.impl.llama_c.llama_token = token_null,
+    codec_bos: llama.impl.llama_c.llama_token = token_null,
+    codec_eos: llama.impl.llama_c.llama_token = token_null,
+    codec_pad: llama.impl.llama_c.llama_token = token_null,
+    c_think: llama.impl.llama_c.llama_token = token_null,
+    c_think_b: llama.impl.llama_c.llama_token = token_null,
+    c_think_e: llama.impl.llama_c.llama_token = token_null,
+    tts_pad: llama.impl.llama_c.llama_token = token_null,
+    tts_bos: llama.impl.llama_c.llama_token = token_null,
+    tts_eos: llama.impl.llama_c.llama_token = token_null,
     tok_embd: std.ArrayList(f32) = .empty, // whole token embedding matrix, n_vocab * n_embd
 
     // must match hparams.wav_tfm_swa hardcoded in mtmd-model.cpp
     window_frames: usize = 72,
 
     // per-generation state, cleared by reset()
-    seq_id: mod.impl.c.llama_seq_id = 0,
+    seq_id: llama.impl.llama_c.llama_seq_id = 0,
     mrope: bool = false,
     pos: c_int = 0,
     prompt: PromptState = .{},
@@ -436,7 +436,7 @@ const Qwen3tts = struct {
         self.so.reset();
     }
 
-    fn row(self: *const Qwen3tts, t: mod.impl.c.llama_token) []const f32 {
+    fn row(self: *const Qwen3tts, t: llama.impl.llama_c.llama_token) []const f32 {
         const n_e = self.base.nE();
         const k: usize = @intCast(t);
         return self.tok_embd.items[k * n_e .. (k + 1) * n_e];
@@ -444,7 +444,7 @@ const Qwen3tts = struct {
 
     /// `sum_row` and `sum_vec` (mtmd-helper-gen.cpp:220, 225 @b1b770d90),
     /// appended to `dst`.
-    fn pushSum(self: *const Qwen3tts, dst: *std.ArrayList(f32), a: mod.impl.c.llama_token, vb: []const f32) void {
+    fn pushSum(self: *const Qwen3tts, dst: *std.ArrayList(f32), a: llama.impl.llama_c.llama_token, vb: []const f32) void {
         const va = self.row(a);
         dst.ensureUnusedCapacity(std.heap.c_allocator, va.len) catch oom();
         for (va, 0..) |x, i| dst.appendAssumeCapacity(x + vb[i]);
@@ -481,7 +481,7 @@ const Qwen3tts = struct {
         const prompt_text: []const u8 = if (inp.prompt_len == 0) "" else inp.prompt.?[0..inp.prompt_len];
         const full = std.mem.concat(std.heap.c_allocator, u8, &.{ "<|im_start|>assistant\n", prompt_text, "<|im_end|>\n<|im_start|>assistant\n" }) catch oom();
         defer std.heap.c_allocator.free(full);
-        const ids = std.heap.c_allocator.alloc(mod.impl.c.llama_token, full.len + 16) catch oom();
+        const ids = std.heap.c_allocator.alloc(llama.impl.llama_c.llama_token, full.len + 16) catch oom();
         defer std.heap.c_allocator.free(ids);
         @memset(ids, 0);
         const n_ids = llama.api.vocab.llama_tokenize(self.base.vocab, full.ptr, @truncate(@as(isize, @intCast(full.len))), ids.ptr, @truncate(@as(isize, @intCast(ids.len))), false, true);
@@ -498,7 +498,7 @@ const Qwen3tts = struct {
             buf.appendSlice(std.heap.c_allocator, self.row(ids[i])) catch oom();
             n_rows += 1;
         }
-        for ([_]mod.impl.c.llama_token{ self.c_think, self.c_think_b, c_lang, self.c_think_e }) |t| {
+        for ([_]llama.impl.llama_c.llama_token{ self.c_think, self.c_think_b, c_lang, self.c_think_e }) |t| {
             self.pushSum(buf, self.tts_pad, self.row(t));
             n_rows += 1;
         }
@@ -522,7 +522,7 @@ const Qwen3tts = struct {
 
         // the talker uses the qwen3vl interleaved mrope, all sections are equal for a text/codec stream
         const rope = llama.api.model.llama_model_rope_type(self.base.model);
-        self.mrope = rope == mod.impl.c.LLAMA_ROPE_TYPE_MROPE or rope == mod.impl.c.LLAMA_ROPE_TYPE_IMROPE;
+        self.mrope = rope == llama.impl.llama_c.LLAMA_ROPE_TYPE_MROPE or rope == llama.impl.llama_c.LLAMA_ROPE_TYPE_IMROPE;
         const n_pos_per_embd: c_int = if (self.mrope) 4 else 1;
 
         self.prompt.dropBatch();
@@ -546,7 +546,7 @@ const Qwen3tts = struct {
     }
 
     /// `step_gen` (mtmd-helper-gen.cpp:318 @b1b770d90).
-    fn stepGen(self: *Qwen3tts, sampled: mod.impl.c.llama_token, h_state_in: ?[*]const f32, h_state_out: *?[*]const f32, out_stop: *bool) i32 {
+    fn stepGen(self: *Qwen3tts, sampled: llama.impl.llama_c.llama_token, h_state_in: ?[*]const f32, h_state_out: *?[*]const f32, out_stop: *bool) i32 {
         if (sampled == token_null) {
             mod.helper.logErr("mtmd_helper_gen_audio: qwen3tts requires a token sampled from the backbone\n", .{});
             return 1;
@@ -589,7 +589,7 @@ const Qwen3tts = struct {
         batch_embd.logits.items[0] = 1;
         self.pos += 1;
 
-        if (llama.api.context.llama_process(self.base.lctx, mod.impl.c.LLAMA_PROCESS_TYPE_DECODE, batch_embd.render(self.base.lctx, 0, 1)) != 0) {
+        if (llama.api.context.llama_process(self.base.lctx, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, batch_embd.render(self.base.lctx, 0, 1)) != 0) {
             mod.helper.logErr("mtmd_helper_gen_audio: decode failed\n", .{});
             return 1;
         }
@@ -625,7 +625,7 @@ const Qwen3tts = struct {
         self.tts_pad = findSpecialToken(v, "<tts_pad>");
         self.tts_bos = findSpecialToken(v, "<tts_text_bos>");
         self.tts_eos = findSpecialToken(v, "<tts_text_eod>");
-        for ([_]mod.impl.c.llama_token{ self.codec_0, self.codec_bos, self.codec_eos, self.codec_pad, self.c_think, self.c_think_b, self.c_think_e, self.tts_pad, self.tts_bos, self.tts_eos }) |t| {
+        for ([_]llama.impl.llama_c.llama_token{ self.codec_0, self.codec_bos, self.codec_eos, self.codec_pad, self.c_think, self.c_think_b, self.c_think_e, self.tts_pad, self.tts_bos, self.tts_eos }) |t| {
             if (t == token_null) {
                 mod.helper.logErr("mtmd_helper_gen_audio: missing a required special token in vocab\n", .{});
                 return false;
@@ -680,7 +680,7 @@ fn pocketttsPack(variant: ?[*:0]const u8) PackSettings {
     return .{};
 }
 
-const TokenList = std.ArrayList(mod.impl.c.llama_token);
+const TokenList = std.ArrayList(llama.impl.llama_c.llama_token);
 
 fn freeLists(lists: *std.ArrayList(TokenList)) void {
     for (lists.items) |*l| l.deinit(std.heap.c_allocator);
@@ -696,11 +696,11 @@ const Pockettts = struct {
     pack: PackSettings = .{},
     temp: f32 = -1.0, // the caller's flow noise scale, < 0 for the model default
     specials_ok: bool = false,
-    bos_before_voice: mod.impl.c.llama_token = token_null,
-    audio_bos: mod.impl.c.llama_token = token_null,
+    bos_before_voice: llama.impl.llama_c.llama_token = token_null,
+    audio_bos: llama.impl.llama_c.llama_token = token_null,
     tok_embd: std.ArrayList(f32) = .empty,
 
-    seq_id: mod.impl.c.llama_seq_id = 0,
+    seq_id: llama.impl.llama_c.llama_seq_id = 0,
     pos: c_int = 0,
     prompt: PromptState = .{},
     seed: u32 = std.math.maxInt(u32),
@@ -864,7 +864,7 @@ const Pockettts = struct {
         batch_embd.logits.items[0] = 1;
         self.pos += 1;
 
-        if (llama.api.context.llama_process(self.base.lctx, mod.impl.c.LLAMA_PROCESS_TYPE_DECODE, batch_embd.render(self.base.lctx, 0, 1)) != 0) {
+        if (llama.api.context.llama_process(self.base.lctx, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, batch_embd.render(self.base.lctx, 0, 1)) != 0) {
             mod.helper.logErr("mtmd_helper_gen_audio: decode failed\n", .{});
             return 1;
         }
@@ -905,7 +905,7 @@ const Pockettts = struct {
 
     /// `push_embd_row` (mtmd-helper-gen.cpp:814 @b1b770d90): the table can
     /// be shorter than the vocab, so the row lookup is bounded.
-    fn pushEmbdRow(self: *const Pockettts, dst: *std.ArrayList(f32), t: mod.impl.c.llama_token) void {
+    fn pushEmbdRow(self: *const Pockettts, dst: *std.ArrayList(f32), t: llama.impl.llama_c.llama_token) void {
         const n_e = self.base.nE();
         const n_rows = self.tok_embd.items.len / n_e;
         mod.impl.ggmlAssert(t >= 0 and @as(usize, @intCast(t)) < n_rows, "mtmd-helper-gen.cpp", 816, "t >= 0 && (size_t) t < n_rows");
@@ -916,7 +916,7 @@ const Pockettts = struct {
     /// `punct_ids` (mtmd-helper-gen.cpp:824 @b1b770d90): the token ids of
     /// the pieces the reference splits on, without the dummy prefix.
     fn punctIds(self: *const Pockettts, s: [:0]const u8) TokenList {
-        var ids: [16]mod.impl.c.llama_token = @splat(0);
+        var ids: [16]llama.impl.llama_c.llama_token = @splat(0);
         const n = llama.api.vocab.llama_tokenize(self.base.vocab, s.ptr, @intCast(s.len), &ids, ids.len, false, false);
         var out: TokenList = .empty;
         if (n <= 1) return out;
@@ -926,12 +926,12 @@ const Pockettts = struct {
 
     /// `split_on` (mtmd-helper-gen.cpp:834 @b1b770d90): cut after runs of
     /// boundary tokens, so punctuation stays with the sentence it ends.
-    fn splitOn(ids: []const mod.impl.c.llama_token, boundary: []const mod.impl.c.llama_token) std.ArrayList(TokenList) {
+    fn splitOn(ids: []const llama.impl.llama_c.llama_token, boundary: []const llama.impl.llama_c.llama_token) std.ArrayList(TokenList) {
         var out: std.ArrayList(TokenList) = .empty;
         var start: usize = 0;
         var prev_was_boundary = false;
         for (ids, 0..) |id, i| {
-            const is_boundary = std.mem.indexOfScalar(mod.impl.c.llama_token, boundary, id) != null;
+            const is_boundary = std.mem.indexOfScalar(llama.impl.llama_c.llama_token, boundary, id) != null;
             if (!is_boundary and prev_was_boundary) {
                 var seg: TokenList = .empty;
                 seg.appendSlice(std.heap.c_allocator, ids[start..i]) catch oom();
@@ -947,7 +947,7 @@ const Pockettts = struct {
     }
 
     /// `split_chunks` (mtmd-helper-gen.cpp:851 @b1b770d90).
-    fn splitChunks(self: *const Pockettts, ids: []const mod.impl.c.llama_token) std.ArrayList(TokenList) {
+    fn splitChunks(self: *const Pockettts, ids: []const llama.impl.llama_c.llama_token) std.ArrayList(TokenList) {
         var out: std.ArrayList(TokenList) = .empty;
         if (@as(c_int, @intCast(ids.len)) <= max_chunk_tokens) {
             var one: TokenList = .empty;
@@ -1047,7 +1047,7 @@ const Pockettts = struct {
         defer batch.destroy();
         batch.setPositionNormal(self.pos, self.seq_id);
         batch.logits.items[@intCast(n_rows - 1)] = 1;
-        if (llama.api.context.llama_process(self.base.lctx, mod.impl.c.LLAMA_PROCESS_TYPE_DECODE, batch.render(self.base.lctx, 0, n_rows)) != 0) {
+        if (llama.api.context.llama_process(self.base.lctx, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, batch.render(self.base.lctx, 0, n_rows)) != 0) {
             mod.helper.logErr("mtmd_helper_gen_audio: chunk prompt decode failed\n", .{});
             return 1;
         }
@@ -1132,10 +1132,10 @@ const Pockettts = struct {
 const Soprano = struct {
     base: Base,
 
-    seq_id: mod.impl.c.llama_seq_id = 0,
-    pos: mod.impl.c.llama_pos = 0,
+    seq_id: llama.impl.llama_c.llama_seq_id = 0,
+    pos: llama.impl.llama_c.llama_pos = 0,
     prompt_pos: c_int = 0,
-    prompt: std.ArrayList(mod.impl.c.llama_token) = .empty,
+    prompt: std.ArrayList(llama.impl.llama_c.llama_token) = .empty,
     features: std.ArrayList(f32) = .empty,
     h_next: std.ArrayList(f32) = .empty,
     audio: std.ArrayList(f32) = .empty,
@@ -1220,7 +1220,7 @@ const Soprano = struct {
     }
 
     /// `step_gen` (mtmd-helper-gen.cpp:1127 @b1b770d90).
-    fn stepGen(self: *Soprano, sampled_in: mod.impl.c.llama_token, h_state_in: ?[*]const f32, h_state_out: *?[*]const f32, out_stop: *bool) i32 {
+    fn stepGen(self: *Soprano, sampled_in: llama.impl.llama_c.llama_token, h_state_in: ?[*]const f32, h_state_out: *?[*]const f32, out_stop: *bool) i32 {
         const lctx = self.base.lctx;
         const vocab = self.base.vocab;
         const n_e = self.base.nE();
@@ -1293,7 +1293,7 @@ const Soprano = struct {
     }
 
     /// `decode` (mtmd-helper-gen.cpp:1206 @b1b770d90).
-    fn decode(self: *Soprano, tokens: [*]const mod.impl.c.llama_token, n: c_int) bool {
+    fn decode(self: *Soprano, tokens: [*]const llama.impl.llama_c.llama_token, n: c_int) bool {
         var batch = llama.api.batch.llama_batch_init(n, 0, 1);
         batch.n_tokens = n;
         var i: c_int = 0;
@@ -1332,10 +1332,10 @@ fn nthLargest(sorted: []f32, k: usize) f32 {
 const Lfm3a = struct {
     base: Base,
 
-    tok_audio_start: mod.impl.c.llama_token = token_null,
-    tok_mixed_start: mod.impl.c.llama_token = token_null,
-    tok_text_end: mod.impl.c.llama_token = token_null,
-    tok_im_end: mod.impl.c.llama_token = token_null,
+    tok_audio_start: llama.impl.llama_c.llama_token = token_null,
+    tok_mixed_start: llama.impl.llama_c.llama_token = token_null,
+    tok_text_end: llama.impl.llama_c.llama_token = token_null,
+    tok_im_end: llama.impl.llama_c.llama_token = token_null,
 
     continuing: bool = false, // the prompt continues a sequence, the response follows the model's switching
     mode: GenMode = .audio,
@@ -1343,9 +1343,9 @@ const Lfm3a = struct {
     speaking: bool = false, // interleaving: the current block is audio
     text_done: bool = false, // interleaving: <|text_end|> was emitted, audio until the end-of-audio frame
 
-    seq_id: mod.impl.c.llama_seq_id = 0,
+    seq_id: llama.impl.llama_c.llama_seq_id = 0,
     pos: c_int = 0,
-    prompt_tokens: std.ArrayList(mod.impl.c.llama_token) = .empty,
+    prompt_tokens: std.ArrayList(llama.impl.llama_c.llama_token) = .empty,
     prompt_pos: c_int = 0,
 
     temp: f32 = 0.0,
@@ -1505,7 +1505,7 @@ const Lfm3a = struct {
 
     /// `step_gen` (mtmd-helper-gen.cpp:1360 @b1b770d90): one generate() step, a text
     /// token from the caller or an audio frame from the hidden state.
-    fn stepGen(self: *Lfm3a, sampled_in: mod.impl.c.llama_token, h_state_in: ?[*]const f32, h_state_out: *?[*]const f32, out_stop: *bool) i32 {
+    fn stepGen(self: *Lfm3a, sampled_in: llama.impl.llama_c.llama_token, h_state_in: ?[*]const f32, h_state_out: *?[*]const f32, out_stop: *bool) i32 {
         var sampled = sampled_in;
         const interleaving = self.mode == .mixed;
         if (self.nextIsText()) {
@@ -1553,7 +1553,7 @@ const Lfm3a = struct {
             defer batch_embd.destroy();
             batch_embd.setPositionNormal(self.pos, self.seq_id);
             batch_embd.logits.items[0] = 1;
-            if (llama.api.context.llama_process(self.base.lctx, mod.impl.c.LLAMA_PROCESS_TYPE_DECODE, batch_embd.render(self.base.lctx, 0, 1)) != 0) {
+            if (llama.api.context.llama_process(self.base.lctx, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, batch_embd.render(self.base.lctx, 0, 1)) != 0) {
                 mod.helper.logErr("mtmd_helper_gen_audio: decode failed\n", .{});
                 return 1;
             }
@@ -1740,12 +1740,12 @@ const Lfm3a = struct {
     }
 
     /// `decode` (mtmd-helper-gen.cpp:1627 @b1b770d90): over `llama_batch_get_one(&sampled, 1)`.
-    fn decodeToken(self: *Lfm3a, token: *mod.impl.c.llama_token) bool {
+    fn decodeToken(self: *Lfm3a, token: *llama.impl.llama_c.llama_token) bool {
         var batch = llama.api.batch.llama_batch_get_one(token, 1);
-        var position: mod.impl.c.llama_pos = self.pos;
+        var position: llama.impl.llama_c.llama_pos = self.pos;
         var n_seq: i32 = 1;
-        var seq: mod.impl.c.llama_seq_id = self.seq_id;
-        var seq_ptr: [*c]mod.impl.c.llama_seq_id = &seq;
+        var seq: llama.impl.llama_c.llama_seq_id = self.seq_id;
+        var seq_ptr: [*c]llama.impl.llama_c.llama_seq_id = &seq;
         var logits: i8 = 1;
         batch.pos = &position;
         batch.n_seq_id = &n_seq;
@@ -1776,12 +1776,12 @@ const Chatterbox = struct {
     mtl: bool = false,
     text_pos: std.ArrayList(f32) = .empty,
     speech_pos: std.ArrayList(f32) = .empty,
-    speech_base: mod.impl.c.llama_token = token_null,
+    speech_base: llama.impl.llama_c.llama_token = token_null,
 
     // per-generation state, cleared by reset()
-    seq_id: mod.impl.c.llama_seq_id = 0,
-    seq_uncond: mod.impl.c.llama_seq_id = 0,
-    pos: mod.impl.c.llama_pos = 0,
+    seq_id: llama.impl.llama_c.llama_seq_id = 0,
+    seq_uncond: llama.impl.llama_c.llama_seq_id = 0,
+    pos: llama.impl.llama_c.llama_pos = 0,
     ar_idx: c_int = 0,
     prompt_embd_buf: std.ArrayList(f32) = .empty,
     uncond_embd_buf: std.ArrayList(f32) = .empty,
@@ -1798,9 +1798,9 @@ const Chatterbox = struct {
 
     /// `text_start` (mtmd-helper-gen.cpp:2058 @b1b770d90): start_text_token
     /// of the reference, only the multilingual prompt uses it.
-    const text_start: mod.impl.c.llama_token = 255;
+    const text_start: llama.impl.llama_c.llama_token = 255;
     /// `text_stop` (mtmd-helper-gen.cpp:2059 @b1b770d90).
-    const text_stop: mod.impl.c.llama_token = 0;
+    const text_stop: llama.impl.llama_c.llama_token = 0;
 
     fn deinit(self: *Chatterbox) void {
         self.base.deinit();
@@ -1897,7 +1897,7 @@ const Chatterbox = struct {
             txt.append(std.heap.c_allocator, ']') catch oom();
         }
         if (inp.prompt_len != 0) txt.appendSlice(std.heap.c_allocator, inp.prompt.?[0..inp.prompt_len]) catch oom();
-        var ids: std.ArrayList(mod.impl.c.llama_token) = .empty;
+        var ids: std.ArrayList(llama.impl.llama_c.llama_token) = .empty;
         defer ids.deinit(std.heap.c_allocator);
         ids.resize(std.heap.c_allocator, txt.items.len + 16) catch oom();
         txt.append(std.heap.c_allocator, 0) catch oom(); // c_str()
@@ -1960,7 +1960,7 @@ const Chatterbox = struct {
         defer batch.destroy();
         batch.setPositionNormal(0, if (uncond) self.seq_uncond else self.seq_id);
         if (last) batch.logits.items[@intCast(self.n_prompt - 1)] = 1;
-        if (llama.api.context.llama_process(self.base.lctx, mod.impl.c.LLAMA_PROCESS_TYPE_DECODE, batch.render(self.base.lctx, p0, n_tokens_batch)) != 0) {
+        if (llama.api.context.llama_process(self.base.lctx, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, batch.render(self.base.lctx, p0, n_tokens_batch)) != 0) {
             mod.helper.logErr("mtmd_helper_gen_audio: prompt decode failed\n", .{});
             return -1;
         }
@@ -1980,7 +1980,7 @@ const Chatterbox = struct {
     }
 
     /// `step_gen` (mtmd-helper-gen.cpp:1865 @b1b770d90).
-    fn stepGen(self: *Chatterbox, sampled: mod.impl.c.llama_token, h_state_out: *?[*]const f32, out_stop: *bool) i32 {
+    fn stepGen(self: *Chatterbox, sampled: llama.impl.llama_c.llama_token, h_state_out: *?[*]const f32, out_stop: *bool) i32 {
         const vocab = self.base.vocab;
         const n_e = self.base.nE();
         if (sampled < 0 or sampled >= llama.api.vocab.llama_vocab_n_tokens(vocab)) {
@@ -2036,12 +2036,12 @@ const Chatterbox = struct {
     }
 
     /// `decode_one` (mtmd-helper-gen.cpp:1967 @b1b770d90).
-    fn decodeOne(self: *Chatterbox, e: [*]const f32, seq: mod.impl.c.llama_seq_id) bool {
+    fn decodeOne(self: *Chatterbox, e: [*]const f32, seq: llama.impl.llama_c.llama_seq_id) bool {
         const batch = mod.helper.EmbdBatch.create(e, 1, 1, self.base.n_embd);
         defer batch.destroy();
         batch.setPositionNormal(self.pos, seq);
         batch.logits.items[0] = 1;
-        if (llama.api.context.llama_process(self.base.lctx, mod.impl.c.LLAMA_PROCESS_TYPE_DECODE, batch.render(self.base.lctx, 0, 1)) != 0) {
+        if (llama.api.context.llama_process(self.base.lctx, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, batch.render(self.base.lctx, 0, 1)) != 0) {
             mod.helper.logErr("mtmd_helper_gen_audio: step decode failed\n", .{});
             return false;
         }
@@ -2135,17 +2135,17 @@ const Chatterbox = struct {
 const Drama3 = struct {
     base: Base,
 
-    sem_begin: mod.impl.c.llama_token = token_null,
-    eos: mod.impl.c.llama_token = token_null,
+    sem_begin: llama.impl.llama_c.llama_token = token_null,
+    eos: llama.impl.llama_c.llama_token = token_null,
 
-    seq_id: mod.impl.c.llama_seq_id = 0,
-    pos: mod.impl.c.llama_pos = 0,
-    prompt_tokens: std.ArrayList(mod.impl.c.llama_token) = .empty,
+    seq_id: llama.impl.llama_c.llama_seq_id = 0,
+    pos: llama.impl.llama_c.llama_pos = 0,
+    prompt_tokens: std.ArrayList(llama.impl.llama_c.llama_token) = .empty,
     prompt_pos: c_int = 0,
 
     rng: stdlib.libcxx.Mt19937 = undefined,
     frame: std.ArrayList(i32) = .empty, // codes of the last frame, input of the next tower row
-    hist: std.ArrayList(mod.impl.c.llama_token) = .empty, // last main tokens, for repetition-aware sampling
+    hist: std.ArrayList(llama.impl.llama_c.llama_token) = .empty, // last main tokens, for repetition-aware sampling
     codes_buf: std.ArrayList(i32) = .empty, // frame-major
     n_decoded: usize = 0, // frames already through the codec
 
@@ -2233,7 +2233,7 @@ const Drama3 = struct {
         };
         for (segments) |seg| {
             const len: i32 = @intCast(seg.len);
-            const ids = std.heap.c_allocator.alloc(mod.impl.c.llama_token, @intCast(len + 16)) catch oom();
+            const ids = std.heap.c_allocator.alloc(llama.impl.llama_c.llama_token, @intCast(len + 16)) catch oom();
             defer std.heap.c_allocator.free(ids);
             const n = llama.api.vocab.llama_tokenize(vocab, seg.ptr, len, ids.ptr, @intCast(ids.len), false, true);
             if (n < 0) {
@@ -2314,12 +2314,12 @@ const Drama3 = struct {
 
         // text/speech stream: all mrope sections use the same position
         const rope = llama.api.model.llama_model_rope_type(self.base.model);
-        const mrope = rope == mod.impl.c.LLAMA_ROPE_TYPE_MROPE or rope == mod.impl.c.LLAMA_ROPE_TYPE_IMROPE;
+        const mrope = rope == llama.impl.llama_c.LLAMA_ROPE_TYPE_MROPE or rope == llama.impl.llama_c.LLAMA_ROPE_TYPE_IMROPE;
         const batch = mod.helper.EmbdBatch.create(next_embd, 1, if (mrope) 4 else 1, self.base.n_embd);
         defer batch.destroy();
         if (mrope) batch.setPositionMrope1d(self.pos, self.seq_id) else batch.setPositionNormal(self.pos, self.seq_id);
         batch.logits.items[0] = 1;
-        if (llama.api.context.llama_process(lctx, mod.impl.c.LLAMA_PROCESS_TYPE_DECODE, batch.render(lctx, 0, 1)) != 0) {
+        if (llama.api.context.llama_process(lctx, llama.impl.llama_c.LLAMA_PROCESS_TYPE_DECODE, batch.render(lctx, 0, 1)) != 0) {
             mod.helper.logErr("mtmd_helper_gen_audio: decode failed\n", .{});
             return 1;
         }
@@ -2387,18 +2387,18 @@ const Drama3 = struct {
 
     /// `sample_main` (mtmd-helper-gen.cpp:2342 @b1b770d90): candidates are
     /// eos, then semantic codes 1.. (the reference never samples code 0).
-    fn sampleMain(self: *Drama3, logits: [*]const f32) mod.impl.c.llama_token {
+    fn sampleMain(self: *Drama3, logits: [*]const f32) llama.impl.llama_c.llama_token {
         var cand: [n_cb_vocab]f32 = undefined;
         cand[0] = logits[@intCast(self.eos)];
         for (1..n_cb_vocab) |i| cand[i] = logits[@as(usize, @intCast(self.sem_begin)) + i];
         const first = self.toToken(self.draw(&cand, 1.0, 0, 0.9));
-        if (first != self.eos and std.mem.indexOfScalar(mod.impl.c.llama_token, self.hist.items, first) != null) {
+        if (first != self.eos and std.mem.indexOfScalar(llama.impl.llama_c.llama_token, self.hist.items, first) != null) {
             return self.toToken(self.draw(&cand, 1.0, 30, 0.95));
         }
         return first;
     }
 
-    fn toToken(self: *const Drama3, i: c_int) mod.impl.c.llama_token {
+    fn toToken(self: *const Drama3, i: c_int) llama.impl.llama_c.llama_token {
         return if (i == 0) self.eos else self.sem_begin + i;
     }
 
@@ -2465,7 +2465,7 @@ pub const GenAudio = struct {
 };
 
 /// Ports `make_pipeline` (mtmd-helper-gen.cpp:2421 @b1b770d90).
-fn makePipeline(lctx: ?*mod.impl.c.struct_llama_context, mctx: *mod.mtmd.Context) ?Pipeline {
+fn makePipeline(lctx: ?*llama.impl.llama_c.struct_llama_context, mctx: *mod.mtmd.Context) ?Pipeline {
     return switch (mod.mtmd.mtmd_gen_audio_get_info(mctx).type) {
         .qwen3tts => .{ .qwen3tts = .{ .base = Base.init(lctx, mctx) } },
         .pockettts => .{ .pockettts = .{ .base = Base.init(lctx, mctx) } },
@@ -2478,7 +2478,7 @@ fn makePipeline(lctx: ?*mod.impl.c.struct_llama_context, mctx: *mod.mtmd.Context
 }
 
 /// Ports `mtmd_helper_gen_audio_init` (mtmd-helper-gen.cpp:2444 @b1b770d90).
-pub fn mtmd_helper_gen_audio_init(lctx: ?*mod.impl.c.struct_llama_context, mctx: *mod.mtmd.Context) callconv(.c) *GenAudio {
+pub fn mtmd_helper_gen_audio_init(lctx: ?*llama.impl.llama_c.struct_llama_context, mctx: *mod.mtmd.Context) callconv(.c) *GenAudio {
     const ctx = std.heap.c_allocator.create(GenAudio) catch oom();
     ctx.* = .{ .pipeline = makePipeline(lctx, mctx) };
     return ctx;
@@ -2552,7 +2552,7 @@ pub fn mtmd_helper_gen_audio_next_is_text(ctx: *GenAudio) callconv(.c) bool {
 }
 
 /// Ports `mtmd_helper_gen_audio_get_logit_bias` (mtmd-helper-gen.cpp:2494 @b1b770d90).
-pub fn mtmd_helper_gen_audio_get_logit_bias(ctx: *GenAudio, n_bias: *usize) callconv(.c) ?[*]const mod.impl.c.llama_logit_bias {
+pub fn mtmd_helper_gen_audio_get_logit_bias(ctx: *GenAudio, n_bias: *usize) callconv(.c) ?[*]const llama.impl.llama_c.llama_logit_bias {
     const p = if (ctx.pipeline) |*p| p else {
         n_bias.* = 0;
         return null;
@@ -2567,8 +2567,8 @@ pub fn mtmd_helper_gen_audio_get_logit_bias(ctx: *GenAudio, n_bias: *usize) call
 /// Ports `mtmd_helper_audio_stream_get_logit_bias` (mtmd-helper-gen.cpp:2499 @b1b770d90):
 /// the bias for the text a caller samples while it transcribes an audio stream
 /// opened with a prompt. Writes up to `n_max` entries to `out`.
-pub fn mtmd_helper_audio_stream_get_logit_bias(mctx: *const mod.mtmd.Context, model: ?*const mod.impl.c.struct_llama_model, out: ?[*]mod.impl.c.llama_logit_bias, n_max: i32) callconv(.c) i32 {
-    var bias: [6]mod.impl.c.llama_logit_bias = undefined;
+pub fn mtmd_helper_audio_stream_get_logit_bias(mctx: *const mod.mtmd.Context, model: ?*const llama.impl.llama_c.struct_llama_model, out: ?[*]llama.impl.llama_c.llama_logit_bias, n_max: i32) callconv(.c) i32 {
+    var bias: [6]llama.impl.llama_c.llama_logit_bias = undefined;
     var n: usize = 0;
     if (mod.mtmd.mtmd_gen_audio_get_info(mctx).type == .lfm3a) {
         // LFM3-Audio live ASR: only <|text_end|> ends the text of a chunk, the stream adds the final <|mixed_end|>
@@ -2588,7 +2588,7 @@ pub fn mtmd_helper_audio_stream_get_logit_bias(mctx: *const mod.mtmd.Context, mo
 
 /// Ports `mtmd_helper_gen_audio_step_gen` (mtmd-helper-gen.cpp:2518
 /// @b1b770d90).
-pub fn mtmd_helper_gen_audio_step_gen(ctx: *GenAudio, sampled: mod.impl.c.llama_token, h_state_in: ?[*]const f32, h_state_out: *?[*]const f32, out_stop: ?*bool) callconv(.c) i32 {
+pub fn mtmd_helper_gen_audio_step_gen(ctx: *GenAudio, sampled: llama.impl.llama_c.llama_token, h_state_in: ?[*]const f32, h_state_out: *?[*]const f32, out_stop: ?*bool) callconv(.c) i32 {
     const p = if (ctx.pipeline) |*p| p else return 1;
     var stop = false;
     const ret = switch (p.*) {
@@ -2644,8 +2644,8 @@ test "split_on keeps punctuation with its sentence" {
     var out = Pockettts.splitOn(&.{ 1, 9, 9, 2, 3, 9 }, &.{9});
     defer freeLists(&out);
     try std.testing.expectEqual(@as(usize, 2), out.items.len);
-    try std.testing.expectEqualSlices(mod.impl.c.llama_token, &.{ 1, 9, 9 }, out.items[0].items);
-    try std.testing.expectEqualSlices(mod.impl.c.llama_token, &.{ 2, 3, 9 }, out.items[1].items);
+    try std.testing.expectEqualSlices(llama.impl.llama_c.llama_token, &.{ 1, 9, 9 }, out.items[0].items);
+    try std.testing.expectEqualSlices(llama.impl.llama_c.llama_token, &.{ 2, 3, 9 }, out.items[1].items);
 }
 
 test "write_wav16 clamps as std::min and std::max do" {

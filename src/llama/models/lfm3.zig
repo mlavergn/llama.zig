@@ -127,7 +127,7 @@ pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Bui
 /// The constructor's `build_attn_block` lambda (models/lfm3.cpp:101
 /// @b1b770d90): Q/K norms, RoPE on the full layers through `rope_freqs`,
 /// attention, and a per-head sigmoid gate before the output projection.
-fn buildAttnBlock(model: *const llama.model.Model, b: *const llama.graph.Builder, cur_in: *llama.impl.c.ggml_tensor, inp_pos: *llama.impl.c.ggml_tensor, inp_attn: anytype, il: c_int) *llama.impl.c.ggml_tensor {
+fn buildAttnBlock(model: *const llama.model.Model, b: *const llama.graph.Builder, cur_in: *llama.impl.llama_c.ggml_tensor, inp_pos: *llama.impl.llama_c.ggml_tensor, inp_attn: anytype, il: c_int) *llama.impl.llama_c.ggml_tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const uil: u32 = @intCast(il);
@@ -154,13 +154,13 @@ fn buildAttnBlock(model: *const llama.model.Model, b: *const llama.graph.Builder
     b.cb(attn_out, "attn_out", il);
 
     var gate = b.buildLoraMm(layer.wqkv_gate.?, cur_in, layer.wqkv_gate_s);
-    gate = llama.impl.c.ggml_sigmoid(ctx, gate);
+    gate = llama.impl.llama_c.ggml_sigmoid(ctx, gate);
     b.cb(gate, "model.layers.{}.self_attn.gate", il);
 
-    var attn_3d: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_3d(ctx, attn_out, n_embd_head, n_head_il, b.n_tokens);
-    const gate_3d: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_3d(ctx, gate, 1, n_head_il, b.n_tokens);
-    attn_3d = llama.impl.c.ggml_mul(ctx, attn_3d, gate_3d);
-    attn_out = llama.impl.c.ggml_reshape_2d(ctx, attn_3d, n_embd_head * n_head_il, b.n_tokens);
+    var attn_3d: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_reshape_3d(ctx, attn_out, n_embd_head, n_head_il, b.n_tokens);
+    const gate_3d: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_reshape_3d(ctx, gate, 1, n_head_il, b.n_tokens);
+    attn_3d = llama.impl.llama_c.ggml_mul(ctx, attn_3d, gate_3d);
+    attn_out = llama.impl.llama_c.ggml_reshape_2d(ctx, attn_3d, n_embd_head * n_head_il, b.n_tokens);
 
     const out = b.buildLoraMm(layer.wo.?, attn_out, layer.wo_s);
     b.cb(out, "model.layers.{}.self_attn.out_proj", il);
@@ -177,7 +177,7 @@ fn buildGraph(comptime decision: bool, model: *const llama.model.Model, b: *cons
     var cur = b.buildInpEmbd(model.tok_embd.?);
     b.cb(cur, "model.embed_tokens", -1);
 
-    llama.impl.c.ggml_build_forward_expand(b.gf, cur);
+    llama.impl.llama_c.ggml_build_forward_expand(b.gf, cur);
 
     // decision: no memory, the whole prompt is read in one batch.
     const inp_hybrid = if (decision) {} else b.buildInpMemHybridIswa();
@@ -215,11 +215,11 @@ fn buildGraph(comptime decision: bool, model: *const llama.model.Model, b: *cons
         }
 
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            prev_cur = llama.impl.c.ggml_get_rows(ctx, prev_cur, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            prev_cur = llama.impl.llama_c.ggml_get_rows(ctx, prev_cur, inp_out_ids);
         }
 
-        cur = llama.impl.c.ggml_add(ctx, prev_cur, cur);
+        cur = llama.impl.llama_c.ggml_add(ctx, prev_cur, cur);
 
         const ffn_norm_out = b.buildNorm(cur, layer.ffn_norm, null, .rms, il);
         b.cb(ffn_norm_out, "model.layers.{}.ffn_norm", il);
@@ -231,7 +231,7 @@ fn buildGraph(comptime decision: bool, model: *const llama.model.Model, b: *cons
             b.cb(ffn_out, "model.layers.{}.post_ffn_norm", il);
         }
 
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_out);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_out);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

@@ -69,8 +69,8 @@ const Mapping = struct {
 };
 
 /// A `ggml_backend_buffer_ptr`: frees its buffer at the end of its scope.
-fn freeBuffer(buf: ggml.impl.c.ggml_backend_buffer_t) void {
-    if (buf != null) ggml.impl.c.ggml_backend_buffer_free(buf);
+fn freeBuffer(buf: ggml.impl.ggml_c.ggml_backend_buffer_t) void {
+    if (buf != null) ggml.impl.ggml_c.ggml_backend_buffer_free(buf);
 }
 
 const Range = struct { first: usize, second: usize };
@@ -89,14 +89,14 @@ fn rangeLess(_: void, a: Range, b: Range) bool {
 ///
 /// Return: true when every read was done here (gathered or by DMA into
 /// the registered span), false when the caller must do them one at a time.
-pub fn getTensorN(device: c_int, tensors: [*c]const [*c]const ggml.impl.c.ggml_tensor, data: [*c]const ?*anyopaque, offsets: [*c]const usize, sizes: [*c]const usize, n_tensors: usize) bool {
+pub fn getTensorN(device: c_int, tensors: [*c]const [*c]const ggml.impl.ggml_c.ggml_tensor, data: [*c]const ?*anyopaque, offsets: [*c]const usize, sizes: [*c]const usize, n_tensors: usize) bool {
     // Provisional dispatch values based on experiments.
     const min_batch_reads: usize = 128;
     const max_gather_read_bytes: usize = 128 * 1024;
     // Collect non-empty CPU destination ranges.
     var ranges: std.ArrayList(Range) = .empty;
-    defer ranges.deinit(ggml.cuda.common.allocator);
-    ranges.ensureTotalCapacity(ggml.cuda.common.allocator, n_tensors) catch ggml.impl.abort("ggml-cuda: out of memory");
+    defer ranges.deinit(std.heap.c_allocator);
+    ranges.ensureTotalCapacity(std.heap.c_allocator, n_tensors) catch ggml.impl.abort("ggml-cuda: out of memory");
     var payload_bytes: usize = 0;
     // Number of non-empty reads whose size is at most max_gather_read_bytes.
     var n_reads_small: usize = 0;
@@ -146,20 +146,20 @@ pub fn getTensorN(device: c_int, tensors: [*c]const [*c]const ggml.impl.c.ggml_t
     // Keep descriptor storage alive until the final stream synchronization.
     const max_batch_descriptors: usize = 128 * 1024;
     const bytes: usize = @as(usize, @min(n_reads_gather, max_batch_descriptors)) * @sizeOf(Descriptor);
-    const descriptors: ggml.impl.c.ggml_backend_buffer_t = if (n_reads_gather != 0) ggml.impl.c.ggml_backend_buft_alloc_buffer(ggml.cuda.backend.bufferType(device), bytes) else null;
+    const descriptors: ggml.impl.ggml_c.ggml_backend_buffer_t = if (n_reads_gather != 0) ggml.impl.ggml_c.ggml_backend_buft_alloc_buffer(ggml.cuda.backend.bufferType(device), bytes) else null;
     defer freeBuffer(descriptors);
     if (descriptors == null) {
         n_reads_gather = 0;
     }
     const host_type = ggml.cuda.backend.hostBufferType();
-    const host_descriptors: ggml.impl.c.ggml_backend_buffer_t = if (n_reads_gather != 0) ggml.impl.c.ggml_backend_buft_alloc_buffer(host_type, bytes) else null;
+    const host_descriptors: ggml.impl.ggml_c.ggml_backend_buffer_t = if (n_reads_gather != 0) ggml.impl.ggml_c.ggml_backend_buft_alloc_buffer(host_type, bytes) else null;
     defer freeBuffer(host_descriptors);
-    if (host_descriptors == null or ggml.impl.c.ggml_backend_buffer_get_type(host_descriptors) != host_type) {
+    if (host_descriptors == null or ggml.impl.ggml_c.ggml_backend_buffer_get_type(host_descriptors) != host_type) {
         n_reads_gather = 0;
     }
     if (n_reads_gather != 0) {
-        const copies: [*]Descriptor = @ptrCast(@alignCast(ggml.impl.c.ggml_backend_buffer_get_base(host_descriptors)));
-        const device_copies: [*]Descriptor = @ptrCast(@alignCast(ggml.impl.c.ggml_backend_buffer_get_base(descriptors)));
+        const copies: [*]Descriptor = @ptrCast(@alignCast(ggml.impl.ggml_c.ggml_backend_buffer_get_base(host_descriptors)));
+        const device_copies: [*]Descriptor = @ptrCast(@alignCast(ggml.impl.ggml_c.ggml_backend_buffer_get_base(descriptors)));
         const threads = 256;
         const nsm: usize = @intCast(ggml.cuda.common.info().devices[@intCast(device)].nsm);
         var i: usize = 0;
@@ -172,7 +172,7 @@ pub fn getTensorN(device: c_int, tensors: [*c]const [*c]const ggml.impl.c.ggml_t
                     continue;
                 }
                 copies[count] = .{
-                    .src = @as([*]const u8, @ptrCast(ggml.impl.one(ggml.impl.c.ggml_tensor, @constCast(tensors[i])).data.?)) + offsets[i],
+                    .src = @as([*]const u8, @ptrCast(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, @constCast(tensors[i])).data.?)) + offsets[i],
                     .dst = mapping.device.? + (@intFromPtr(data[i]) - begin),
                     .size = sizes[i],
                 };
@@ -198,7 +198,7 @@ pub fn getTensorN(device: c_int, tensors: [*c]const [*c]const ggml.impl.c.ggml_t
     // Keep the destination pinned for DMA too; overlapping destinations already declined above.
     for (0..n_tensors) |i| {
         if (sizes[i] != 0 and (n_reads_gather == 0 or sizes[i] > max_gather_read_bytes)) {
-            const src: [*]const u8 = @as([*]const u8, @ptrCast(ggml.impl.one(ggml.impl.c.ggml_tensor, @constCast(tensors[i])).data.?)) + offsets[i];
+            const src: [*]const u8 = @as([*]const u8, @ptrCast(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, @constCast(tensors[i])).data.?)) + offsets[i];
             ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(data[i], src, sizes[i], ggml.cuda.common.cu.cudaMemcpyDeviceToHost, stream_per_thread), "cudaMemcpyAsync(data[i], (const char *) tensors[i]->data + offsets[i], sizes[i], cudaMemcpyDeviceToHost, cudaStreamPerThread)", @src());
         }
     }

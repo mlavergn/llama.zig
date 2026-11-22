@@ -371,7 +371,7 @@ fn putCodepoint(utf8: []const u8, expected_width: c_int) c_int {
         // Calculate the width considering text wrapping
         var w: extern struct { ws_row: u16, ws_col: u16, ws_xpixel: u16, ws_ypixel: u16 } = undefined;
         const tiocgwinsz: c_ulong = if (builtin.os.tag.isDarwin()) 0x40087468 else 0x5413;
-        _ = stdlib.libc.ioctl(std.posix.STDOUT_FILENO, tiocgwinsz, &w);
+        _ = std.c.ioctl(std.posix.STDOUT_FILENO, tiocgwinsz, &w);
         width += w.ws_col;
     }
     return width;
@@ -968,7 +968,7 @@ fn readlineAdvanced(a: std.mem.Allocator, line: *std.ArrayList(u8), multiline_in
 fn readLinePosix(a: std.mem.Allocator, line: *std.ArrayList(u8)) !bool {
     var buf: ?[*]u8 = null;
     var cap: usize = 0;
-    defer stdlib.libc.free(buf);
+    defer std.c.free(buf);
     stdlib.stdio.flushLineBuffered();
     const n = stdlib.libc.getline(&buf, &cap, stdlib.stdio.cStream(.stdin));
     if (n < 0) return false;

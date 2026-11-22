@@ -12,6 +12,7 @@
 //! declaration names what it ports and the line it began at.
 
 const std = @import("std");
+const llama = @import("llama");
 const mtmd = @import("../module.zig");
 
 /// Ports `mtmd_graph_pockettts_gen` (mtmd/models/models.h:482
@@ -28,8 +29,8 @@ const Gen = struct {
     /// shift`.
     fn modulate(self: *const Gen, x: mtmd.graph.T, shift: mtmd.graph.T, scale: mtmd.graph.T) mtmd.graph.T {
         const ctx0 = self.g.ctx0;
-        const cur = mtmd.impl.c.ggml_mul(ctx0, x, mtmd.impl.c.ggml_scale_bias(ctx0, scale, 1.0, 1.0));
-        return mtmd.impl.c.ggml_add(ctx0, cur, shift);
+        const cur = llama.impl.llama_c.ggml_mul(ctx0, x, llama.impl.llama_c.ggml_scale_bias(ctx0, scale, 1.0, 1.0));
+        return llama.impl.llama_c.ggml_add(ctx0, cur, shift);
     }
 
     /// Ports `time_embed` (pockettts-gen.cpp:18 @b1b770d90), a member of
@@ -37,25 +38,25 @@ const Gen = struct {
     fn timeEmbed(self: *const Gen, te: *const mtmd.model.FlowNet.TimeEmbd, t: f32) mtmd.graph.T {
         const ctx0 = self.g.ctx0;
         // t is a graph-build constant, so the cos/sin table can be folded into a scaled copy
-        const args = mtmd.impl.c.ggml_scale(ctx0, te.freqs, t);
-        const emb = mtmd.impl.c.ggml_concat(ctx0, mtmd.impl.c.ggml_cos(ctx0, args), mtmd.impl.c.ggml_sin(ctx0, args), 0);
+        const args = llama.impl.llama_c.ggml_scale(ctx0, te.freqs, t);
+        const emb = llama.impl.llama_c.ggml_concat(ctx0, llama.impl.llama_c.ggml_cos(ctx0, args), llama.impl.llama_c.ggml_sin(ctx0, args), 0);
 
         var cur = self.g.buildMm(te.up_w, emb);
-        cur = mtmd.impl.c.ggml_add(ctx0, cur, te.up_b);
-        cur = mtmd.impl.c.ggml_silu(ctx0, cur);
+        cur = llama.impl.llama_c.ggml_add(ctx0, cur, te.up_b);
+        cur = llama.impl.llama_c.ggml_silu(ctx0, cur);
         cur = self.g.buildMm(te.down_w, cur);
-        cur = mtmd.impl.c.ggml_add(ctx0, cur, te.down_b);
+        cur = llama.impl.llama_c.ggml_add(ctx0, cur, te.down_b);
 
         // this "RMSNorm" divides by the unbiased variance, not the mean square
         // it also rescales the input, not the centered value, see _rms_norm() in mlp.py
         {
             const n = mtmd.graph.ne(cur, 0);
-            const mean = mtmd.impl.c.ggml_mean(ctx0, cur);
-            const dev = mtmd.impl.c.ggml_sub(ctx0, cur, mean);
-            var variance = mtmd.impl.c.ggml_mean(ctx0, mtmd.impl.c.ggml_sqr(ctx0, dev));
-            variance = mtmd.impl.c.ggml_scale_bias(ctx0, variance, @as(f32, @floatFromInt(n)) / @as(f32, @floatFromInt(n - 1)), 1e-5);
-            cur = mtmd.impl.c.ggml_div(ctx0, cur, mtmd.impl.c.ggml_sqrt(ctx0, variance));
-            cur = mtmd.impl.c.ggml_mul(ctx0, cur, te.norm);
+            const mean = llama.impl.llama_c.ggml_mean(ctx0, cur);
+            const dev = llama.impl.llama_c.ggml_sub(ctx0, cur, mean);
+            var variance = llama.impl.llama_c.ggml_mean(ctx0, llama.impl.llama_c.ggml_sqr(ctx0, dev));
+            variance = llama.impl.llama_c.ggml_scale_bias(ctx0, variance, @as(f32, @floatFromInt(n)) / @as(f32, @floatFromInt(n - 1)), 1e-5);
+            cur = llama.impl.llama_c.ggml_div(ctx0, cur, llama.impl.llama_c.ggml_sqrt(ctx0, variance));
+            cur = llama.impl.llama_c.ggml_mul(ctx0, cur, te.norm);
         }
 
         return cur;
@@ -69,52 +70,52 @@ const Gen = struct {
         const flow = &self.g.model.flow;
 
         var cur = self.g.buildMm(flow.input_proj_w, x);
-        cur = mtmd.impl.c.ggml_add(ctx0, cur, flow.input_proj_b);
+        cur = llama.impl.llama_c.ggml_add(ctx0, cur, flow.input_proj_b);
 
         // the two time conditions are averaged, then added to the projected backbone state
-        var ts = mtmd.impl.c.ggml_add(ctx0, self.timeEmbed(&flow.time.items[0], s), self.timeEmbed(&flow.time.items[1], t));
-        ts = mtmd.impl.c.ggml_scale(ctx0, ts, 1.0 / @as(f32, @floatFromInt(flow.time.items.len)));
+        var ts = llama.impl.llama_c.ggml_add(ctx0, self.timeEmbed(&flow.time.items[0], s), self.timeEmbed(&flow.time.items[1], t));
+        ts = llama.impl.llama_c.ggml_scale(ctx0, ts, 1.0 / @as(f32, @floatFromInt(flow.time.items.len)));
 
         // `c` upstream, which names the C namespace here
         var c_emb = self.g.buildMm(flow.cond_embd_w, cond);
-        c_emb = mtmd.impl.c.ggml_add(ctx0, c_emb, flow.cond_embd_b);
+        c_emb = llama.impl.llama_c.ggml_add(ctx0, c_emb, flow.cond_embd_b);
 
-        const y = mtmd.impl.c.ggml_add(ctx0, ts, c_emb);
+        const y = llama.impl.llama_c.ggml_add(ctx0, ts, c_emb);
         self.g.cb(y, "flow_cond", -1);
 
         const n_ch: i64 = if (flow.blocks.items.len == 0) 0 else mtmd.graph.ne(flow.blocks.items[0].norm_w, 0);
 
         for (flow.blocks.items, 0..) |*blk, il| {
-            var ada_mod = self.g.buildMm(blk.ada_w, mtmd.impl.c.ggml_silu(ctx0, y));
-            ada_mod = mtmd.impl.c.ggml_add(ctx0, ada_mod, blk.ada_b);
+            var ada_mod = self.g.buildMm(blk.ada_w, llama.impl.llama_c.ggml_silu(ctx0, y));
+            ada_mod = llama.impl.llama_c.ggml_add(ctx0, ada_mod, blk.ada_b);
 
-            const shift = mtmd.impl.c.ggml_view_1d(ctx0, ada_mod, n_ch, 0);
-            const scale = mtmd.impl.c.ggml_view_1d(ctx0, ada_mod, n_ch, @as(usize, @intCast(n_ch)) * mtmd.graph.nb(ada_mod, 0));
-            const gate = mtmd.impl.c.ggml_view_1d(ctx0, ada_mod, n_ch, 2 * @as(usize, @intCast(n_ch)) * mtmd.graph.nb(ada_mod, 0));
+            const shift = llama.impl.llama_c.ggml_view_1d(ctx0, ada_mod, n_ch, 0);
+            const scale = llama.impl.llama_c.ggml_view_1d(ctx0, ada_mod, n_ch, @as(usize, @intCast(n_ch)) * mtmd.graph.nb(ada_mod, 0));
+            const gate = llama.impl.llama_c.ggml_view_1d(ctx0, ada_mod, n_ch, 2 * @as(usize, @intCast(n_ch)) * mtmd.graph.nb(ada_mod, 0));
 
             var h = self.g.buildNorm(cur, blk.norm_w, blk.norm_b, .normal, 1e-6, @intCast(il));
             h = self.modulate(h, shift, scale);
             h = self.g.buildMm(blk.up_w, h);
-            h = mtmd.impl.c.ggml_add(ctx0, h, blk.up_b);
-            h = mtmd.impl.c.ggml_silu(ctx0, h);
+            h = llama.impl.llama_c.ggml_add(ctx0, h, blk.up_b);
+            h = llama.impl.llama_c.ggml_silu(ctx0, h);
             h = self.g.buildMm(blk.down_w, h);
-            h = mtmd.impl.c.ggml_add(ctx0, h, blk.down_b);
+            h = llama.impl.llama_c.ggml_add(ctx0, h, blk.down_b);
 
-            cur = mtmd.impl.c.ggml_add(ctx0, cur, mtmd.impl.c.ggml_mul(ctx0, gate, h));
+            cur = llama.impl.llama_c.ggml_add(ctx0, cur, llama.impl.llama_c.ggml_mul(ctx0, gate, h));
             self.g.cb(cur, "flow_blk", @intCast(il));
         }
 
         // final layer: the norm has no weights, only the AdaLN modulation
-        var ada_mod = self.g.buildMm(flow.final_ada_w, mtmd.impl.c.ggml_silu(ctx0, y));
-        ada_mod = mtmd.impl.c.ggml_add(ctx0, ada_mod, flow.final_ada_b);
+        var ada_mod = self.g.buildMm(flow.final_ada_w, llama.impl.llama_c.ggml_silu(ctx0, y));
+        ada_mod = llama.impl.llama_c.ggml_add(ctx0, ada_mod, flow.final_ada_b);
 
-        const shift = mtmd.impl.c.ggml_view_1d(ctx0, ada_mod, n_ch, 0);
-        const scale = mtmd.impl.c.ggml_view_1d(ctx0, ada_mod, n_ch, @as(usize, @intCast(n_ch)) * mtmd.graph.nb(ada_mod, 0));
+        const shift = llama.impl.llama_c.ggml_view_1d(ctx0, ada_mod, n_ch, 0);
+        const scale = llama.impl.llama_c.ggml_view_1d(ctx0, ada_mod, n_ch, @as(usize, @intCast(n_ch)) * mtmd.graph.nb(ada_mod, 0));
 
         cur = self.g.buildNorm(cur, null, null, .normal, 1e-6, -1);
         cur = self.modulate(cur, shift, scale);
         cur = self.g.buildMm(flow.final_proj_w, cur);
-        cur = mtmd.impl.c.ggml_add(ctx0, cur, flow.final_proj_b);
+        cur = llama.impl.llama_c.ggml_add(ctx0, cur, flow.final_proj_b);
 
         return cur;
     }
@@ -124,8 +125,8 @@ const Gen = struct {
 /// the state carried between GEN_WAV calls -- rope offset, per-layer KV
 /// window, conv left context and the transposed-conv overlap tails. The
 /// caller frees the slice with `module.freeSlots`.
-pub fn listStateSlots(hparams: *const mtmd.model.Hparams, model: *const mtmd.model.Model) mtmd.clip.Error![]mtmd.models.StateSlot {
-    var slots: std.ArrayList(mtmd.models.StateSlot) = .empty;
+pub fn listStateSlots(hparams: *const mtmd.model.Hparams, model: *const mtmd.model.Model) mtmd.clip.Error![]mtmd.models.dispatch.StateSlot {
+    var slots: std.ArrayList(mtmd.models.dispatch.StateSlot) = .empty;
     errdefer {
         for (slots.items) |s| std.heap.c_allocator.free(s.name);
         slots.deinit(std.heap.c_allocator);
@@ -170,7 +171,7 @@ pub fn listStateSlots(hparams: *const mtmd.model.Hparams, model: *const mtmd.mod
 /// `mtmd_graph_pockettts_gen`, with the builder's parameters derived as
 /// mtmd_get_graph_builder's `PROJECTOR_TYPE_POCKETTTS_GEN` arm does
 /// (mtmd-graph.cpp:963 @b1b770d90).
-pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*llama.impl.llama_c.ggml_cgraph {
     const model = g.model;
     const hparams = g.hparams;
 
@@ -194,18 +195,18 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     if (self.gen_process == .gen_code) {
         // the backbone hidden state arrives as the single batch entry
         var h_state = g.buildInpRaw(1);
-        h_state = mtmd.impl.c.ggml_reshape_2d(ctx0, h_state, g.n_mmproj_embd, 1);
+        h_state = llama.impl.llama_c.ggml_reshape_2d(ctx0, h_state, g.n_mmproj_embd, 1);
 
         // end-of-speech probe, thresholded on the host side
         var eos = g.buildMm(model.gen_out_eos_w, h_state);
-        eos = mtmd.impl.c.ggml_add(ctx0, eos, model.gen_out_eos_b);
-        _ = mtmd.impl.c.ggml_set_name(eos, "out_eos_score");
-        mtmd.impl.c.ggml_set_output(eos);
-        mtmd.impl.c.ggml_build_forward_expand(g.gf, eos);
+        eos = llama.impl.llama_c.ggml_add(ctx0, eos, model.gen_out_eos_b);
+        _ = llama.impl.llama_c.ggml_set_name(eos, "out_eos_score");
+        llama.impl.llama_c.ggml_set_output(eos);
+        llama.impl.llama_c.ggml_build_forward_expand(g.gf, eos);
 
-        const noise = mtmd.impl.c.ggml_new_tensor_2d(ctx0, mtmd.impl.c.GGML_TYPE_F32, n_latent, 1);
-        _ = mtmd.impl.c.ggml_set_name(noise, "inp_noise");
-        mtmd.impl.c.ggml_set_input(noise);
+        const noise = llama.impl.llama_c.ggml_new_tensor_2d(ctx0, llama.impl.llama_c.GGML_TYPE_F32, n_latent, 1);
+        _ = llama.impl.llama_c.ggml_set_name(noise, "inp_noise");
+        llama.impl.llama_c.ggml_set_input(noise);
 
         // lsd_decode: integrate the velocity field from the noise sample
         var cur: mtmd.graph.T = noise;
@@ -214,18 +215,18 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
             const s = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(self.n_step));
             const t = @as(f32, @floatFromInt(i + 1)) / @as(f32, @floatFromInt(self.n_step));
             const v = self.flowForward(h_state, cur, s, t);
-            cur = mtmd.impl.c.ggml_add(ctx0, cur, mtmd.impl.c.ggml_scale(ctx0, v, 1.0 / @as(f32, @floatFromInt(self.n_step))));
+            cur = llama.impl.llama_c.ggml_add(ctx0, cur, llama.impl.llama_c.ggml_scale(ctx0, v, 1.0 / @as(f32, @floatFromInt(self.n_step))));
         }
         g.cb(cur, "flow_latent", -1);
 
-        _ = mtmd.impl.c.ggml_set_name(cur, "out_feats");
-        mtmd.impl.c.ggml_set_output(cur);
-        mtmd.impl.c.ggml_build_forward_expand(g.gf, cur);
+        _ = llama.impl.llama_c.ggml_set_name(cur, "out_feats");
+        llama.impl.llama_c.ggml_set_output(cur);
+        llama.impl.llama_c.ggml_build_forward_expand(g.gf, cur);
 
         // the same latent, projected into the backbone's input space for the next step
         const embd = g.buildMm(model.gen_input_lin_w, cur);
         g.cb(embd, "gen_embd", -1);
-        mtmd.impl.c.ggml_build_forward_expand(g.gf, embd);
+        llama.impl.llama_c.ggml_build_forward_expand(g.gf, embd);
 
         return g.gf;
     }
@@ -235,58 +236,58 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
     const arena = arena_state.allocator();
 
     // GEN_WAV: [32, n_frames] latents -> PCM
-    const feats_t = mtmd.impl.c.ggml_new_tensor_2d(ctx0, mtmd.impl.c.GGML_TYPE_F32, mtmd.graph.ne(model.gen_input_lin_w, 0), self.n_frames);
-    _ = mtmd.impl.c.ggml_set_name(feats_t, "inp_feats");
-    mtmd.impl.c.ggml_set_input(feats_t);
+    const feats_t = llama.impl.llama_c.ggml_new_tensor_2d(ctx0, llama.impl.llama_c.GGML_TYPE_F32, mtmd.graph.ne(model.gen_input_lin_w, 0), self.n_frames);
+    _ = llama.impl.llama_c.ggml_set_name(feats_t, "inp_feats");
+    llama.impl.llama_c.ggml_set_input(feats_t);
 
     // denormalize, then the DummyQuantizer up-projection
-    var cur = mtmd.impl.c.ggml_add(ctx0, mtmd.impl.c.ggml_mul(ctx0, feats_t, model.gen_emb_std), model.gen_emb_mean);
+    var cur = llama.impl.llama_c.ggml_add(ctx0, llama.impl.llama_c.ggml_mul(ctx0, feats_t, model.gen_emb_std), model.gen_emb_mean);
     cur = g.buildMm(model.gen_quant_out_w, cur);
     g.cb(cur, "quant_out", -1);
 
     var seanet: mtmd.models.pockettts_seanet.Seanet = .init(g, arena);
     {
         const slots = try listStateSlots(hparams, model);
-        defer mtmd.models.freeSlots(slots);
+        defer mtmd.models.dispatch.freeSlots(slots);
         for (slots) |slot| {
-            const t = mtmd.impl.c.ggml_new_tensor_2d(ctx0, mtmd.impl.c.GGML_TYPE_F32, slot.ne0, slot.ne1);
+            const t = llama.impl.llama_c.ggml_new_tensor_2d(ctx0, llama.impl.llama_c.GGML_TYPE_F32, slot.ne0, slot.ne1);
             const name = try std.fmt.allocPrintSentinel(arena, "state_in_{s}", .{slot.name}, 0);
-            _ = mtmd.impl.c.ggml_set_name(t, name.ptr);
-            mtmd.impl.c.ggml_set_input(t);
+            _ = llama.impl.llama_c.ggml_set_name(t, name.ptr);
+            llama.impl.llama_c.ggml_set_input(t);
             seanet.putState(slot.name, t);
         }
     }
 
     // model frame rate -> encoder frame rate, depthwise transposed conv
-    cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, cur));
+    cur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, cur));
     cur = seanet.convTranspose1d(cur, model.gen_upsample_w, null, hparams.mimi_downsample, "up");
     g.cb(cur, "mimi_upsample", -1);
 
-    cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, cur));
+    cur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, cur));
 
     // positions continue across calls, the counter lives in the state
     const n_pos = mtmd.graph.ne(cur, 1);
     const prefix: i64 = hparams.mimi_tfm_context - 1;
     const n_kv = prefix + n_pos;
 
-    const base = mtmd.impl.c.ggml_reshape_1d(ctx0, seanet.stateAt("tfm_pos"), 1);
-    const inp_pos = mtmd.impl.c.ggml_cast(ctx0, mtmd.impl.c.ggml_add(ctx0, mtmd.impl.c.ggml_arange(ctx0, 0.0, @floatFromInt(n_pos), 1.0), base), mtmd.impl.c.GGML_TYPE_I32);
-    seanet.pushState("tfm_pos", mtmd.impl.c.ggml_scale_bias(ctx0, seanet.stateAt("tfm_pos"), 1.0, @floatFromInt(n_pos)));
+    const base = llama.impl.llama_c.ggml_reshape_1d(ctx0, seanet.stateAt("tfm_pos"), 1);
+    const inp_pos = llama.impl.llama_c.ggml_cast(ctx0, llama.impl.llama_c.ggml_add(ctx0, llama.impl.llama_c.ggml_arange(ctx0, 0.0, @floatFromInt(n_pos), 1.0), base), llama.impl.llama_c.GGML_TYPE_I32);
+    seanet.pushState("tfm_pos", llama.impl.llama_c.ggml_scale_bias(ctx0, seanet.stateAt("tfm_pos"), 1.0, @floatFromInt(n_pos)));
 
     // banded causal mask over [cached prefix | this chunk]
     // the last factor masks out cache rows that hold no real frame yet
-    const pos_k = mtmd.impl.c.ggml_reshape_2d(ctx0, mtmd.impl.c.ggml_arange(ctx0, 0.0, @floatFromInt(n_kv), 1.0), n_kv, 1);
-    const pos_q = mtmd.impl.c.ggml_reshape_2d(ctx0, mtmd.impl.c.ggml_arange(ctx0, @floatFromInt(prefix), @floatFromInt(prefix + n_pos), 1.0), 1, n_pos);
-    const diff = mtmd.impl.c.ggml_sub(ctx0, mtmd.impl.c.ggml_repeat_4d(ctx0, pos_q, n_kv, n_pos, 1, 1), pos_k);
+    const pos_k = llama.impl.llama_c.ggml_reshape_2d(ctx0, llama.impl.llama_c.ggml_arange(ctx0, 0.0, @floatFromInt(n_kv), 1.0), n_kv, 1);
+    const pos_q = llama.impl.llama_c.ggml_reshape_2d(ctx0, llama.impl.llama_c.ggml_arange(ctx0, @floatFromInt(prefix), @floatFromInt(prefix + n_pos), 1.0), 1, n_pos);
+    const diff = llama.impl.llama_c.ggml_sub(ctx0, llama.impl.llama_c.ggml_repeat_4d(ctx0, pos_q, n_kv, n_pos, 1, 1), pos_k);
 
-    var keep = mtmd.impl.c.ggml_mul(
+    var keep = llama.impl.llama_c.ggml_mul(
         ctx0,
-        mtmd.impl.c.ggml_step(ctx0, mtmd.impl.c.ggml_scale_bias(ctx0, diff, 1.0, 0.5)), // delta >= 0
-        mtmd.impl.c.ggml_step(ctx0, mtmd.impl.c.ggml_scale_bias(ctx0, diff, -1.0, @as(f32, @floatFromInt(hparams.mimi_tfm_context)) - 0.5)), // delta < context
+        llama.impl.llama_c.ggml_step(ctx0, llama.impl.llama_c.ggml_scale_bias(ctx0, diff, 1.0, 0.5)), // delta >= 0
+        llama.impl.llama_c.ggml_step(ctx0, llama.impl.llama_c.ggml_scale_bias(ctx0, diff, -1.0, @as(f32, @floatFromInt(hparams.mimi_tfm_context)) - 0.5)), // delta < context
     );
-    keep = mtmd.impl.c.ggml_mul(ctx0, keep, mtmd.impl.c.ggml_step(ctx0, mtmd.impl.c.ggml_scale_bias(ctx0, mtmd.impl.c.ggml_add(ctx0, pos_k, base), 1.0, 0.5 - @as(f32, @floatFromInt(prefix)))));
-    var kq_mask = mtmd.impl.c.ggml_reshape_4d(ctx0, mtmd.impl.c.ggml_log(ctx0, keep), n_kv, n_pos, 1, 1);
-    if (g.flash_attn_type == .enabled) kq_mask = mtmd.impl.c.ggml_cast(ctx0, kq_mask, mtmd.impl.c.GGML_TYPE_F16);
+    keep = llama.impl.llama_c.ggml_mul(ctx0, keep, llama.impl.llama_c.ggml_step(ctx0, llama.impl.llama_c.ggml_scale_bias(ctx0, llama.impl.llama_c.ggml_add(ctx0, pos_k, base), 1.0, 0.5 - @as(f32, @floatFromInt(prefix)))));
+    var kq_mask = llama.impl.llama_c.ggml_reshape_4d(ctx0, llama.impl.llama_c.ggml_log(ctx0, keep), n_kv, n_pos, 1, 1);
+    if (g.flash_attn_type == .enabled) kq_mask = llama.impl.llama_c.ggml_cast(ctx0, kq_mask, llama.impl.llama_c.GGML_TYPE_F16);
 
     var il: c_int = 0;
     while (il < g.n_layer) : (il += 1) {
@@ -299,52 +300,52 @@ pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.
         var Kcur = g.buildMm(layer.k_w, cur);
         const Vcur = g.buildMm(layer.v_w, cur);
 
-        Qcur = mtmd.impl.c.ggml_reshape_3d(ctx0, Qcur, g.d_head, g.n_head, n_pos);
-        Kcur = mtmd.impl.c.ggml_reshape_3d(ctx0, Kcur, g.d_head, g.n_head, n_pos);
+        Qcur = llama.impl.llama_c.ggml_reshape_3d(ctx0, Qcur, g.d_head, g.n_head, n_pos);
+        Kcur = llama.impl.llama_c.ggml_reshape_3d(ctx0, Kcur, g.d_head, g.n_head, n_pos);
 
-        Qcur = mtmd.impl.c.ggml_rope_ext(ctx0, Qcur, inp_pos, null, g.d_head, mtmd.impl.c.GGML_ROPE_TYPE_NORMAL, 0, hparams.rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
-        Kcur = mtmd.impl.c.ggml_rope_ext(ctx0, Kcur, inp_pos, null, g.d_head, mtmd.impl.c.GGML_ROPE_TYPE_NORMAL, 0, hparams.rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
+        Qcur = llama.impl.llama_c.ggml_rope_ext(ctx0, Qcur, inp_pos, null, g.d_head, llama.impl.llama_c.GGML_ROPE_TYPE_NORMAL, 0, hparams.rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
+        Kcur = llama.impl.llama_c.ggml_rope_ext(ctx0, Kcur, inp_pos, null, g.d_head, llama.impl.llama_c.GGML_ROPE_TYPE_NORMAL, 0, hparams.rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
 
         // prepend the cached window, then keep this chunk's tail for the next call
         const k_name = try std.fmt.allocPrint(arena, "tfm_k_{d}", .{il});
         const v_name = try std.fmt.allocPrint(arena, "tfm_v_{d}", .{il});
-        const k_full = mtmd.impl.c.ggml_concat(ctx0, seanet.stateAt(k_name), mtmd.impl.c.ggml_reshape_2d(ctx0, Kcur, @as(i64, g.d_head) * g.n_head, n_pos), 1);
-        const v_full = mtmd.impl.c.ggml_concat(ctx0, seanet.stateAt(v_name), Vcur, 1);
-        seanet.pushState(k_name, mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_view_2d(ctx0, k_full, mtmd.graph.ne(k_full, 0), prefix, mtmd.graph.nb(k_full, 1), @as(usize, @intCast(n_pos)) * mtmd.graph.nb(k_full, 1))));
-        seanet.pushState(v_name, mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_view_2d(ctx0, v_full, mtmd.graph.ne(v_full, 0), prefix, mtmd.graph.nb(v_full, 1), @as(usize, @intCast(n_pos)) * mtmd.graph.nb(v_full, 1))));
+        const k_full = llama.impl.llama_c.ggml_concat(ctx0, seanet.stateAt(k_name), llama.impl.llama_c.ggml_reshape_2d(ctx0, Kcur, @as(i64, g.d_head) * g.n_head, n_pos), 1);
+        const v_full = llama.impl.llama_c.ggml_concat(ctx0, seanet.stateAt(v_name), Vcur, 1);
+        seanet.pushState(k_name, llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_view_2d(ctx0, k_full, mtmd.graph.ne(k_full, 0), prefix, mtmd.graph.nb(k_full, 1), @as(usize, @intCast(n_pos)) * mtmd.graph.nb(k_full, 1))));
+        seanet.pushState(v_name, llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_view_2d(ctx0, v_full, mtmd.graph.ne(v_full, 0), prefix, mtmd.graph.nb(v_full, 1), @as(usize, @intCast(n_pos)) * mtmd.graph.nb(v_full, 1))));
 
-        const q_cur = mtmd.impl.c.ggml_reshape_4d(ctx0, Qcur, g.d_head, g.n_head, n_pos, 1);
-        const k_cur = mtmd.impl.c.ggml_reshape_4d(ctx0, k_full, g.d_head, g.n_head, n_kv, 1);
-        const v_cur = mtmd.impl.c.ggml_reshape_4d(ctx0, v_full, g.d_head, g.n_head, n_kv, 1);
+        const q_cur = llama.impl.llama_c.ggml_reshape_4d(ctx0, Qcur, g.d_head, g.n_head, n_pos, 1);
+        const k_cur = llama.impl.llama_c.ggml_reshape_4d(ctx0, k_full, g.d_head, g.n_head, n_kv, 1);
+        const v_cur = llama.impl.llama_c.ggml_reshape_4d(ctx0, v_full, g.d_head, g.n_head, n_kv, 1);
 
         cur = g.buildAttn(layer.o_w, null, q_cur, k_cur, v_cur, kq_mask, g.kq_scale, il, null);
-        cur = mtmd.impl.c.ggml_mul(ctx0, cur, layer.ls_1_w);
-        cur = mtmd.impl.c.ggml_add(ctx0, cur, inp);
+        cur = llama.impl.llama_c.ggml_mul(ctx0, cur, layer.ls_1_w);
+        cur = llama.impl.llama_c.ggml_add(ctx0, cur, inp);
 
         inp = cur;
         cur = g.buildNorm(cur, layer.ln_2_w, layer.ln_2_b, .normal, g.eps, il);
         cur = g.buildFfn(cur, layer.ff_up_w, null, null, null, layer.ff_down_w, null, .gelu, il);
-        cur = mtmd.impl.c.ggml_mul(ctx0, cur, layer.ls_2_w);
-        cur = mtmd.impl.c.ggml_add(ctx0, cur, inp);
+        cur = llama.impl.llama_c.ggml_mul(ctx0, cur, layer.ls_2_w);
+        cur = llama.impl.llama_c.ggml_add(ctx0, cur, inp);
     }
     g.cb(cur, "mimi_dec_tfm", -1);
 
-    cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, cur));
+    cur = llama.impl.llama_c.ggml_cont(ctx0, llama.impl.llama_c.ggml_transpose(ctx0, cur));
     cur = seanet.decode(cur);
 
     for (seanet.state_out.items) |s| {
         const name = try std.fmt.allocPrintSentinel(arena, "state_out_{s}", .{s.name}, 0);
-        _ = mtmd.impl.c.ggml_set_name(s.t, name.ptr);
-        mtmd.impl.c.ggml_set_output(s.t);
-        mtmd.impl.c.ggml_build_forward_expand(g.gf, s.t);
+        _ = llama.impl.llama_c.ggml_set_name(s.t, name.ptr);
+        llama.impl.llama_c.ggml_set_output(s.t);
+        llama.impl.llama_c.ggml_build_forward_expand(g.gf, s.t);
     }
 
     // [n_samples, 1] -> [n_samples], clamped like the reference output
-    cur = mtmd.impl.c.ggml_reshape_1d(ctx0, cur, mtmd.graph.ne(cur, 0));
-    cur = mtmd.impl.c.ggml_clamp(ctx0, cur, -1.0, 1.0);
-    _ = mtmd.impl.c.ggml_set_name(cur, "out_audio");
-    mtmd.impl.c.ggml_set_output(cur);
-    mtmd.impl.c.ggml_build_forward_expand(g.gf, cur);
+    cur = llama.impl.llama_c.ggml_reshape_1d(ctx0, cur, mtmd.graph.ne(cur, 0));
+    cur = llama.impl.llama_c.ggml_clamp(ctx0, cur, -1.0, 1.0);
+    _ = llama.impl.llama_c.ggml_set_name(cur, "out_audio");
+    llama.impl.llama_c.ggml_set_output(cur);
+    llama.impl.llama_c.ggml_build_forward_expand(g.gf, cur);
 
     return g.gf;
 }

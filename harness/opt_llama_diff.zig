@@ -46,17 +46,11 @@
 //! Usage: opt_llama_diff <base-qwen35.gguf> <tmp-dir> [--abort <case> <ref|port>]
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const input_tensor_order = @import("input_tensor_order.zig");
 const harness_root = @import("harness_root");
 
-const c = harness_root.impl.c;
-const M = harness_root.model;
-const A = harness_root.api;
-
-const gpa = std.heap.c_allocator;
-
-extern fn _ZNK11llama_model10get_tensorEPKc(model: *const c.struct_llama_model, name: [*:0]const u8) ?*c.ggml_tensor;
+extern fn _ZNK11llama_model10get_tensorEPKc(model: *const harness_root.impl.c.struct_llama_model, name: [*:0]const u8) ?*harness_root.impl.c.ggml_tensor;
 
 // -----------------------------------------------------------------------------
 // The transcript
@@ -65,12 +59,12 @@ var rec: ?*std.ArrayList(u8) = null;
 
 fn note(comptime fmt: []const u8, args: anytype) void {
     const r = rec orelse return;
-    r.print(gpa, fmt ++ "\n", args) catch unreachable;
+    r.print(std.heap.c_allocator, fmt ++ "\n", args) catch unreachable;
 }
 
 var log_on = false;
 
-fn logCb(level: c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
+fn logCb(level: harness_root.impl.c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
     _ = level;
     if (!log_on) return;
     const r = rec orelse return;
@@ -78,7 +72,7 @@ fn logCb(level: c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callc
     // Metal compiles a pipeline the first time anything in the process
     // uses it, which is whichever side ran first.
     if (std.mem.startsWith(u8, s, "ggml_metal_library_compile_pipeline:")) return;
-    r.appendSlice(gpa, s) catch unreachable;
+    r.appendSlice(std.heap.c_allocator, s) catch unreachable;
 }
 
 fn hashBytes(p: [*]const u8, n: usize) u64 {
@@ -87,38 +81,38 @@ fn hashBytes(p: [*]const u8, n: usize) u64 {
 
 var scratch: std.ArrayList(u8) = .empty;
 
-fn tensorHash(t: *const c.ggml_tensor) u64 {
-    const n = c.ggml_nbytes(t);
-    scratch.resize(gpa, n) catch unreachable;
-    c.ggml_backend_tensor_get(t, scratch.items.ptr, 0, n);
+fn tensorHash(t: *const harness_root.impl.c.ggml_tensor) u64 {
+    const n = harness_root.impl.c.ggml_nbytes(t);
+    scratch.resize(std.heap.c_allocator, n) catch unreachable;
+    harness_root.impl.c.ggml_backend_tensor_get(t, scratch.items.ptr, 0, n);
     return hashBytes(scratch.items.ptr, n);
 }
 
 var n_nodes_seen: usize = 0;
 
-fn nodeCb(t: [*c]c.ggml_tensor, ask: bool, _: ?*anyopaque) callconv(.c) bool {
+fn nodeCb(t: [*c]harness_root.impl.c.ggml_tensor, ask: bool, _: ?*anyopaque) callconv(.c) bool {
     if (ask) return true;
-    const node: *c.ggml_tensor = t;
+    const node: *harness_root.impl.c.ggml_tensor = t;
     n_nodes_seen += 1;
     const r = rec orelse return true;
-    r.print(gpa, "node {s} {s} {s} [{d},{d},{d},{d}] flags {x} src", .{
-        std.mem.sliceTo(&node.name, 0), c.ggml_op_desc(node), c.ggml_type_name(node.type),
-        node.ne[0],                     node.ne[1],           node.ne[2],
+    r.print(std.heap.c_allocator, "node {s} {s} {s} [{d},{d},{d},{d}] flags {x} src", .{
+        std.mem.sliceTo(&node.name, 0), harness_root.impl.c.ggml_op_desc(node), harness_root.impl.c.ggml_type_name(node.type),
+        node.ne[0],                     node.ne[1],                             node.ne[2],
         node.ne[3],                     node.flags,
     }) catch unreachable;
     for (node.src) |s| {
         if (s == null) continue;
-        const src: *c.ggml_tensor = s;
-        r.print(gpa, " {s}:{s}:{x}", .{ std.mem.sliceTo(&src.name, 0), c.ggml_op_desc(src), src.flags }) catch unreachable;
+        const src: *harness_root.impl.c.ggml_tensor = s;
+        r.print(std.heap.c_allocator, " {s}:{s}:{x}", .{ std.mem.sliceTo(&src.name, 0), harness_root.impl.c.ggml_op_desc(src), src.flags }) catch unreachable;
     }
     // A node without GGML_TENSOR_FLAG_COMPUTE (an unselected
     // `ggml_build_forward_select` branch) is never computed: its bytes are
     // leftovers. Its flags are compared above.
-    if ((node.flags & c.GGML_TENSOR_FLAG_COMPUTE) == 0) {
-        r.appendSlice(gpa, " h -\n") catch unreachable;
+    if ((node.flags & harness_root.impl.c.GGML_TENSOR_FLAG_COMPUTE) == 0) {
+        r.appendSlice(std.heap.c_allocator, " h -\n") catch unreachable;
         return true;
     }
-    r.print(gpa, " h {x}\n", .{tensorHash(node)}) catch unreachable;
+    r.print(std.heap.c_allocator, " h {x}\n", .{tensorHash(node)}) catch unreachable;
     return true;
 }
 
@@ -143,49 +137,49 @@ const TensorSpec = struct { name: []const u8, ne: [2]i64, kind: enum { norm, mat
 /// Writes the four-layer F32 Qwen3.5 to `path`, its metadata and vocabulary
 /// taken from `base`.
 fn writeModel(base: [:0]const u8, path: [:0]const u8) void {
-    const src = c.gguf_init_from_file(base.ptr, .{ .no_alloc = true, .ctx = null }) orelse {
+    const src = harness_root.impl.c.gguf_init_from_file(base.ptr, .{ .no_alloc = true, .ctx = null }) orelse {
         std.debug.print("FAIL: cannot read {s}\n", .{base});
         std.process.exit(2);
     };
-    defer c.gguf_free(src);
-    const n_vocab: i64 = @intCast(c.gguf_get_arr_n(src, c.gguf_find_key(src, "tokenizer.ggml.tokens")));
+    defer harness_root.impl.c.gguf_free(src);
+    const n_vocab: i64 = @intCast(harness_root.impl.c.gguf_get_arr_n(src, harness_root.impl.c.gguf_find_key(src, "tokenizer.ggml.tokens")));
 
-    const g = c.gguf_init_empty();
-    defer c.gguf_free(g);
-    c.gguf_set_kv(g, src);
-    for ([_][*:0]const u8{ "quantize.imatrix.file", "quantize.imatrix.dataset", "quantize.imatrix.entries_count", "quantize.imatrix.chunks_count" }) |k| _ = c.gguf_remove_key(g, k);
-    c.gguf_set_val_str(g, "general.name", "opt-diff-tiny");
-    c.gguf_set_val_u32(g, "general.file_type", c.LLAMA_FTYPE_ALL_F32);
-    c.gguf_set_val_u32(g, "qwen35.block_count", n_layer);
-    c.gguf_set_val_u32(g, "qwen35.context_length", 256);
-    c.gguf_set_val_u32(g, "qwen35.embedding_length", n_embd);
-    c.gguf_set_val_u32(g, "qwen35.feed_forward_length", n_ff);
-    c.gguf_set_val_u32(g, "qwen35.attention.head_count", n_head);
-    c.gguf_set_val_u32(g, "qwen35.attention.head_count_kv", n_head_kv);
-    c.gguf_set_val_u32(g, "qwen35.attention.key_length", head_dim);
-    c.gguf_set_val_u32(g, "qwen35.attention.value_length", head_dim);
-    c.gguf_set_val_u32(g, "qwen35.rope.dimension_count", 16);
+    const g = harness_root.impl.c.gguf_init_empty();
+    defer harness_root.impl.c.gguf_free(g);
+    harness_root.impl.c.gguf_set_kv(g, src);
+    for ([_][*:0]const u8{ "quantize.imatrix.file", "quantize.imatrix.dataset", "quantize.imatrix.entries_count", "quantize.imatrix.chunks_count" }) |k| _ = harness_root.impl.c.gguf_remove_key(g, k);
+    harness_root.impl.c.gguf_set_val_str(g, "general.name", "opt-diff-tiny");
+    harness_root.impl.c.gguf_set_val_u32(g, "general.file_type", harness_root.impl.c.LLAMA_FTYPE_ALL_F32);
+    harness_root.impl.c.gguf_set_val_u32(g, "qwen35.block_count", n_layer);
+    harness_root.impl.c.gguf_set_val_u32(g, "qwen35.context_length", 256);
+    harness_root.impl.c.gguf_set_val_u32(g, "qwen35.embedding_length", n_embd);
+    harness_root.impl.c.gguf_set_val_u32(g, "qwen35.feed_forward_length", n_ff);
+    harness_root.impl.c.gguf_set_val_u32(g, "qwen35.attention.head_count", n_head);
+    harness_root.impl.c.gguf_set_val_u32(g, "qwen35.attention.head_count_kv", n_head_kv);
+    harness_root.impl.c.gguf_set_val_u32(g, "qwen35.attention.key_length", head_dim);
+    harness_root.impl.c.gguf_set_val_u32(g, "qwen35.attention.value_length", head_dim);
+    harness_root.impl.c.gguf_set_val_u32(g, "qwen35.rope.dimension_count", 16);
     const sections = [_]i32{ 3, 3, 2, 0 };
-    c.gguf_set_arr_data(g, "qwen35.rope.dimension_sections", c.GGUF_TYPE_INT32, &sections, sections.len);
-    c.gguf_set_val_u32(g, "qwen35.ssm.conv_kernel", ssm_d_conv);
-    c.gguf_set_val_u32(g, "qwen35.ssm.state_size", ssm_d_state);
-    c.gguf_set_val_u32(g, "qwen35.ssm.group_count", ssm_n_group);
-    c.gguf_set_val_u32(g, "qwen35.ssm.time_step_rank", ssm_dt_rank);
-    c.gguf_set_val_u32(g, "qwen35.ssm.inner_size", ssm_d_inner);
-    c.gguf_set_val_u32(g, "qwen35.full_attention_interval", 4);
+    harness_root.impl.c.gguf_set_arr_data(g, "qwen35.rope.dimension_sections", harness_root.impl.c.GGUF_TYPE_INT32, &sections, sections.len);
+    harness_root.impl.c.gguf_set_val_u32(g, "qwen35.ssm.conv_kernel", ssm_d_conv);
+    harness_root.impl.c.gguf_set_val_u32(g, "qwen35.ssm.state_size", ssm_d_state);
+    harness_root.impl.c.gguf_set_val_u32(g, "qwen35.ssm.group_count", ssm_n_group);
+    harness_root.impl.c.gguf_set_val_u32(g, "qwen35.ssm.time_step_rank", ssm_dt_rank);
+    harness_root.impl.c.gguf_set_val_u32(g, "qwen35.ssm.inner_size", ssm_d_inner);
+    harness_root.impl.c.gguf_set_val_u32(g, "qwen35.full_attention_interval", 4);
 
     var specs: std.ArrayList(TensorSpec) = .empty;
-    defer specs.deinit(gpa);
+    defer specs.deinit(std.heap.c_allocator);
     var names: std.ArrayList([]u8) = .empty;
     defer {
-        for (names.items) |n| gpa.free(n);
-        names.deinit(gpa);
+        for (names.items) |n| std.heap.c_allocator.free(n);
+        names.deinit(std.heap.c_allocator);
     }
     const add = struct {
         fn f(list: *std.ArrayList(TensorSpec), nl: *std.ArrayList([]u8), comptime fmt: []const u8, args: anytype, ne: [2]i64, kind: @FieldType(TensorSpec, "kind")) void {
-            const n = std.fmt.allocPrint(gpa, fmt, args) catch unreachable;
-            nl.append(gpa, n) catch unreachable;
-            list.append(gpa, .{ .name = n, .ne = ne, .kind = kind }) catch unreachable;
+            const n = std.fmt.allocPrint(std.heap.c_allocator, fmt, args) catch unreachable;
+            nl.append(std.heap.c_allocator, n) catch unreachable;
+            list.append(std.heap.c_allocator, .{ .name = n, .ne = ne, .kind = kind }) catch unreachable;
         }
     }.f;
     add(&specs, &names, "token_embd.weight", .{}, .{ n_embd, n_vocab }, .embd);
@@ -219,14 +213,14 @@ fn writeModel(base: [:0]const u8, path: [:0]const u8) void {
 
     var total: usize = 0;
     for (specs.items) |s| total += @intCast(s.ne[0] * s.ne[1] * 4);
-    const ctx = c.ggml_init(.{ .mem_size = total + (specs.items.len + 1) * (c.ggml_tensor_overhead() + 64), .mem_buffer = null, .no_alloc = false }).?;
-    defer c.ggml_free(ctx);
+    const ctx = harness_root.impl.c.ggml_init(.{ .mem_size = total + (specs.items.len + 1) * (harness_root.impl.c.ggml_tensor_overhead() + 64), .mem_buffer = null, .no_alloc = false }).?;
+    defer harness_root.impl.c.ggml_free(ctx);
     var prng = std.Random.DefaultPrng.init(0x0b7d1ff);
     const rand = prng.random();
     for (specs.items) |s| {
-        const t = if (s.ne[1] == 1) c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_F32, s.ne[0]) else c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, s.ne[0], s.ne[1]);
+        const t = if (s.ne[1] == 1) harness_root.impl.c.ggml_new_tensor_1d(ctx, harness_root.impl.c.GGML_TYPE_F32, s.ne[0]) else harness_root.impl.c.ggml_new_tensor_2d(ctx, harness_root.impl.c.GGML_TYPE_F32, s.ne[0], s.ne[1]);
         var nb: [128]u8 = undefined;
-        _ = c.ggml_set_name(t, (std.fmt.bufPrintSentinel(&nb, "{s}", .{s.name}, 0) catch unreachable).ptr);
+        _ = harness_root.impl.c.ggml_set_name(t, (std.fmt.bufPrintSentinel(&nb, "{s}", .{s.name}, 0) catch unreachable).ptr);
         const data: [*]f32 = @ptrCast(@alignCast(t.*.data));
         const n: usize = @intCast(s.ne[0] * s.ne[1]);
         const scale: f32 = 1.0 / @sqrt(@as(f32, @floatFromInt(s.ne[0])));
@@ -241,9 +235,9 @@ fn writeModel(base: [:0]const u8, path: [:0]const u8) void {
                 .conv => 0.3 * u,
             };
         }
-        c.gguf_add_tensor(g, t);
+        harness_root.impl.c.gguf_add_tensor(g, t);
     }
-    if (!c.gguf_write_to_file(g, path.ptr, false)) {
+    if (!harness_root.impl.c.gguf_write_to_file(g, path.ptr, false)) {
         std.debug.print("FAIL: cannot write {s}\n", .{path});
         std.process.exit(2);
     }
@@ -301,44 +295,44 @@ const Filter = enum {
 var current_filter: Filter = .output;
 
 /// Records every tensor it is offered, then decides by `current_filter`.
-fn recordingFilter(tensor: [*c]const c.struct_ggml_tensor, userdata: ?*anyopaque) callconv(.c) bool {
-    const t: *const c.ggml_tensor = @ptrCast(tensor);
+fn recordingFilter(tensor: [*c]const harness_root.impl.c.struct_ggml_tensor, userdata: ?*anyopaque) callconv(.c) bool {
+    const t: *const harness_root.impl.c.ggml_tensor = @ptrCast(tensor);
     const name = std.mem.sliceTo(&t.name, 0);
     const accept = current_filter.accepts(name);
     note("filter {s} ud={} -> {}", .{ name, userdata == @as(?*anyopaque, @ptrCast(&current_filter)), accept });
     return accept;
 }
 
-var g_opt_pars: c.struct_ggml_opt_optimizer_params = undefined;
+var g_opt_pars: harness_root.impl.c.struct_ggml_opt_optimizer_params = undefined;
 var n_opt_pars_calls: usize = 0;
 
-fn optPars(userdata: ?*anyopaque) callconv(.c) c.struct_ggml_opt_optimizer_params {
+fn optPars(userdata: ?*anyopaque) callconv(.c) harness_root.impl.c.struct_ggml_opt_optimizer_params {
     n_opt_pars_calls += 1;
     note("get_opt_pars ud={}", .{userdata == @as(?*anyopaque, @ptrCast(&g_opt_pars))});
     return g_opt_pars;
 }
 
-fn epochCb(train: bool, opt_ctx: c.ggml_opt_context_t, dataset: c.ggml_opt_dataset_t, result: c.ggml_opt_result_t, ibatch: i64, ibatch_max: i64, t_start_us: i64) callconv(.c) void {
+fn epochCb(train: bool, opt_ctx: harness_root.impl.c.ggml_opt_context_t, dataset: harness_root.impl.c.ggml_opt_dataset_t, result: harness_root.impl.c.ggml_opt_result_t, ibatch: i64, ibatch_max: i64, t_start_us: i64) callconv(.c) void {
     note("callback train={} opt_ctx={} dataset={} ibatch={d}/{d} t_start>0={}", .{ train, opt_ctx != null, dataset == g_dataset, ibatch, ibatch_max, t_start_us > 0 });
     recResult("callback", result);
 }
 
-var g_dataset: c.ggml_opt_dataset_t = null;
+var g_dataset: harness_root.impl.c.ggml_opt_dataset_t = null;
 
-fn recResult(tag: []const u8, res: c.ggml_opt_result_t) void {
+fn recResult(tag: []const u8, res: harness_root.impl.c.ggml_opt_result_t) void {
     var nd: i64 = 0;
-    c.ggml_opt_result_ndata(res, &nd);
+    harness_root.impl.c.ggml_opt_result_ndata(res, &nd);
     var loss: f64 = 0;
     var unc: f64 = 0;
-    c.ggml_opt_result_loss(res, &loss, &unc);
+    harness_root.impl.c.ggml_opt_result_loss(res, &loss, &unc);
     var acc: f64 = 0;
     var acc_unc: f64 = 0;
-    c.ggml_opt_result_accuracy(res, &acc, &acc_unc);
+    harness_root.impl.c.ggml_opt_result_accuracy(res, &acc, &acc_unc);
     var pred_h: u64 = 0;
     if (nd > 0) {
-        const pred = gpa.alloc(i32, @intCast(nd)) catch unreachable;
-        defer gpa.free(pred);
-        c.ggml_opt_result_pred(res, pred.ptr);
+        const pred = std.heap.c_allocator.alloc(i32, @intCast(nd)) catch unreachable;
+        defer std.heap.c_allocator.free(pred);
+        harness_root.impl.c.ggml_opt_result_pred(res, pred.ptr);
         pred_h = hashBytes(@ptrCast(pred.ptr), pred.len * 4);
     }
     note("{s}: ndata={d} loss={x} unc={x} acc={x} acc_unc={x} pred={x}", .{ tag, nd, @as(u64, @bitCast(loss)), @as(u64, @bitCast(unc)), @as(u64, @bitCast(acc)), @as(u64, @bitCast(acc_unc)), pred_h });
@@ -347,7 +341,7 @@ fn recResult(tag: []const u8, res: c.ggml_opt_result_t) void {
 const Case = struct {
     name: []const u8,
     filter: Filter,
-    optimizer: c.enum_ggml_opt_optimizer_type,
+    optimizer: harness_root.impl.c.enum_ggml_opt_optimizer_type,
     n_gpu_layers: i32,
     n_batch: u32 = 128,
     n_ubatch: u32 = 64,
@@ -361,11 +355,11 @@ const Case = struct {
 };
 
 const cases = [_]Case{
-    .{ .name = "gpu adamw output", .filter = .output, .optimizer = c.GGML_OPT_OPTIMIZER_TYPE_ADAMW, .n_gpu_layers = -1 },
-    .{ .name = "gpu sgd head", .filter = .head, .optimizer = c.GGML_OPT_OPTIMIZER_TYPE_SGD, .n_gpu_layers = -1 },
-    .{ .name = "gpu adamw head, one ubatch per batch", .filter = .head, .optimizer = c.GGML_OPT_OPTIMIZER_TYPE_ADAMW, .n_gpu_layers = -1, .n_batch = 64, .n_ubatch = 64 },
-    .{ .name = "cpu adamw head", .filter = .head, .optimizer = c.GGML_OPT_OPTIMIZER_TYPE_ADAMW, .n_gpu_layers = 0 },
-    .{ .name = "cpu sgd output, n_ctx_train 128", .filter = .output, .optimizer = c.GGML_OPT_OPTIMIZER_TYPE_SGD, .n_gpu_layers = 0, .n_ctx_train = 128, .idata_split = 3 },
+    .{ .name = "gpu adamw output", .filter = .output, .optimizer = harness_root.impl.c.GGML_OPT_OPTIMIZER_TYPE_ADAMW, .n_gpu_layers = -1 },
+    .{ .name = "gpu sgd head", .filter = .head, .optimizer = harness_root.impl.c.GGML_OPT_OPTIMIZER_TYPE_SGD, .n_gpu_layers = -1 },
+    .{ .name = "gpu adamw head, one ubatch per batch", .filter = .head, .optimizer = harness_root.impl.c.GGML_OPT_OPTIMIZER_TYPE_ADAMW, .n_gpu_layers = -1, .n_batch = 64, .n_ubatch = 64 },
+    .{ .name = "cpu adamw head", .filter = .head, .optimizer = harness_root.impl.c.GGML_OPT_OPTIMIZER_TYPE_ADAMW, .n_gpu_layers = 0 },
+    .{ .name = "cpu sgd output, n_ctx_train 128", .filter = .output, .optimizer = harness_root.impl.c.GGML_OPT_OPTIMIZER_TYPE_SGD, .n_gpu_layers = 0, .n_ctx_train = 128, .idata_split = 3 },
     // No case has n_ubatch == n_ctx, the training graph that reads the
     // ubatch's own K and V: on this hybrid model upstream then aborts in
     // `llm_graph_input_mem_hybrid::set_input`, which still writes the
@@ -378,21 +372,21 @@ const cases = [_]Case{
 /// models' tensors by.
 var weight_names: std.ArrayList([:0]u8) = .empty;
 
-fn script(comptime side: enum { ref, port }, model: *c.struct_llama_model, cs: Case, tokens: []const i32) void {
-    const Api = if (side == .ref) c else struct {
-        const llama_init_from_model = A.context.llama_init_from_model;
-        const llama_free = A.context.llama_free;
-        const llama_decode = A.context.llama_decode;
-        const llama_n_ctx = A.context.llama_n_ctx;
-        const llama_opt_init = A.opt.llama_opt_init;
-        const llama_opt_epoch = A.opt.llama_opt_epoch;
-        const llama_opt_param_filter_all = A.opt.llama_opt_param_filter_all;
-        const llama_model_n_ctx_train = A.model.llama_model_n_ctx_train;
+fn script(comptime side: enum { ref, port }, model: *harness_root.impl.c.struct_llama_model, cs: Case, tokens: []const i32) void {
+    const Api = if (side == .ref) harness_root.impl.c else struct {
+        const llama_init_from_model = harness_root.api.context.llama_init_from_model;
+        const llama_free = harness_root.api.context.llama_free;
+        const llama_decode = harness_root.api.context.llama_decode;
+        const llama_n_ctx = harness_root.api.context.llama_n_ctx;
+        const llama_opt_init = harness_root.api.opt.llama_opt_init;
+        const llama_opt_epoch = harness_root.api.opt.llama_opt_epoch;
+        const llama_opt_param_filter_all = harness_root.api.opt.llama_opt_param_filter_all;
+        const llama_model_n_ctx_train = harness_root.api.model.llama_model_n_ctx_train;
     };
     const getTensor = struct {
-        fn f(m: *c.struct_llama_model, name: [:0]const u8) ?*c.ggml_tensor {
+        fn f(m: *harness_root.impl.c.struct_llama_model, name: [:0]const u8) ?*harness_root.impl.c.ggml_tensor {
             if (side == .ref) return _ZNK11llama_model10get_tensorEPKc(m, name.ptr);
-            const pm: *M.Model = @ptrCast(@alignCast(m));
+            const pm: *harness_root.model.Model = @ptrCast(@alignCast(m));
             for (pm.tensors_by_name.items) |t| {
                 if (std.mem.eql(u8, std.mem.sliceTo(&t.name, 0), name)) return t;
             }
@@ -400,16 +394,16 @@ fn script(comptime side: enum { ref, port }, model: *c.struct_llama_model, cs: C
         }
     }.f;
 
-    var params = c.llama_context_default_params();
+    var params = harness_root.impl.c.llama_context_default_params();
     params.cb_eval = nodeCb;
     params.cb_eval_user_data = null;
     params.no_perf = true;
     params.n_ctx = cs.n_ctx;
     params.n_batch = cs.n_batch;
     params.n_ubatch = cs.n_ubatch;
-    params.type_k = c.GGML_TYPE_F32;
-    params.type_v = c.GGML_TYPE_F32;
-    params.flash_attn_type = c.LLAMA_FLASH_ATTN_TYPE_DISABLED;
+    params.type_k = harness_root.impl.c.GGML_TYPE_F32;
+    params.type_v = harness_root.impl.c.GGML_TYPE_F32;
+    params.flash_attn_type = harness_root.impl.c.LLAMA_FLASH_ATTN_TYPE_DISABLED;
     params.n_threads = 4;
     params.n_threads_batch = 4;
 
@@ -424,8 +418,8 @@ fn script(comptime side: enum { ref, port }, model: *c.struct_llama_model, cs: C
     // One decode first: it installs `cb_eval` on the scheduler, which the
     // training graphs then run under.
     {
-        var b = c.llama_batch_init(8, 0, 1);
-        defer c.llama_batch_free(b);
+        var b = harness_root.impl.c.llama_batch_init(8, 0, 1);
+        defer harness_root.impl.c.llama_batch_free(b);
         for (0..4) |k| {
             b.token[k] = tokens[k];
             b.pos[k] = @intCast(k);
@@ -438,12 +432,12 @@ fn script(comptime side: enum { ref, port }, model: *c.struct_llama_model, cs: C
     }
 
     current_filter = cs.filter;
-    g_opt_pars = c.ggml_opt_get_default_optimizer_params(null);
+    g_opt_pars = harness_root.impl.c.ggml_opt_get_default_optimizer_params(null);
     g_opt_pars.adamw.alpha = 0.01;
     g_opt_pars.adamw.wd = 0.01;
     g_opt_pars.sgd.alpha = 0.05;
     g_opt_pars.sgd.wd = 0.001;
-    const lopt: c.struct_llama_opt_params = .{
+    const lopt: harness_root.impl.c.struct_llama_opt_params = .{
         .n_ctx_train = cs.n_ctx_train,
         .param_filter = if (cs.filter == .all) Api.llama_opt_param_filter_all else recordingFilter,
         .param_filter_ud = &current_filter,
@@ -468,12 +462,12 @@ fn script(comptime side: enum { ref, port }, model: *c.struct_llama_model, cs: C
     // context.
     const ndata: i64 = 3;
     const stride: i64 = @divExact(n_ctx, 2);
-    const dataset = c.ggml_opt_dataset_init(c.GGML_TYPE_I32, c.GGML_TYPE_I32, n_ctx, n_ctx, ndata, 1);
-    defer c.ggml_opt_dataset_free(dataset);
+    const dataset = harness_root.impl.c.ggml_opt_dataset_init(harness_root.impl.c.GGML_TYPE_I32, harness_root.impl.c.GGML_TYPE_I32, n_ctx, n_ctx, ndata, 1);
+    defer harness_root.impl.c.ggml_opt_dataset_free(dataset);
     g_dataset = dataset;
     {
-        const data: [*]i32 = @ptrCast(@alignCast(c.ggml_opt_dataset_data(dataset).*.data));
-        const labels: [*]i32 = @ptrCast(@alignCast(c.ggml_opt_dataset_labels(dataset).*.data));
+        const data: [*]i32 = @ptrCast(@alignCast(harness_root.impl.c.ggml_opt_dataset_data(dataset).*.data));
+        const labels: [*]i32 = @ptrCast(@alignCast(harness_root.impl.c.ggml_opt_dataset_labels(dataset).*.data));
         for (0..@intCast(ndata)) |idata| {
             const at: usize = @intCast(@as(i64, @intCast(idata)) * stride);
             @memcpy(data[idata * @as(usize, @intCast(n_ctx)) ..][0..@intCast(n_ctx)], tokens[at..][0..@intCast(n_ctx)]);
@@ -481,10 +475,10 @@ fn script(comptime side: enum { ref, port }, model: *c.struct_llama_model, cs: C
         }
     }
 
-    const result_train = c.ggml_opt_result_init();
-    defer c.ggml_opt_result_free(result_train);
-    const result_eval = c.ggml_opt_result_init();
-    defer c.ggml_opt_result_free(result_eval);
+    const result_train = harness_root.impl.c.ggml_opt_result_init();
+    defer harness_root.impl.c.ggml_opt_result_free(result_train);
+    const result_eval = harness_root.impl.c.ggml_opt_result_init();
+    defer harness_root.impl.c.ggml_opt_result_free(result_eval);
 
     for (0..cs.epochs) |epoch| {
         note("epoch {d}", .{epoch});
@@ -495,8 +489,8 @@ fn script(comptime side: enum { ref, port }, model: *c.struct_llama_model, cs: C
             const t = getTensor(model, name) orelse continue;
             note("weight {s}: h {x}", .{ name, tensorHash(t) });
         }
-        c.ggml_opt_result_reset(result_train);
-        c.ggml_opt_result_reset(result_eval);
+        harness_root.impl.c.ggml_opt_result_reset(result_train);
+        harness_root.impl.c.ggml_opt_result_reset(result_eval);
     }
     note("get_opt_pars calls {d}", .{n_opt_pars_calls});
     n_opt_pars_calls = 0;
@@ -504,10 +498,10 @@ fn script(comptime side: enum { ref, port }, model: *c.struct_llama_model, cs: C
 }
 
 fn firstDiff(name: []const u8, a_raw: []const u8, b_raw: []const u8) usize {
-    var sa = input_tensor_order.sortRuns(gpa, a_raw);
-    defer sa.deinit(gpa);
-    var sb = input_tensor_order.sortRuns(gpa, b_raw);
-    defer sb.deinit(gpa);
+    var sa = input_tensor_order.sortRuns(std.heap.c_allocator, a_raw);
+    defer sa.deinit(std.heap.c_allocator);
+    var sb = input_tensor_order.sortRuns(std.heap.c_allocator, b_raw);
+    defer sb.deinit(std.heap.c_allocator);
     const a = sa.items;
     const b = sb.items;
     var ia = std.mem.splitScalar(u8, a, '\n');
@@ -535,23 +529,23 @@ fn firstDiff(name: []const u8, a_raw: []const u8, b_raw: []const u8) usize {
     }
 }
 
-fn loadBoth(path: [:0]const u8, n_gpu_layers: i32, rm: **c.struct_llama_model, pm: **M.Model, splits: *std.ArrayList([:0]const u8)) void {
-    var mp = c.llama_model_default_params();
+fn loadBoth(path: [:0]const u8, n_gpu_layers: i32, rm: **harness_root.impl.c.struct_llama_model, pm: **harness_root.model.Model, splits: *std.ArrayList([:0]const u8)) void {
+    var mp = harness_root.impl.c.llama_model_default_params();
     mp.n_gpu_layers = n_gpu_layers;
     // Writable weights: training updates them in place.
-    mp.load_mode = c.LLAMA_LOAD_MODE_NONE;
-    rm.* = c.llama_model_load_from_file(path.ptr, mp) orelse {
+    mp.load_mode = harness_root.impl.c.LLAMA_LOAD_MODE_NONE;
+    rm.* = harness_root.impl.c.llama_model_load_from_file(path.ptr, mp) orelse {
         std.debug.print("FAIL: the C++ cannot load {s}\n", .{path});
         std.process.exit(1);
     };
-    pm.* = M.loadFromFileImpl(.{ .path = path }, splits, null, null, mp) orelse {
+    pm.* = harness_root.model.loadFromFileImpl(.{ .path = path }, splits, null, null, mp) orelse {
         std.debug.print("FAIL: the port cannot load {s}\n", .{path});
         std.process.exit(1);
     };
 }
 
 fn randomTokens(n_vocab: i32) []i32 {
-    const tokens = gpa.alloc(i32, 1024) catch unreachable;
+    const tokens = std.heap.c_allocator.alloc(i32, 1024) catch unreachable;
     var prng = std.Random.DefaultPrng.init(0x70c3);
     const rand = prng.random();
     // A small alphabet, so the network has something learnable to fit.
@@ -565,15 +559,15 @@ pub fn main(init: std.process.Init) !void {
         std.debug.print("usage: opt_llama_diff <base-qwen35.gguf> <tmp-dir> [--abort <case> <ref|port>]\n", .{});
         std.process.exit(2);
     }
-    _ = libc.setenv("GGML_NO_BACKTRACE", "1", 1);
-    const base = try gpa.dupeSentinel(u8, args[1], 0);
-    const path = try std.fmt.allocPrintSentinel(gpa, "{s}/tiny-qwen35-f32.gguf", .{args[2]}, 0);
+    _ = stdlib.libc.setenv("GGML_NO_BACKTRACE", "1", 1);
+    const base = try std.heap.c_allocator.dupeSentinel(u8, args[1], 0);
+    const path = try std.fmt.allocPrintSentinel(std.heap.c_allocator, "{s}/tiny-qwen35-f32.gguf", .{args[2]}, 0);
 
-    c.llama_log_set(logCb, null);
+    harness_root.impl.c.llama_log_set(logCb, null);
 
     harness_root.api.impl.llama_log_set(logCb, null);
-    c.ggml_log_set(logCb, null);
-    c.llama_backend_init();
+    harness_root.impl.c.ggml_log_set(logCb, null);
+    harness_root.impl.c.llama_backend_init();
 
     if (args.len >= 6 and std.mem.eql(u8, args[3], "--abort")) {
         // The main run writes the model; a lone abort run writes its own.
@@ -585,26 +579,26 @@ pub fn main(init: std.process.Init) !void {
 
     var checks: usize = 0;
     for (cases) |cs| {
-        var rm: *c.struct_llama_model = undefined;
-        var pm: *M.Model = undefined;
+        var rm: *harness_root.impl.c.struct_llama_model = undefined;
+        var pm: *harness_root.model.Model = undefined;
         var splits: std.ArrayList([:0]const u8) = .empty;
         defer {
-            for (splits.items) |s| gpa.free(s);
-            splits.deinit(gpa);
+            for (splits.items) |s| std.heap.c_allocator.free(s);
+            splits.deinit(std.heap.c_allocator);
         }
         loadBoth(path, cs.n_gpu_layers, &rm, &pm, &splits);
-        defer c.llama_model_free(rm);
-        defer M.destroy(pm);
+        defer harness_root.impl.c.llama_model_free(rm);
+        defer harness_root.model.destroy(pm);
 
         weight_names.clearRetainingCapacity();
-        for (pm.tensors_by_name.items) |t| weight_names.append(gpa, gpa.dupeSentinel(u8, std.mem.sliceTo(&t.name, 0), 0) catch unreachable) catch unreachable;
-        const tokens = randomTokens(c.llama_vocab_n_tokens(c.llama_model_get_vocab(rm)));
-        defer gpa.free(tokens);
+        for (pm.tensors_by_name.items) |t| weight_names.append(std.heap.c_allocator, std.heap.c_allocator.dupeSentinel(u8, std.mem.sliceTo(&t.name, 0), 0) catch unreachable) catch unreachable;
+        const tokens = randomTokens(harness_root.impl.c.llama_vocab_n_tokens(harness_root.impl.c.llama_model_get_vocab(rm)));
+        defer std.heap.c_allocator.free(tokens);
 
         var ref_t: std.ArrayList(u8) = .empty;
-        defer ref_t.deinit(gpa);
+        defer ref_t.deinit(std.heap.c_allocator);
         var port_t: std.ArrayList(u8) = .empty;
-        defer port_t.deinit(gpa);
+        defer port_t.deinit(std.heap.c_allocator);
         const nodes_before = n_nodes_seen;
         rec = &ref_t;
         script(.ref, rm, cs, tokens);
@@ -638,12 +632,12 @@ fn dump(dir: []const u8, name: []const u8, a: []const u8, b: []const u8) void {
 // Cases that abort, one side per process
 
 fn abortCase(path: [:0]const u8, which: []const u8, side: []const u8) void {
-    var rm: *c.struct_llama_model = undefined;
-    var pm: *M.Model = undefined;
+    var rm: *harness_root.impl.c.struct_llama_model = undefined;
+    var pm: *harness_root.model.Model = undefined;
     var splits: std.ArrayList([:0]const u8) = .empty;
     loadBoth(path, -1, &rm, &pm, &splits);
-    const tokens = randomTokens(c.llama_vocab_n_tokens(c.llama_model_get_vocab(rm)));
-    var cs: Case = .{ .name = "abort", .filter = .output, .optimizer = c.GGML_OPT_OPTIMIZER_TYPE_ADAMW, .n_gpu_layers = -1, .epochs = 1 };
+    const tokens = randomTokens(harness_root.impl.c.llama_vocab_n_tokens(harness_root.impl.c.llama_model_get_vocab(rm)));
+    var cs: Case = .{ .name = "abort", .filter = .output, .optimizer = harness_root.impl.c.GGML_OPT_OPTIMIZER_TYPE_ADAMW, .n_gpu_layers = -1, .epochs = 1 };
     if (std.mem.eql(u8, which, "filter-all")) {
         cs.filter = .all;
     } else if (std.mem.eql(u8, which, "n_ctx_train")) {

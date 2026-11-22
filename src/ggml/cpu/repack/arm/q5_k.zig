@@ -24,7 +24,6 @@
 //! an OR in this use, but see `neon.sli_n_u8` for why it is written as the
 //! instruction rather than as an OR.
 
-const std = @import("std");
 const ggml = @import("../../../module.zig");
 
 // The `_generic` bodies, in `cpu/repack/`, that each export below falls to
@@ -49,14 +48,14 @@ const sh4: @Vector(16, u3) = @splat(4);
 const sh2: @Vector(16, u3) = @splat(2);
 
 /// Ports `ggml_gemv_q5_K_8x4_q8_K` (arch/arm/repack.cpp:935 @b1b770d90).
-pub export fn ggml_gemv_q5_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemv_q5_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.q5_k.ggml_gemv_q5_K_8x4_q8_K_generic(n, s, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 256);
     const ncols_interleaved: c_int = 8;
     const col_groups: usize = 2;
 
     var acc_f32: [col_groups]ggml.cpu.quants.arch.neon.f32x4 = undefined;
-    const q8_ptr: [*]const ggml.impl.c.block_q8_K = @ptrCast(@alignCast(vy));
+    const q8_ptr: [*]const ggml.impl.ggml_c.block_q8_K = @ptrCast(@alignCast(vy));
 
     var x: c_int = 0;
     while (x < @divTrunc(nc, ncols_interleaved)) : (x += 1) {
@@ -176,14 +175,14 @@ pub export fn ggml_gemv_q5_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
 ///
 /// `qh` here is `[4][4]`, not `[2][8]`, and is shifted in place per
 /// sub-block exactly as in the 8x4 kernel.
-pub export fn ggml_gemv_q5_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemv_q5_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.q5_k.ggml_gemv_q5_K_8x8_q8_K_generic(n, s, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 256);
     const ncols_interleaved: c_int = 8;
     const col_pairs: usize = 4;
 
     var acc_f32: [2]ggml.cpu.quants.arch.neon.f32x4 = undefined;
-    const q8_ptr: [*]const ggml.impl.c.block_q8_K = @ptrCast(@alignCast(vy));
+    const q8_ptr: [*]const ggml.impl.ggml_c.block_q8_K = @ptrCast(@alignCast(vy));
 
     var x: c_int = 0;
     while (x < @divTrunc(nc, ncols_interleaved)) : (x += 1) {
@@ -298,7 +297,7 @@ pub export fn ggml_gemv_q5_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
 /// note that is per **read**, not per sub-block as in the gemv, because
 /// the gemm walks eight reads per sub-block and each consumes one bit
 /// pair.
-pub export fn ggml_gemm_q5_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
+pub fn ggml_gemm_q5_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
     if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.q5_k.ggml_gemm_q5_K_8x4_q8_K_generic(n, s, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 256);
     const ncols_interleaved: c_int = 8;
@@ -434,8 +433,4 @@ pub export fn ggml_gemm_q5_K_8x4_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
             }
         }
     }
-}
-
-comptime {
-    _ = std;
 }

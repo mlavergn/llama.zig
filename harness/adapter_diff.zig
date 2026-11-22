@@ -40,18 +40,10 @@
 //! Usage: adapter_diff <tmpdir> <model.gguf> [--quick] [--hadamard]
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const input_tensor_order = @import("input_tensor_order.zig");
 const derive_hadamard = @import("derive_hadamard.zig");
 const harness_root = @import("harness_root");
-
-const c = harness_root.impl.c;
-const M = harness_root.model;
-const L = harness_root.adapter;
-const Pctx = harness_root.api.context;
-const Pad = harness_root.api.adapter;
-
-const gpa = std.heap.c_allocator;
 
 extern fn adapter_ref_loras_order(keys: [*]const ?*anyopaque, scales: [*]const f32, n: usize, out_keys: [*]?*anyopaque, out_scales: [*]f32, out_bc: *usize) usize;
 extern fn adapter_ref_loras_find(keys: [*]const ?*anyopaque, scales: [*]const f32, n: usize, key: ?*anyopaque, out_scale: *f32) c_int;
@@ -73,13 +65,13 @@ var n_nodes_seen: usize = 0;
 
 fn note(comptime fmt: []const u8, args: anytype) void {
     const r = rec orelse return;
-    r.print(gpa, fmt ++ "\n", args) catch unreachable;
+    r.print(std.heap.c_allocator, fmt ++ "\n", args) catch unreachable;
 }
 
-fn logCb(level: c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
+fn logCb(level: harness_root.impl.c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
     const r = rec orelse return;
     _ = level;
-    r.appendSlice(gpa, std.mem.span(@as([*:0]const u8, @ptrCast(text)))) catch unreachable;
+    r.appendSlice(std.heap.c_allocator, std.mem.span(@as([*:0]const u8, @ptrCast(text)))) catch unreachable;
 }
 
 fn hashBytes(p: [*]const u8, n: usize) u64 {
@@ -88,38 +80,38 @@ fn hashBytes(p: [*]const u8, n: usize) u64 {
 
 var scratch: std.ArrayList(u8) = .empty;
 
-fn tensorHash(t: *const c.ggml_tensor) u64 {
-    const n = c.ggml_nbytes(t);
-    scratch.resize(gpa, n) catch unreachable;
-    c.ggml_backend_tensor_get(t, scratch.items.ptr, 0, n);
+fn tensorHash(t: *const harness_root.impl.c.ggml_tensor) u64 {
+    const n = harness_root.impl.c.ggml_nbytes(t);
+    scratch.resize(std.heap.c_allocator, n) catch unreachable;
+    harness_root.impl.c.ggml_backend_tensor_get(t, scratch.items.ptr, 0, n);
     return hashBytes(scratch.items.ptr, n);
 }
 
-fn nodeCb(t: [*c]c.ggml_tensor, ask: bool, _: ?*anyopaque) callconv(.c) bool {
+fn nodeCb(t: [*c]harness_root.impl.c.ggml_tensor, ask: bool, _: ?*anyopaque) callconv(.c) bool {
     if (ask) return true;
-    const node: *c.ggml_tensor = t;
+    const node: *harness_root.impl.c.ggml_tensor = t;
     n_nodes_seen += 1;
     const r = rec orelse return true;
-    r.print(gpa, "node {s} {s} {s} [{d},{d},{d},{d}] [{d},{d},{d},{d}] p", .{
-        std.mem.sliceTo(&node.name, 0), c.ggml_op_desc(node), c.ggml_type_name(node.type),
-        node.ne[0],                     node.ne[1],           node.ne[2],
-        node.ne[3],                     node.nb[0],           node.nb[1],
+    r.print(std.heap.c_allocator, "node {s} {s} {s} [{d},{d},{d},{d}] [{d},{d},{d},{d}] p", .{
+        std.mem.sliceTo(&node.name, 0), harness_root.impl.c.ggml_op_desc(node), harness_root.impl.c.ggml_type_name(node.type),
+        node.ne[0],                     node.ne[1],                             node.ne[2],
+        node.ne[3],                     node.nb[0],                             node.nb[1],
         node.nb[2],                     node.nb[3],
     }) catch unreachable;
-    for (node.op_params) |w| r.print(gpa, " {x}", .{@as(u32, @bitCast(w))}) catch unreachable;
-    r.appendSlice(gpa, " src") catch unreachable;
+    for (node.op_params) |w| r.print(std.heap.c_allocator, " {x}", .{@as(u32, @bitCast(w))}) catch unreachable;
+    r.appendSlice(std.heap.c_allocator, " src") catch unreachable;
     for (node.src) |s| {
         if (s == null) continue;
-        const src: *c.ggml_tensor = s;
-        r.print(gpa, " {s}:{s}", .{ std.mem.sliceTo(&src.name, 0), c.ggml_op_desc(src) }) catch unreachable;
+        const src: *harness_root.impl.c.ggml_tensor = s;
+        r.print(std.heap.c_allocator, " {s}:{s}", .{ std.mem.sliceTo(&src.name, 0), harness_root.impl.c.ggml_op_desc(src) }) catch unreachable;
         // A LoRA weight is a leaf the callback never sees: hash it here.
-        if (src.op == c.GGML_OP_NONE and src.buffer != null and std.mem.find(u8, std.mem.sliceTo(&src.name, 0), ".lora_") != null) {
-            r.print(gpa, "={x}", .{tensorHash(src)}) catch unreachable;
+        if (src.op == harness_root.impl.c.GGML_OP_NONE and src.buffer != null and std.mem.find(u8, std.mem.sliceTo(&src.name, 0), ".lora_") != null) {
+            r.print(std.heap.c_allocator, "={x}", .{tensorHash(src)}) catch unreachable;
         }
     }
     if (node.view_src != null) {
-        const v: *c.ggml_tensor = node.view_src;
-        r.print(gpa, " view {s}+{d}", .{ std.mem.sliceTo(&v.name, 0), node.view_offs }) catch unreachable;
+        const v: *harness_root.impl.c.ggml_tensor = node.view_src;
+        r.print(std.heap.c_allocator, " view {s}+{d}", .{ std.mem.sliceTo(&v.name, 0), node.view_offs }) catch unreachable;
     }
     // A node without GGML_TENSOR_FLAG_COMPUTE -- an unselected branch of
     // `ggml_build_forward_select`, such as the mixed-batch input when
@@ -127,11 +119,11 @@ fn nodeCb(t: [*c]c.ggml_tensor, ask: bool, _: ?*anyopaque) callconv(.c) bool {
     // ggml-metal-ops.cpp:218 @620d2225c): its bytes are the allocator's
     // leftovers on either side. The flags above are compared, so a node one
     // side computes and the other does not still differs.
-    if ((node.flags & c.GGML_TENSOR_FLAG_COMPUTE) == 0) {
-        r.print(gpa, " flags {x} h -\n", .{node.flags}) catch unreachable;
+    if ((node.flags & harness_root.impl.c.GGML_TENSOR_FLAG_COMPUTE) == 0) {
+        r.print(std.heap.c_allocator, " flags {x} h -\n", .{node.flags}) catch unreachable;
         return true;
     }
-    r.print(gpa, " flags {x} h {x}\n", .{ node.flags, tensorHash(node) }) catch unreachable;
+    r.print(std.heap.c_allocator, " flags {x} h {x}\n", .{ node.flags, tensorHash(node) }) catch unreachable;
     return true;
 }
 
@@ -143,31 +135,31 @@ fn normalize(log: []const u8) std.ArrayList(u8) {
     var first = true;
     while (lines.next()) |line| {
         if (std.mem.startsWith(u8, line, "ggml_metal_library_compile_pipeline:")) continue;
-        if (!first) out.append(gpa, '\n') catch unreachable;
+        if (!first) out.append(std.heap.c_allocator, '\n') catch unreachable;
         first = false;
         if (std.mem.find(u8, line, "reserve took ")) |at| {
-            out.appendSlice(gpa, line[0 .. at + "reserve took ".len]) catch unreachable;
-            out.appendSlice(gpa, "N ms") catch unreachable;
-            if (std.mem.find(u8, line, ", sched copies")) |rest| out.appendSlice(gpa, line[rest..]) catch unreachable;
+            out.appendSlice(std.heap.c_allocator, line[0 .. at + "reserve took ".len]) catch unreachable;
+            out.appendSlice(std.heap.c_allocator, "N ms") catch unreachable;
+            if (std.mem.find(u8, line, ", sched copies")) |rest| out.appendSlice(std.heap.c_allocator, line[rest..]) catch unreachable;
             continue;
         }
         if (std.mem.startsWith(u8, line, "ggml_metal_log_allocated_size:")) {
             if (std.mem.findScalar(u8, line, '(')) |open| {
-                out.appendSlice(gpa, line[0..open]) catch unreachable;
-                out.appendSlice(gpa, "(N)") catch unreachable;
+                out.appendSlice(std.heap.c_allocator, line[0..open]) catch unreachable;
+                out.appendSlice(std.heap.c_allocator, "(N)") catch unreachable;
                 continue;
             }
         }
         // The adapters array is the harness's, a different one per side.
         if (std.mem.find(u8, line, ": adapters = ")) |at| {
-            out.appendSlice(gpa, line[0 .. at + ": adapters = ".len]) catch unreachable;
-            out.appendSlice(gpa, "P") catch unreachable;
+            out.appendSlice(std.heap.c_allocator, line[0 .. at + ": adapters = ".len]) catch unreachable;
+            out.appendSlice(std.heap.c_allocator, "P") catch unreachable;
             continue;
         }
-        out.appendSlice(gpa, line) catch unreachable;
+        out.appendSlice(std.heap.c_allocator, line) catch unreachable;
     }
-    const sorted = input_tensor_order.sortRuns(gpa, out.items);
-    out.deinit(gpa);
+    const sorted = input_tensor_order.sortRuns(std.heap.c_allocator, out.items);
+    out.deinit(std.heap.c_allocator);
     return sorted;
 }
 
@@ -205,27 +197,27 @@ const Info = struct {
 };
 
 fn readInfo(path: [:0]const u8) Info {
-    var mctx: ?*c.ggml_context = null;
-    const g = c.gguf_init_from_file(path.ptr, .{ .no_alloc = true, .ctx = @ptrCast(&mctx) }) orelse {
+    var mctx: ?*harness_root.impl.c.ggml_context = null;
+    const g = harness_root.impl.c.gguf_init_from_file(path.ptr, .{ .no_alloc = true, .ctx = @ptrCast(&mctx) }) orelse {
         std.debug.print("FAIL: cannot read {s}\n", .{path});
         std.process.exit(1);
     };
-    defer c.gguf_free(g);
-    defer c.ggml_free(mctx);
-    const arch = std.mem.span(c.gguf_get_val_str(g, c.gguf_find_key(g, "general.architecture")));
+    defer harness_root.impl.c.gguf_free(g);
+    defer harness_root.impl.c.ggml_free(mctx);
+    const arch = std.mem.span(harness_root.impl.c.gguf_get_val_str(g, harness_root.impl.c.gguf_find_key(g, "general.architecture")));
     var key: [128]u8 = undefined;
     const ke = std.fmt.bufPrintSentinel(&key, "{s}.embedding_length", .{arch}, 0) catch unreachable;
     const kl = std.fmt.bufPrintSentinel(&key, "{s}.block_count", .{arch}, 0) catch unreachable;
     _ = ke;
-    var info: Info = .{ .arch = gpa.dupe(u8, arch) catch unreachable, .n_embd = 0, .n_layer = 0 };
-    info.n_layer = c.gguf_get_val_u32(g, c.gguf_find_key(g, kl.ptr));
+    var info: Info = .{ .arch = std.heap.c_allocator.dupe(u8, arch) catch unreachable, .n_embd = 0, .n_layer = 0 };
+    info.n_layer = harness_root.impl.c.gguf_get_val_u32(g, harness_root.impl.c.gguf_find_key(g, kl.ptr));
     const ke2 = std.fmt.bufPrintSentinel(&key, "{s}.embedding_length", .{arch}, 0) catch unreachable;
-    info.n_embd = c.gguf_get_val_u32(g, c.gguf_find_key(g, ke2.ptr));
-    var cur: ?*c.ggml_tensor = c.ggml_get_first_tensor(mctx);
-    while (cur) |t| : (cur = c.ggml_get_next_tensor(mctx, t)) {
-        info.names.append(gpa, gpa.dupe(u8, std.mem.sliceTo(&t.name, 0)) catch unreachable) catch unreachable;
-        info.shapes.append(gpa, .{ t.ne[0], t.ne[1] }) catch unreachable;
-        info.dims.append(gpa, @intCast(c.ggml_n_dims(t))) catch unreachable;
+    info.n_embd = harness_root.impl.c.gguf_get_val_u32(g, harness_root.impl.c.gguf_find_key(g, ke2.ptr));
+    var cur: ?*harness_root.impl.c.ggml_tensor = harness_root.impl.c.ggml_get_first_tensor(mctx);
+    while (cur) |t| : (cur = harness_root.impl.c.ggml_get_next_tensor(mctx, t)) {
+        info.names.append(std.heap.c_allocator, std.heap.c_allocator.dupe(u8, std.mem.sliceTo(&t.name, 0)) catch unreachable) catch unreachable;
+        info.shapes.append(std.heap.c_allocator, .{ t.ne[0], t.ne[1] }) catch unreachable;
+        info.dims.append(std.heap.c_allocator, @intCast(harness_root.impl.c.ggml_n_dims(t))) catch unreachable;
     }
     return info;
 }
@@ -244,41 +236,41 @@ fn rnd() f32 {
 }
 
 const File = struct {
-    g: *c.gguf_context,
-    ctx: *c.ggml_context,
+    g: *harness_root.impl.c.gguf_context,
+    ctx: *harness_root.impl.c.ggml_context,
 
     fn init(general_type: ?[:0]const u8, arch: ?[]const u8, adapter_type: ?[:0]const u8, alpha: ?f32) File {
-        const ctx = c.ggml_init(.{ .mem_size = 96 << 20, .mem_buffer = null, .no_alloc = false }).?;
-        const g = c.gguf_init_empty().?;
-        if (general_type) |t| c.gguf_set_val_str(g, "general.type", t.ptr);
+        const ctx = harness_root.impl.c.ggml_init(.{ .mem_size = 96 << 20, .mem_buffer = null, .no_alloc = false }).?;
+        const g = harness_root.impl.c.gguf_init_empty().?;
+        if (general_type) |t| harness_root.impl.c.gguf_set_val_str(g, "general.type", t.ptr);
         if (arch) |a| {
             var buf: [64]u8 = undefined;
             const z = std.fmt.bufPrintSentinel(&buf, "{s}", .{a}, 0) catch unreachable;
-            c.gguf_set_val_str(g, "general.architecture", z.ptr);
+            harness_root.impl.c.gguf_set_val_str(g, "general.architecture", z.ptr);
         }
-        if (adapter_type) |t| c.gguf_set_val_str(g, "adapter.type", t.ptr);
-        if (alpha) |a| c.gguf_set_val_f32(g, "adapter.lora.alpha", a);
+        if (adapter_type) |t| harness_root.impl.c.gguf_set_val_str(g, "adapter.type", t.ptr);
+        if (alpha) |a| harness_root.impl.c.gguf_set_val_f32(g, "adapter.lora.alpha", a);
         return .{ .g = g, .ctx = ctx };
     }
 
-    fn tensor(self: *File, name: []const u8, ty: c.enum_ggml_type, ne0: i64, ne1: i64, amp: f32) void {
-        const t = c.ggml_new_tensor_2d(self.ctx, ty, ne0, ne1);
+    fn tensor(self: *File, name: []const u8, ty: harness_root.impl.c.enum_ggml_type, ne0: i64, ne1: i64, amp: f32) void {
+        const t = harness_root.impl.c.ggml_new_tensor_2d(self.ctx, ty, ne0, ne1);
         var buf: [128]u8 = undefined;
         const z = std.fmt.bufPrintSentinel(&buf, "{s}", .{name}, 0) catch unreachable;
-        _ = c.ggml_set_name(t, z.ptr);
+        _ = harness_root.impl.c.ggml_set_name(t, z.ptr);
         const n: usize = @intCast(ne0 * ne1);
-        if (ty == c.GGML_TYPE_F32) {
+        if (ty == harness_root.impl.c.GGML_TYPE_F32) {
             const d: [*]f32 = @ptrCast(@alignCast(t.*.data));
             for (0..n) |i| d[i] = rnd() * amp;
         } else {
             const d: [*]f16 = @ptrCast(@alignCast(t.*.data));
             for (0..n) |i| d[i] = @floatCast(rnd() * amp);
         }
-        c.gguf_add_tensor(self.g, t);
+        harness_root.impl.c.gguf_add_tensor(self.g, t);
     }
 
     /// A pair adapting `target`, whose shape is `ne`.
-    fn pair(self: *File, target: []const u8, ne: [2]i64, rank: i64, ta: c.enum_ggml_type, tb: c.enum_ggml_type) void {
+    fn pair(self: *File, target: []const u8, ne: [2]i64, rank: i64, ta: harness_root.impl.c.enum_ggml_type, tb: harness_root.impl.c.enum_ggml_type) void {
         var na: [128]u8 = undefined;
         var nb: [128]u8 = undefined;
         if (std.mem.endsWith(u8, target, "token_embd.weight")) {
@@ -291,12 +283,12 @@ const File = struct {
     }
 
     fn write(self: *File, path: [:0]const u8) void {
-        if (!c.gguf_write_to_file(self.g, path.ptr, false)) {
+        if (!harness_root.impl.c.gguf_write_to_file(self.g, path.ptr, false)) {
             std.debug.print("FAIL: cannot write {s}\n", .{path});
             std.process.exit(1);
         }
-        c.gguf_free(self.g);
-        c.ggml_free(self.ctx);
+        harness_root.impl.c.gguf_free(self.g);
+        harness_root.impl.c.ggml_free(self.ctx);
     }
 };
 
@@ -305,7 +297,7 @@ const File = struct {
 const Lf = struct { name: []const u8, path: [:0]u8, good: bool, keep: bool = false };
 
 fn pathFor(dir: []const u8, name: []const u8) [:0]u8 {
-    return std.fmt.allocPrintSentinel(gpa, "{s}/{s}.gguf", .{ dir, name }, 0) catch unreachable;
+    return std.fmt.allocPrintSentinel(std.heap.c_allocator, "{s}/{s}.gguf", .{ dir, name }, 0) catch unreachable;
 }
 
 /// Every 2-D weight of block `bid` a LoRA can adapt.
@@ -316,21 +308,21 @@ fn blockTargets(info: *const Info, bid: u32, out: *std.ArrayList([]const u8)) vo
         if (!std.mem.startsWith(u8, n, p) or info.dims.items[i] != 2) continue;
         if (!std.mem.endsWith(u8, n, ".weight") or std.mem.find(u8, n, "norm") != null) continue;
         if (std.mem.find(u8, n, "conv1d") != null) continue;
-        out.append(gpa, n) catch unreachable;
+        out.append(std.heap.c_allocator, n) catch unreachable;
     }
 }
 
 fn writeFiles(dir: []const u8, info: *const Info, files: *std.ArrayList(Lf)) void {
     const arch = info.arch;
-    const F32 = c.GGML_TYPE_F32;
-    const F16 = c.GGML_TYPE_F16;
+    const F32 = harness_root.impl.c.GGML_TYPE_F32;
+    const F16 = harness_root.impl.c.GGML_TYPE_F16;
 
     // A: block 0 (linear attention, SSM, FFN), F32, rank 4, alpha 8. Its
     // ssm_out is named with `.lora_a` twice, which `replace_all` strips.
     {
         var f = File.init("adapter", arch, "lora", 8.0);
         var ts: std.ArrayList([]const u8) = .empty;
-        defer ts.deinit(gpa);
+        defer ts.deinit(std.heap.c_allocator);
         blockTargets(info, 0, &ts);
         for (ts.items) |t| {
             const ne = info.shape(t).?;
@@ -346,7 +338,7 @@ fn writeFiles(dir: []const u8, info: *const Info, files: *std.ArrayList(Lf)) voi
         }
         const p = pathFor(dir, "a");
         f.write(p);
-        files.append(gpa, .{ .name = "a", .path = p, .good = true }) catch unreachable;
+        files.append(std.heap.c_allocator, .{ .name = "a", .path = p, .good = true }) catch unreachable;
     }
 
     // B: block 3 (full attention, FFN) plus block 0's ffn_up, which A also
@@ -354,13 +346,13 @@ fn writeFiles(dir: []const u8, info: *const Info, files: *std.ArrayList(Lf)) voi
     {
         var f = File.init("adapter", arch, "lora", null);
         var ts: std.ArrayList([]const u8) = .empty;
-        defer ts.deinit(gpa);
+        defer ts.deinit(std.heap.c_allocator);
         blockTargets(info, 3, &ts);
         for (ts.items, 0..) |t, i| f.pair(t, info.shape(t).?, 2, F16, if (i % 2 == 0) F16 else F32);
         if (info.shape("blk.0.ffn_up.weight")) |ne| f.pair("blk.0.ffn_up.weight", ne, 2, F16, F16);
         const p = pathFor(dir, "b");
         f.write(p);
-        files.append(gpa, .{ .name = "b", .path = p, .good = true }) catch unreachable;
+        files.append(std.heap.c_allocator, .{ .name = "b", .path = p, .good = true }) catch unreachable;
     }
 
     // C: an aLoRA over block 1, rank 8, alpha 16, with metadata of every
@@ -368,25 +360,25 @@ fn writeFiles(dir: []const u8, info: *const Info, files: *std.ArrayList(Lf)) voi
     {
         var f = File.init("adapter", arch, "lora", 16.0);
         const toks = [_]u32{ 151644, 77091, 198, 7 };
-        c.gguf_set_arr_data(f.g, "adapter.alora.invocation_tokens", c.GGUF_TYPE_UINT32, &toks, toks.len);
-        c.gguf_set_val_str(f.g, "general.name", "synthetic aLoRA");
-        c.gguf_set_val_str(f.g, "adapter.lora.task_name", "a task name that is quite a bit longer than forty bytes\nand has a newline");
-        c.gguf_set_val_u32(f.g, "training.epochs", 3);
-        c.gguf_set_val_f32(f.g, "training.lr", 0.000125);
-        c.gguf_set_val_bool(f.g, "training.flag", true);
+        harness_root.impl.c.gguf_set_arr_data(f.g, "adapter.alora.invocation_tokens", harness_root.impl.c.GGUF_TYPE_UINT32, &toks, toks.len);
+        harness_root.impl.c.gguf_set_val_str(f.g, "general.name", "synthetic aLoRA");
+        harness_root.impl.c.gguf_set_val_str(f.g, "adapter.lora.task_name", "a task name that is quite a bit longer than forty bytes\nand has a newline");
+        harness_root.impl.c.gguf_set_val_u32(f.g, "training.epochs", 3);
+        harness_root.impl.c.gguf_set_val_f32(f.g, "training.lr", 0.000125);
+        harness_root.impl.c.gguf_set_val_bool(f.g, "training.flag", true);
         var strs = [_][*c]const u8{ "x", "y\"z" };
-        c.gguf_set_arr_str(f.g, "training.list", &strs, strs.len);
+        harness_root.impl.c.gguf_set_arr_str(f.g, "training.list", &strs, strs.len);
         const ints = [_]i32{ -1, 2, 3 };
-        c.gguf_set_arr_data(f.g, "training.ints", c.GGUF_TYPE_INT32, &ints, ints.len);
-        c.gguf_set_val_str(f.g, "z.last", "");
+        harness_root.impl.c.gguf_set_arr_data(f.g, "training.ints", harness_root.impl.c.GGUF_TYPE_INT32, &ints, ints.len);
+        harness_root.impl.c.gguf_set_val_str(f.g, "z.last", "");
         var ts: std.ArrayList([]const u8) = .empty;
-        defer ts.deinit(gpa);
+        defer ts.deinit(std.heap.c_allocator);
         blockTargets(info, 1, &ts);
         for (ts.items) |t| f.pair(t, info.shape(t).?, 8, F32, F16);
         f.tensor("blk.1.attn_norm.weight", F32, info.n_embd, 1, 1.0);
         const p = pathFor(dir, "c");
         f.write(p);
-        files.append(gpa, .{ .name = "c", .path = p, .good = true }) catch unreachable;
+        files.append(std.heap.c_allocator, .{ .name = "c", .path = p, .good = true }) catch unreachable;
     }
 
     // E: block 2, F32, rank 3, and the output head where the model has
@@ -395,12 +387,12 @@ fn writeFiles(dir: []const u8, info: *const Info, files: *std.ArrayList(Lf)) voi
         var f = File.init("adapter", arch, "lora", 4.0);
         if (info.shape("output.weight")) |ne| f.pair("output.weight", ne, 2, F32, F32);
         var ts: std.ArrayList([]const u8) = .empty;
-        defer ts.deinit(gpa);
+        defer ts.deinit(std.heap.c_allocator);
         blockTargets(info, 2, &ts);
         for (ts.items) |t| f.pair(t, info.shape(t).?, 3, F32, F32);
         const p = pathFor(dir, "e");
         f.write(p);
-        files.append(gpa, .{ .name = "e", .path = p, .good = true }) catch unreachable;
+        files.append(std.heap.c_allocator, .{ .name = "e", .path = p, .good = true }) catch unreachable;
     }
 
     // The embeddings, loaded but never set: on a model whose output head is
@@ -412,7 +404,7 @@ fn writeFiles(dir: []const u8, info: *const Info, files: *std.ArrayList(Lf)) voi
         f.pair("token_embd.weight", info.shape("token_embd.weight").?, 2, F16, F32);
         const p = pathFor(dir, "embd");
         f.write(p);
-        files.append(gpa, .{ .name = "embd", .path = p, .good = false, .keep = true }) catch unreachable;
+        files.append(std.heap.c_allocator, .{ .name = "embd", .path = p, .good = false, .keep = true }) catch unreachable;
     }
 
     const q = info.shape("blk.3.attn_q.weight") orelse info.shape("blk.0.ffn_up.weight").?;
@@ -422,7 +414,7 @@ fn writeFiles(dir: []const u8, info: *const Info, files: *std.ArrayList(Lf)) voi
         fn one(d: []const u8, fs: *std.ArrayList(Lf), name: []const u8, f: *File) void {
             const p = pathFor(d, name);
             f.write(p);
-            fs.append(gpa, .{ .name = name, .path = p, .good = false }) catch unreachable;
+            fs.append(std.heap.c_allocator, .{ .name = name, .path = p, .good = false }) catch unreachable;
         }
     };
 
@@ -453,14 +445,14 @@ fn writeFiles(dir: []const u8, info: *const Info, files: *std.ArrayList(Lf)) voi
     }
     {
         var f = File.init("adapter", arch, "lora", 8.0);
-        c.gguf_set_val_str(f.g, "adapter.alora.invocation_tokens", "1 2 3");
+        harness_root.impl.c.gguf_set_val_str(f.g, "adapter.alora.invocation_tokens", "1 2 3");
         f.pair(qname, q, 2, F32, F32);
         Bad.one(dir, files, "alora-str", &f);
     }
     {
         var f = File.init("adapter", arch, "lora", 8.0);
         const ints = [_]i32{ 1, 2 };
-        c.gguf_set_arr_data(f.g, "adapter.alora.invocation_tokens", c.GGUF_TYPE_INT32, &ints, ints.len);
+        harness_root.impl.c.gguf_set_arr_data(f.g, "adapter.alora.invocation_tokens", harness_root.impl.c.GGUF_TYPE_INT32, &ints, ints.len);
         f.pair(qname, q, 2, F32, F32);
         Bad.one(dir, files, "alora-i32", &f);
     }
@@ -522,21 +514,21 @@ fn writeFiles(dir: []const u8, info: *const Info, files: *std.ArrayList(Lf)) voi
         f.pair(qname, q, 2, F32, F32);
         const p = pathFor(dir, "truncated");
         f.write(p);
-        const fp = c.fopen(p.ptr, "rb");
-        _ = c.fseek(fp, 0, c.SEEK_END);
-        const size = c.ftell(fp);
-        _ = c.fclose(fp);
+        const fp = harness_root.impl.c.fopen(p.ptr, "rb");
+        _ = harness_root.impl.c.fseek(fp, 0, harness_root.impl.c.SEEK_END);
+        const size = harness_root.impl.c.ftell(fp);
+        _ = harness_root.impl.c.fclose(fp);
         _ = truncate(p.ptr, size - 64);
-        files.append(gpa, .{ .name = "truncated", .path = p, .good = false }) catch unreachable;
+        files.append(std.heap.c_allocator, .{ .name = "truncated", .path = p, .good = false }) catch unreachable;
     }
     {
         const p = pathFor(dir, "not-gguf");
-        const fp = c.fopen(p.ptr, "wb");
-        _ = c.fwrite("this is not a gguf file\n", 1, 24, fp);
-        _ = c.fclose(fp);
-        files.append(gpa, .{ .name = "not-gguf", .path = p, .good = false }) catch unreachable;
+        const fp = harness_root.impl.c.fopen(p.ptr, "wb");
+        _ = harness_root.impl.c.fwrite("this is not a gguf file\n", 1, 24, fp);
+        _ = harness_root.impl.c.fclose(fp);
+        files.append(std.heap.c_allocator, .{ .name = "not-gguf", .path = p, .good = false }) catch unreachable;
     }
-    files.append(gpa, .{ .name = "missing-file", .path = pathFor(dir, "does-not-exist"), .good = false }) catch unreachable;
+    files.append(std.heap.c_allocator, .{ .name = "missing-file", .path = pathFor(dir, "does-not-exist"), .good = false }) catch unreachable;
 }
 
 // -----------------------------------------------------------------------------
@@ -544,27 +536,27 @@ fn writeFiles(dir: []const u8, info: *const Info, files: *std.ArrayList(Lf)) voi
 
 fn Api(comptime port: bool) type {
     return struct {
-        const init_from_model = if (port) Pctx.llama_init_from_model else c.llama_init_from_model;
-        const free = if (port) Pctx.llama_free else c.llama_free;
-        const get_memory = if (port) Pctx.llama_get_memory else c.llama_get_memory;
-        const memory_clear = if (port) Pctx.llama_memory_clear else c.llama_memory_clear;
-        const decode = if (port) Pctx.llama_decode else c.llama_decode;
-        const get_logits_ith = if (port) Pctx.llama_get_logits_ith else c.llama_get_logits_ith;
-        const lora_init = if (port) Pad.llama_adapter_lora_init else c.llama_adapter_lora_init;
-        const lora_init_fp = if (port) Pad.llama_adapter_lora_init_from_file_ptr else c.llama_adapter_lora_init_from_file_ptr;
-        const lora_free = if (port) Pad.llama_adapter_lora_free else c.llama_adapter_lora_free;
-        const meta_count = if (port) Pad.llama_adapter_meta_count else c.llama_adapter_meta_count;
-        const meta_key_by_index = if (port) Pad.llama_adapter_meta_key_by_index else c.llama_adapter_meta_key_by_index;
-        const meta_val_str = if (port) Pad.llama_adapter_meta_val_str else c.llama_adapter_meta_val_str;
-        const meta_val_str_by_index = if (port) Pad.llama_adapter_meta_val_str_by_index else c.llama_adapter_meta_val_str_by_index;
-        const alora_n = if (port) Pad.llama_adapter_get_alora_n_invocation_tokens else c.llama_adapter_get_alora_n_invocation_tokens;
-        const alora_tokens = if (port) Pad.llama_adapter_get_alora_invocation_tokens else c.llama_adapter_get_alora_invocation_tokens;
-        const set_loras = if (port) Pad.llama_set_adapters_lora else c.llama_set_adapters_lora;
-        const set_cvec = if (port) Pad.llama_set_adapter_cvec else c.llama_set_adapter_cvec;
+        const init_from_model = if (port) harness_root.api.context.llama_init_from_model else harness_root.impl.c.llama_init_from_model;
+        const free = if (port) harness_root.api.context.llama_free else harness_root.impl.c.llama_free;
+        const get_memory = if (port) harness_root.api.context.llama_get_memory else harness_root.impl.c.llama_get_memory;
+        const memory_clear = if (port) harness_root.api.context.llama_memory_clear else harness_root.impl.c.llama_memory_clear;
+        const decode = if (port) harness_root.api.context.llama_decode else harness_root.impl.c.llama_decode;
+        const get_logits_ith = if (port) harness_root.api.context.llama_get_logits_ith else harness_root.impl.c.llama_get_logits_ith;
+        const lora_init = if (port) harness_root.api.adapter.llama_adapter_lora_init else harness_root.impl.c.llama_adapter_lora_init;
+        const lora_init_fp = if (port) harness_root.api.adapter.llama_adapter_lora_init_from_file_ptr else harness_root.impl.c.llama_adapter_lora_init_from_file_ptr;
+        const lora_free = if (port) harness_root.api.adapter.llama_adapter_lora_free else harness_root.impl.c.llama_adapter_lora_free;
+        const meta_count = if (port) harness_root.api.adapter.llama_adapter_meta_count else harness_root.impl.c.llama_adapter_meta_count;
+        const meta_key_by_index = if (port) harness_root.api.adapter.llama_adapter_meta_key_by_index else harness_root.impl.c.llama_adapter_meta_key_by_index;
+        const meta_val_str = if (port) harness_root.api.adapter.llama_adapter_meta_val_str else harness_root.impl.c.llama_adapter_meta_val_str;
+        const meta_val_str_by_index = if (port) harness_root.api.adapter.llama_adapter_meta_val_str_by_index else harness_root.impl.c.llama_adapter_meta_val_str_by_index;
+        const alora_n = if (port) harness_root.api.adapter.llama_adapter_get_alora_n_invocation_tokens else harness_root.impl.c.llama_adapter_get_alora_n_invocation_tokens;
+        const alora_tokens = if (port) harness_root.api.adapter.llama_adapter_get_alora_invocation_tokens else harness_root.impl.c.llama_adapter_get_alora_invocation_tokens;
+        const set_loras = if (port) harness_root.api.adapter.llama_set_adapters_lora else harness_root.impl.c.llama_set_adapters_lora;
+        const set_cvec = if (port) harness_root.api.adapter.llama_set_adapter_cvec else harness_root.impl.c.llama_set_adapter_cvec;
     };
 }
 
-const Handle = ?*c.struct_llama_adapter_lora;
+const Handle = ?*harness_root.impl.c.struct_llama_adapter_lora;
 
 /// The prefix `embedFile` puts before an embedded GGUF: not a multiple of
 /// anything, so every absolute offset differs from the GGUF's own.
@@ -576,18 +568,18 @@ const embed_offset = 37;
 ///
 /// Return: the copy's path.
 fn embedFile(path: [:0]const u8) [:0]u8 {
-    const out = std.fmt.allocPrintSentinel(gpa, "{s}.embedded", .{path}, 0) catch unreachable;
-    const in = c.fopen(path.ptr, "rb") orelse unreachable;
-    defer _ = c.fclose(in);
-    const o = c.fopen(out.ptr, "wb") orelse unreachable;
-    defer _ = c.fclose(o);
+    const out = std.fmt.allocPrintSentinel(std.heap.c_allocator, "{s}.embedded", .{path}, 0) catch unreachable;
+    const in = harness_root.impl.c.fopen(path.ptr, "rb") orelse unreachable;
+    defer _ = harness_root.impl.c.fclose(in);
+    const o = harness_root.impl.c.fopen(out.ptr, "wb") orelse unreachable;
+    defer _ = harness_root.impl.c.fclose(o);
     const pad: [embed_offset]u8 = @splat('x');
-    _ = c.fwrite(&pad, 1, pad.len, o);
+    _ = harness_root.impl.c.fwrite(&pad, 1, pad.len, o);
     var buf: [65536]u8 = undefined;
     while (true) {
-        const n = c.fread(&buf, 1, buf.len, in);
+        const n = harness_root.impl.c.fread(&buf, 1, buf.len, in);
         if (n == 0) break;
-        _ = c.fwrite(&buf, 1, n, o);
+        _ = harness_root.impl.c.fwrite(&buf, 1, n, o);
     }
     return out;
 }
@@ -597,24 +589,24 @@ fn embedFile(path: [:0]const u8) [:0]u8 {
 /// `embed_offset` bytes with the file positioned at the GGUF. Each result,
 /// where it left the file, and a loaded adapter's metadata are noted; the
 /// adapters are freed again.
-fn filePtrSection(comptime A: type, model: ?*c.struct_llama_model, files: []const Lf, embedded: []const [:0]u8) void {
+fn filePtrSection(comptime A: type, model: ?*harness_root.impl.c.struct_llama_model, files: []const Lf, embedded: []const [:0]u8) void {
     note("file_ptr null: {s}", .{if (A.lora_init_fp(model, null) == null) "null" else "ok"});
     for (files, 0..) |f, i| {
         for (0..2) |pass| {
             const path = if (pass == 0) f.path else (embedded[i]);
             if (path.len == 0) continue;
-            const fp = c.fopen(path.ptr, "rb") orelse {
+            const fp = harness_root.impl.c.fopen(path.ptr, "rb") orelse {
                 note("file_ptr {s} #{d}: cannot open", .{ f.name, pass });
                 continue;
             };
-            if (pass == 1) _ = c.fseek(fp, embed_offset, c.SEEK_SET);
+            if (pass == 1) _ = harness_root.impl.c.fseek(fp, embed_offset, harness_root.impl.c.SEEK_SET);
             const h = A.lora_init_fp(model, fp);
-            note("file_ptr {s} #{d}: {s} at {d}", .{ f.name, pass, if (h == null) "null" else "ok", c.ftell(fp) });
+            note("file_ptr {s} #{d}: {s} at {d}", .{ f.name, pass, if (h == null) "null" else "ok", harness_root.impl.c.ftell(fp) });
             if (h != null) {
                 query(A, h, f.name);
                 A.lora_free(h);
             }
-            _ = c.fclose(fp);
+            _ = harness_root.impl.c.fclose(fp);
         }
     }
 }
@@ -792,9 +784,9 @@ fn sameAsMap(cur: []const Set, sets: []const Set) bool {
 var cvec_full: []f32 = &.{};
 var cvec_short: []f32 = &.{};
 
-fn script(comptime port: bool, model: ?*c.struct_llama_model, handles: []const Handle, tokens: []const i32, n_vocab: usize, n_layer: i32) void {
+fn script(comptime port: bool, model: ?*harness_root.impl.c.struct_llama_model, handles: []const Handle, tokens: []const i32, n_vocab: usize, n_layer: i32) void {
     const A = Api(port);
-    var params = c.llama_context_default_params();
+    var params = harness_root.impl.c.llama_context_default_params();
     params.cb_eval = nodeCb;
     params.cb_eval_user_data = null;
     params.no_perf = true;
@@ -805,8 +797,8 @@ fn script(comptime port: bool, model: ?*c.struct_llama_model, handles: []const H
     };
     defer A.free(ctx);
     const mem = A.get_memory(ctx);
-    var b = c.llama_batch_init(@intCast(tokens.len + 8), 0, 1);
-    defer c.llama_batch_free(b);
+    var b = harness_root.impl.c.llama_batch_init(@intCast(tokens.len + 8), 0, 1);
+    defer harness_root.impl.c.llama_batch_free(b);
 
     for (steps, 0..) |st, si| {
         note("step {d}", .{si});
@@ -859,7 +851,7 @@ fn script(comptime port: bool, model: ?*c.struct_llama_model, handles: []const H
                 var order: [16]usize = undefined;
                 var n: usize = 0;
                 if (port) {
-                    for (Pctx.ctxOf(ctx).loras.items.items) |e| {
+                    for (harness_root.api.context.ctxOf(ctx).loras.items.items) |e| {
                         order[n] = for (handles, 0..) |h, j| {
                             if (@as(?*anyopaque, h) == @as(?*anyopaque, e.lora)) break j;
                         } else 99;
@@ -908,7 +900,7 @@ fn sweepOrder() void {
                 else => R.float(f32) * 4 - 2,
             };
         }
-        var l: L.Loras = .{};
+        var l: harness_root.adapter.Loras = .{};
         defer l.deinit();
         for (0..n) |i| if (scales[i] != 0.0) l.insert(@ptrCast(@alignCast(keys[i].?)), scales[i]);
         var ok: [64]?*anyopaque = undefined;
@@ -962,7 +954,7 @@ pub fn main(init: std.process.Init) !void {
         std.process.exit(2);
     }
     const dir = args[1];
-    var path = try gpa.dupeSentinel(u8, args[2], 0);
+    var path = try std.heap.c_allocator.dupeSentinel(u8, args[2], 0);
     var quick = false;
     var hadamard = false;
     for (args[3..]) |a| {
@@ -971,11 +963,11 @@ pub fn main(init: std.process.Init) !void {
     }
     const out_dir: ?[]const u8 = if (std.c.getenv("ADAPTER_DIFF_OUT")) |d| std.mem.span(d) else null;
 
-    c.llama_log_set(logCb, null);
+    harness_root.impl.c.llama_log_set(logCb, null);
 
     harness_root.api.impl.llama_log_set(logCb, null);
-    c.ggml_log_set(logCb, null);
-    c.llama_backend_init();
+    harness_root.impl.c.ggml_log_set(logCb, null);
+    harness_root.impl.c.llama_backend_init();
 
     if (hadamard) {
         const dst = pathFor(dir, "hadamard-model");
@@ -995,43 +987,43 @@ pub fn main(init: std.process.Init) !void {
     const n_layer: i32 = @intCast(info.n_layer);
     few_layers = n_layer <= 5;
     const ne: usize = @intCast(info.n_embd);
-    cvec_full = try gpa.alloc(f32, ne * @as(usize, @intCast(n_layer - 1)));
+    cvec_full = try std.heap.c_allocator.alloc(f32, ne * @as(usize, @intCast(n_layer - 1)));
     for (cvec_full) |*v| v.* = rnd() * 0.25;
-    cvec_short = try gpa.alloc(f32, ne * 3 + 7);
+    cvec_short = try std.heap.c_allocator.alloc(f32, ne * 3 + 7);
     for (cvec_short) |*v| v.* = rnd() * 0.5;
 
     for (model_cfgs) |mc| {
         if (quick and !std.mem.eql(u8, mc.name, "gpu")) continue;
-        var mp = c.llama_model_default_params();
+        var mp = harness_root.impl.c.llama_model_default_params();
         mp.n_gpu_layers = mc.n_gpu_layers;
-        const rm = c.llama_model_load_from_file(path.ptr, mp) orelse {
+        const rm = harness_root.impl.c.llama_model_load_from_file(path.ptr, mp) orelse {
             std.debug.print("FAIL: the C++ cannot load {s}\n", .{path});
             std.process.exit(1);
         };
         var splits: std.ArrayList([:0]const u8) = .empty;
-        const pm = M.loadFromFileImpl(.{ .path = path }, &splits, null, null, mp) orelse {
+        const pm = harness_root.model.loadFromFileImpl(.{ .path = path }, &splits, null, null, mp) orelse {
             std.debug.print("FAIL: the port cannot load {s}\n", .{path});
             std.process.exit(1);
         };
-        const pmc: ?*c.struct_llama_model = @ptrCast(pm);
+        const pmc: ?*harness_root.impl.c.struct_llama_model = @ptrCast(pm);
 
-        const vocab = c.llama_model_get_vocab(rm);
+        const vocab = harness_root.impl.c.llama_model_get_vocab(rm);
         var tokens: [256]i32 = undefined;
-        const nt = c.llama_tokenize(vocab, prompt_text, prompt_text.len, &tokens, tokens.len, true, false);
-        const n_vocab: usize = @intCast(c.llama_vocab_n_tokens(vocab));
+        const nt = harness_root.impl.c.llama_tokenize(vocab, prompt_text, prompt_text.len, &tokens, tokens.len, true, false);
+        const n_vocab: usize = @intCast(harness_root.impl.c.llama_vocab_n_tokens(vocab));
 
         // A first context initializes what each backend initializes once.
         {
-            var p = c.llama_context_default_params();
+            var p = harness_root.impl.c.llama_context_default_params();
             p.n_ctx = 256;
-            if (c.llama_init_from_model(rm, p)) |ctx| c.llama_free(ctx);
+            if (harness_root.impl.c.llama_init_from_model(rm, p)) |ctx| harness_root.impl.c.llama_free(ctx);
         }
 
         // ---- loading
         var ref: std.ArrayList(u8) = .empty;
-        defer ref.deinit(gpa);
+        defer ref.deinit(std.heap.c_allocator);
         var port: std.ArrayList(u8) = .empty;
-        defer port.deinit(gpa);
+        defer port.deinit(std.heap.c_allocator);
 
         var ref_h: [n_good]Handle = undefined;
         rec = &ref;
@@ -1072,12 +1064,12 @@ pub fn main(init: std.process.Init) !void {
                         cand[k][j] = A.lora_init(pmc, f.path.ptr);
                     }
                     rec = &port;
-                    port.appendSlice(gpa, logs[0].items) catch unreachable;
+                    port.appendSlice(std.heap.c_allocator, logs[0].items) catch unreachable;
                     for (1..n_cand) |j| {
                         checks += 1;
                         if (!std.mem.eql(u8, logs[0].items, logs[j].items)) fail("{s}: loading {s} again logged differently", .{ mc.name, f.name });
                     }
-                    for (&logs) |*l| l.deinit(gpa);
+                    for (&logs) |*l| l.deinit(std.heap.c_allocator);
                     note("load {s}: {s}", .{ f.name, if (cand[k][0] == null) "null" else "ok" });
                     k += 1;
                 } else {
@@ -1143,10 +1135,10 @@ pub fn main(init: std.process.Init) !void {
 
         // ---- llama_adapter_lora_init_from_file_ptr
         {
-            var embedded = gpa.alloc([:0]u8, files.items.len) catch unreachable;
-            defer gpa.free(embedded);
+            var embedded = std.heap.c_allocator.alloc([:0]u8, files.items.len) catch unreachable;
+            defer std.heap.c_allocator.free(embedded);
             for (files.items, 0..) |f, i| {
-                const exists = libc.access(f.path.ptr, 0) == 0;
+                const exists = std.c.access(f.path.ptr, 0) == 0;
                 embedded[i] = if (exists) embedFile(f.path) else @constCast("");
             }
             ref.clearRetainingCapacity();
@@ -1168,8 +1160,8 @@ pub fn main(init: std.process.Init) !void {
         checks += 1;
         if (!loaded) {
             fail("{s}: an adapter did not load; the script is skipped", .{mc.name});
-            c.llama_model_free(rm);
-            M.destroy(pm);
+            harness_root.impl.c.llama_model_free(rm);
+            harness_root.model.destroy(pm);
             continue;
         }
         ref.clearRetainingCapacity();
@@ -1187,10 +1179,10 @@ pub fn main(init: std.process.Init) !void {
         // C++'s logits differ between the first decode and each adapted one.
         vacuity(mc.name, ref.items);
 
-        c.llama_model_free(rm);
-        M.destroy(pm);
-        for (splits.items) |s| gpa.free(s);
-        splits.deinit(gpa);
+        harness_root.impl.c.llama_model_free(rm);
+        harness_root.model.destroy(pm);
+        for (splits.items) |s| std.heap.c_allocator.free(s);
+        splits.deinit(std.heap.c_allocator);
     }
 
     std.debug.print("adapter-diff: {d} checks, {d} failures\n", .{ checks, failures });
@@ -1199,9 +1191,9 @@ pub fn main(init: std.process.Init) !void {
 
 fn compare(io: std.Io, out_dir: ?[]const u8, cfg: []const u8, what: []const u8, ref: []const u8, port: []const u8, nodes: usize) void {
     var rn = normalize(ref);
-    defer rn.deinit(gpa);
+    defer rn.deinit(std.heap.c_allocator);
     var pn = normalize(port);
-    defer pn.deinit(gpa);
+    defer pn.deinit(std.heap.c_allocator);
     if (out_dir) |d| {
         var pb: [512]u8 = undefined;
         const rp = std.fmt.bufPrint(&pb, "{s}/{s}-{s}.ref", .{ d, cfg, what }) catch unreachable;
@@ -1227,7 +1219,7 @@ fn vacuity(cfg: []const u8, ref: []const u8) void {
     var step: usize = 0;
     var baseline: ?[]const u8 = null;
     var seen: std.ArrayList([]const u8) = .empty;
-    defer seen.deinit(gpa);
+    defer seen.deinit(std.heap.c_allocator);
     var first_in_step = true;
     while (it.next()) |line| {
         if (std.mem.startsWith(u8, line, "step ")) {
@@ -1241,7 +1233,7 @@ fn vacuity(cfg: []const u8, ref: []const u8) void {
             baseline = line;
             continue;
         }
-        seen.append(gpa, line) catch unreachable;
+        seen.append(std.heap.c_allocator, line) catch unreachable;
         // Steps 12 and 25 decode with nothing active -- after the all-zero
         // set, and after the null set with the control vector cleared --
         // and must give the unadapted logits back; every other must not.

@@ -18,12 +18,11 @@
 //! the C++'s `shared_ptr` as a `SharedProc` reference.
 
 const std = @import("std");
+const common_chat = @import("common_chat");
 const mod = @import("module.zig");
 const cli_fit = @import("cli_fit");
 const stdlib = @import("stdlib");
 const json = @import("json");
-
-const Allocator = std.mem.Allocator;
 
 /// Ports `MEASURE_TIMEOUT` (server-models-sched.cpp:9 @b1b770d90): seconds,
 /// then the measure child is killed.
@@ -65,7 +64,7 @@ pub const ServerModelMemory = struct {
 
     /// Ports `server_model_memory` (server-models-sched.cpp:15 @b1b770d90),
     /// the constructor over breakdown rows.
-    pub fn fromRows(a: Allocator, n_ctx: u32, rows: []const cli_fit.MemoryBreakdownRow) Allocator.Error!ServerModelMemory {
+    pub fn fromRows(a: std.mem.Allocator, n_ctx: u32, rows: []const cli_fit.MemoryBreakdownRow) std.mem.Allocator.Error!ServerModelMemory {
         const devices = try a.alloc(Device, rows.len);
         for (rows, devices) |*row, *d| {
             d.* = .{
@@ -87,7 +86,7 @@ pub const ServerModelMemory = struct {
 
     /// Ports `to_json` (server-models-sched.cpp:33 @b1b770d90), a member of
     /// `server_model_memory`.
-    pub fn toJson(self: *const ServerModelMemory, a: Allocator) mod.common.Error!json.Value {
+    pub fn toJson(self: *const ServerModelMemory, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         var devs = json.Value.emptyArray();
         for (self.devices) |*d| {
             var jd = mod.common.Obj.init(a);
@@ -110,7 +109,7 @@ pub const ServerModelMemory = struct {
 
     /// Ports `from_json` (server-models-sched.cpp:55 @b1b770d90), a member of
     /// `server_model_memory`: throws on a malformed input.
-    pub fn fromJson(a: Allocator, j: *const json.Value) mod.common.Error!ServerModelMemory {
+    pub fn fromJson(a: std.mem.Allocator, j: *const json.Value) common_chat.exception.Error!ServerModelMemory {
         var mem: ServerModelMemory = .{};
         mem.n_ctx = try (try j.at("n_ctx")).get(u32);
         const jdevs = try j.at("devices");
@@ -137,7 +136,7 @@ pub const ServerModelMemory = struct {
     }
 
     /// The C++ copy: every string deep-copied into `a`.
-    pub fn clone(self: *const ServerModelMemory, a: Allocator) Allocator.Error!ServerModelMemory {
+    pub fn clone(self: *const ServerModelMemory, a: std.mem.Allocator) std.mem.Allocator.Error!ServerModelMemory {
         const devices = try a.alloc(Device, self.devices.len);
         for (self.devices, devices) |*s, *d| {
             d.* = s.*;
@@ -183,7 +182,7 @@ pub const MemoryInfo = struct {
 
     /// Ports `to_json` (server-models-sched.cpp:72 @b1b770d90), a member of
     /// `server_model_memory_info`.
-    pub fn toJson(self: *const MemoryInfo, a: Allocator) mod.common.Error!json.Value {
+    pub fn toJson(self: *const MemoryInfo, a: std.mem.Allocator) common_chat.exception.Error!json.Value {
         var o = mod.common.Obj.init(a);
         try o.put("status", memoryStatusToString(self.status));
         try o.put("min", if (self.min) |*m| try m.toJson(a) else @as(json.Value, .null));
@@ -193,7 +192,7 @@ pub const MemoryInfo = struct {
     }
 
     /// The C++ copy.
-    pub fn clone(self: *const MemoryInfo, a: Allocator) Allocator.Error!MemoryInfo {
+    pub fn clone(self: *const MemoryInfo, a: std.mem.Allocator) std.mem.Allocator.Error!MemoryInfo {
         var out = self.*;
         if (self.min) |*m| out.min = try m.clone(a);
         if (self.max) |*m| out.max = try m.clone(a);
@@ -281,14 +280,14 @@ pub const Sched = struct {
     /// entry, so they all need only one slot and all get unblocked by the
     /// single load that entry performs.
     pub fn join(self: *Sched, model_id: []const u8) !void {
-        const z = try mod.common.zs(mod.context.gpa, model_id);
-        defer mod.context.gpa.free(std.mem.span(z));
+        const z = try mod.common.zs(std.heap.c_allocator, model_id);
+        defer std.heap.c_allocator.free(std.mem.span(z));
         if (self.find(model_id)) |e| {
             e.n_waiters += 1;
             mod.common.srv(.inf, "join", "request for name=%s joined the queue, %d waiting\n", .{ z, e.n_waiters });
             return;
         }
-        try self.queue.append(mod.context.gpa, .{ .model_id = try mod.context.gpa.dupe(u8, model_id), .n_waiters = 1, .loading = false });
+        try self.queue.append(std.heap.c_allocator, .{ .model_id = try std.heap.c_allocator.dupe(u8, model_id), .n_waiters = 1, .loading = false });
         mod.common.srv(.inf, "join", "request for name=%s queued at position %zu\n", .{ z, self.queue.items.len });
     }
 
@@ -299,7 +298,7 @@ pub const Sched = struct {
             if (std.mem.eql(u8, e.model_id, model_id)) {
                 e.n_waiters -= 1;
                 if (e.n_waiters <= 0) {
-                    mod.context.gpa.free(e.model_id);
+                    std.heap.c_allocator.free(e.model_id);
                     _ = self.queue.orderedRemove(i); // last one waiting for this model went away
                 }
                 return;
@@ -383,8 +382,8 @@ pub const Sched = struct {
             if (victim.len == 0) {
                 return; // all remaining models are busy, wait for a request to end
             }
-            const z = mod.common.zs(mod.context.gpa, victim) catch return;
-            defer mod.context.gpa.free(std.mem.span(z));
+            const z = mod.common.zs(std.heap.c_allocator, victim) catch return;
+            defer std.heap.c_allocator.free(std.mem.span(z));
             mod.common.srv(.inf, "tick", "evicting idle LRU name=%s for a queued request\n", .{z});
             models.requestStop(victim, true);
             n_free += 1;
@@ -425,7 +424,7 @@ pub const Sched = struct {
             return false;
         }
         var missing: std.ArrayList(Bytes) = .empty;
-        defer missing.deinit(mod.context.gpa);
+        defer missing.deinit(std.heap.c_allocator);
         self.deficit(name, &missing) catch return false;
         if (missing.items.len == 0) {
             return false;
@@ -441,10 +440,10 @@ pub const Sched = struct {
             if (!verbose) {
                 break;
             }
-            const nz = mod.common.zs(mod.context.gpa, name) catch break;
-            defer mod.context.gpa.free(std.mem.span(nz));
-            const dz = mod.common.zs(mod.context.gpa, e.dev) catch break;
-            defer mod.context.gpa.free(std.mem.span(dz));
+            const nz = mod.common.zs(std.heap.c_allocator, name) catch break;
+            defer std.heap.c_allocator.free(std.mem.span(nz));
+            const dz = mod.common.zs(std.heap.c_allocator, e.dev) catch break;
+            defer std.heap.c_allocator.free(std.mem.span(dz));
             if (any_running) {
                 mod.common.srv(.dbg, "limits_exceeded", "model name=%s is short by %zu MiB on %s\n", .{ nz, e.bytes / mib, dz });
             } else {
@@ -472,8 +471,8 @@ pub const Sched = struct {
             defer models.mutex.unlock();
             try self.enqueueMeasure(name, true);
             if (!self.isMeasured(name)) {
-                const z = try mod.common.zs(mod.context.gpa, name);
-                defer mod.context.gpa.free(std.mem.span(z));
+                const z = try mod.common.zs(std.heap.c_allocator, name);
+                defer std.heap.c_allocator.free(std.mem.span(z));
                 mod.common.srv(.inf, "make_room", "waiting for the memory measurement of model name=%s\n", .{z});
                 while (!self.isMeasured(name)) models.cv.wait(&models.mutex);
             }
@@ -481,7 +480,7 @@ pub const Sched = struct {
 
         while (true) {
             var lru_model_name: []const u8 = "";
-            defer if (lru_model_name.len != 0) mod.context.gpa.free(lru_model_name);
+            defer if (lru_model_name.len != 0) std.heap.c_allocator.free(lru_model_name);
             {
                 models.mutex.lock();
                 defer models.mutex.unlock();
@@ -489,13 +488,13 @@ pub const Sched = struct {
                     return;
                 }
                 const v = self.pickVictim();
-                if (v.len != 0) lru_model_name = try mod.context.gpa.dupe(u8, v);
+                if (v.len != 0) lru_model_name = try std.heap.c_allocator.dupe(u8, v);
             }
             if (lru_model_name.len == 0) {
                 return; // every running model is busy, load() reports the limit
             }
-            const z = try mod.common.zs(mod.context.gpa, lru_model_name);
-            defer mod.context.gpa.free(std.mem.span(z));
+            const z = try mod.common.zs(std.heap.c_allocator, lru_model_name);
+            defer std.heap.c_allocator.free(std.mem.span(z));
             mod.common.srv(.inf, "make_room", "limits reached, removing LRU name=%s\n", .{z});
             try models.unload(lru_model_name);
             // wait for unload to complete
@@ -580,10 +579,10 @@ pub const Sched = struct {
     /// a member of `server_models_sched`: stop the measure child and drop the
     /// queue, for shutdown.
     pub fn cancelMeasurements(self: *Sched) void {
-        for (self.measure_queue.items) |n| mod.context.gpa.free(n);
+        for (self.measure_queue.items) |n| std.heap.c_allocator.free(n);
         self.measure_queue.clearRetainingCapacity();
         if (self.measure_proc) |proc| {
-            const z = mod.common.zs(mod.context.gpa, self.measuring) catch "";
+            const z = mod.common.zs(std.heap.c_allocator, self.measuring) catch "";
             mod.common.srv(.inf, "cancel_measurements", "stopping measure process for model name=%s\n", .{z});
             proc.proc.terminate();
             // the monitor reaps it and clears measuring
@@ -611,16 +610,16 @@ pub const Sched = struct {
                 if (!front) {
                     return; // already queued
                 }
-                mod.context.gpa.free(n);
+                std.heap.c_allocator.free(n);
                 _ = self.measure_queue.orderedRemove(i);
                 break;
             }
         }
-        const owned = try mod.context.gpa.dupe(u8, name);
+        const owned = try std.heap.c_allocator.dupe(u8, name);
         if (front) {
-            try self.measure_queue.insert(mod.context.gpa, 0, owned);
+            try self.measure_queue.insert(std.heap.c_allocator, 0, owned);
         } else {
-            try self.measure_queue.append(mod.context.gpa, owned);
+            try self.measure_queue.append(std.heap.c_allocator, owned);
         }
         try self.measureNext();
     }
@@ -632,13 +631,13 @@ pub const Sched = struct {
         if (self.measuring.len != 0) {
             return; // one measure child at a time
         }
-        var scratch = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var scratch = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer scratch.deinit();
         const sa = scratch.allocator();
         while (self.measure_queue.items.len != 0) {
             const name = self.measure_queue.orderedRemove(0);
             var name_owned = true;
-            defer if (name_owned) mod.context.gpa.free(name);
+            defer if (name_owned) std.heap.c_allocator.free(name);
             const it = models.find(name) orelse continue; // removed meanwhile
             if (it.meta.memory.status != .unmeasured) {
                 continue; // measured meanwhile
@@ -684,12 +683,12 @@ pub const Sched = struct {
         }
         proc.release();
         self.measure_proc = null;
-        mod.context.gpa.free(self.measuring);
+        std.heap.c_allocator.free(self.measuring);
         self.measuring = "";
         if (models.find(name)) |it| {
             if (it.meta.memory.status == .measuring) {
                 // exited without a result: crashed, or killed after the timeout
-                const z = mod.common.zs(mod.context.gpa, name) catch "";
+                const z = mod.common.zs(std.heap.c_allocator, name) catch "";
                 mod.common.srv(.wrn, "on_measure_exit", "measure process for model name=%s exited with status %d before reporting, memory limits will not apply to it\n", .{ z, exit_code });
                 it.meta.memory.status = .failed;
                 self.notifyMemory(name, &it.meta.memory);
@@ -703,7 +702,7 @@ pub const Sched = struct {
 
     /// `models.notify_sse("model_memory", name, info.to_json())`.
     fn notifyMemory(self: *Sched, name: []const u8, info: *const MemoryInfo) void {
-        var scratch = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var scratch = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer scratch.deinit();
         const v = info.toJson(scratch.allocator()) catch return;
         self.models.notifySse("model_memory", name, &v);
@@ -718,7 +717,7 @@ pub const Sched = struct {
         defer models.mutex.unlock();
         const it = models.find(name) orelse return;
         const info = &it.meta.memory;
-        var scratch = std.heap.ArenaAllocator.init(mod.context.gpa);
+        var scratch = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer scratch.deinit();
         const sa = scratch.allocator();
         const nz = mod.common.zs(sa, name) catch return;
@@ -765,7 +764,7 @@ pub const Sched = struct {
         models.cv.broadcast();
     }
 
-    fn parseMeasured(_: *Sched, a: Allocator, info: *MemoryInfo, payload: *const json.Value) mod.common.Error!void {
+    fn parseMeasured(_: *Sched, a: std.mem.Allocator, info: *MemoryInfo, payload: *const json.Value) common_chat.exception.Error!void {
         info.min = try ServerModelMemory.fromJson(a, try payload.at("min"));
         info.max = try ServerModelMemory.fromJson(a, try payload.at("max"));
     }
@@ -793,16 +792,16 @@ pub const Sched = struct {
             }
             // a measure child allocates nothing, its free does not include self
             const self_bytes: i64 = if (reporter.len == 0) 0 else @bitCast(d.selfBytes());
-            const gop = try self.device_memory.getOrPut(mod.context.gpa, d.name);
+            const gop = try self.device_memory.getOrPut(std.heap.c_allocator, d.name);
             if (!gop.found_existing) {
-                gop.key_ptr.* = try mod.context.gpa.dupe(u8, d.name);
+                gop.key_ptr.* = try std.heap.c_allocator.dupe(u8, d.name);
                 gop.value_ptr.* = .{};
             }
             const dm = gop.value_ptr;
             dm.total = @bitCast(d.total);
             dm.external = @max(0, dm.total -% @as(i64, @bitCast(d.free)) -% self_bytes -% tracked);
-            const z = try mod.common.zs(mod.context.gpa, d.name);
-            defer mod.context.gpa.free(std.mem.span(z));
+            const z = try mod.common.zs(std.heap.c_allocator, d.name);
+            defer std.heap.c_allocator.free(std.mem.span(z));
             mod.common.srv(.dbg, "calibrate", "device %s: total=%lld MiB, external=%lld MiB, available=%lld MiB\n", .{
                 z,
                 @as(c_longlong, @divTrunc(dm.total, 1024 * 1024)),
@@ -833,20 +832,20 @@ pub const Sched = struct {
                         found = true;
                     }
                 }
-                if (!found) try devs.append(mod.context.gpa, .{ .dev = try mod.context.gpa.dupe(u8, d.name), .bytes = d.selfBytes() });
+                if (!found) try devs.append(std.heap.c_allocator, .{ .dev = try std.heap.c_allocator.dupe(u8, d.name), .bytes = d.selfBytes() });
             }
         }
-        try self.held.put(mod.context.gpa, try mod.context.gpa.dupe(u8, name), devs);
+        try self.held.put(std.heap.c_allocator, try std.heap.c_allocator.dupe(u8, name), devs);
     }
 
     /// Ports `release` (server-models-sched.cpp:553 @b1b770d90), a member of
     /// `server_models_sched`.
     fn release(self: *Sched, name: []const u8) void {
         const kv = self.held.fetchRemove(name) orelse return;
-        mod.context.gpa.free(kv.key);
+        std.heap.c_allocator.free(kv.key);
         var devs = kv.value;
-        for (devs.items) |x| mod.context.gpa.free(x.dev);
-        devs.deinit(mod.context.gpa);
+        for (devs.items) |x| std.heap.c_allocator.free(x.dev);
+        devs.deinit(std.heap.c_allocator);
     }
 
     /// Ports `available` (server-models-sched.cpp:557 @b1b770d90), a member
@@ -870,7 +869,7 @@ pub const Sched = struct {
     /// Ports `deficit` (server-models-sched.cpp:572 @b1b770d90), a member of
     /// `server_models_sched`: the bytes missing per device to load `name` at
     /// its min, in device name order, empty if it fits.
-    fn deficit(self: *const Sched, name: []const u8, res: *std.ArrayList(Bytes)) Allocator.Error!void {
+    fn deficit(self: *const Sched, name: []const u8, res: *std.ArrayList(Bytes)) std.mem.Allocator.Error!void {
         const it = self.models.find(name) orelse return;
         const mn = if (it.meta.memory.min) |*m| m else return;
         const margin: i64 = @as(i64, self.models.base_params.models_memory_margin) * 1024 * 1024;
@@ -891,7 +890,7 @@ pub const Sched = struct {
                 if (i < res.items.len and std.mem.eql(u8, res.items[i].dev, d.name)) {
                     res.items[i].bytes = bytes;
                 } else {
-                    try res.insert(mod.context.gpa, i, .{ .dev = d.name, .bytes = bytes });
+                    try res.insert(std.heap.c_allocator, i, .{ .dev = d.name, .bytes = bytes });
                 }
             }
         }

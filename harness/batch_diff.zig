@@ -39,15 +39,9 @@
 //! Usage: batch_diff <vocab.gguf> [seed]
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const input_tensor_order = @import("input_tensor_order.zig");
 const harness_root = @import("harness_root");
-
-const c = harness_root.impl.c;
-const B = harness_root.batch;
-const M = harness_root.model;
-
-const gpa = std.heap.c_allocator;
 
 const RefUbatch = extern struct {
     b_equal_seqs: u32 = 0,
@@ -56,14 +50,14 @@ const RefUbatch = extern struct {
     n_seqs: u32 = 0,
     n_seqs_unq: u32 = 0,
     n_pos: u32 = 0,
-    token: [*c]c.llama_token = null,
+    token: [*c]harness_root.impl.c.llama_token = null,
     embd: [*c]f32 = null,
     embd_state: [*c]f32 = null,
     embd_row: [*c]i32 = null,
-    pos: [*c]c.llama_pos = null,
+    pos: [*c]harness_root.impl.c.llama_pos = null,
     n_seq_id: [*c]i32 = null,
-    seq_id: [*c][*c]c.llama_seq_id = null,
-    seq_id_unq: [*c]c.llama_seq_id = null,
+    seq_id: [*c][*c]harness_root.impl.c.llama_seq_id = null,
+    seq_id_unq: [*c]harness_root.impl.c.llama_seq_id = null,
     seq_idx: [*c]i32 = null,
     output: [*c]i8 = null,
     type: [*c]i8 = null,
@@ -72,7 +66,7 @@ const RefUbatch = extern struct {
 };
 
 const RefExtToken = extern struct {
-    id: c.llama_token,
+    id: harness_root.impl.c.llama_token,
     has_embd: i32,
     embd_off: u64,
     has_state: i32,
@@ -81,39 +75,37 @@ const RefExtToken = extern struct {
     state_row: i32,
     output: i32,
     decision_order: i32,
-    pos: [4]c.llama_pos,
+    pos: [4]harness_root.impl.c.llama_pos,
     n_seq: i32,
-    seq: [B.max_seq + 8]c.llama_seq_id,
+    seq: [harness_root.batch.max_seq + 8]harness_root.impl.c.llama_seq_id,
 };
 
-const RefExt = c.struct_llama_batch_ext;
-
-extern fn ref_mem_set(s: c_int, p_min: c.llama_pos, p_max: c.llama_pos) void;
-extern fn ref_mem_min(s: c_int) c.llama_pos;
-extern fn ref_mem_max(s: c_int) c.llama_pos;
+extern fn ref_mem_set(s: c_int, p_min: harness_root.impl.c.llama_pos, p_max: harness_root.impl.c.llama_pos) void;
+extern fn ref_mem_min(s: c_int) harness_root.impl.c.llama_pos;
+extern fn ref_mem_max(s: c_int) harness_root.impl.c.llama_pos;
 extern fn ref_new(n_pos_per_embd: u32, allow_mixed: c_int) *anyopaque;
 extern fn ref_delete(a: *anyopaque) void;
-extern fn ref_init(a: *anyopaque, batch: *const RefExt, vocab: *const c.llama_vocab, output_all: c_int) c_int;
-extern fn ref_ext_new(n_tokens_max: usize, n_embd_inp: usize, n_embd_inp_enc: usize, n_seq_max: c.llama_seq_id, use_memory: c_int, n_vocab: c.llama_token, n_pos_per_embd: usize) *RefExt;
-extern fn ref_ext_free(b: *RefExt) void;
-extern fn ref_compat_init(b: *RefExt, batch: *const c.llama_batch, n_embd_row: usize) void;
-extern fn ref_ext_set_decision_order(b: *RefExt, idx: i32, order: i32) c_int;
-extern fn ref_ext_add_embd_row(b: *RefExt, seq_id: c.llama_seq_id, row: i32) i32;
-extern fn ref_ext_n_tokens(b: *const RefExt) usize;
-extern fn ref_ext_n_embd(b: *const RefExt) usize;
-extern fn ref_ext_set_n_embd_state(b: *RefExt, n: usize) void;
-extern fn ref_ext_n_embd_state(b: *const RefExt) usize;
-extern fn ref_ext_state(b: *const RefExt, data: *[*c]const f32) usize;
-extern fn ref_ext_embd(b: *const RefExt, data: *[*c]const f32) usize;
-extern fn ref_ext_token(b: *const RefExt, i: usize, out: *RefExtToken) void;
+extern fn ref_init(a: *anyopaque, batch: *const harness_root.impl.c.struct_llama_batch_ext, vocab: *const harness_root.impl.c.llama_vocab, output_all: c_int) c_int;
+extern fn ref_ext_new(n_tokens_max: usize, n_embd_inp: usize, n_embd_inp_enc: usize, n_seq_max: harness_root.impl.c.llama_seq_id, use_memory: c_int, n_vocab: harness_root.impl.c.llama_token, n_pos_per_embd: usize) *harness_root.impl.c.struct_llama_batch_ext;
+extern fn ref_ext_free(b: *harness_root.impl.c.struct_llama_batch_ext) void;
+extern fn ref_compat_init(b: *harness_root.impl.c.struct_llama_batch_ext, batch: *const harness_root.impl.c.llama_batch, n_embd_row: usize) void;
+extern fn ref_ext_set_decision_order(b: *harness_root.impl.c.struct_llama_batch_ext, idx: i32, order: i32) c_int;
+extern fn ref_ext_add_embd_row(b: *harness_root.impl.c.struct_llama_batch_ext, seq_id: harness_root.impl.c.llama_seq_id, row: i32) i32;
+extern fn ref_ext_n_tokens(b: *const harness_root.impl.c.struct_llama_batch_ext) usize;
+extern fn ref_ext_n_embd(b: *const harness_root.impl.c.struct_llama_batch_ext) usize;
+extern fn ref_ext_set_n_embd_state(b: *harness_root.impl.c.struct_llama_batch_ext, n: usize) void;
+extern fn ref_ext_n_embd_state(b: *const harness_root.impl.c.struct_llama_batch_ext) usize;
+extern fn ref_ext_state(b: *const harness_root.impl.c.struct_llama_batch_ext, data: *[*c]const f32) usize;
+extern fn ref_ext_embd(b: *const harness_root.impl.c.struct_llama_batch_ext, data: *[*c]const f32) usize;
+extern fn ref_ext_token(b: *const harness_root.impl.c.struct_llama_batch_ext, i: usize, out: *RefExtToken) void;
 extern fn ref_ubatch_batch_idxs(u: *const RefUbatch, idxs: *[*c]const i32) usize;
-extern fn ref_get_batch(a: *anyopaque, out: *c.llama_batch) void;
+extern fn ref_get_batch(a: *anyopaque, out: *harness_root.impl.c.llama_batch) void;
 extern fn ref_n_tokens(a: *anyopaque) u32;
 extern fn ref_n_outputs(a: *anyopaque) u32;
 extern fn ref_n_used(a: *anyopaque) u32;
 extern fn ref_out_ids(a: *anyopaque, ids: *[*c]const i32) usize;
-extern fn ref_seq_pos_min(a: *anyopaque, s: c.llama_seq_id) c.llama_pos;
-extern fn ref_seq_pos_max(a: *anyopaque, s: c.llama_seq_id) c.llama_pos;
+extern fn ref_seq_pos_min(a: *anyopaque, s: harness_root.impl.c.llama_seq_id) harness_root.impl.c.llama_pos;
+extern fn ref_seq_pos_max(a: *anyopaque, s: harness_root.impl.c.llama_seq_id) harness_root.impl.c.llama_pos;
 extern fn ref_split_reset(a: *anyopaque) void;
 extern fn ref_split_simple(a: *anyopaque, n_ubatch: u32, out: *RefUbatch) void;
 extern fn ref_split_equal(a: *anyopaque, n_ubatch: u32, sequential: c_int, n_keep_tail: u32, out: *RefUbatch) void;
@@ -153,9 +145,9 @@ fn expectInt(what: []const u8, ref: i128, port: i128) bool {
 
 var log_target: ?*std.ArrayList(u8) = null;
 
-fn logCb(level: c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
+fn logCb(level: harness_root.impl.c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
     const t = log_target orelse return;
-    t.print(gpa, "<{d}>", .{level}) catch unreachable;
+    t.print(std.heap.c_allocator, "<{d}>", .{level}) catch unreachable;
     // `%p` prints a heap address, which differs between the sides; keep
     // only whether it is null.
     const s = std.mem.span(@as([*:0]const u8, @ptrCast(text)));
@@ -165,10 +157,10 @@ fn logCb(level: c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callc
             var j = i + 2;
             while (j < s.len and std.ascii.isHex(s[j])) j += 1;
             const zero = std.mem.allEqual(u8, s[i + 2 .. j], '0');
-            t.appendSlice(gpa, if (zero) "NULL" else "PTR") catch unreachable;
+            t.appendSlice(std.heap.c_allocator, if (zero) "NULL" else "PTR") catch unreachable;
             i = j;
         } else {
-            t.append(gpa, s[i]) catch unreachable;
+            t.append(std.heap.c_allocator, s[i]) catch unreachable;
             i += 1;
         }
     }
@@ -176,10 +168,10 @@ fn logCb(level: c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callc
 
 fn firstDiff(a_raw: []const u8, b_raw: []const u8) void {
     checks += 1;
-    var sa = input_tensor_order.sortRuns(gpa, a_raw);
-    defer sa.deinit(gpa);
-    var sb = input_tensor_order.sortRuns(gpa, b_raw);
-    defer sb.deinit(gpa);
+    var sa = input_tensor_order.sortRuns(std.heap.c_allocator, a_raw);
+    defer sa.deinit(std.heap.c_allocator);
+    var sb = input_tensor_order.sortRuns(std.heap.c_allocator, b_raw);
+    defer sb.deinit(std.heap.c_allocator);
     const a = sa.items;
     const b = sb.items;
     if (std.mem.eql(u8, a, b)) return;
@@ -211,10 +203,10 @@ fn noteReached(log: []const u8) void {
         // one path is one key.
         var key: std.ArrayList(u8) = .empty;
         for (line[0..@min(line.len, 90)]) |ch| {
-            if (!std.ascii.isDigit(ch)) key.append(gpa, ch) catch unreachable;
+            if (!std.ascii.isDigit(ch)) key.append(std.heap.c_allocator, ch) catch unreachable;
         }
-        const gop = reached.getOrPut(gpa, key.items) catch unreachable;
-        if (gop.found_existing) key.deinit(gpa);
+        const gop = reached.getOrPut(std.heap.c_allocator, key.items) catch unreachable;
+        if (gop.found_existing) key.deinit(std.heap.c_allocator);
         if (!gop.found_existing) gop.value_ptr.* = 0;
         gop.value_ptr.* += 1;
     }
@@ -223,26 +215,26 @@ fn noteReached(log: []const u8) void {
 // -----------------------------------------------------------------------------
 // The memory both sides read
 
-fn memMin(_: *anyopaque, s: c.llama_seq_id) c.llama_pos {
+fn memMin(_: *anyopaque, s: harness_root.impl.c.llama_seq_id) harness_root.impl.c.llama_pos {
     return ref_mem_min(s);
 }
 
-fn memMax(_: *anyopaque, s: c.llama_seq_id) c.llama_pos {
+fn memMax(_: *anyopaque, s: harness_root.impl.c.llama_seq_id) harness_root.impl.c.llama_pos {
     return ref_mem_max(s);
 }
 
 var mem_ctx: u8 = 0;
-const port_memory: B.MemoryPos = .{ .ctx = &mem_ctx, .seq_pos_min = memMin, .seq_pos_max = memMax };
+const port_memory: harness_root.batch.MemoryPos = .{ .ctx = &mem_ctx, .seq_pos_min = memMin, .seq_pos_max = memMax };
 
 fn memClear() void {
-    for (0..B.max_seq) |s| ref_mem_set(@intCast(s), -1, -1);
+    for (0..harness_root.batch.max_seq) |s| ref_mem_set(@intCast(s), -1, -1);
 }
 
 // -----------------------------------------------------------------------------
 // Inputs
 
 const Input = struct {
-    batch: c.llama_batch,
+    batch: harness_root.impl.c.llama_batch,
     n_embd: u32,
     n_seq_max: u32,
     output_all: bool,
@@ -256,15 +248,15 @@ const Input = struct {
 /// A batch under construction, its arrays in an arena.
 const Builder = struct {
     ar: std.mem.Allocator,
-    token: ?[]c.llama_token = null,
+    token: ?[]harness_root.impl.c.llama_token = null,
     embd: ?[]f32 = null,
-    pos: ?[]c.llama_pos = null,
+    pos: ?[]harness_root.impl.c.llama_pos = null,
     n_seq_id: ?[]i32 = null,
-    seq_id: ?[][*c]c.llama_seq_id = null,
+    seq_id: ?[][*c]harness_root.impl.c.llama_seq_id = null,
     logits: ?[]i8 = null,
     n: usize,
 
-    fn cbatch(self: *const Builder) c.llama_batch {
+    fn cbatch(self: *const Builder) harness_root.impl.c.llama_batch {
         return .{
             .n_tokens = @intCast(self.n),
             .token = if (self.token) |t| t.ptr else null,
@@ -278,8 +270,8 @@ const Builder = struct {
 
     /// Sets token `i`'s sequences; there is always room for at least one,
     /// so `seq_id[i][0]` is readable even when `n_seq_id[i]` is 0.
-    fn setSeqs(self: *Builder, i: usize, ids: []const c.llama_seq_id) void {
-        const store = self.ar.alloc(c.llama_seq_id, @max(ids.len, 1) + 2) catch unreachable;
+    fn setSeqs(self: *Builder, i: usize, ids: []const harness_root.impl.c.llama_seq_id) void {
+        const store = self.ar.alloc(harness_root.impl.c.llama_seq_id, @max(ids.len, 1) + 2) catch unreachable;
         @memset(store, 0);
         @memcpy(store[0..ids.len], ids);
         self.seq_id.?[i] = store.ptr;
@@ -288,7 +280,7 @@ const Builder = struct {
 
     fn withSeqArrays(self: *Builder) void {
         self.n_seq_id = self.ar.alloc(i32, self.n) catch unreachable;
-        const s = self.ar.alloc([*c]c.llama_seq_id, self.n + 1) catch unreachable;
+        const s = self.ar.alloc([*c]harness_root.impl.c.llama_seq_id, self.n + 1) catch unreachable;
         @memset(s, null);
         self.seq_id = s;
     }
@@ -313,7 +305,7 @@ const Gen = struct {
 
     /// An embedding argument: `n_rows * n_embd` floats of `width` in all,
     /// mostly; sometimes a wrong width or a null pointer.
-    fn embdArg(self: Gen, width: usize, other: usize) c.struct_llama_embd {
+    fn embdArg(self: Gen, width: usize, other: usize) harness_root.impl.c.struct_llama_embd {
         var total = if (self.chance(15)) other else width;
         if (self.chance(8)) total = 1 + self.below(9);
         var rows: usize = 1;
@@ -345,12 +337,12 @@ const Gen = struct {
         const state_all = n_embd_state > 0 and !state_row_all and self.chance(70);
         const e = Exts.create(n_tokens_max, n_embd_inp, n_embd_inp_enc, n_seq_max, use_memory, @intCast(self.n_vocab), n_pos, n_embd_state);
 
-        var next: [8]c.llama_pos = @splat(0);
+        var next: [8]harness_root.impl.c.llama_pos = @splat(0);
         if (use_memory) {
             for (0..@intCast(n_seq_max)) |s| {
                 if (self.chance(40)) continue;
-                const lo: c.llama_pos = @intCast(self.below(10));
-                const hi = lo + @as(c.llama_pos, @intCast(self.below(10)));
+                const lo: harness_root.impl.c.llama_pos = @intCast(self.below(10));
+                const hi = lo + @as(harness_root.impl.c.llama_pos, @intCast(self.below(10)));
                 ref_mem_set(@intCast(s), lo, hi);
                 next[s] = hi + 1;
             }
@@ -373,7 +365,7 @@ const Gen = struct {
                 // a token id or an embedding on a row entry, which is refused
                 if (idx >= 0 and self.chance(5)) _ = both(e, "llama_batch_ext_set_embd_token", .{ idx, self.embdArg(n_embd_inp, n_embd_inp_enc) }, ref_log, port_log);
             } else if (kind == 3) {
-                idx = both(e, "llama_batch_ext_add_token", .{ seq, @as(c.llama_token, @intCast(self.below(self.n_vocab))) }, ref_log, port_log);
+                idx = both(e, "llama_batch_ext_add_token", .{ seq, @as(harness_root.impl.c.llama_token, @intCast(self.below(self.n_vocab))) }, ref_log, port_log);
                 if (idx >= 0) _ = both(e, "llama_batch_ext_set_embd_token", .{ idx, self.embdArg(n_embd_inp, n_embd_inp_enc) }, ref_log, port_log);
             } else if (as_embd) {
                 idx = both(e, "llama_batch_ext_add_embd", .{ seq, self.embdArg(n_embd_inp, n_embd_inp_enc) }, ref_log, port_log);
@@ -381,8 +373,8 @@ const Gen = struct {
                 // an entry with neither, which `init` refuses
                 idx = both(e, "llama_batch_ext_add", .{seq}, ref_log, port_log);
             } else {
-                var id: c.llama_token = @intCast(self.below(self.n_vocab));
-                if (self.chance(4)) id = self.pick(c.llama_token, &.{ -1, @intCast(self.n_vocab), std.math.minInt(i32) });
+                var id: harness_root.impl.c.llama_token = @intCast(self.below(self.n_vocab));
+                if (self.chance(4)) id = self.pick(harness_root.impl.c.llama_token, &.{ -1, @intCast(self.n_vocab), std.math.minInt(i32) });
                 idx = both(e, "llama_batch_ext_add_token", .{ seq, id }, ref_log, port_log);
             }
             if (idx < 0) continue;
@@ -390,11 +382,11 @@ const Gen = struct {
             const s: usize = @intCast(seq);
             // positions: one for a token, n_pos for an embedding
             if (!self.chance(8)) {
-                var pos: [4]c.llama_pos = .{ next[s], @intCast(self.below(5)), @intCast(self.below(5)), 0 };
+                var pos: [4]harness_root.impl.c.llama_pos = .{ next[s], @intCast(self.below(5)), @intCast(self.below(5)), 0 };
                 if (self.chance(5)) pos[0] -= 1;
-                const step: c.llama_pos = if (n_pos > 1 and self.chance(20)) @intCast(1 + self.below(3)) else if (as_embd and n_pos > 1 and self.chance(30)) 0 else 1;
+                const step: harness_root.impl.c.llama_pos = if (n_pos > 1 and self.chance(20)) @intCast(1 + self.below(3)) else if (as_embd and n_pos > 1 and self.chance(30)) 0 else 1;
                 next[s] = pos[0] + step;
-                const pp: [*c]const c.llama_pos = if (self.chance(4)) null else &pos;
+                const pp: [*c]const harness_root.impl.c.llama_pos = if (self.chance(4)) null else &pos;
                 _ = both(e, "llama_batch_ext_set_pos", .{ idx, pp }, ref_log, port_log);
             }
             if (self.chance(15)) {
@@ -434,9 +426,9 @@ const Gen = struct {
             if (self.chance(4)) _ = both(e, "llama_batch_ext_set_embd_token", .{ if (self.chance(50)) idx else @as(i32, 9999), self.embdArg(n_embd_inp, n_embd_inp_enc) }, ref_log, port_log);
             if (self.chance(2)) {
                 log_target = ref_log;
-                c.llama_batch_ext_clear(e.ref);
+                harness_root.impl.c.llama_batch_ext_clear(e.ref);
                 log_target = port_log;
-                PA.llama_batch_ext_clear(portExt(e));
+                harness_root.api.batch.llama_batch_ext_clear(portExt(e));
                 log_target = null;
                 @memset(&next, 0);
             }
@@ -458,14 +450,14 @@ const Gen = struct {
 
         // the sequences in play
         const k = 1 + self.below(@min(n_seq_max, 6));
-        var seqs: [6]c.llama_seq_id = undefined;
+        var seqs: [6]harness_root.impl.c.llama_seq_id = undefined;
         if (self.chance(50)) {
             for (0..k) |i| seqs[i] = @intCast(i);
         } else {
             var n: usize = 0;
             while (n < k) {
-                const s: c.llama_seq_id = @intCast(self.below(n_seq_max));
-                if (std.mem.findScalar(c.llama_seq_id, seqs[0..n], s) == null) {
+                const s: harness_root.impl.c.llama_seq_id = @intCast(self.below(n_seq_max));
+                if (std.mem.findScalar(harness_root.impl.c.llama_seq_id, seqs[0..n], s) == null) {
                     seqs[n] = s;
                     n += 1;
                 }
@@ -474,28 +466,28 @@ const Gen = struct {
         const chosen = seqs[0..k];
 
         // the memory, and each sequence's next position
-        var next: [B.max_seq]c.llama_pos = @splat(0);
-        const base: c.llama_pos = if (self.chance(50)) 0 else @intCast(self.below(10));
-        for (0..B.max_seq) |s| next[s] = base;
+        var next: [harness_root.batch.max_seq]harness_root.impl.c.llama_pos = @splat(0);
+        const base: harness_root.impl.c.llama_pos = if (self.chance(50)) 0 else @intCast(self.below(10));
+        for (0..harness_root.batch.max_seq) |s| next[s] = base;
         if (use_memory) {
             for (chosen) |s| {
                 if (self.chance(40)) continue;
-                const lo: c.llama_pos = @intCast(self.below(20));
-                const hi = lo + @as(c.llama_pos, @intCast(self.below(30)));
+                const lo: harness_root.impl.c.llama_pos = @intCast(self.below(20));
+                const hi = lo + @as(harness_root.impl.c.llama_pos, @intCast(self.below(30)));
                 ref_mem_set(s, lo, hi);
                 next[@intCast(s)] = hi + 1;
             }
             // an unrelated sequence with a history
             if (self.chance(30)) {
                 const s: c_int = @intCast(self.below(n_seq_max));
-                if (std.mem.findScalar(c.llama_seq_id, chosen, s) == null) ref_mem_set(s, 3, 7);
+                if (std.mem.findScalar(harness_root.impl.c.llama_seq_id, chosen, s) == null) ref_mem_set(s, 3, 7);
             }
         } else {
             for (chosen) |s| next[@intCast(s)] = base;
         }
 
         // the token stream: a list of (sequence set, position) by stream
-        const Tok = struct { set: []c.llama_seq_id, pos: c.llama_pos };
+        const Tok = struct { set: []harness_root.impl.c.llama_seq_id, pos: harness_root.impl.c.llama_pos };
         var streams: std.ArrayList(std.ArrayList(Tok)) = .empty;
         var prefix: std.ArrayList(Tok) = .empty;
 
@@ -506,7 +498,7 @@ const Gen = struct {
         const sync_memory = !self.chance(15);
 
         // groups: sets of sequences that move together
-        var groups: std.ArrayList([]c.llama_seq_id) = .empty;
+        var groups: std.ArrayList([]harness_root.impl.c.llama_seq_id) = .empty;
         switch (style) {
             1 => {
                 var i: usize = 0;
@@ -521,7 +513,7 @@ const Gen = struct {
 
         // coupled sequences must agree on their memory to be valid
         const syncGroup = struct {
-            fn f(g: []const c.llama_seq_id, nx: *[B.max_seq]c.llama_pos) void {
+            fn f(g: []const harness_root.impl.c.llama_seq_id, nx: *[harness_root.batch.max_seq]harness_root.impl.c.llama_pos) void {
                 const lo = ref_mem_min(g[0]);
                 const hi = ref_mem_max(g[0]);
                 for (g[1..]) |s| {
@@ -538,8 +530,8 @@ const Gen = struct {
             if (sync_memory) syncGroup(members, &next);
             const len = 1 + self.below(scale);
             for (0..len) |_| {
-                const set = self.ar.dupe(c.llama_seq_id, members) catch unreachable;
-                if (self.chance(30)) self.r.shuffle(c.llama_seq_id, set);
+                const set = self.ar.dupe(harness_root.impl.c.llama_seq_id, members) catch unreachable;
+                if (self.chance(30)) self.r.shuffle(harness_root.impl.c.llama_seq_id, set);
                 const p = next[@intCast(members[0])];
                 prefix.append(self.ar, .{ .set = set, .pos = p }) catch unreachable;
                 for (members) |s| next[@intCast(s)] = p + 1;
@@ -551,11 +543,11 @@ const Gen = struct {
             var list: std.ArrayList(Tok) = .empty;
             const len = (if (style == 2) self.below(scale) else 1 + self.below(scale)) * (if (style == 3) @as(usize, 4) else 1);
             for (0..len) |_| {
-                const set = self.ar.dupe(c.llama_seq_id, g) catch unreachable;
-                if (set.len > 1 and self.chance(30)) self.r.shuffle(c.llama_seq_id, set);
+                const set = self.ar.dupe(harness_root.impl.c.llama_seq_id, g) catch unreachable;
+                if (set.len > 1 and self.chance(30)) self.r.shuffle(harness_root.impl.c.llama_seq_id, set);
                 const p = next[@intCast(g[0])];
                 list.append(self.ar, .{ .set = set, .pos = p }) catch unreachable;
-                const step: c.llama_pos = if (jumps and self.chance(30)) @intCast(1 + self.below(3)) else 1;
+                const step: harness_root.impl.c.llama_pos = if (jumps and self.chance(30)) @intCast(1 + self.below(3)) else 1;
                 for (g) |s| next[@intCast(s)] = p + step;
             }
             streams.append(self.ar, list) catch unreachable;
@@ -583,7 +575,7 @@ const Gen = struct {
             }
         }
         if (toks.items.len == 0) {
-            const set = self.ar.dupe(c.llama_seq_id, chosen[0..1]) catch unreachable;
+            const set = self.ar.dupe(harness_root.impl.c.llama_seq_id, chosen[0..1]) catch unreachable;
             toks.append(self.ar, .{ .set = set, .pos = next[@intCast(chosen[0])] }) catch unreachable;
         }
 
@@ -602,7 +594,7 @@ const Gen = struct {
             if (token_and_embd and self.chance(70)) n_embd_state = n_embd;
         }
         if (!embd_input) {
-            const t = self.ar.alloc(c.llama_token, n) catch unreachable;
+            const t = self.ar.alloc(harness_root.impl.c.llama_token, n) catch unreachable;
             for (t) |*x| x.* = @intCast(self.below(self.n_vocab));
             b.token = t;
         }
@@ -611,7 +603,7 @@ const Gen = struct {
         const must_pos = embd_input and n_pos_per_embd > 1;
         if (must_pos or !self.chance(35)) {
             const npos = if (embd_input) n * n_pos_per_embd else n;
-            const p = self.ar.alloc(c.llama_pos, npos) catch unreachable;
+            const p = self.ar.alloc(harness_root.impl.c.llama_pos, npos) catch unreachable;
             for (toks.items, 0..) |t, i| p[i] = t.pos;
             for (p[n..]) |*x| x.* = @intCast(self.below(100));
             b.pos = p;
@@ -660,7 +652,7 @@ const Gen = struct {
                 switch (self.below(11)) {
                     0 => if (b.pos) |p| {
                         const j = self.below(n);
-                        std.mem.swap(c.llama_pos, &p[i], &p[j]);
+                        std.mem.swap(harness_root.impl.c.llama_pos, &p[i], &p[j]);
                     },
                     1 => if (b.pos) |p| {
                         p[i] += @intCast(1 + self.below(3));
@@ -675,15 +667,15 @@ const Gen = struct {
                         const lo: usize = if (b.pos == null) 1 else 0;
                         if (b.n_seq_id.?[i] > lo) {
                             const at = lo + self.below(@as(usize, @intCast(b.n_seq_id.?[i])) - lo);
-                            s[i][at] = if (self.chance(30)) -1 else @as(c.llama_seq_id, @intCast(n_seq_max + self.below(3)));
+                            s[i][at] = if (self.chance(30)) -1 else @as(harness_root.impl.c.llama_seq_id, @intCast(n_seq_max + self.below(3)));
                         }
                     },
                     4 => if (b.token) |t| {
-                        t[i] = self.pick(c.llama_token, &.{ -1, @intCast(self.n_vocab), @intCast(self.n_vocab + 5), std.math.minInt(i32) });
+                        t[i] = self.pick(harness_root.impl.c.llama_token, &.{ -1, @intCast(self.n_vocab), @intCast(self.n_vocab + 5), std.math.minInt(i32) });
                     },
                     5 => {
                         const s = chosen[self.below(k)];
-                        const d: c.llama_pos = @as(c.llama_pos, @intCast(self.below(5))) - 2;
+                        const d: harness_root.impl.c.llama_pos = @as(harness_root.impl.c.llama_pos, @intCast(self.below(5))) - 2;
                         ref_mem_set(s, ref_mem_min(s), ref_mem_max(s) + d);
                     },
                     // a token in no sequence: see `n_seq_id` above
@@ -692,8 +684,8 @@ const Gen = struct {
                     8 => if (b.seq_id != null) {
                         // join another sequence to this token
                         const old = b.seq_id.?[i][0..@intCast(b.n_seq_id.?[i])];
-                        const extra: c.llama_seq_id = @intCast(self.below(n_seq_max));
-                        const set = self.ar.alloc(c.llama_seq_id, old.len + 1) catch unreachable;
+                        const extra: harness_root.impl.c.llama_seq_id = @intCast(self.below(n_seq_max));
+                        const set = self.ar.alloc(harness_root.impl.c.llama_seq_id, old.len + 1) catch unreachable;
                         @memcpy(set[0..old.len], old);
                         set[old.len] = extra;
                         b.setSeqs(i, set);
@@ -701,7 +693,7 @@ const Gen = struct {
                     9 => if (b.seq_id != null and b.n_seq_id.?[i] > 0) {
                         // a sequence named twice in one token
                         const old = b.seq_id.?[i][0..@intCast(b.n_seq_id.?[i])];
-                        const set = self.ar.alloc(c.llama_seq_id, old.len + 1) catch unreachable;
+                        const set = self.ar.alloc(harness_root.impl.c.llama_seq_id, old.len + 1) catch unreachable;
                         @memcpy(set[0..old.len], old);
                         set[old.len] = old[0];
                         b.setSeqs(i, set);
@@ -721,9 +713,7 @@ const Gen = struct {
 // -----------------------------------------------------------------------------
 // Extended batches, call by call
 
-const PA = harness_root.api.batch;
-
-fn portExt(e: Exts) *c.struct_llama_batch_ext {
+fn portExt(e: Exts) *harness_root.impl.c.struct_llama_batch_ext {
     return @ptrCast(e.port);
 }
 
@@ -731,9 +721,9 @@ fn portExt(e: Exts) *c.struct_llama_batch_ext {
 /// and compares the answers.
 fn both(e: Exts, comptime name: []const u8, args: anytype, ref_log: *std.ArrayList(u8), port_log: *std.ArrayList(u8)) i32 {
     log_target = ref_log;
-    const r = @call(.auto, @field(c, name), .{e.ref} ++ args);
+    const r = @call(.auto, @field(harness_root.impl.c, name), .{e.ref} ++ args);
     log_target = port_log;
-    const p = @call(.auto, @field(PA, name), .{portExt(e)} ++ args);
+    const p = @call(.auto, @field(harness_root.api.batch, name), .{portExt(e)} ++ args);
     log_target = null;
     const ri: i32 = if (@TypeOf(r) == bool) @intFromBool(r) else r;
     const pi: i32 = if (@TypeOf(p) == bool) @intFromBool(p) else p;
@@ -748,7 +738,7 @@ fn addEmbdRow(e: Exts, seq: i32, row: i32, ref_log: *std.ArrayList(u8), port_log
     log_target = ref_log;
     const r = ref_ext_add_embd_row(e.ref, seq, row);
     log_target = port_log;
-    const p = PA.llama_batch_ext_add_embd_row(portExt(e), seq, row);
+    const p = harness_root.api.batch.llama_batch_ext_add_embd_row(portExt(e), seq, row);
     log_target = null;
     _ = expectInt("llama_batch_ext_add_embd_row", r, p);
     tally.ext_calls += 1;
@@ -757,7 +747,7 @@ fn addEmbdRow(e: Exts, seq: i32, row: i32, ref_log: *std.ArrayList(u8), port_log
 
 fn setDecisionOrder(e: Exts, idx: i32, order: i32) void {
     const r = ref_ext_set_decision_order(e.ref, idx, order);
-    const p = PA.llama_batch_ext_set_decision_order(portExt(e), idx, @fromBackingInt(@intCast(@as(c_uint, @bitCast(order)))));
+    const p = harness_root.api.batch.llama_batch_ext_set_decision_order(portExt(e), idx, @fromBackingInt(@intCast(@as(c_uint, @bitCast(order)))));
     _ = expectInt("llama_batch_ext_set_decision_order", r, @intFromBool(p));
     tally.ext_calls += 1;
 }
@@ -788,7 +778,7 @@ fn sameArray(comptime T: type, what: []const u8, a: [*c]const T, b: [*c]const T,
     }
 }
 
-fn compareUbatch(what: []const u8, r: *const RefUbatch, p: *const B.Ubatch, n_embd: u32, n_embd_state: u32) void {
+fn compareUbatch(what: []const u8, r: *const RefUbatch, p: *const harness_root.batch.Ubatch, n_embd: u32, n_embd_state: u32) void {
     results += 1;
     const before = failures;
     _ = expectInt("b_equal_seqs", r.b_equal_seqs, p.b_equal_seqs);
@@ -803,7 +793,7 @@ fn compareUbatch(what: []const u8, r: *const RefUbatch, p: *const B.Ubatch, n_em
         return;
     }
     const n = r.n_tokens;
-    if (sameNull("token", r.token, p.token)) sameArray(c.llama_token, "token", r.token, p.token, n);
+    if (sameNull("token", r.token, p.token)) sameArray(harness_root.impl.c.llama_token, "token", r.token, p.token, n);
     if (sameNull("embd", r.embd, p.embd)) sameArray(f32, "embd", r.embd, p.embd, @as(usize, n) * n_embd);
     if (sameNull("embd_state", r.embd_state, p.embd_state)) sameArray(f32, "embd_state", r.embd_state, p.embd_state, @as(usize, n) * n_embd_state);
     if (sameNull("embd_row", r.embd_row, p.embd_row)) sameArray(i32, "embd_row", r.embd_row, p.embd_row, n);
@@ -813,17 +803,17 @@ fn compareUbatch(what: []const u8, r: *const RefUbatch, p: *const B.Ubatch, n_em
         const pr: []const i32 = if (p.data) |d| d.embd_state_row.items else &.{};
         if (expectInt("embd_state_row size", @intCast(nr), @intCast(pr.len)) and nr > 0) sameArray(i32, "embd_state_row", rows, pr.ptr, nr);
     }
-    if (sameNull("pos", r.pos, p.pos)) sameArray(c.llama_pos, "pos", r.pos, p.pos, @as(usize, n) * r.n_pos);
+    if (sameNull("pos", r.pos, p.pos)) sameArray(harness_root.impl.c.llama_pos, "pos", r.pos, p.pos, @as(usize, n) * r.n_pos);
     const have_nsid = sameNull("n_seq_id", r.n_seq_id, p.n_seq_id);
     if (have_nsid) sameArray(i32, "n_seq_id", r.n_seq_id, p.n_seq_id, n);
     if (sameNull("seq_id", r.seq_id, p.seq_id) and have_nsid) {
         for (0..n) |i| {
             if (!sameNull("seq_id[i]", r.seq_id[i], p.seq_id[i])) continue;
-            sameArray(c.llama_seq_id, "seq_id[i]", r.seq_id[i], p.seq_id[i], @intCast(@max(0, r.n_seq_id[i])));
+            sameArray(harness_root.impl.c.llama_seq_id, "seq_id[i]", r.seq_id[i], p.seq_id[i], @intCast(@max(0, r.n_seq_id[i])));
         }
     }
-    if (sameNull("seq_id_unq", r.seq_id_unq, p.seq_id_unq)) sameArray(c.llama_seq_id, "seq_id_unq", r.seq_id_unq, p.seq_id_unq, r.n_seqs_unq);
-    if (sameNull("seq_idx", r.seq_idx, p.seq_idx)) sameArray(i32, "seq_idx", r.seq_idx, p.seq_idx, B.max_seq);
+    if (sameNull("seq_id_unq", r.seq_id_unq, p.seq_id_unq)) sameArray(harness_root.impl.c.llama_seq_id, "seq_id_unq", r.seq_id_unq, p.seq_id_unq, r.n_seqs_unq);
+    if (sameNull("seq_idx", r.seq_idx, p.seq_idx)) sameArray(i32, "seq_idx", r.seq_idx, p.seq_idx, harness_root.batch.max_seq);
     if (sameNull("output", r.output, p.output)) sameArray(i8, "output", r.output, p.output, n);
     if (sameNull("type", r.type, p.type)) sameArray(i8, "type", r.type, p.type, n);
     if (sameNull("decision_order", r.decision_order, p.decision_order)) sameArray(i32, "decision_order", r.decision_order, p.decision_order, n);
@@ -836,11 +826,11 @@ fn compareUbatch(what: []const u8, r: *const RefUbatch, p: *const B.Ubatch, n_em
     if (failures != before) fail("  in {s}", .{what});
 }
 
-fn compareState(ra: *anyopaque, pa: *B.BatchAllocr) void {
+fn compareState(ra: *anyopaque, pa: *harness_root.batch.BatchAllocr) void {
     _ = expectInt("get_n_tokens", ref_n_tokens(ra), pa.getNTokens());
     _ = expectInt("get_n_outputs", ref_n_outputs(ra), pa.getNOutputs());
-    for (0..B.max_seq) |s| {
-        const sid: c.llama_seq_id = @intCast(s);
+    for (0..harness_root.batch.max_seq) |s| {
+        const sid: harness_root.impl.c.llama_seq_id = @intCast(s);
         if (!expectInt("seq_pos_min", ref_seq_pos_min(ra, sid), pa.seqPosMin(sid))) return;
         if (!expectInt("seq_pos_max", ref_seq_pos_max(ra, sid), pa.seqPosMax(sid))) return;
     }
@@ -848,18 +838,18 @@ fn compareState(ra: *anyopaque, pa: *B.BatchAllocr) void {
 
 /// The flat batch each side built from its extended batch: every array is
 /// the allocator's own now, so the comparison is by content.
-fn compareSanitized(ra: *anyopaque, pa: *B.BatchAllocr, n_pos: u32) void {
+fn compareSanitized(ra: *anyopaque, pa: *harness_root.batch.BatchAllocr, n_pos: u32) void {
     results += 1;
-    var r: c.llama_batch = undefined;
+    var r: harness_root.impl.c.llama_batch = undefined;
     ref_get_batch(ra, &r);
     const p = pa.getBatch().*;
     const n: usize = @intCast(r.n_tokens);
     if (!expectInt("batch.n_tokens", r.n_tokens, p.n_tokens)) return;
-    if (sameNull("batch.token", r.token, p.token)) sameArray(c.llama_token, "batch.token", r.token, p.token, n);
+    if (sameNull("batch.token", r.token, p.token)) sameArray(harness_root.impl.c.llama_token, "batch.token", r.token, p.token, n);
     if (sameNull("batch.embd", r.embd, p.embd)) sameArray(f32, "batch.embd", r.embd, p.embd, n * pa.n_embd);
-    sameArray(c.llama_pos, "batch.pos", r.pos, p.pos, n * n_pos);
+    sameArray(harness_root.impl.c.llama_pos, "batch.pos", r.pos, p.pos, n * n_pos);
     sameArray(i32, "batch.n_seq_id", r.n_seq_id, p.n_seq_id, n);
-    for (0..n) |i| sameArray(c.llama_seq_id, "batch.seq_id[i]", r.seq_id[i], p.seq_id[i], @intCast(@max(0, r.n_seq_id[i])));
+    for (0..n) |i| sameArray(harness_root.impl.c.llama_seq_id, "batch.seq_id[i]", r.seq_id[i], p.seq_id[i], @intCast(@max(0, r.n_seq_id[i])));
     checks += 1;
     if (r.seq_id[n] != null or p.seq_id[n] != null) fail("batch.seq_id is not null-terminated", .{});
     sameArray(i8, "batch.logits", r.logits, p.logits, n);
@@ -867,13 +857,13 @@ fn compareSanitized(ra: *anyopaque, pa: *B.BatchAllocr, n_pos: u32) void {
 
 /// A `llama_batch_ext` on each side.
 const Exts = struct {
-    ref: *RefExt,
-    port: *B.BatchExt,
+    ref: *harness_root.impl.c.struct_llama_batch_ext,
+    port: *harness_root.batch.BatchExt,
 
-    fn create(n_tokens_max: usize, n_embd_inp: usize, n_embd_inp_enc: usize, n_seq_max: c.llama_seq_id, use_memory: bool, n_vocab: c.llama_token, n_pos_per_embd: usize, n_embd_state: usize) Exts {
+    fn create(n_tokens_max: usize, n_embd_inp: usize, n_embd_inp_enc: usize, n_seq_max: harness_root.impl.c.llama_seq_id, use_memory: bool, n_vocab: harness_root.impl.c.llama_token, n_pos_per_embd: usize, n_embd_state: usize) Exts {
         const self: Exts = .{
             .ref = ref_ext_new(n_tokens_max, n_embd_inp, n_embd_inp_enc, n_seq_max, @intFromBool(use_memory), n_vocab, n_pos_per_embd),
-            .port = B.BatchExt.create(n_tokens_max, n_embd_inp, n_embd_inp_enc, n_seq_max, if (use_memory) port_memory else null, n_vocab, n_pos_per_embd),
+            .port = harness_root.batch.BatchExt.create(n_tokens_max, n_embd_inp, n_embd_inp_enc, n_seq_max, if (use_memory) port_memory else null, n_vocab, n_pos_per_embd),
         };
         ref_ext_set_n_embd_state(self.ref, n_embd_state);
         self.port.n_embd_state = n_embd_state;
@@ -903,7 +893,7 @@ fn compareExt(what: []const u8, e: Exts) void {
     var rs: [*c]const f32 = null;
     const rsn = ref_ext_state(e.ref, &rs);
     if (expectInt("ext state size", @intCast(rsn), @intCast(e.port.state.items.len))) sameArray(f32, "ext state", rs, e.port.state.items.ptr, rsn);
-    var order: [B.max_seq + 8]c.llama_seq_id = undefined;
+    var order: [harness_root.batch.max_seq + 8]harness_root.impl.c.llama_seq_id = undefined;
     for (0..n) |i| {
         var rt: RefExtToken = undefined;
         ref_ext_token(e.ref, i, &rt);
@@ -917,16 +907,16 @@ fn compareExt(what: []const u8, e: Exts) void {
         if (!expectInt("ext state_row", rt.state_row, pt.state_row)) break;
         if (!expectInt("ext output", rt.output, @intFromBool(pt.output))) break;
         if (!expectInt("ext decision_order", rt.decision_order, pt.decision_order)) break;
-        sameArray(c.llama_pos, "ext pos", &rt.pos, &pt.pos, 4);
+        sameArray(harness_root.impl.c.llama_pos, "ext pos", &rt.pos, &pt.pos, 4);
         const pn = pt.seq_ids.count();
         if (!expectInt("ext n_seq", rt.n_seq, @intCast(pn))) break;
         pt.seq_ids.ordered(order[0..pn]);
-        sameArray(c.llama_seq_id, "ext seq_ids (iteration order)", &rt.seq, &order, pn);
+        sameArray(harness_root.impl.c.llama_seq_id, "ext seq_ids (iteration order)", &rt.seq, &order, pn);
     }
     if (failures != before) fail("  in {s}", .{what});
 }
 
-fn compareOutIds(what: []const u8, ra: *anyopaque, pa: *B.BatchAllocr) void {
+fn compareOutIds(what: []const u8, ra: *anyopaque, pa: *harness_root.batch.BatchAllocr) void {
     var ids: [*c]const i32 = null;
     const n = ref_out_ids(ra, &ids);
     const port = pa.getOutIds().items;
@@ -945,22 +935,22 @@ const Split = union(enum) {
 
 /// Runs one split mode to exhaustion on both sides, in lockstep, then
 /// compares every ubatch -- after the last, so each must have kept its data.
-fn runSplit(ra: *anyopaque, pa: *B.BatchAllocr, sp: Split, n_embd: u32, ref_log: *std.ArrayList(u8), port_log: *std.ArrayList(u8), reset: bool) void {
+fn runSplit(ra: *anyopaque, pa: *harness_root.batch.BatchAllocr, sp: Split, n_embd: u32, ref_log: *std.ArrayList(u8), port_log: *std.ArrayList(u8), reset: bool) void {
     if (reset) {
         ref_split_reset(ra);
         pa.splitReset();
     }
 
     var rl: std.ArrayList(RefUbatch) = .empty;
-    defer rl.deinit(gpa);
-    var pl: std.ArrayList(B.Ubatch) = .empty;
-    defer pl.deinit(gpa);
+    defer rl.deinit(std.heap.c_allocator);
+    var pl: std.ArrayList(harness_root.batch.Ubatch) = .empty;
+    defer pl.deinit(std.heap.c_allocator);
 
     const cap = @as(usize, ref_n_tokens(ra)) * 2 + 4;
     var it: usize = 0;
     while (it < cap) : (it += 1) {
         var r: RefUbatch = .{};
-        var p: B.Ubatch = undefined;
+        var p: harness_root.batch.Ubatch = undefined;
         log_target = ref_log;
         switch (sp) {
             .simple => |n| ref_split_simple(ra, n, &r),
@@ -974,8 +964,8 @@ fn runSplit(ra: *anyopaque, pa: *B.BatchAllocr, sp: Split, n_embd: u32, ref_log:
             .seq => |n| pa.splitSeq(n),
         };
         log_target = null;
-        rl.append(gpa, r) catch unreachable;
-        pl.append(gpa, p) catch unreachable;
+        rl.append(std.heap.c_allocator, r) catch unreachable;
+        pl.append(std.heap.c_allocator, p) catch unreachable;
         _ = expectInt("get_n_used", ref_n_used(ra), pa.getNUsed());
         if (r.n_tokens == 0 and p.n_tokens == 0) break;
         if ((r.n_tokens == 0) != (p.n_tokens == 0)) {
@@ -1011,7 +1001,7 @@ fn runSplit(ra: *anyopaque, pa: *B.BatchAllocr, sp: Split, n_embd: u32, ref_log:
     compareOutIds(@tagName(sp), ra, pa);
 }
 
-fn runReserve(ra: *anyopaque, pa: *B.BatchAllocr, n_seq_tokens: u32, n_seqs: u32, ref_log: *std.ArrayList(u8), port_log: *std.ArrayList(u8)) void {
+fn runReserve(ra: *anyopaque, pa: *harness_root.batch.BatchAllocr, n_seq_tokens: u32, n_seqs: u32, ref_log: *std.ArrayList(u8), port_log: *std.ArrayList(u8)) void {
     var r: RefUbatch = .{};
     log_target = ref_log;
     ref_ubatch_reserve(ra, n_seq_tokens, n_seqs, &r);
@@ -1029,19 +1019,19 @@ fn runReserve(ra: *anyopaque, pa: *B.BatchAllocr, n_seq_tokens: u32, n_seqs: u32
 
 /// The vocabulary, on both sides.
 const Vocabs = struct {
-    ref: *const c.llama_vocab,
+    ref: *const harness_root.impl.c.llama_vocab,
     port: *const harness_root.vocab.Vocab,
 };
 
 /// Builds each side's extended batch from `in.batch` through
 /// `llama_batch_compat::init` and runs `runExt` on them.
-fn runBatch(g: ?Gen, ra: *anyopaque, pa: *B.BatchAllocr, v: Vocabs, in: Input, ref_log: *std.ArrayList(u8), port_log: *std.ArrayList(u8)) void {
+fn runBatch(g: ?Gen, ra: *anyopaque, pa: *harness_root.batch.BatchAllocr, v: Vocabs, in: Input, ref_log: *std.ArrayList(u8), port_log: *std.ArrayList(u8)) void {
     const e = Exts.create(1 << 24, in.n_embd, in.n_embd, @intCast(in.n_seq_max), in.use_memory, @intCast(v.port.nTokens()), pa.n_pos_per_embd, in.n_embd_state);
     defer e.destroy();
     log_target = ref_log;
     ref_compat_init(e.ref, &in.batch, 0);
     log_target = port_log;
-    B.compatInit(e.port, in.batch, 0);
+    harness_root.batch.compatInit(e.port, in.batch, 0);
     log_target = null;
     compareExt("llama_batch_compat::init", e);
     runExt(g, ra, pa, v, e, in.output_all, ref_log, port_log);
@@ -1049,7 +1039,7 @@ fn runBatch(g: ?Gen, ra: *anyopaque, pa: *B.BatchAllocr, v: Vocabs, in: Input, r
 
 /// Runs `init` on both allocators and compares; on success, runs every
 /// split mode.
-fn runExt(g: ?Gen, ra: *anyopaque, pa: *B.BatchAllocr, v: Vocabs, e: Exts, output_all: bool, ref_log: *std.ArrayList(u8), port_log: *std.ArrayList(u8)) void {
+fn runExt(g: ?Gen, ra: *anyopaque, pa: *harness_root.batch.BatchAllocr, v: Vocabs, e: Exts, output_all: bool, ref_log: *std.ArrayList(u8), port_log: *std.ArrayList(u8)) void {
     results += 1;
     log_target = ref_log;
     const rok = ref_init(ra, e.ref, v.ref, @intFromBool(output_all));
@@ -1122,13 +1112,13 @@ fn sessionMixed(name: []const u8, n_pos_per_embd: u32, allow_mixed: bool, v: Voc
     tally.sessions += 1;
 
     var ref_log: std.ArrayList(u8) = .empty;
-    defer ref_log.deinit(gpa);
+    defer ref_log.deinit(std.heap.c_allocator);
     var port_log: std.ArrayList(u8) = .empty;
-    defer port_log.deinit(gpa);
+    defer port_log.deinit(std.heap.c_allocator);
 
     const ra = ref_new(n_pos_per_embd, @intFromBool(allow_mixed));
     defer ref_delete(ra);
-    var pa = B.BatchAllocr.init(n_pos_per_embd, allow_mixed);
+    var pa = harness_root.batch.BatchAllocr.init(n_pos_per_embd, allow_mixed);
     defer pa.deinit();
 
     for (inputs) |in| runBatch(g, ra, &pa, v, in, &ref_log, &port_log);
@@ -1162,7 +1152,7 @@ fn hand(ar: std.mem.Allocator, v: Vocabs) void {
     const H = struct {
         fn tokens(a: std.mem.Allocator, n: usize) Builder {
             var b: Builder = .{ .ar = a, .n = n };
-            const t = a.alloc(c.llama_token, n) catch unreachable;
+            const t = a.alloc(harness_root.impl.c.llama_token, n) catch unreachable;
             for (t, 0..) |*x, i| x.* = @intCast((i * 7919) % 1000);
             b.token = t;
             return b;
@@ -1172,15 +1162,15 @@ fn hand(ar: std.mem.Allocator, v: Vocabs) void {
             const e = a.alloc(f32, n * n_embd) catch unreachable;
             for (e, 0..) |*x, i| x.* = @floatFromInt(i);
             b.embd = e;
-            const p = a.alloc(c.llama_pos, n * n_pos) catch unreachable;
+            const p = a.alloc(harness_root.impl.c.llama_pos, n * n_pos) catch unreachable;
             for (p, 0..) |*x, i| x.* = @intCast(i % n + 10 * (i / n));
             b.pos = p;
             return b;
         }
-        fn pos(b: *Builder, ps: []const c.llama_pos) void {
-            b.pos = b.ar.dupe(c.llama_pos, ps) catch unreachable;
+        fn pos(b: *Builder, ps: []const harness_root.impl.c.llama_pos) void {
+            b.pos = b.ar.dupe(harness_root.impl.c.llama_pos, ps) catch unreachable;
         }
-        fn seqs(b: *Builder, sets: []const []const c.llama_seq_id) void {
+        fn seqs(b: *Builder, sets: []const []const harness_root.impl.c.llama_seq_id) void {
             b.withSeqArrays();
             for (sets, 0..) |s, i| b.setSeqs(i, s);
         }
@@ -1281,45 +1271,45 @@ var abort_vocab: Vocabs = undefined;
 
 fn abortsInChild(body: *const fn (side: c_int) void, side: c_int) bool {
     var fds: [2]c_int = undefined;
-    if (libc.pipe(&fds) != 0) return false;
-    const pid = libc.fork();
+    if (std.c.pipe(&fds) != 0) return false;
+    const pid = std.c.fork();
     if (pid == 0) {
-        _ = libc.dup2(fds[1], 2);
-        _ = libc.close(fds[0]);
+        _ = std.c.dup2(fds[1], 2);
+        _ = std.c.close(fds[0]);
         body(side);
-        libc._exit(0);
+        std.c._exit(0);
     }
-    _ = libc.close(fds[1]);
+    _ = std.c.close(fds[1]);
     var buf: [4096]u8 = undefined;
-    while (libc.read(fds[0], &buf, buf.len) > 0) {}
-    _ = libc.close(fds[0]);
+    while (std.c.read(fds[0], &buf, buf.len) > 0) {}
+    _ = std.c.close(fds[0]);
     var status: c_int = 0;
-    _ = libc.waitpid(pid, &status, 0);
+    _ = std.c.waitpid(pid, &status, 0);
     return (status & 0x7f) == sigabrt;
 }
 
-fn abortExts(b: *const c.llama_batch) Exts {
+fn abortExts(b: *const harness_root.impl.c.llama_batch) Exts {
     const e = Exts.create(1 << 24, 0, 0, 1, false, @intCast(abort_vocab.port.nTokens()), 1, 0);
     ref_compat_init(e.ref, b, 0);
-    B.compatInit(e.port, b.*, 0);
+    harness_root.batch.compatInit(e.port, b.*, 0);
     return e;
 }
 
 fn emptyBatch(side: c_int) void {
-    var tok = [_]c.llama_token{1};
-    const b = B.batchGetOne(&tok, 0);
+    var tok = [_]harness_root.impl.c.llama_token{1};
+    const b = harness_root.batch.batchGetOne(&tok, 0);
     const e = abortExts(&b);
     if (side == 0) {
         _ = ref_init(ref_new(1, 0), e.ref, abort_vocab.ref, 0);
     } else {
-        var pa = B.BatchAllocr.init(1, false);
+        var pa = harness_root.batch.BatchAllocr.init(1, false);
         _ = pa.initBatch(e.port, abort_vocab.port, false);
     }
 }
 
 fn keepTailTooLong(side: c_int) void {
-    var tok = [_]c.llama_token{ 1, 2, 3 };
-    const b = B.batchGetOne(&tok, 3);
+    var tok = [_]harness_root.impl.c.llama_token{ 1, 2, 3 };
+    const b = harness_root.batch.batchGetOne(&tok, 3);
     const e = abortExts(&b);
     if (side == 0) {
         const ra = ref_new(1, 0);
@@ -1327,7 +1317,7 @@ fn keepTailTooLong(side: c_int) void {
         var r: RefUbatch = .{};
         ref_split_equal(ra, 2, 0, 2, &r);
     } else {
-        var pa = B.BatchAllocr.init(1, false);
+        var pa = harness_root.batch.BatchAllocr.init(1, false);
         _ = pa.initBatch(e.port, abort_vocab.port, false);
         _ = pa.splitEqual(2, false, 2);
     }
@@ -1349,19 +1339,19 @@ fn checkAborts(v: Vocabs) void {
 fn checkCInterface() void {
     session_name = "C interface";
     session_failures = 0;
-    var tok = [_]c.llama_token{ 5, 6, 7 };
-    const r1 = c.llama_batch_get_one(&tok, 3);
-    const p1 = B.batchGetOne(&tok, 3);
+    var tok = [_]harness_root.impl.c.llama_token{ 5, 6, 7 };
+    const r1 = harness_root.impl.c.llama_batch_get_one(&tok, 3);
+    const p1 = harness_root.batch.batchGetOne(&tok, 3);
     results += 1;
     checks += 1;
-    inline for (@typeInfo(c.llama_batch).@"struct".field_names) |f| {
+    inline for (@typeInfo(harness_root.impl.c.llama_batch).@"struct".field_names) |f| {
         if (@field(r1, f) != @field(p1, f)) fail("llama_batch_get_one.{s} differs", .{f});
     }
 
     for ([_][3]i32{ .{ 4, 0, 1 }, .{ 4, 8, 2 }, .{ 0, 0, 1 }, .{ 1, 3, 256 } }) |a| {
         results += 1;
-        const r = c.llama_batch_init(a[0], a[1], a[2]);
-        const p = B.batchInit(a[0], a[1], a[2]);
+        const r = harness_root.impl.c.llama_batch_init(a[0], a[1], a[2]);
+        const p = harness_root.batch.batchInit(a[0], a[1], a[2]);
         _ = expectInt("n_tokens", r.n_tokens, p.n_tokens);
         _ = sameNull("batch_init token", r.token, p.token);
         _ = sameNull("batch_init embd", r.embd, p.embd);
@@ -1373,8 +1363,8 @@ fn checkCInterface() void {
         for (0..n) |i| _ = sameNull("batch_init seq_id[i]", r.seq_id[i], p.seq_id[i]);
         _ = sameNull("batch_init seq_id[n]", r.seq_id[n], p.seq_id[n]);
         // both allocate with malloc, so each frees the other's
-        c.llama_batch_free(p);
-        B.batchFree(r);
+        harness_root.impl.c.llama_batch_free(p);
+        harness_root.batch.batchFree(r);
     }
 }
 
@@ -1386,35 +1376,35 @@ pub fn main(init: std.process.Init) !void {
         std.debug.print("usage: batch_diff <vocab.gguf> [seed]\n", .{});
         std.process.exit(2);
     }
-    const path = try gpa.dupeSentinel(u8, args[1], 0);
+    const path = try std.heap.c_allocator.dupeSentinel(u8, args[1], 0);
     const seed: u64 = if (args.len > 2) try std.fmt.parseInt(u64, args[2], 10) else 20261013;
 
-    c.llama_log_set(logCb, null);
+    harness_root.impl.c.llama_log_set(logCb, null);
 
     harness_root.api.impl.llama_log_set(logCb, null);
-    c.ggml_log_set(logCb, null);
+    harness_root.impl.c.ggml_log_set(logCb, null);
     log_target = null;
 
     // the vocabulary, once through each side
-    var mp = c.llama_model_default_params();
+    var mp = harness_root.impl.c.llama_model_default_params();
     mp.vocab_only = true;
-    const ref_model = c.llama_model_load_from_file(path.ptr, mp) orelse {
+    const ref_model = harness_root.impl.c.llama_model_load_from_file(path.ptr, mp) orelse {
         std.debug.print("FAIL: the C++ cannot load {s}\n", .{path});
         std.process.exit(1);
     };
-    defer c.llama_model_free(ref_model);
+    defer harness_root.impl.c.llama_model_free(ref_model);
     var exc: harness_root.impl.Exception = .{};
     var splits: std.ArrayList([:0]const u8) = .empty;
-    var params = M.defaultParams();
+    var params = harness_root.model.defaultParams();
     params.vocab_only = true;
-    var loaded = M.loadMetadata(.{ .path = path }, &splits, params, null, &exc);
+    var loaded = harness_root.model.loadMetadata(.{ .path = path }, &splits, params, null, &exc);
     if (loaded != .model) {
         std.debug.print("FAIL: the port cannot load {s}\n", .{path});
         std.process.exit(1);
     }
     defer loaded.model.deinit();
-    const v: Vocabs = .{ .ref = c.llama_model_get_vocab(ref_model).?, .port = &loaded.model.vocab };
-    if (c.llama_vocab_n_tokens(v.ref) != @as(i32, @intCast(v.port.nTokens()))) {
+    const v: Vocabs = .{ .ref = harness_root.impl.c.llama_model_get_vocab(ref_model).?, .port = &loaded.model.vocab };
+    if (harness_root.impl.c.llama_vocab_n_tokens(v.ref) != @as(i32, @intCast(v.port.nTokens()))) {
         std.debug.print("FAIL: the vocabularies differ in size\n", .{});
         std.process.exit(1);
     }
@@ -1422,7 +1412,7 @@ pub fn main(init: std.process.Init) !void {
     checkCInterface();
     checkAborts(v);
 
-    var arena: std.heap.ArenaAllocator = .init(gpa);
+    var arena: std.heap.ArenaAllocator = .init(std.heap.c_allocator);
     defer arena.deinit();
 
     var prng: std.Random.DefaultPrng = .init(seed);
@@ -1435,7 +1425,7 @@ pub fn main(init: std.process.Init) !void {
         .{ .env = "x", .sessions = 50 },
     };
     for (modes) |md| {
-        if (md.env) |e| _ = libc.setenv("LLAMA_BATCH_DEBUG", e, 1) else _ = unsetenv("LLAMA_BATCH_DEBUG");
+        if (md.env) |e| _ = stdlib.libc.setenv("LLAMA_BATCH_DEBUG", e, 1) else _ = unsetenv("LLAMA_BATCH_DEBUG");
         std.debug.print("  LLAMA_BATCH_DEBUG={s}\n", .{md.env orelse "(unset)"});
 
         _ = arena.reset(.retain_capacity);

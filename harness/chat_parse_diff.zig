@@ -12,20 +12,13 @@
 //! Usage: chat_parse_diff <records> <transcript>
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const json = @import("json");
 const peg = @import("peg");
 const jinja = @import("zigjinja");
-const chat = @import("common_chat");
+const common_chat = @import("common_chat");
 const llama = @import("llama");
 const peg_serialize = @import("peg_serialize.zig");
-
-const Allocator = std.mem.Allocator;
-const Value = json.Value;
-const Msg = chat.msg.Msg;
-const helpers = chat.autoparser.helpers;
-
-const gpa = std.heap.c_allocator;
 
 /// What `chat_parse_ref.cpp` pins `time` and `clock_gettime` to.
 const fixed_time: i64 = 1700000000;
@@ -36,24 +29,24 @@ var logs: std.ArrayList(u8) = .empty;
 fn esc(w: *std.ArrayList(u8), s: []const u8) !void {
     for (s) |c| {
         if (c == '\\') {
-            try w.appendSlice(gpa, "\\\\");
+            try w.appendSlice(std.heap.c_allocator, "\\\\");
         } else if (c < 0x20 or c >= 0x7f) {
-            try w.print(gpa, "\\x{x:0>2}", .{c});
+            try w.print(std.heap.c_allocator, "\\x{x:0>2}", .{c});
         } else {
-            try w.append(gpa, c);
+            try w.append(std.heap.c_allocator, c);
         }
     }
 }
 
 fn line(comptime fmt: []const u8, args: anytype) !void {
-    try out.print(gpa, fmt ++ "\n", args);
+    try out.print(std.heap.c_allocator, fmt ++ "\n", args);
 }
 
 fn kv(key: []const u8, s: []const u8) !void {
-    try out.appendSlice(gpa, key);
-    try out.append(gpa, ' ');
+    try out.appendSlice(std.heap.c_allocator, key);
+    try out.append(std.heap.c_allocator, ' ');
     try esc(&out, s);
-    try out.append(gpa, '\n');
+    try out.append(std.heap.c_allocator, '\n');
 }
 
 fn flag(key: []const u8, b: bool) !void {
@@ -69,9 +62,9 @@ fn guarded(r: anyerror!void) !void {
             error.RuntimeError => "runtime_error",
             else => return e,
         };
-        try out.print(gpa, "E {s} ", .{class});
-        try esc(&out, chat.exception.what(e));
-        try out.append(gpa, '\n');
+        try out.print(std.heap.c_allocator, "E {s} ", .{class});
+        try esc(&out, common_chat.exception.what(e));
+        try out.append(std.heap.c_allocator, '\n');
     };
 }
 
@@ -81,22 +74,22 @@ fn guarded(r: anyerror!void) !void {
 
 fn logLine(tag: []const u8, text_in: []const u8) void {
     const text = if (std.mem.indexOfScalar(u8, text_in, 0)) |nul| text_in[0..nul] else text_in;
-    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    var arena_state = std.heap.ArenaAllocator.init(std.heap.c_allocator);
     defer arena_state.deinit();
     const a = arena_state.allocator();
-    const v = Value.from(a, text) catch return;
+    const v = json.Value.from(a, text) catch return;
     const dumped = json.dumpSafe(a, &v, -1) catch return;
     var back = json.parse(a, dumped) catch return;
     const clean = back.get([]const u8) catch return;
-    logs.print(gpa, "L {s} ", .{tag}) catch return;
+    logs.print(std.heap.c_allocator, "L {s} ", .{tag}) catch return;
     var tmp: std.ArrayList(u8) = .empty;
     esc(&tmp, clean) catch return;
-    logs.appendSlice(gpa, tmp.items) catch return;
-    tmp.deinit(gpa);
-    logs.append(gpa, '\n') catch return;
+    logs.appendSlice(std.heap.c_allocator, tmp.items) catch return;
+    tmp.deinit(std.heap.c_allocator);
+    logs.append(std.heap.c_allocator, '\n') catch return;
 }
 
-fn chatLog(level: chat.log.Level, text: []const u8) void {
+fn chatLog(level: common_chat.log.Level, text: []const u8) void {
     switch (level) {
         .debug => {},
         .info => logLine("I", text),
@@ -105,7 +98,7 @@ fn chatLog(level: chat.log.Level, text: []const u8) void {
     }
 }
 
-fn msgLog(level: chat.msg.Level, text: []const u8) void {
+fn msgLog(level: common_chat.msg.Level, text: []const u8) void {
     switch (level) {
         .warn => logLine("W", text),
         .err => logLine("E", text),
@@ -113,7 +106,7 @@ fn msgLog(level: chat.msg.Level, text: []const u8) void {
 }
 
 fn flushLogs() !void {
-    try out.appendSlice(gpa, logs.items);
+    try out.appendSlice(std.heap.c_allocator, logs.items);
     logs.clearRetainingCapacity();
 }
 
@@ -122,26 +115,26 @@ fn silent(_: []const u8) void {}
 // -----------------------------------------------------------------------------
 // records
 
-fn str(v: *const Value, key: []const u8) ![]const u8 {
+fn str(v: *const json.Value, key: []const u8) ![]const u8 {
     return (try v.at(key)).get([]const u8);
 }
 
-fn boolean(v: *const Value, key: []const u8) !bool {
+fn boolean(v: *const json.Value, key: []const u8) !bool {
     return (try v.at(key)).get(bool);
 }
 
-fn int(v: *const Value, key: []const u8) !i64 {
+fn int(v: *const json.Value, key: []const u8) !i64 {
     return (try v.at(key)).get(i64);
 }
 
-fn unhex(a: Allocator, h: []const u8) ![]u8 {
+fn unhex(a: std.mem.Allocator, h: []const u8) ![]u8 {
     const s = try a.alloc(u8, h.len / 2);
     for (s, 0..) |*c, i| c.* = try std.fmt.parseInt(u8, h[2 * i ..][0..2], 16);
     return s;
 }
 
-fn readMsg(a: Allocator, j: *const Value) !Msg {
-    var m: Msg = .{};
+fn readMsg(a: std.mem.Allocator, j: *const json.Value) !common_chat.msg.Msg {
+    var m: common_chat.msg.Msg = .{};
     m.role = try str(j, "role");
     m.content = try str(j, "content");
     for ((try j.at("parts")).array.items) |*p| {
@@ -165,10 +158,10 @@ fn readMsg(a: Allocator, j: *const Value) !Msg {
     return m;
 }
 
-fn readInputs(a: Allocator, j: *const Value) !chat.templates.TemplatesInputs {
-    var msgs: std.ArrayList(Msg) = .empty;
+fn readInputs(a: std.mem.Allocator, j: *const json.Value) !common_chat.templates.TemplatesInputs {
+    var msgs: std.ArrayList(common_chat.msg.Msg) = .empty;
     for ((try j.at("messages")).array.items) |*m| try msgs.append(a, try readMsg(a, m));
-    var tools: std.ArrayList(chat.msg.Tool) = .empty;
+    var tools: std.ArrayList(common_chat.msg.Tool) = .empty;
     for ((try j.at("tools")).array.items) |*t| {
         try tools.append(a, .{
             .name = try (try t.atIndex(0)).get([]const u8),
@@ -177,7 +170,7 @@ fn readInputs(a: Allocator, j: *const Value) !chat.templates.TemplatesInputs {
             .defer_loading = t.size() > 3 and try (try t.atIndex(3)).get(bool),
         });
     }
-    var kwargs: std.ArrayList(chat.templates.KwArg) = .empty;
+    var kwargs: std.ArrayList(common_chat.templates.KwArg) = .empty;
     for ((try j.at("kwargs")).array.items) |*k| {
         try kwargs.append(a, .{ .key = try (try k.atIndex(0)).get([]const u8), .value = try (try k.atIndex(1)).get([]const u8) });
     }
@@ -200,7 +193,7 @@ fn readInputs(a: Allocator, j: *const Value) !chat.templates.TemplatesInputs {
     };
 }
 
-fn readTemplateParams(a: Allocator, j: *const Value) !chat.autoparser.TemplateParams {
+fn readTemplateParams(a: std.mem.Allocator, j: *const json.Value) !common_chat.autoparser.TemplateParams {
     return .{
         .messages = try (try j.at("messages")).clone(a),
         .tools = try (try j.at("tools")).clone(a),
@@ -211,12 +204,12 @@ fn readTemplateParams(a: Allocator, j: *const Value) !chat.autoparser.TemplatePa
 }
 
 /// `show_prompt`: the text, then every part, an empty one included.
-fn showPrompt(a: Allocator, p: *const chat.prompt.Prompt) !void {
+fn showPrompt(a: std.mem.Allocator, p: *const common_chat.prompt.Prompt) !void {
     try kv("prompt", try p.str(a));
     for (p.parts.items) |part| try kv(if (part.is_input) "prompt.input" else "prompt.template", part.text);
 }
 
-fn showParams(a: Allocator, p: *const chat.params.ChatParams) !void {
+fn showParams(a: std.mem.Allocator, p: *const common_chat.params.ChatParams) !void {
     try kv("format", p.format.name());
     try showPrompt(a, &p.prompt);
     try kv("grammar", p.grammar);
@@ -226,9 +219,9 @@ fn showParams(a: Allocator, p: *const chat.params.ChatParams) !void {
     try kv("think_start", p.thinking_start_tag);
     for (p.thinking_end_tags.items) |t| try kv("think_end", t);
     for (p.grammar_triggers.items) |t| {
-        try out.print(gpa, "trigger {d} {d} ", .{ @backingInt(t.type), t.token });
+        try out.print(std.heap.c_allocator, "trigger {d} {d} ", .{ @backingInt(t.type), t.token });
         try esc(&out, t.value);
-        try out.append(gpa, '\n');
+        try out.append(std.heap.c_allocator, '\n');
     }
     for (p.preserved_tokens.items) |t| try kv("preserved", t);
     for (p.additional_stops.items) |t| try kv("stop", t);
@@ -236,24 +229,24 @@ fn showParams(a: Allocator, p: *const chat.params.ChatParams) !void {
     try guarded(showDelims(a, p));
 }
 
-fn showParser(a: Allocator, p: *const chat.params.ChatParams) !void {
+fn showParser(a: std.mem.Allocator, p: *const common_chat.params.ChatParams) !void {
     const text = if (p.parser) |*arena| (if (arena.empty()) "" else try peg_serialize.save(a, arena)) else "";
     try kv("parser", text);
 }
 
 /// The form `common_chat_msg_delimiters::to_json` once wrote.
-fn showDelims(a: Allocator, p: *const chat.params.ChatParams) !void {
-    var v = Value.emptyArray();
+fn showDelims(a: std.mem.Allocator, p: *const common_chat.params.ChatParams) !void {
+    var v = json.Value.emptyArray();
     for (p.message_delimiters.delimiters.items) |d| {
-        var o = Value.emptyObject();
-        try o.set(a, "role", try Value.from(a, d.role.toString()));
-        try o.set(a, "delimiter", try Value.from(a, d.delimiter));
+        var o = json.Value.emptyObject();
+        try o.set(a, "role", try json.Value.from(a, d.role.toString()));
+        try o.set(a, "delimiter", try json.Value.from(a, d.delimiter));
         try v.pushBack(a, o);
     }
     try kv("delims", try json.dump(a, &v, -1));
 }
 
-fn showMsg(m: *const Msg) !void {
+fn showMsg(m: *const common_chat.msg.Msg) !void {
     try kv("role", m.role);
     try kv("content", m.content);
     for (m.content_parts.items) |p| {
@@ -270,7 +263,7 @@ fn showMsg(m: *const Msg) !void {
     try kv("tool_call_id", m.tool_call_id);
 }
 
-fn showAnalysis(ap: *const chat.autoparser.Autoparser) !void {
+fn showAnalysis(ap: *const common_chat.autoparser.Autoparser) !void {
     try kv("an.user_start", ap.user_start);
     try kv("an.assistant_start", ap.assistant_start);
     try kv("an.reasoning.mode", ap.reasoning.mode.name());
@@ -315,7 +308,7 @@ fn showAnalysis(ap: *const chat.autoparser.Autoparser) !void {
     for (ap.additional_stops.items) |t| try kv("an.stop", t);
 }
 
-fn showDiff(d: chat.autoparser.DiffSplit) !void {
+fn showDiff(d: common_chat.autoparser.DiffSplit) !void {
     try kv("prefix", d.prefix);
     try kv("suffix", d.suffix);
     try kv("left", d.left);
@@ -323,132 +316,132 @@ fn showDiff(d: chat.autoparser.DiffSplit) !void {
 }
 
 const Kept = struct {
-    params: chat.params.ChatParams,
+    params: common_chat.params.ChatParams,
 };
 
 const State = struct {
-    tmpls: std.AutoHashMapUnmanaged(i64, chat.templates.Templates) = .empty,
+    tmpls: std.AutoHashMapUnmanaged(i64, common_chat.templates.Templates) = .empty,
     applies: std.AutoHashMapUnmanaged(i64, Kept) = .empty,
     /// Owns every kept apply's result.
-    keep_arena: std.heap.ArenaAllocator = .init(gpa),
+    keep_arena: std.heap.ArenaAllocator = .init(std.heap.c_allocator),
 };
 
 var models: std.StringHashMapUnmanaged(*anyopaque) = .empty;
 
 fn quietLog(_: c_uint, _: [*c]const u8, _: ?*anyopaque) callconv(.c) void {}
 
-fn tmplRecord(st: *State, a: Allocator, r: *const Value) !void {
+fn tmplRecord(st: *State, a: std.mem.Allocator, r: *const json.Value) !void {
     const id = try int(r, "id");
     const src = try str(r, "src");
     const bos = try str(r, "bos");
     const eos = try str(r, "eos");
     // With a "model", its vocabulary's BOS, EOS and flags, read through
     // libllama's port, as `common_chat_templates_init` reads them.
-    var info: ?chat.templates.ModelInfo = null;
+    var info: ?common_chat.templates.ModelInfo = null;
     if (r.contains("model")) {
         const path = try str(r, "model");
         const model = models.get(path) orelse blk: {
             llama.api.impl.llama_log_set(quietLog, null);
             var mp = llama.api.model.llama_model_default_params();
             mp.vocab_only = true;
-            const z = try gpa.dupeSentinel(u8, path, 0);
+            const z = try std.heap.c_allocator.dupeSentinel(u8, path, 0);
             const m = llama.api.llama.llama_model_load_from_file(z.ptr, mp) orelse return error.ModelLoad;
             // the key outlives the record it was read from
-            try models.put(gpa, try gpa.dupe(u8, path), @ptrCast(m));
+            try models.put(std.heap.c_allocator, try std.heap.c_allocator.dupe(u8, path), @ptrCast(m));
             break :blk @as(*anyopaque, m);
         };
-        info = try chat.templates.modelInfo(gpa, model);
+        info = try common_chat.templates.modelInfo(std.heap.c_allocator, model);
     }
-    const t = chat.templates.init(gpa, if (info) |*i| i else null, src, bos, eos) catch |e| {
+    const t = common_chat.templates.init(std.heap.c_allocator, if (info) |*i| i else null, src, bos, eos) catch |e| {
         if (e == error.OutOfMemory) return e;
         try line("init_failed", .{});
         return;
     };
-    try st.tmpls.put(gpa, id, t);
+    try st.tmpls.put(std.heap.c_allocator, id, t);
     const tp = st.tmpls.getPtr(id).?;
-    for (chat.templates.getCaps(tp)) |e| try line("caps {s}={s}", .{ e.name, if (e.value) "1" else "0" });
+    for (common_chat.templates.getCaps(tp)) |e| try line("caps {s}={s}", .{ e.name, if (e.value) "1" else "0" });
     {
-        var caps = try chat.templates.getCapsJson(a, tp);
+        var caps = try common_chat.templates.getCapsJson(a, tp);
         try kv("caps_json", try json.dump(a, &caps, -1));
     }
-    try kv("source", chat.templates.source(tp, ""));
-    try kv("tool_use_source", chat.templates.source(tp, "tool_use"));
-    try flag("explicit", chat.templates.wasExplicit(tp));
+    try kv("source", common_chat.templates.source(tp, ""));
+    try kv("tool_use_source", common_chat.templates.source(tp, "tool_use"));
+    try flag("explicit", common_chat.templates.wasExplicit(tp));
     for ([_][]const u8{ "", "fr", "FR", "xx" }) |language| {
-        const asr = try chat.templates.getAsrPrompt(a, tp, language);
+        const asr = try common_chat.templates.getAsrPrompt(a, tp, language);
         try kv("asr.system", asr.system);
         try kv("asr.user", asr.user);
         try flag("asr.has_language", asr.has_language);
     }
     try guarded(blk: {
-        const s = chat.templates.getTtsPrompt(a, tp, "Say this", "", "") catch |e| break :blk e;
+        const s = common_chat.templates.getTtsPrompt(a, tp, "Say this", "", "") catch |e| break :blk e;
         break :blk kv("tts", s);
     });
     try guarded(blk: {
-        const s = chat.templates.getTtsPrompt(a, tp, "Say \"that\"", "fr", "alice") catch |e| break :blk e;
+        const s = common_chat.templates.getTtsPrompt(a, tp, "Say \"that\"", "fr", "alice") catch |e| break :blk e;
         break :blk kv("tts", s);
     });
     try guarded(blk: {
-        const b = chat.templates.supportEnableThinking(gpa, tp) catch |e| break :blk e;
+        const b = common_chat.templates.supportEnableThinking(std.heap.c_allocator, tp) catch |e| break :blk e;
         break :blk flag("enable_thinking", b);
     });
     try guarded(blk: {
-        const ex = chat.templates.formatExample(a, tp, true, &.{}) catch |e| break :blk e;
+        const ex = common_chat.templates.formatExample(a, tp, true, &.{}) catch |e| break :blk e;
         break :blk kv("example", ex);
     });
-    try flag("verify", try chat.templates.verifyTemplate(gpa, src, true));
+    try flag("verify", try common_chat.templates.verifyTemplate(std.heap.c_allocator, src, true));
     try guarded(analysis(a, src, bos, eos));
 }
 
-fn analysis(a: Allocator, src: []const u8, bos: []const u8, eos: []const u8) !void {
-    var tmpl = try chat.template.Template.init(gpa, src, bos, eos);
+fn analysis(a: std.mem.Allocator, src: []const u8, bos: []const u8, eos: []const u8) !void {
+    var tmpl = try common_chat.template.Template.init(std.heap.c_allocator, src, bos, eos);
     defer tmpl.deinit();
-    var ap: chat.autoparser.Autoparser = .{};
-    try chat.autoparser.analyzeTemplate(&ap, a, &tmpl);
+    var ap: common_chat.autoparser.Autoparser = .{};
+    try common_chat.autoparser.analyzeTemplate(&ap, a, &tmpl);
     try showAnalysis(&ap);
 }
 
-fn applyRecord(st: *State, a: Allocator, n: usize, r: *const Value) !void {
+fn applyRecord(st: *State, a: std.mem.Allocator, n: usize, r: *const json.Value) !void {
     const tp = st.tmpls.getPtr(try int(r, "t")) orelse return line("no_templates", .{});
     const keep = r.contains("keep") and try boolean(r, "keep");
     const pa = if (keep) st.keep_arena.allocator() else a;
     try guarded(blk: {
         const in = readInputs(pa, try r.at("in")) catch |e| break :blk e;
-        const params = chat.templates.apply(pa, tp, &in) catch |e| break :blk e;
+        const params = common_chat.templates.apply(pa, tp, &in) catch |e| break :blk e;
         showParams(a, &params) catch |e| break :blk e;
-        if (keep) st.applies.put(gpa, @intCast(n), .{ .params = params }) catch |e| break :blk e;
+        if (keep) st.applies.put(std.heap.c_allocator, @intCast(n), .{ .params = params }) catch |e| break :blk e;
     });
 }
 
-fn parseRecord(st: *State, a: Allocator, r: *const Value) !void {
+fn parseRecord(st: *State, a: std.mem.Allocator, r: *const json.Value) !void {
     const text = try unhex(a, try str(r, "input_hex"));
     const partial = try boolean(r, "partial");
     const kept = st.applies.getPtr(try int(r, "a")) orelse return line("no_apply", .{});
     // `common_chat_parser_params(params)`: the format, and the generation
     // prompt as input without tokens
-    var gen = try chat.input.Input.fromText(a, kept.params.generation_prompt);
-    const params: chat.parse.ParserParams = .{ .format = kept.params.format, .generation_prompt = &gen };
-    var input = try chat.input.Input.fromText(a, text);
+    var gen = try common_chat.input.Input.fromText(a, kept.params.generation_prompt);
+    const params: common_chat.parse.ParserParams = .{ .format = kept.params.format, .generation_prompt = &gen };
+    var input = try common_chat.input.Input.fromText(a, text);
     const arena: ?*const peg.Arena = if (kept.params.parser) |*p| p else null;
     try guarded(blk: {
-        var m = chat.parse.pegParse(gpa, arena, &input, partial, &params) catch |e| break :blk e;
-        defer m.deinit(gpa);
+        var m = common_chat.parse.pegParse(std.heap.c_allocator, arena, &input, partial, &params) catch |e| break :blk e;
+        defer m.deinit(std.heap.c_allocator);
         break :blk showMsg(&m);
     });
 }
 
-fn cvRecord(a: Allocator, r: *const Value) !void {
-    var tmpl = try chat.template.Template.init(gpa, try str(r, "src"), try str(r, "bos"), try str(r, "eos"));
+fn cvRecord(a: std.mem.Allocator, r: *const json.Value) !void {
+    var tmpl = try common_chat.template.Template.init(std.heap.c_allocator, try str(r, "src"), try str(r, "bos"), try str(r, "eos"));
     defer tmpl.deinit();
     const pa = try readTemplateParams(a, try r.at("a"));
     const pb = try readTemplateParams(a, try r.at("b"));
-    const res = try helpers.compareVariants(a, &tmpl, &pa, &pb) orelse return line("none", .{});
+    const res = try common_chat.autoparser.helpers.compareVariants(a, &tmpl, &pa, &pb) orelse return line("none", .{});
     try showDiff(res.diff);
     try kv("output_A", res.output_A);
     try kv("output_B", res.output_B);
 }
 
-fn run(st: *State, a: Allocator, n: usize, r: *const Value) !void {
+fn run(st: *State, a: std.mem.Allocator, n: usize, r: *const json.Value) !void {
     const op = try str(r, "op");
     try line("== {d} {s}", .{ n, op });
     if (std.mem.eql(u8, op, "tmpl")) {
@@ -458,13 +451,13 @@ fn run(st: *State, a: Allocator, n: usize, r: *const Value) !void {
     } else if (std.mem.eql(u8, op, "parse")) {
         try parseRecord(st, a, r);
     } else if (std.mem.eql(u8, op, "diff")) {
-        try showDiff(try helpers.calculateDiffSplit(a, try str(r, "l"), try str(r, "r")));
+        try showDiff(try common_chat.autoparser.helpers.calculateDiffSplit(a, try str(r, "l"), try str(r, "r")));
     } else if (std.mem.eql(u8, op, "ucp")) {
-        try kv("r", helpers.untilCommonPrefix(try str(r, "full"), try str(r, "l"), try str(r, "r")));
+        try kv("r", common_chat.autoparser.helpers.untilCommonPrefix(try str(r, "full"), try str(r, "l"), try str(r, "r")));
     } else if (std.mem.eql(u8, op, "acs")) {
-        try kv("r", helpers.afterCommonSuffix(try str(r, "full"), try str(r, "l"), try str(r, "r")));
+        try kv("r", common_chat.autoparser.helpers.afterCommonSuffix(try str(r, "full"), try str(r, "l"), try str(r, "r")));
     } else if (std.mem.eql(u8, op, "seg")) {
-        for (try helpers.segmentizeMarkers(a, try str(r, "text"))) |s| try kv(s.type.name(), s.value);
+        for (try common_chat.autoparser.helpers.segmentizeMarkers(a, try str(r, "text"))) |s| try kv(s.type.name(), s.value);
     } else if (std.mem.eql(u8, op, "cv")) {
         try guarded(cvRecord(a, r));
     } else {
@@ -477,7 +470,7 @@ const FILE = opaque {};
 
 /// Whether a record before the start of a resumed run rebuilds state the
 /// records after it read: templates, kept applies.
-fn buildsState(r: *const Value) bool {
+fn buildsState(r: *const json.Value) bool {
     const op = str(r, "op") catch return false;
     if (std.mem.eql(u8, op, "tmpl")) return true;
     return std.mem.eql(u8, op, "apply") and r.contains("keep");
@@ -498,19 +491,19 @@ pub fn main(init: std.process.Init) !void {
     var skip: std.AutoHashMapUnmanaged(usize, void) = .empty;
     if (init.environ_map.get("CHAT_PARSE_SKIP")) |list| {
         var it = std.mem.tokenizeScalar(u8, list, ',');
-        while (it.next()) |x| try skip.put(gpa, try std.fmt.parseInt(usize, x, 10), {});
+        while (it.next()) |x| try skip.put(std.heap.c_allocator, try std.fmt.parseInt(usize, x, 10), {});
     }
-    chat.template.now_override = fixed_time;
+    common_chat.template.now_override = fixed_time;
     jinja.time.fixed_timestamp = fixed_time;
-    chat.log.sink = chatLog;
-    chat.msg.log_sink = msgLog;
+    common_chat.log.sink = chatLog;
+    common_chat.msg.log_sink = msgLog;
     json.schema_to_grammar.warning_sink = silent;
 
     const io = init.io;
-    const records = try std.Io.Dir.cwd().readFileAlloc(io, args[1], gpa, .unlimited);
-    defer gpa.free(records);
-    const path = try gpa.dupeSentinel(u8, args[2], 0);
-    const file = libc.fopen(path, if (start == 0) "wb" else "ab") orelse return error.CannotOpen;
+    const records = try std.Io.Dir.cwd().readFileAlloc(io, args[1], std.heap.c_allocator, .unlimited);
+    defer std.heap.c_allocator.free(records);
+    const path = try std.heap.c_allocator.dupeSentinel(u8, args[2], 0);
+    const file = stdlib.libc.fopen(path, if (start == 0) "wb" else "ab") orelse return error.CannotOpen;
 
     var st: State = .{};
     var lines = std.mem.splitScalar(u8, records, '\n');
@@ -519,17 +512,17 @@ pub fn main(init: std.process.Init) !void {
         if (text.len == 0) continue;
         defer n += 1;
         if (skip.contains(n)) continue;
-        var arena_state = std.heap.ArenaAllocator.init(gpa);
+        var arena_state = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer arena_state.deinit();
         const a = arena_state.allocator();
         const r = try json.parse(a, text);
         if (n < start and !buildsState(&r)) continue;
         try run(&st, a, n, &r);
         if (n >= start) {
-            _ = libc.fwrite(out.items.ptr, 1, out.items.len, file);
-            _ = libc.fflush(file);
+            _ = stdlib.libc.fwrite(out.items.ptr, 1, out.items.len, file);
+            _ = stdlib.libc.fflush(file);
         }
         out.clearRetainingCapacity();
     }
-    _ = libc.fclose(file);
+    _ = stdlib.libc.fclose(file);
 }

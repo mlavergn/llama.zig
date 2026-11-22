@@ -64,9 +64,9 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.llama_c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
 
-    inpL = llama.impl.c.ggml_scale(ctx, inpL, stdlib.libm.sqrtfInt(b.n_embd));
+    inpL = llama.impl.llama_c.ggml_scale(ctx, inpL, stdlib.libm.sqrtfInt(b.n_embd));
     b.cb(inpL, "inp_scaled", -1);
 
     // The positions.
@@ -99,16 +99,16 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             b.cb(Kcur, "Kcur", il);
             b.cb(Vcur, "Vcur", il);
 
-            Qcur = llama.impl.c.ggml_scale(ctx, Qcur, 1.0 / stdlib.libm.sqrtfInt(n_embd_head));
+            Qcur = llama.impl.llama_c.ggml_scale(ctx, Qcur, 1.0 / stdlib.libm.sqrtfInt(n_embd_head));
             b.cb(Qcur, "Qcur_scaled", il);
 
             cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0, il);
         }
         if (il == b.n_layer - 1) {
-            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
+            cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpL = llama.impl.llama_c.ggml_get_rows(ctx, inpL, inp_out_ids);
         }
-        const sa_out: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpL);
+        const sa_out: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpL);
         b.cb(sa_out, "sa_out", il);
 
         cur = b.buildNorm(sa_out, layer.ffn_norm, null, .rms, il);
@@ -119,7 +119,7 @@ fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) vo
             cur = b.buildFfn(cur, layer.ffn_up, null, null, layer.ffn_gate, null, null, layer.ffn_down, null, null, null, .gelu, .par, il);
             b.cb(cur, "ffn_out", il);
         }
-        cur = llama.impl.c.ggml_add(ctx, cur, sa_out);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, sa_out);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

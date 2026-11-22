@@ -157,13 +157,13 @@ fn otherModel(b: *const llama.graph.Builder) *const llama.model.Model {
 /// Ports `llama_model_eagle3`'s `graph<true>`'s `build_inp_embd_enc`
 /// (models/eagle3.cpp:104 @b1b770d90): the target model's features, three
 /// layers concatenated, given as the batch's embeddings.
-fn buildInpEmbdEnc(b: *const llama.graph.Builder) *llama.impl.c.ggml_tensor {
+fn buildInpEmbdEnc(b: *const llama.graph.Builder) *llama.impl.llama_c.ggml_tensor {
     const hp = b.hparams;
 
     const inp_target = std.heap.c_allocator.create(llama.graph.InpEmbd) catch oom();
     inp_target.* = .{ .n_embd = hp.nEmbdInpEnc() };
-    inp_target.embd = llama.impl.c.ggml_new_tensor_2d(b.ctx0, llama.impl.c.GGML_TYPE_F32, hp.nEmbdInpEnc(), b.n_tokens);
-    llama.impl.c.ggml_set_input(inp_target.embd);
+    inp_target.embd = llama.impl.llama_c.ggml_new_tensor_2d(b.ctx0, llama.impl.llama_c.GGML_TYPE_F32, hp.nEmbdInpEnc(), b.n_tokens);
+    llama.impl.llama_c.ggml_set_input(inp_target.embd);
 
     const cur = inp_target.embd.?;
     b.cb(cur, "inp_embd", -1);
@@ -192,10 +192,10 @@ fn buildGraphEnc(model: *const llama.model.Model, b: *const llama.graph.Builder)
 
     // The g_embeddings go to t_h_nextn, as MTP's do, so they can be read
     // through llama_get_embeddings_nextn(ctx_dft).
-    llama.impl.c.ggml_set_output(cur);
+    llama.impl.llama_c.ggml_set_output(cur);
     b.res.t_h_nextn = cur;
 
-    llama.impl.c.ggml_build_forward_expand(b.gf, cur);
+    llama.impl.llama_c.ggml_build_forward_expand(b.gf, cur);
 }
 
 /// Ports the constructor of `llama_model_eagle3`'s `graph<false>`
@@ -225,13 +225,13 @@ fn buildGraphDec(model: *const llama.model.Model, b: *const llama.graph.Builder)
     const inp = std.heap.c_allocator.create(llama.graph.InpEmbd) catch oom();
     inp.* = .{ .n_embd = b.n_embd };
 
-    inp.tokens = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_I32, b.n_tokens);
-    llama.impl.c.ggml_set_input(inp.tokens);
+    inp.tokens = llama.impl.llama_c.ggml_new_tensor_1d(ctx, llama.impl.llama_c.GGML_TYPE_I32, b.n_tokens);
+    llama.impl.llama_c.ggml_set_input(inp.tokens);
 
-    inp.embd = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_F32, b.n_embd, b.n_tokens);
-    llama.impl.c.ggml_set_input(inp.embd);
+    inp.embd = llama.impl.llama_c.ggml_new_tensor_2d(ctx, llama.impl.llama_c.GGML_TYPE_F32, b.n_embd, b.n_tokens);
+    llama.impl.llama_c.ggml_set_input(inp.embd);
 
-    const inp_embd: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_get_rows(ctx, tok_embd, inp.tokens);
+    const inp_embd: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_get_rows(ctx, tok_embd, inp.tokens);
     b.cb(inp_embd, "inp_embd", -1);
 
     const inp_g = inp.embd.?;
@@ -269,7 +269,7 @@ fn buildGraphDec(model: *const llama.model.Model, b: *const llama.graph.Builder)
 
         // The normed inp_embd and inp_g, concatenated. Upstream passes the
         // layer index as the dimension, which is 0 here.
-        var cur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_concat(ctx, embd_norm, g_norm, il);
+        var cur: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_concat(ctx, embd_norm, g_norm, il);
         b.cb(cur, "concat_embd", il);
 
         // Self-attention over the concatenated input.
@@ -282,9 +282,9 @@ fn buildGraphDec(model: *const llama.model.Model, b: *const llama.graph.Builder)
         var Vcur = b.buildLoraMm(layer.wv.?, cur, null);
         b.cb(Vcur, "Vcur", il);
 
-        Qcur = llama.impl.c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
-        Kcur = llama.impl.c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, b.n_tokens);
-        Vcur = llama.impl.c.ggml_reshape_3d(ctx, Vcur, n_embd_head, b.n_head_kv, b.n_tokens);
+        Qcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
+        Kcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, b.n_tokens);
+        Vcur = llama.impl.llama_c.ggml_reshape_3d(ctx, Vcur, n_embd_head, b.n_head_kv, b.n_tokens);
 
         Qcur = b.buildRope(Qcur, inp_pos, il);
         Kcur = b.buildRope(Kcur, inp_pos, il);
@@ -295,7 +295,7 @@ fn buildGraphDec(model: *const llama.model.Model, b: *const llama.graph.Builder)
         cur = b.buildAttn(inp_attn, layer.wo, null, null, Qcur, Kcur, Vcur, null, null, null, kq_scale, il);
 
         // The residual, updated.
-        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The FFN norm on the sum.
@@ -306,7 +306,7 @@ fn buildGraphDec(model: *const llama.model.Model, b: *const llama.graph.Builder)
         b.cb(cur, "ffn_out", il);
 
         // The output, with the residual.
-        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_inp);
         b.cb(cur, "eagle3_prenorm", il);
 
         inpL = cur;
@@ -316,7 +316,7 @@ fn buildGraphDec(model: *const llama.model.Model, b: *const llama.graph.Builder)
 
     // The pre-norm state, the next token's g_embeddings in autoregressive
     // generation.
-    llama.impl.c.ggml_set_output(cur);
+    llama.impl.llama_c.ggml_set_output(cur);
     b.res.t_h_nextn = cur;
 
     cur = b.buildNorm(cur, model.output_norm, null, .rms, -1);
@@ -339,12 +339,12 @@ fn buildGraphDec(model: *const llama.model.Model, b: *const llama.graph.Builder)
         const n_outputs = cur.ne[1];
         const n_vocab: i64 = model.vocab.nTokens();
 
-        llama.impl.assert(d2t.type == llama.impl.c.GGML_TYPE_I64, "models/eagle3.cpp", 301, "model.d2t->type == GGML_TYPE_I64");
+        llama.impl.assert(d2t.type == llama.impl.llama_c.GGML_TYPE_I64, "models/eagle3.cpp", 301, "model.d2t->type == GGML_TYPE_I64");
         llama.impl.assert(d2t.ne[0] == n_draft_vocab, "models/eagle3.cpp", 302, "model.d2t->ne[0] == n_draft_vocab");
 
-        const logits: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_fill(ctx, llama.impl.c.ggml_new_tensor_3d(ctx, llama.impl.c.GGML_TYPE_F32, 1, n_vocab, n_outputs), -std.math.inf(f32));
-        cur = llama.impl.c.ggml_set_rows(ctx, logits, llama.impl.c.ggml_reshape_3d(ctx, cur, 1, n_draft_vocab, n_outputs), llama.impl.c.ggml_reshape_3d(ctx, d2t, n_draft_vocab, 1, 1));
-        cur = llama.impl.c.ggml_reshape_2d(ctx, cur, n_vocab, n_outputs);
+        const logits: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_fill(ctx, llama.impl.llama_c.ggml_new_tensor_3d(ctx, llama.impl.llama_c.GGML_TYPE_F32, 1, n_vocab, n_outputs), -std.math.inf(f32));
+        cur = llama.impl.llama_c.ggml_set_rows(ctx, logits, llama.impl.llama_c.ggml_reshape_3d(ctx, cur, 1, n_draft_vocab, n_outputs), llama.impl.llama_c.ggml_reshape_3d(ctx, d2t, n_draft_vocab, 1, 1));
+        cur = llama.impl.llama_c.ggml_reshape_2d(ctx, cur, n_vocab, n_outputs);
     }
 
     b.cb(cur, "result_output", -1);

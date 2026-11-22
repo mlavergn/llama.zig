@@ -44,16 +44,16 @@ fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder)
     const inp = std.heap.c_allocator.create(llama.graph.InpEmbdH) catch llama.impl.abort("models/nemotron-h-moe.cpp", 28, "out of memory");
     inp.* = .{ .n_embd = hp.nEmbdInp(), .n_embd_state = hp.n_embd };
 
-    inp.tokens = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_I32, b.n_tokens);
-    llama.impl.c.ggml_set_input(inp.tokens);
+    inp.tokens = llama.impl.llama_c.ggml_new_tensor_1d(ctx, llama.impl.llama_c.GGML_TYPE_I32, b.n_tokens);
+    llama.impl.llama_c.ggml_set_input(inp.tokens);
 
-    inp.embd = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_F32, hp.nEmbdInp(), b.n_tokens);
-    llama.impl.c.ggml_set_input(inp.embd);
+    inp.embd = llama.impl.llama_c.ggml_new_tensor_2d(ctx, llama.impl.llama_c.GGML_TYPE_F32, hp.nEmbdInp(), b.n_tokens);
+    llama.impl.llama_c.ggml_set_input(inp.embd);
 
-    var tok_embd: *llama.impl.c.ggml_tensor = undefined;
+    var tok_embd: *llama.impl.llama_c.ggml_tensor = undefined;
     b.ubatch.assertEmbdOrToken("models/nemotron-h-moe.cpp", 37);
     if (b.ubatch.token != null) {
-        tok_embd = llama.impl.c.ggml_get_rows(ctx, tok_embd_w, inp.tokens);
+        tok_embd = llama.impl.llama_c.ggml_get_rows(ctx, tok_embd_w, inp.tokens);
     } else {
         tok_embd = inp.embd.?;
     }
@@ -74,7 +74,7 @@ fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder)
     const e_norm = b.buildNorm(tok_embd, layer.nextn.enorm, null, .rms, il);
     b.cb(e_norm, "mtp_enorm", il);
 
-    const concat: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_concat(ctx, e_norm, h_norm, 0);
+    const concat: *llama.impl.llama_c.ggml_tensor = llama.impl.llama_c.ggml_concat(ctx, e_norm, h_norm, 0);
     b.cb(concat, "mtp_concat", il);
 
     var cur = b.buildLoraMm(layer.nextn.eh_proj.?, concat, layer.nextn.eh_proj_s);
@@ -92,13 +92,13 @@ fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder)
         b.cb(cur, "mtp_attn_out", il);
     }
 
-    cur = llama.impl.c.ggml_add(ctx, cur, inpSA);
+    cur = llama.impl.llama_c.ggml_add(ctx, cur, inpSA);
     b.cb(cur, "mtp_attn_residual", il);
 
     // The output rows are gathered here so the MoE FFN below runs only on
     // the positions kept.
     if (b.cropBeforeNextn(inp_out_ids)) {
-        cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+        cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
     }
 
     // The MoE FFN sub-layer (mtp.layers.1).
@@ -114,7 +114,7 @@ fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder)
         b.cb(ffn_shexp, "mtp_ffn_shexp", il);
 
         if (layer.ffn_latent_down) |w| {
-            cur = llama.impl.c.ggml_mul_mat(ctx, w, cur);
+            cur = llama.impl.llama_c.ggml_mul_mat(ctx, w, cur);
         }
 
         var moe_out = b.buildMoeFfn(cur, .{
@@ -138,14 +138,14 @@ fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder)
         b.cb(moe_out, "mtp_ffn_moe_out", il);
 
         if (layer.ffn_latent_up) |w| {
-            moe_out = llama.impl.c.ggml_mul_mat(ctx, w, moe_out);
+            moe_out = llama.impl.llama_c.ggml_mul_mat(ctx, w, moe_out);
         }
 
-        cur = llama.impl.c.ggml_add(ctx, moe_out, ffn_shexp);
+        cur = llama.impl.llama_c.ggml_add(ctx, moe_out, ffn_shexp);
         b.cb(cur, "mtp_ffn_out", il);
     }
 
-    cur = llama.impl.c.ggml_add(ctx, cur, ffn_residual);
+    cur = llama.impl.llama_c.ggml_add(ctx, cur, ffn_residual);
     b.cb(cur, "mtp_post_ffn", il);
 
     // The final head norm: the MTP head has its own LayerNorm.
@@ -156,7 +156,7 @@ fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder)
     b.res.t_h_nextn = cur;
 
     if (b.cropAfterNextn(inp_out_ids)) {
-        cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+        cur = llama.impl.llama_c.ggml_get_rows(ctx, cur, inp_out_ids);
     }
 
     // The LM head.

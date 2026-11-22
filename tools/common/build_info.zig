@@ -10,16 +10,16 @@
 const std = @import("std");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const options = @import("build_info");
+const build_info = @import("build_info");
 
 /// Ports `llama_build_number` (build-info.cpp.in:11 @b1b770d90).
-pub const build_number: c_int = options.build_number;
+pub const build_number: c_int = build_info.build_number;
 /// Ports `llama_commit` (build-info.cpp.in:15 @b1b770d90).
-pub const commit: [:0]const u8 = options.commit ++ "";
+pub const commit: [:0]const u8 = build_info.commit ++ "";
 /// Ports `llama_compiler` (build-info.cpp.in:19 @b1b770d90).
-pub const compiler: [:0]const u8 = options.compiler ++ "";
+pub const compiler: [:0]const u8 = build_info.compiler ++ "";
 /// Ports `llama_build_target` (build-info.cpp.in:23 @b1b770d90).
-pub const build_target: [:0]const u8 = options.build_target ++ "";
+pub const build_target: [:0]const u8 = build_info.build_target ++ "";
 
 /// Ports `llama_print_build_info` (build-info.cpp.in:32 @b1b770d90): two lines
 /// on `stream`, which `build-info.h` defaults to `stderr` -- every caller

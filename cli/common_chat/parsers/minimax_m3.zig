@@ -13,8 +13,6 @@ const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
 
-const Allocator = std.mem.Allocator;
-
 // M3 prefixes every tool tag with the namespace token "]<]minimax[>[";
 // params use the parameter name as the tag (<file_path>...</file_path>).
 const ns = "]<]minimax[>[";
@@ -25,7 +23,7 @@ const fc_end = ns ++ "</tool_call>";
 const invoke_end = ns ++ "</invoke>";
 
 const Build = struct {
-    a: Allocator,
+    a: std.mem.Allocator,
     inputs: *const common_chat.template.GenerationParams,
     gen_prompt: []const u8,
     has_tools: bool,
@@ -205,7 +203,7 @@ const Build = struct {
 /// Ports `common_chat_params_init_minimax_m3` (parsers/minimax-m3.cpp:3 @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
-pub fn init(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
+pub fn init(a: std.mem.Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
     var data: common_chat.params.ChatParams = .{};
 
     data.prompt = try common_chat.template.directApplyImpl(a, tmpl, inputs, null, null, null);
