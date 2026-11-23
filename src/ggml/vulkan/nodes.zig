@@ -74,12 +74,12 @@ fn createOrAbort(ctx: *ggml.vulkan.context.BackendCtx, size: usize) *ggml.vulkan
 fn overlapsUnsynced(node: *const ggml.impl.ggml_c.ggml_tensor, unsynced: []const *const ggml.impl.ggml_c.ggml_tensor) bool {
     if (unsynced.len == 0) return false;
     const n_base = ggml.vulkan.buffer.tensorOffset(node) + node.view_offs;
-    const n_size = ggml.impl.ggml_c.ggml_nbytes(node);
+    const n_size = ggml.types.ggml_nbytes(node);
     const a_buf = ggml.vulkan.buffer.tensorBuffer(node);
     for (unsynced) |other| {
         if (a_buf != ggml.vulkan.buffer.tensorBuffer(other)) continue;
         const o_base = ggml.vulkan.buffer.tensorOffset(other) + other.view_offs;
-        const o_size = ggml.impl.ggml_c.ggml_nbytes(other);
+        const o_size = ggml.types.ggml_nbytes(other);
         if ((o_base <= n_base and n_base < o_base + o_size) or (n_base <= o_base and o_base < n_base + n_size)) return true;
     }
     return false;
@@ -92,7 +92,7 @@ fn overlapsUnsynced(node: *const ggml.impl.ggml_c.ggml_tensor, unsynced: []const
 /// Return: whether the node enqueued work.
 pub fn buildGraph(ctx: *ggml.vulkan.context.BackendCtx, cgraph: *ggml.impl.CGraph, node_idx: c_int, node_idx_begin: c_int, last_node: bool, almost_ready: bool, submit: bool) bool {
     const node = nodeAt(cgraph, node_idx);
-    if (ggml.impl.ggml_c.ggml_is_empty(node) or ggml.impl.opIsEmpty(node.op) or node.buffer == null) return false;
+    if (ggml.types.ggml_is_empty(node) or ggml.impl.opIsEmpty(node.op) or node.buffer == null) return false;
     if ((node.flags & ggml.impl.ggml_c.GGML_TENSOR_FLAG_COMPUTE) == 0) return false;
 
     ctx.semaphore_idx = 0;
@@ -107,7 +107,7 @@ pub fn buildGraph(ctx: *ggml.vulkan.context.BackendCtx, cgraph: *ggml.impl.CGrap
         if (next_node_idx < cgraph.n_nodes and
             nodeAt(cgraph, next_node_idx).op == ggml.impl.ggml_c.GGML_OP_RMS_NORM and
             nodeAt(cgraph, next_node_idx).src[0] == nodeAt(cgraph, next_node_idx - 1) and
-            ggml.impl.ggml_c.ggml_nrows(nodeAt(cgraph, next_node_idx)) == 1 and
+            ggml.types.ggml_nrows(nodeAt(cgraph, next_node_idx)) == 1 and
             ctx.device.add_rms_fusion and !ctx.device.disable_fusion)
         {
             const size = ggml.vulkan.ops.rmsPartialsSize(ctx, nodeAt(cgraph, node_idx));
@@ -195,9 +195,9 @@ fn syncLogNodes(ctx: *ggml.vulkan.context.BackendCtx, cgraph: *const ggml.impl.C
     var i: c_int = 0;
     while (i < ctx.num_additional_fused_ops + 1) : (i += 1) {
         const n = nodeAt(cgraph, node_idx + i);
-        ggml.impl.fprintfStderr("%d %s %s", .{ node_idx + i, ggml.impl.ggml_c.ggml_op_name(n.op), @as([*:0]const u8, @ptrCast(&n.name)) });
+        ggml.impl.fprintfStderr("%d %s %s", .{ node_idx + i, ggml.types.ggml_op_name(n.op), @as([*:0]const u8, @ptrCast(&n.name)) });
         if (n.op == ggml.impl.ggml_c.GGML_OP_GLU) {
-            ggml.impl.fprintfStderr(" %s %s ", .{ ggml.impl.ggml_c.ggml_glu_op_name(ggml.impl.ggml_c.ggml_get_glu_op(n)), @as([*:0]const u8, if (n.src[1] != null) "split" else "single") });
+            ggml.impl.fprintfStderr(" %s %s ", .{ ggml.types.ggml_glu_op_name(ggml.types.ggml_get_glu_op(n)), @as([*:0]const u8, if (n.src[1] != null) "split" else "single") });
         }
         if (n.op == ggml.impl.ggml_c.GGML_OP_ROPE) ggml.impl.fprintfStderr(" rope mode: %d", .{n.op_params[2]});
         ggml.impl.fprintfStderr("\n", .{});

@@ -269,12 +269,12 @@ fn gatedDeltaNetOneChunk(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.
     const n_tokens = src_v.ne[2];
     const n_seqs = src_v.ne[3];
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(src_q), "ggml_is_contiguous_rows(src_q)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(src_k), "ggml_is_contiguous_rows(src_k)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(src_v), "ggml_is_contiguous_rows(src_v)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src_g), "ggml_is_contiguous(src_g)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src_beta), "ggml_is_contiguous(src_beta)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src_state), "ggml_is_contiguous(src_state)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(src_q), "ggml_is_contiguous_rows(src_q)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(src_k), "ggml_is_contiguous_rows(src_k)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(src_v), "ggml_is_contiguous_rows(src_v)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src_g), "ggml_is_contiguous(src_g)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src_beta), "ggml_is_contiguous(src_beta)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src_state), "ggml_is_contiguous(src_state)");
 
     ggml.impl.assert(src_g.ne[0] == 1 or src_g.ne[0] == S_v, "src_g->ne[0] == 1 || src_g->ne[0] == S_v");
     ggml.impl.assert(src_beta.ne[0] == 1, "src_beta->ne[0] == 1");

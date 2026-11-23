@@ -29,7 +29,7 @@ const nwarps = 4;
 /// Ports `mmq_few_unit_size_of` (mmq-few.cu:22 @b1b770d90): `src0` bytes
 /// per 256 values, `QK_K/qk*bs`.
 fn unitSizeOf(ty: ggml.impl.ggml_c.enum_ggml_type) c_int {
-    return @intCast(@divTrunc(@as(i64, ggml.impl.ggml_c.QK_K), ggml.impl.ggml_c.ggml_blck_size(ty)) * @as(i64, @intCast(ggml.impl.ggml_c.ggml_type_size(ty))));
+    return @intCast(@divTrunc(@as(i64, ggml.impl.ggml_c.QK_K), ggml.types.ggml_blck_size(ty)) * @as(i64, @intCast(ggml.types.ggml_type_size(ty))));
 }
 
 /// Ports `mmq_few_unit_size` (mmq-few.cu:27 @b1b770d90): `src0` bytes per
@@ -104,7 +104,7 @@ fn tallSupported(ty: ggml.impl.ggml_c.enum_ggml_type) bool {
 /// static `ggml_is_constant` on the tensor a view points to.
 fn isConstant(src0: *const ggml.impl.ggml_c.ggml_tensor) bool {
     const x_root: *const ggml.impl.ggml_c.ggml_tensor = if (src0.view_src) |v| v else src0;
-    return x_root.buffer != null and ggml.impl.ggml_c.ggml_backend_buffer_get_usage(x_root.buffer) == ggml.impl.ggml_c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS and
+    return x_root.buffer != null and ggml.backend.ggml_backend_buffer_get_usage(x_root.buffer) == ggml.impl.ggml_c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS and
         (x_root.flags & ggml.impl.ggml_c.GGML_TENSOR_FLAG_PARAM) == 0;
 }
 
@@ -199,7 +199,7 @@ pub fn mulMatQFew(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.
 
     ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
     ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F32");
-    ggml.impl.assert(src0.nb[0] == ggml.impl.ggml_c.ggml_type_size(src0.type), "nb00 == ggml_type_size(src0->type)");
+    ggml.impl.assert(src0.nb[0] == ggml.types.ggml_type_size(src0.type), "nb00 == ggml_type_size(src0->type)");
     ggml.impl.assert(src1.nb[0] == @sizeOf(f32), "nb10 == sizeof(float)");
     ggml.impl.assert(dst.nb[0] == @sizeOf(f32), "nb0  == sizeof(float)");
     ggml.impl.assert(ne11 <= max_ncg * ggml.cuda.quantize.mmq_few_ncols, "ne11 <= MMQ_FEW_MAX_NCG*MMQ_FEW_NCOLS");
@@ -266,6 +266,6 @@ pub fn shouldUseMmqFew(src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const g
     const nunits_stage = nunitsStage(src0.type, ncg, nmt);
     if (@rem(src0.ne[0], @as(i64, nunits_stage) * ggml.impl.ggml_c.QK_K) != 0) return false;
     // unaligned data needs the alignment of the decoder loads
-    const x_alignment: usize = if (unaligned(src0.type, nunits_stage)) (if (ggml.impl.ggml_c.ggml_type_size(src0.type) % 4 == 0) 4 else 2) else 16;
+    const x_alignment: usize = if (unaligned(src0.type, nunits_stage)) (if (ggml.types.ggml_type_size(src0.type) % 4 == 0) 4 else 2) else 16;
     return ggml.cuda.common.isAligned(src0, x_alignment) and ggml.cuda.common.isAligned(src1, 16);
 }

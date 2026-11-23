@@ -577,7 +577,7 @@ fn useMoreBits(i_layer: c_int, n_layers: c_int) bool {
 fn layerInfo(n_expert: c_int, i_layer_in: c_int, n_layer: c_int, name: [:0]const u8, exc: *mod.impl.Exception) mod.impl.Thrown![2]c_int {
     var i_layer = i_layer_in;
     if (n_expert > 1) {
-        if (mod.impl.llama_c.sscanf(name.ptr, "blk.%d.", &i_layer) != 1) {
+        if (stdlib.libc.sscanf(name.ptr, "blk.%d.", &i_layer) != 1) {
             return exc.throw(.runtime_error, "Failed to determine layer for tensor {s}", .{name});
         }
         if (i_layer < 0 or i_layer >= n_layer) {
@@ -1111,10 +1111,10 @@ fn initCounters(qs: *State, names: []const []const u8, categories: []Category) v
 
 /// Ports `llama_format_tensor_shape` for a tensor (llama-impl.cpp:142 @b1b770d90).
 fn formatTensorShape(t: *const mod.impl.llama_c.ggml_tensor, buf: *[256]u8) [*:0]const u8 {
-    var len: usize = @intCast(mod.impl.llama_c.snprintf(buf, buf.len, "%6lld", @as(c_longlong, t.ne[0])));
+    var len: usize = @intCast(stdlib.libc.snprintf(buf, buf.len, "%6lld", @as(c_longlong, t.ne[0])));
     var i: usize = 1;
     while (i < mod.impl.llama_c.GGML_MAX_DIMS) : (i += 1) {
-        len += @intCast(mod.impl.llama_c.snprintf(buf[len..].ptr, buf.len - len, ", %6lld", @as(c_longlong, t.ne[i])));
+        len += @intCast(stdlib.libc.snprintf(buf[len..].ptr, buf.len - len, ", %6lld", @as(c_longlong, t.ne[i])));
     }
     return @ptrCast(buf);
 }
@@ -1126,10 +1126,10 @@ fn formatTensorShape(t: *const mod.impl.llama_c.ggml_tensor, buf: *[256]u8) [*:0
 /// `exceptions(failbit)` set: a file that cannot be opened throws libc++'s
 /// `ios_base::failure` the moment the mask is set.
 const OutFile = struct {
-    fp: ?*mod.impl.llama_c.FILE = null,
+    fp: ?*anyopaque = null,
 
     fn open(path: [*:0]const u8, exc: *mod.impl.Exception) mod.impl.Thrown!OutFile {
-        const fp = mod.impl.llama_c.fopen(path, "wb") orelse
+        const fp = stdlib.libc.fopen(path, "wb") orelse
             return exc.throw(.runtime_error, "ios_base::clear: unspecified iostream_category error", .{});
         return .{ .fp = fp };
     }
@@ -1139,7 +1139,7 @@ const OutFile = struct {
     }
 
     fn write(self: *OutFile, data: [*]const u8, n: usize) void {
-        if (n != 0) _ = mod.impl.llama_c.fwrite(data, 1, n, self.fp);
+        if (n != 0) _ = stdlib.libc.fwrite(data, 1, n, self.fp);
     }
 
     /// Ports `zeros` (llama-quant.cpp:46 @b1b770d90).
@@ -1154,11 +1154,11 @@ const OutFile = struct {
     }
 
     fn seekStart(self: *OutFile) void {
-        _ = mod.impl.llama_c.fseek(self.fp, 0, mod.impl.llama_c.SEEK_SET);
+        _ = stdlib.libc.fseek(self.fp, 0, std.c.SEEK.SET);
     }
 
     fn close(self: *OutFile) void {
-        if (self.fp) |fp| _ = mod.impl.llama_c.fclose(fp);
+        if (self.fp) |fp| _ = stdlib.libc.fclose(fp);
         self.fp = null;
     }
 };
@@ -1247,7 +1247,7 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
             for (kv.value.*) |f| {
                 if (!std.math.isFinite(f)) {
                     var buf: [64]u8 = undefined;
-                    _ = mod.impl.llama_c.snprintf(&buf, buf.len, "%f", @as(f64, f));
+                    _ = stdlib.libc.snprintf(&buf, buf.len, "%f", @as(f64, f));
                     return exc.throw(.runtime_error, "imatrix contains non-finite value {s}\n", .{std.mem.sliceTo(&buf, 0)});
                 }
             }
@@ -1559,7 +1559,7 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
             }
 
             mod.impl.logInfo("converting to %s .. ", .{typeName(new_type)});
-            _ = mod.impl.llama_c.fflush(mod.impl.cStdout());
+            _ = stdlib.libc.fflush(mod.impl.cStdout());
             // and what a tool wrote through `stdlib.stdio`
             @import("stdlib").stdio.stdout().flush();
 

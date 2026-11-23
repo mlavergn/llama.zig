@@ -46,14 +46,14 @@ pub fn opAcc(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor)
     ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
     ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F32");
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src1), "ggml_is_contiguous(src1)");
-    ggml.impl.assert(dst.nb[0] == ggml.impl.ggml_c.ggml_element_size(dst), "dst->nb[0] == ggml_element_size(dst)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguously_allocated(dst), "ggml_is_contiguously_allocated(dst)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src1), "ggml_is_contiguous(src1)");
+    ggml.impl.assert(dst.nb[0] == ggml.types.ggml_element_size(dst), "dst->nb[0] == ggml_element_size(dst)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguously_allocated(dst), "ggml_is_contiguously_allocated(dst)");
 
     const s1 = floats(dst.op_params[0]);
     const s2 = floats(dst.op_params[1]);
     const s3 = floats(dst.op_params[2]);
     const off = floats(dst.op_params[3]);
 
-    accF32Cuda(src0_d, src1_d, dst_d, ggml.impl.ggml_c.ggml_nelements(dst), src1.ne[0], src1.ne[1], src1.ne[2], src1.ne[3], s1, s2, s3, off, stream);
+    accF32Cuda(src0_d, src1_d, dst_d, ggml.types.ggml_nelements(dst), src1.ne[0], src1.ne[1], src1.ne[2], src1.ne[3], s1, s2, s3, off, stream);
 }

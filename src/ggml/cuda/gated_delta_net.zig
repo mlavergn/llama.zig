@@ -187,14 +187,14 @@ fn opGatedDeltaNetImpl(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.gg
     const s_d: ?*const anyopaque = src_state.data;
     const dst_d: [*]f32 = @ptrCast(@alignCast(dst.data));
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(src_q), "ggml_is_contiguous_rows(src_q)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(src_k), "ggml_is_contiguous_rows(src_k)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(src_v), "ggml_is_contiguous_rows(src_v)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_stride(src_q, src_k), "ggml_are_same_stride(src_q, src_k)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(src_q), "ggml_is_contiguous_rows(src_q)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(src_k), "ggml_is_contiguous_rows(src_k)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(src_v), "ggml_is_contiguous_rows(src_v)");
+    ggml.impl.assert(ggml.types.ggml_are_same_stride(src_q, src_k), "ggml_are_same_stride(src_q, src_k)");
     ggml.impl.assert(src_g.ne[0] == 1 or kda, "src_g->ne[0] == 1 || kda");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src_g), "ggml_is_contiguous(src_g)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src_beta), "ggml_is_contiguous(src_beta)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src_state), "ggml_is_contiguous(src_state)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src_g), "ggml_is_contiguous(src_g)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src_beta), "ggml_is_contiguous(src_beta)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src_state), "ggml_is_contiguous(src_state)");
 
     // strides in floats (beta strides used for both g and beta offset computation)
     const sq1: i64 = @intCast(nbq1 / @sizeOf(f32));

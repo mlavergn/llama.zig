@@ -33,9 +33,9 @@ fn addQF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.gg
     const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
     const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, src1) and ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, src1) && ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src0, src1) and ggml.types.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, src1) && ggml_are_same_shape(src0, dst)");
 
-    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src0));
+    const nr: i64 = @intCast(ggml.types.ggml_nrows(src0));
 
     const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
@@ -44,11 +44,11 @@ fn addQF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.gg
 
     const @"type" = src0.type;
     const dtype = dst.type;
-    const dequantize_row_q = ggml.impl.ggml_c.ggml_get_type_traits(@"type").*.to_float.?;
-    const quantize_row_q = ggml.impl.ggml_c.ggml_get_type_traits_cpu(dtype).*.from_float;
+    const dequantize_row_q = ggml.types.ggml_get_type_traits(@"type").*.to_float.?;
+    const quantize_row_q = ggml.cpu.traits.ggml_get_type_traits_cpu(dtype).*.from_float;
 
     // we don't support permuted src0 or src1
-    ggml.impl.assert(l.nb00 == ggml.impl.ggml_c.ggml_type_size(@"type"), "nb00 == ggml_type_size(type)");
+    ggml.impl.assert(l.nb00 == ggml.types.ggml_type_size(@"type"), "nb00 == ggml_type_size(type)");
     ggml.impl.assert(l.nb10 == @sizeOf(f32), "nb10 == sizeof(float)");
 
     // dst cannot be transposed or permuted
@@ -56,9 +56,9 @@ fn addQF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.gg
     ggml.impl.assert(l.nb1 <= l.nb2, "nb1 <= nb2");
     ggml.impl.assert(l.nb2 <= l.nb3, "nb2 <= nb3");
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_quantized(src0.type) or src0.type == ggml.impl.ggml_c.GGML_TYPE_F8_E4M3, "ggml_is_quantized(src0->type) || src0->type == GGML_TYPE_F8_E4M3");
+    ggml.impl.assert(ggml.types.ggml_is_quantized(src0.type) or src0.type == ggml.impl.ggml_c.GGML_TYPE_F8_E4M3, "ggml_is_quantized(src0->type) || src0->type == GGML_TYPE_F8_E4M3");
     ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
-    ggml.impl.assert(@rem(l.ne00, ggml.impl.ggml_c.ggml_blck_size(@"type")) == 0, "ne00 % ggml_blck_size(type) == 0");
+    ggml.impl.assert(@rem(l.ne00, ggml.types.ggml_blck_size(@"type")) == 0, "ne00 % ggml_blck_size(type) == 0");
 
     const dr = @divTrunc(nr + nth - 1, nth);
     const ir0 = dr * ith;
@@ -159,7 +159,7 @@ fn addIdF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.g
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src0));
+    const nr: i64 = @intCast(ggml.types.ggml_nrows(src0));
 
     const l = ggml.cpu.defs.TernaryLocals.of(src0, src1, src2, dst);
 
@@ -220,13 +220,13 @@ fn add1F32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.gg
     const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
     const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_scalar(src1), "ggml_is_scalar(src1)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.types.ggml_is_scalar(src1), "ggml_is_scalar(src1)");
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src0));
+    const nr: i64 = @intCast(ggml.types.ggml_nrows(src0));
 
     const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
@@ -272,8 +272,8 @@ fn add1Narrow(comptime T: type, comptime scalar_is_f32: bool, params: *const ggm
     const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
     const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_scalar(src1), "ggml_is_scalar(src1)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.types.ggml_is_scalar(src1), "ggml_is_scalar(src1)");
 
     // scalar to add
     const v: f32 = if (scalar_is_f32)
@@ -284,7 +284,7 @@ fn add1Narrow(comptime T: type, comptime scalar_is_f32: bool, params: *const ggm
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src0));
+    const nr: i64 = @intCast(ggml.types.ggml_nrows(src0));
 
     const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
@@ -320,8 +320,8 @@ fn add1QF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.g
     const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
     const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_scalar(src1), "ggml_is_scalar(src1)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.types.ggml_is_scalar(src1), "ggml_is_scalar(src1)");
 
     // scalar to add
     const v = @as(*const f32, @ptrCast(@alignCast(src1.data.?))).*;
@@ -329,23 +329,23 @@ fn add1QF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.g
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src0));
+    const nr: i64 = @intCast(ggml.types.ggml_nrows(src0));
 
     const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
     const @"type" = src0.type;
-    const dequantize_row_q = ggml.impl.ggml_c.ggml_get_type_traits(@"type").*.to_float.?;
-    const quantize_row_q = ggml.impl.ggml_c.ggml_get_type_traits_cpu(@"type").*.from_float.?;
+    const dequantize_row_q = ggml.types.ggml_get_type_traits(@"type").*.to_float.?;
+    const quantize_row_q = ggml.cpu.traits.ggml_get_type_traits_cpu(@"type").*.from_float.?;
 
     // we don't support permuted src0
-    ggml.impl.assert(l.nb00 == ggml.impl.ggml_c.ggml_type_size(@"type"), "nb00 == ggml_type_size(type)");
+    ggml.impl.assert(l.nb00 == ggml.types.ggml_type_size(@"type"), "nb00 == ggml_type_size(type)");
 
     // dst cannot be transposed or permuted
     ggml.impl.assert(l.nb0 <= l.nb1, "nb0 <= nb1");
     ggml.impl.assert(l.nb1 <= l.nb2, "nb1 <= nb2");
     ggml.impl.assert(l.nb2 <= l.nb3, "nb2 <= nb3");
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_quantized(src0.type) or src0.type == ggml.impl.ggml_c.GGML_TYPE_F8_E4M3, "ggml_is_quantized(src0->type) || src0->type == GGML_TYPE_F8_E4M3");
+    ggml.impl.assert(ggml.types.ggml_is_quantized(src0.type) or src0.type == ggml.impl.ggml_c.GGML_TYPE_F8_E4M3, "ggml_is_quantized(src0->type) || src0->type == GGML_TYPE_F8_E4M3");
     ggml.impl.assert(dst.type == src0.type, "dst->type == src0->type");
     ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
 
@@ -445,8 +445,8 @@ fn accF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggm
     const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
     const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst) and ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(dst) && ggml_is_contiguous(src0)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(dst) and ggml.types.ggml_is_contiguous(src0), "ggml_is_contiguous(dst) && ggml_is_contiguous(src0)");
 
     // view src0 and dst with these strides and data offset in bytes during acc
     // nb0 is implicitly element_size because src0 and dst are contiguous
@@ -461,7 +461,7 @@ fn accF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggm
         if (params.ith == 0) {
             // memcpy needs to be synchronized across threads to avoid race
             // conditions. => do it in INIT phase
-            const n = ggml.impl.ggml_c.ggml_nbytes(dst);
+            const n = ggml.types.ggml_nbytes(dst);
             const d: [*]u8 = @ptrCast(dst.data.?);
             const s: [*]const u8 = @ptrCast(src0.data.?);
             @memcpy(d[0..n], s[0..n]);
@@ -472,7 +472,7 @@ fn accF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggm
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src1));
+    const nr: i64 = @intCast(ggml.types.ggml_nrows(src1));
     const nc = src1.ne[0];
 
     const ne10 = src1.ne[0];
@@ -485,7 +485,7 @@ fn accF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggm
     const nb13 = src1.nb[3];
 
     // src0 and dst as viewed during acc
-    const nb0: usize = ggml.impl.ggml_c.ggml_element_size(src0);
+    const nb0: usize = ggml.types.ggml_element_size(src0);
 
     const nb00 = nb0;
     const nb01 = nb1;
@@ -493,9 +493,9 @@ fn accF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggm
     const nb03 = nb3;
 
     ggml.impl.assert(offset + @as(usize, @intCast(if (ne10 == 0) 0 else ne10 - 1)) * nb0 + @as(usize, @intCast(if (ne11 == 0) 0 else ne11 - 1)) * nb1 +
-        @as(usize, @intCast(if (ne12 == 0) 0 else ne12 - 1)) * nb2 + @as(usize, @intCast(if (ne13 == 0) 0 else ne13 - 1)) * nb3 < ggml.impl.ggml_c.ggml_nbytes(dst), "acc fits in dst");
+        @as(usize, @intCast(if (ne12 == 0) 0 else ne12 - 1)) * nb2 + @as(usize, @intCast(if (ne13 == 0) 0 else ne13 - 1)) * nb3 < ggml.types.ggml_nbytes(dst), "acc fits in dst");
     ggml.impl.assert(offset + @as(usize, @intCast(if (ne10 == 0) 0 else ne10 - 1)) * nb00 + @as(usize, @intCast(if (ne11 == 0) 0 else ne11 - 1)) * nb01 +
-        @as(usize, @intCast(if (ne12 == 0) 0 else ne12 - 1)) * nb02 + @as(usize, @intCast(if (ne13 == 0) 0 else ne13 - 1)) * nb03 < ggml.impl.ggml_c.ggml_nbytes(src0), "acc fits in src0");
+        @as(usize, @intCast(if (ne12 == 0) 0 else ne12 - 1)) * nb02 + @as(usize, @intCast(if (ne13 == 0) 0 else ne13 - 1)) * nb03 < ggml.types.ggml_nbytes(src0), "acc fits in src0");
 
     ggml.impl.assert(nb10 == @sizeOf(f32), "nb10 == sizeof(float)");
 

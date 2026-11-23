@@ -121,7 +121,7 @@ fn appendPrint(out: *std.ArrayList(u8), comptime fmt: []const u8, args: anytype)
 /// digits only libc can promise, `%f` above all.
 fn appendC(out: *std.ArrayList(u8), comptime fmt: [:0]const u8, args: anytype) void {
     var buf: [512]u8 = undefined;
-    const n = @call(.auto, mod.impl.llama_c.snprintf, .{ &buf, buf.len, fmt.ptr } ++ args);
+    const n = @call(.auto, stdlib.libc.snprintf, .{ &buf, buf.len, fmt.ptr } ++ args);
     out.appendSlice(std.heap.c_allocator, buf[0..@min(@as(usize, @intCast(n)), buf.len - 1)]) catch oom();
 }
 
@@ -227,7 +227,7 @@ pub const Weight = struct {
 
 fn blockOf(name: [*c]const u8) c_int {
     var layer: c_int = -1;
-    _ = mod.impl.llama_c.sscanf(name, "blk.%d.", &layer);
+    _ = stdlib.libc.sscanf(name, "blk.%d.", &layer);
     return layer;
 }
 
@@ -689,7 +689,7 @@ pub const Loader = struct {
                     n_skipped += 1;
                     continue;
                 }
-                _ = mod.impl.llama_c.fclose(f);
+                _ = stdlib.libc.fclose(f);
             }
             var ctx: ?*mod.impl.llama_c.ggml_context = null;
             const split_gguf = mod.impl.llama_c.gguf_init_from_file(fname_split.ptr, .{ .no_alloc = true, .ctx = &ctx }) orelse
@@ -853,7 +853,7 @@ pub const Loader = struct {
             const ty = mod.impl.llama_c.gguf_get_kv_type(ctx, i);
             var type_name: [128]u8 = undefined;
             const tn: [*:0]const u8 = if (ty == mod.impl.llama_c.GGUF_TYPE_ARRAY) blk: {
-                _ = mod.impl.llama_c.snprintf(&type_name, type_name.len, "%s[%s,%zu]", mod.impl.llama_c.gguf_type_name(ty), mod.impl.llama_c.gguf_type_name(mod.impl.llama_c.gguf_get_arr_type(ctx, i)), mod.impl.llama_c.gguf_get_arr_n(ctx, i));
+                _ = stdlib.libc.snprintf(&type_name, type_name.len, "%s[%s,%zu]", mod.impl.llama_c.gguf_type_name(ty), mod.impl.llama_c.gguf_type_name(mod.impl.llama_c.gguf_get_arr_type(ctx, i)), mod.impl.llama_c.gguf_get_arr_n(ctx, i));
                 break :blk @ptrCast(&type_name);
             } else mod.impl.llama_c.gguf_type_name(ty);
 
@@ -1418,7 +1418,7 @@ pub const Loader = struct {
             mod.impl.assert(buf != null, "llama-model-loader.cpp", 1633, "buf != nullptr");
             mod.impl.assert(w.idx < self.files.items.len, "llama-model-loader.cpp", 1634, "w.idx < files.size()");
             const file = &self.files.items[w.idx];
-            try file.seek(w.offs + offs, mod.impl.llama_c.SEEK_SET, exc);
+            try file.seek(w.offs + offs, std.c.SEEK.SET, exc);
             try file.readRaw(buf.?, size, exc);
         }
 
@@ -1558,7 +1558,7 @@ pub const Loader = struct {
             } else {
                 const file = &self.files.items[weight.idx];
                 if (mod.impl.llama_c.ggml_backend_buffer_is_host(cur.buffer)) {
-                    try file.seek(weight.offs, mod.impl.llama_c.SEEK_SET, exc);
+                    try file.seek(weight.offs, std.c.SEEK.SET, exc);
                     try file.readRaw(cur.data.?, n_size, exc);
                     if (self.check_tensors) validation.append(std.heap.c_allocator, .{ .tensor = cur, .data = @ptrCast(cur.data.?), .size = n_size }) catch oom();
                 } else if (upload_backend != null) {
@@ -1568,7 +1568,7 @@ pub const Loader = struct {
                     alignment = file.readAlignment();
                     const aligned_offset = offset & ~(alignment - 1);
                     const offset_from_alignment = offset - aligned_offset;
-                    try file.seek(aligned_offset, mod.impl.llama_c.SEEK_SET, exc);
+                    try file.seek(aligned_offset, std.c.SEEK.SET, exc);
 
                     const read_start = aligned_offset;
                     const read_end = (offset + n_size + alignment - 1) & ~(alignment - 1);
@@ -1620,7 +1620,7 @@ pub const Loader = struct {
                         read_buf = std.heap.c_allocator.alloc(u8, buf_size) catch oom();
                     }
                     const read_dst: [*]u8 = @ptrFromInt((@intFromPtr(read_buf.ptr) + align_ - 1) & ~(align_ - 1)); // GGML_PAD
-                    try file.seek(aligned_offset, mod.impl.llama_c.SEEK_SET, exc);
+                    try file.seek(aligned_offset, std.c.SEEK.SET, exc);
                     try file.readRawUnsafe(read_dst, read_size, exc);
 
                     const data = read_dst + pad;
@@ -1985,9 +1985,9 @@ pub fn selectWeightBuft(hparams: *const mod.hparams.Hparams, tensor: *mod.impl.l
 
 /// Ports `llama_format_tensor_shape` for a shape (llama-impl.cpp:133 @b1b770d90).
 fn formatShape(ne: []const i64, buf: *[256]u8) []const u8 {
-    var len: usize = @intCast(mod.impl.llama_c.snprintf(buf, buf.len, "%6lld", @as(c_longlong, ne[0])));
+    var len: usize = @intCast(stdlib.libc.snprintf(buf, buf.len, "%6lld", @as(c_longlong, ne[0])));
     for (ne[1..]) |n| {
-        len += @intCast(mod.impl.llama_c.snprintf(buf[len..].ptr, buf.len - len, ", %6lld", @as(c_longlong, n)));
+        len += @intCast(stdlib.libc.snprintf(buf[len..].ptr, buf.len - len, ", %6lld", @as(c_longlong, n)));
     }
     return buf[0..len];
 }
@@ -2011,10 +2011,10 @@ fn listSplits(path: [:0]const u8, idx: u16, n_split: u16, out: *std.ArrayList([:
 
 /// Ports `llama_format_tensor_shape` for a tensor (llama-impl.cpp:142 @b1b770d90).
 fn formatTensorShape(t: *const mod.impl.llama_c.ggml_tensor, buf: *[256]u8) [*:0]const u8 {
-    var len: usize = @intCast(mod.impl.llama_c.snprintf(buf, buf.len, "%6lld", @as(c_longlong, t.ne[0])));
+    var len: usize = @intCast(stdlib.libc.snprintf(buf, buf.len, "%6lld", @as(c_longlong, t.ne[0])));
     var i: usize = 1;
     while (i < mod.impl.llama_c.GGML_MAX_DIMS) : (i += 1) {
-        len += @intCast(mod.impl.llama_c.snprintf(buf[len..].ptr, buf.len - len, ", %6lld", @as(c_longlong, t.ne[i])));
+        len += @intCast(stdlib.libc.snprintf(buf[len..].ptr, buf.len - len, ", %6lld", @as(c_longlong, t.ne[i])));
     }
     return @ptrCast(buf);
 }

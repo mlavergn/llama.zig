@@ -114,7 +114,7 @@ pub inline fn fromF32(comptime T: type, v: f32) T {
 pub fn getThreadRange(params: *const ggml.cpu.defs.ComputeParams, src0: *const ggml.impl.ggml_c.ggml_tensor) struct { i64, i64 } {
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
-    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src0));
+    const nr: i64 = @intCast(ggml.types.ggml_nrows(src0));
     const dr = @divTrunc(nr + nth - 1, nth);
     const ir0 = dr * ith;
     return .{ ir0, @min(ir0 + dr, nr) };

@@ -234,7 +234,7 @@ fn switchSrc0Type(comptime D: type, src0_d: ?*const anyopaque, src0_type: ggml.i
         ggml.impl.ggml_c.GGML_TYPE_IQ4_NL => getRowsCudaKq(32, D, "dequantize_iq4_nl", src0_d, src1_d, dst_d, a, stream),
         ggml.impl.ggml_c.GGML_TYPE_IQ4_XS => getRowsCudaKq(32, D, "dequantize_iq4_xs", src0_d, src1_d, dst_d, a, stream),
         ggml.impl.ggml_c.GGML_TYPE_MXFP4 => getRowsCudaKq(32, D, "dequantize_mxfp4", src0_d, src1_d, dst_d, a, stream),
-        else => ggml.impl.ggml_c.ggml_abort(@src().file.ptr, @intCast(@src().line), "%s: unsupported src0 type: %s\n", "ggml_cuda_get_rows_switch_src0_type", ggml.impl.ggml_c.ggml_type_name(src0_type)),
+        else => ggml.impl.ggml_c.ggml_abort(@src().file.ptr, @intCast(@src().line), "%s: unsupported src0 type: %s\n", "ggml_cuda_get_rows_switch_src0_type", ggml.types.ggml_type_name(src0_type)),
     }
 }
 
@@ -287,7 +287,7 @@ pub fn getRowsCuda(
         ggml.impl.ggml_c.GGML_TYPE_I32 => switchSrc0Type(i32, src0_d, src0_type, src1_d, dst_d, a, stream),
         ggml.impl.ggml_c.GGML_TYPE_F16 => switchSrc0Type(ggml.cuda.kernels.half, src0_d, src0_type, src1_d, dst_d, a, stream),
         ggml.impl.ggml_c.GGML_TYPE_BF16 => switchSrc0Type(ggml.cuda.kernels.bf16, src0_d, src0_type, src1_d, dst_d, a, stream),
-        else => ggml.impl.ggml_c.ggml_abort(@src().file.ptr, @intCast(@src().line), "%s: unsupported dst type: %s\n", "get_rows_cuda", ggml.impl.ggml_c.ggml_type_name(dst_type)),
+        else => ggml.impl.ggml_c.ggml_abort(@src().file.ptr, @intCast(@src().line), "%s: unsupported dst type: %s\n", "get_rows_cuda", ggml.types.ggml_type_name(dst_type)),
     }
 }
 
@@ -305,9 +305,9 @@ pub fn opGetRows(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_ten
     ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_I32, "src1->type == GGML_TYPE_I32");
     ggml.impl.assert(src1.ne[3] == 1, "ne13 == 1");
 
-    ggml.impl.assert(src0.nb[0] == ggml.impl.ggml_c.ggml_type_size(src0.type), "src0->nb[0] == ggml_type_size(src0->type)");
-    ggml.impl.assert(src1.nb[0] == ggml.impl.ggml_c.ggml_type_size(src1.type), "src1->nb[0] == ggml_type_size(src1->type)");
-    ggml.impl.assert(dst.nb[0] == ggml.impl.ggml_c.ggml_type_size(dst.type), "dst->nb[0]  == ggml_type_size(dst->type)");
+    ggml.impl.assert(src0.nb[0] == ggml.types.ggml_type_size(src0.type), "src0->nb[0] == ggml_type_size(src0->type)");
+    ggml.impl.assert(src1.nb[0] == ggml.types.ggml_type_size(src1.type), "src1->nb[0] == ggml_type_size(src1->type)");
+    ggml.impl.assert(dst.nb[0] == ggml.types.ggml_type_size(dst.type), "dst->nb[0]  == ggml_type_size(dst->type)");
 
     getRowsCuda(
         src0.data,
@@ -351,9 +351,9 @@ pub fn opGetRowsBack(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml
     ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_I32, "src1->type == GGML_TYPE_I32");
     ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type  == GGML_TYPE_F32");
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src1), "ggml_is_contiguous(src1)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src1), "ggml_is_contiguous(src1)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
 
     ggml.impl.assert(src0.ne[2] * src0.ne[3] == 1, "ne02*ne03 == 1");
     ggml.impl.assert(src1.ne[2] * src1.ne[3] == 1, "ne12*ne13 == 1");

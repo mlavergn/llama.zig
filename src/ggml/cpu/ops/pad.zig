@@ -592,7 +592,7 @@ fn arangeF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.
 
     const steps: i64 = @intFromFloat(@ceil((stop - start) / step));
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_nelements(dst) == steps, "ggml_nelements(dst) == steps");
+    ggml.impl.assert(ggml.types.ggml_nelements(dst) == steps, "ggml_nelements(dst) == steps");
 
     const d: [*]f32 = @ptrCast(@alignCast(dst.data.?));
     var i: i64 = ith;

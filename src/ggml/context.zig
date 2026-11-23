@@ -73,12 +73,12 @@ var is_first_call = true;
 pub fn ggml_init(params: mod.impl.ggml_c.struct_ggml_init_params) callconv(.c) ?*Context {
     // The C guards this with a critical section because the time system needs
     // initialising exactly once, on Windows.
-    mod.impl.ggml_c.ggml_critical_section_start();
+    mod.threading.ggml_critical_section_start();
     if (is_first_call) {
         mod.runtime.ggml_time_init();
         is_first_call = false;
     }
-    mod.impl.ggml_c.ggml_critical_section_end();
+    mod.threading.ggml_critical_section_end();
 
     const ctx: *Context = @ptrCast(@alignCast(std.c.malloc(@sizeOf(Context)) orelse
         mod.impl.abort("fatal error")));

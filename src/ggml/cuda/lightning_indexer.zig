@@ -82,10 +82,10 @@ pub fn opLightningIndexer(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c
     ggml.impl.assert(m.type == ggml.impl.ggml_c.GGML_TYPE_F16, "  m->type == GGML_TYPE_F16");
 
     // input tensor rows must be contiguous
-    ggml.impl.assert(q.nb[0] == ggml.impl.ggml_c.ggml_type_size(q.type), "nbq0 == ggml_type_size(q->type)");
-    ggml.impl.assert(k.nb[0] == ggml.impl.ggml_c.ggml_type_size(k.type), "nbk0 == ggml_type_size(k->type)");
-    ggml.impl.assert(w.nb[0] == ggml.impl.ggml_c.ggml_type_size(w.type), "nbw0 == ggml_type_size(w->type)");
-    ggml.impl.assert(m.nb[0] == ggml.impl.ggml_c.ggml_type_size(m.type), "nbm0 == ggml_type_size(m->type)");
+    ggml.impl.assert(q.nb[0] == ggml.types.ggml_type_size(q.type), "nbq0 == ggml_type_size(q->type)");
+    ggml.impl.assert(k.nb[0] == ggml.types.ggml_type_size(k.type), "nbk0 == ggml_type_size(k->type)");
+    ggml.impl.assert(w.nb[0] == ggml.types.ggml_type_size(w.type), "nbw0 == ggml_type_size(w->type)");
+    ggml.impl.assert(m.nb[0] == ggml.types.ggml_type_size(m.type), "nbm0 == ggml_type_size(m->type)");
 
     // dst cannot be transposed or permuted
     ggml.impl.assert(dst.nb[0] == @sizeOf(f32), "nb0 == sizeof(float)");
@@ -158,7 +158,7 @@ pub fn supported(device: c_int, dst: *const ggml.impl.ggml_c.ggml_tensor) bool {
 
     // alignment checks
     for ([_]*const ggml.impl.ggml_c.ggml_tensor{ q, k }) |t| {
-        if (ggml.impl.ggml_c.ggml_is_quantized(t.type)) continue;
+        if (ggml.types.ggml_is_quantized(t.type)) continue;
         for (1..ggml.impl.ggml_c.GGML_MAX_DIMS) |i| {
             if (t.nb[i] % 16 != 0) return false;
         }

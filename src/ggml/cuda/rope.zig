@@ -181,7 +181,7 @@ fn opRopeImpl(comptime forward: bool, ctx: *ggml.cuda.common.Context, dst: *ggml
         dst_d = sr.data;
         row_indices = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, sr.src[1]).data;
         dst_type = sr.type;
-        set_rows_stride = @truncate(@as(i64, @intCast(sr.nb[1] / ggml.impl.ggml_c.ggml_type_size(sr.type))));
+        set_rows_stride = @truncate(@as(i64, @intCast(sr.nb[1] / ggml.types.ggml_type_size(sr.type))));
     }
     const stream = ctx.stream();
 
@@ -194,14 +194,14 @@ fn opRopeImpl(comptime forward: bool, ctx: *ggml.cuda.common.Context, dst: *ggml
     const ne00 = src0.ne[0]; // head dims
     const ne01 = src0.ne[1]; // num heads
     const ne02 = src0.ne[2]; // num heads
-    const nr = ggml.impl.ggml_c.ggml_nrows(src0);
+    const nr = ggml.types.ggml_nrows(src0);
 
-    const ts0 = ggml.impl.ggml_c.ggml_type_size(src0.type);
+    const ts0 = ggml.types.ggml_type_size(src0.type);
     const s01 = src0.nb[1] / ts0;
     const s02 = src0.nb[2] / ts0;
     const s03 = src0.nb[3] / ts0;
 
-    const tsd = ggml.impl.ggml_c.ggml_type_size(dst.type);
+    const tsd = ggml.types.ggml_type_size(dst.type);
     const s1 = dst.nb[1] / tsd;
     const s2 = dst.nb[2] / tsd;
     const s3 = dst.nb[3] / tsd;
@@ -248,7 +248,7 @@ fn opRopeImpl(comptime forward: bool, ctx: *ggml.cuda.common.Context, dst: *ggml
     }
 
     var corr_dims: CorrDims = undefined;
-    ggml.impl.ggml_c.ggml_rope_yarn_corr_dims(n_dims, n_ctx_orig, freq_base, beta_fast, beta_slow, ggml.impl.ggml_c.ggml_rope_get_truncate(dst), &corr_dims.v);
+    ggml.ops.ggml_rope_yarn_corr_dims(n_dims, n_ctx_orig, freq_base, beta_fast, beta_slow, ggml.ops.ggml_rope_get_truncate(dst), &corr_dims.v);
 
     const a: Args = .{
         .x = src0.data,
@@ -437,7 +437,7 @@ pub fn opRmsNormMulRopeFused(ctx: *ggml.cuda.common.Context, rms_norm: *ggml.imp
         dst_d = sr.data;
         dst_type = sr.type;
         row_indices = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, sr.src[1]).data;
-        set_rows_stride = @truncate(@as(i64, @intCast(sr.nb[1] / ggml.impl.ggml_c.ggml_type_size(sr.type))));
+        set_rows_stride = @truncate(@as(i64, @intCast(sr.nb[1] / ggml.types.ggml_type_size(sr.type))));
     }
 
     const n_dims: c_int = ggml.impl.getOpParamsI32(rope, 1);
@@ -458,21 +458,21 @@ pub fn opRmsNormMulRopeFused(ctx: *ggml.cuda.common.Context, rms_norm: *ggml.imp
     const freq_factors: CPtr = if (rope.src[2] != null) ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, rope.src[2]).data else null;
 
     var corr_dims: CorrDims = undefined;
-    ggml.impl.ggml_c.ggml_rope_yarn_corr_dims(n_dims, n_ctx_orig, freq_base, beta_fast, beta_slow, ggml.impl.ggml_c.ggml_rope_get_truncate(rope), &corr_dims.v);
+    ggml.ops.ggml_rope_yarn_corr_dims(n_dims, n_ctx_orig, freq_base, beta_fast, beta_slow, ggml.ops.ggml_rope_get_truncate(rope), &corr_dims.v);
 
-    const ts0 = ggml.impl.ggml_c.ggml_type_size(x.type);
+    const ts0 = ggml.types.ggml_type_size(x.type);
     ggml.impl.assert(x.nb[0] == ts0, "x->nb[0] == ts0");
     const s01: i64 = @intCast(x.nb[1] / ts0);
     const s02: i64 = @intCast(x.nb[2] / ts0);
     const s03: i64 = @intCast(x.nb[3] / ts0);
 
-    const ts_mul = ggml.impl.ggml_c.ggml_type_size(mul_src.type);
+    const ts_mul = ggml.types.ggml_type_size(mul_src.type);
     ggml.impl.assert(mul_src.nb[0] == ts_mul, "mul_src->nb[0] == ts_mul");
     const mul_s01: i64 = @intCast(mul_src.nb[1] / ts_mul);
     const mul_s02: i64 = @intCast(mul_src.nb[2] / ts_mul);
     const mul_s03: i64 = @intCast(mul_src.nb[3] / ts_mul);
 
-    const ts_dst = ggml.impl.ggml_c.ggml_type_size(rope.type);
+    const ts_dst = ggml.types.ggml_type_size(rope.type);
     const s1: i64 = @intCast(rope.nb[1] / ts_dst);
     const s2: i64 = @intCast(rope.nb[2] / ts_dst);
     const s3: i64 = @intCast(rope.nb[3] / ts_dst);

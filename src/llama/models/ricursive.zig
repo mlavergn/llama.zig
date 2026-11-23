@@ -18,7 +18,7 @@ const stdlib = @import("stdlib");
 /// `snprintf`: `%g` has no `std.fmt` equivalent.
 fn throwC(exc: *llama.impl.Exception, comptime fmt: [:0]const u8, args: anytype) llama.impl.Thrown {
     var buf: [512]u8 = undefined;
-    const n = @call(.auto, llama.impl.llama_c.snprintf, .{ &buf, buf.len, fmt.ptr } ++ args);
+    const n = @call(.auto, stdlib.libc.snprintf, .{ &buf, buf.len, fmt.ptr } ++ args);
     const len: usize = @min(@as(usize, @intCast(n)), buf.len - 1);
     return exc.throw(.runtime_error, "{s}", .{buf[0..len]});
 }

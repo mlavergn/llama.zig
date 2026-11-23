@@ -460,7 +460,7 @@ fn Repacker(
             const dst_base: [*]Dst = @ptrCast(@alignCast(t.data.?));
             const src_base: [*]const Src = @ptrCast(@alignCast(data));
             var dst_tmp: [rows]Src = undefined;
-            const nrow: usize = @intCast(ggml.impl.ggml_c.ggml_nrows(t));
+            const nrow: usize = @intCast(ggml.types.ggml_nrows(t));
             const nblocks: usize = @intCast(@divTrunc(t.ne[0], qk));
 
             ggml.impl.assert(data_size == nrow * nblocks * @sizeOf(Src), "data_size matches the tensor");

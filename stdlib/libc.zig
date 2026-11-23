@@ -48,6 +48,8 @@ pub extern "c" fn ftell(stream: ?*anyopaque) c_long;
 pub extern "c" fn tmpfile() ?*anyopaque;
 pub extern "c" fn fileno(stream: ?*anyopaque) c_int;
 pub extern "c" fn fscanf(stream: ?*anyopaque, format: [*:0]const u8, ...) c_int;
+pub extern "c" fn sscanf(s: [*:0]const u8, format: [*:0]const u8, ...) c_int;
+pub extern "c" fn ferror(stream: ?*anyopaque) c_int;
 pub extern "c" fn getwchar() u32;
 pub extern "c" fn fgets(buf: [*]u8, n: c_int, stream: ?*anyopaque) ?[*]u8;
 pub extern "c" fn getline(line: *?[*]u8, n: *usize, stream: ?*anyopaque) isize;

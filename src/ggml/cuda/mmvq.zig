@@ -118,7 +118,7 @@ pub fn getMmidMaxBatch(ty: ggml.impl.ggml_c.enum_ggml_type, x_in: c_int) c_int {
 
 /// Ports `ggml_cuda_should_use_mmvq` (mmvq.cu:315 @b1b770d90), NVIDIA arms.
 pub fn shouldUseMmvq(ty: ggml.impl.ggml_c.enum_ggml_type, x: c_int, ne11: i64) bool {
-    if (!ggml.impl.ggml_c.ggml_is_quantized(ty)) return false;
+    if (!ggml.types.ggml_is_quantized(ty)) return false;
     // k-quants cost more to decode and mvq redoes that per column, so MMQ
     // wins sooner. Only list quant-types MMQ supports, others would fall back
     // to cuBLAS.
@@ -365,7 +365,7 @@ fn switchNcolsDst(
     ids_stride: c_int,
     stream: ggml.cuda.common.cu.cudaStream_t,
 ) void {
-    ggml.impl.assert(@rem(ncols_x, @as(c_int, @intCast(ggml.impl.ggml_c.ggml_blck_size(ty)))) == 0, "ncols_x % ggml_blck_size(type) == 0");
+    ggml.impl.assert(@rem(ncols_x, @as(c_int, @intCast(ggml.types.ggml_blck_size(ty)))) == 0, "ncols_x % ggml_blck_size(type) == 0");
     ggml.impl.assert(ncols_dst <= max_batch_size, "ncols_dst <= MMVQ_MAX_BATCH_SIZE");
 
     const zero3: ggml.cuda.common.cu.uint3 = .{ .x = 0, .y = 0, .z = 0 };
@@ -539,14 +539,14 @@ pub fn mulMatVecQ(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.
 
     const stream = ctx.stream();
 
-    const ts_src0 = ggml.impl.ggml_c.ggml_type_size(src0.type);
-    const ts_src1 = ggml.impl.ggml_c.ggml_type_size(src1.type);
-    const ts_dst = ggml.impl.ggml_c.ggml_type_size(dst.type);
+    const ts_src0 = ggml.types.ggml_type_size(src0.type);
+    const ts_src1 = ggml.types.ggml_type_size(src1.type);
+    const ts_dst = ggml.types.ggml_type_size(dst.type);
 
     ggml.impl.assert(src0.nb[0] == ts_src0, "        nb00       == ts_src0");
     ggml.impl.assert(src1.nb[0] == ts_src1, "        nb10       == ts_src1");
     ggml.impl.assert(dst.nb[0] == ts_dst, "        nb0        == ts_dst");
-    ggml.impl.assert(ids == null or ids.?.nb[0] == ggml.impl.ggml_c.ggml_type_size(ids.?.type), "!ids || ids->nb[0] == ggml_type_size(ids->type)");
+    ggml.impl.assert(ids == null or ids.?.nb[0] == ggml.types.ggml_type_size(ids.?.type), "!ids || ids->nb[0] == ggml_type_size(ids->type)");
 
     ggml.impl.assert(ids == null or ne12 <= max_batch_size, "!ids || ne12 <= MMVQ_MAX_BATCH_SIZE");
 
@@ -570,11 +570,11 @@ pub fn mulMatVecQ(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.
             const sg = f.shared_gate.?;
             const sd = f.shared_dst.?;
             ggml.impl.assert(su.type == src0.type and sg.type == src0.type, "fusion->shared_up->type == src0->type && fusion->shared_gate->type == src0->type");
-            ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(su, sg), "ggml_are_same_shape(fusion->shared_up, fusion->shared_gate)");
-            ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(su) and ggml.impl.ggml_c.ggml_is_contiguous(sg), "ggml_is_contiguous(fusion->shared_up) && ggml_is_contiguous(fusion->shared_gate)");
+            ggml.impl.assert(ggml.types.ggml_are_same_shape(su, sg), "ggml_are_same_shape(fusion->shared_up, fusion->shared_gate)");
+            ggml.impl.assert(ggml.types.ggml_is_contiguous(su) and ggml.types.ggml_is_contiguous(sg), "ggml_is_contiguous(fusion->shared_up) && ggml_is_contiguous(fusion->shared_gate)");
             ggml.impl.assert(su.ne[0] == ne00 and su.ne[1] == ne01, "fusion->shared_up->ne[0] == ne00 && fusion->shared_up->ne[1] == ne01");
-            ggml.impl.assert(su.nb[1] == src0.nb[1] and ggml.impl.ggml_c.ggml_is_matrix(su), "fusion->shared_up->nb[1] == nb01 && ggml_is_matrix(fusion->shared_up)");
-            ggml.impl.assert(sd.type == ggml.impl.ggml_c.GGML_TYPE_F32 and ggml.impl.ggml_c.ggml_is_contiguous(sd), "fusion->shared_dst->type == GGML_TYPE_F32 && ggml_is_contiguous(fusion->shared_dst)");
+            ggml.impl.assert(su.nb[1] == src0.nb[1] and ggml.types.ggml_is_matrix(su), "fusion->shared_up->nb[1] == nb01 && ggml_is_matrix(fusion->shared_up)");
+            ggml.impl.assert(sd.type == ggml.impl.ggml_c.GGML_TYPE_F32 and ggml.types.ggml_is_contiguous(sd), "fusion->shared_dst->type == GGML_TYPE_F32 && ggml_is_contiguous(fusion->shared_dst)");
             ggml.impl.assert(sd.ne[0] == dst.ne[0] and sd.ne[1] == ne2, "fusion->shared_dst->ne[0] == ne0 && fusion->shared_dst->ne[1] == ne2");
             fusion_local.shared_up = su.data;
             fusion_local.shared_gate = sg.data;
@@ -589,7 +589,7 @@ pub fn mulMatVecQ(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.
             fusion_local.x_bias = b.data;
         }
         if (f.gate) |g| {
-            ggml.impl.assert(g.type == src0.type and ggml.impl.ggml_c.ggml_are_same_stride(g, src0), "fusion->gate->type == src0->type && ggml_are_same_stride(fusion->gate, src0)");
+            ggml.impl.assert(g.type == src0.type and ggml.types.ggml_are_same_stride(g, src0), "fusion->gate->type == src0->type && ggml_are_same_stride(fusion->gate, src0)");
             fusion_local.gate = g.data;
         }
         if (f.gate_bias) |b| {
@@ -600,14 +600,14 @@ pub fn mulMatVecQ(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.
         }
         if (f.x_scale) |s| {
             ggml.impl.assert(s.type == ggml.impl.ggml_c.GGML_TYPE_F32, "fusion->x_scale->type == GGML_TYPE_F32");
-            ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(s), "ggml_is_contiguous(fusion->x_scale)");
-            ggml.impl.assert(ggml.impl.ggml_c.ggml_nelements(s) == (if (ids != null) src0.ne[2] else 1), "ggml_nelements(fusion->x_scale) == (ids ? src0->ne[2] : 1)");
+            ggml.impl.assert(ggml.types.ggml_is_contiguous(s), "ggml_is_contiguous(fusion->x_scale)");
+            ggml.impl.assert(ggml.types.ggml_nelements(s) == (if (ids != null) src0.ne[2] else 1), "ggml_nelements(fusion->x_scale) == (ids ? src0->ne[2] : 1)");
             fusion_local.x_scale = s.data;
         }
         if (f.gate_scale) |s| {
             ggml.impl.assert(s.type == ggml.impl.ggml_c.GGML_TYPE_F32, "fusion->gate_scale->type == GGML_TYPE_F32");
-            ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(s), "ggml_is_contiguous(fusion->gate_scale)");
-            ggml.impl.assert(ggml.impl.ggml_c.ggml_nelements(s) == (if (ids != null) src0.ne[2] else 1), "ggml_nelements(fusion->gate_scale) == (ids ? src0->ne[2] : 1)");
+            ggml.impl.assert(ggml.types.ggml_is_contiguous(s), "ggml_is_contiguous(fusion->gate_scale)");
+            ggml.impl.assert(ggml.types.ggml_nelements(s) == (if (ids != null) src0.ne[2] else 1), "ggml_nelements(fusion->gate_scale) == (ids ? src0->ne[2] : 1)");
             fusion_local.gate_scale = s.data;
         }
         fusion_local.glu_op = f.glu_op;
@@ -615,11 +615,11 @@ pub fn mulMatVecQ(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.
     }
 
     // If src0 is a temporary compute buffer, clear any potential padding.
-    if (ggml.impl.ggml_c.ggml_backend_buffer_get_usage(src0.buffer) == ggml.impl.ggml_c.GGML_BACKEND_BUFFER_USAGE_COMPUTE) {
-        const size_data = ggml.impl.ggml_c.ggml_nbytes(src0);
-        const size_alloc = ggml.impl.ggml_c.ggml_backend_buffer_get_alloc_size(src0.buffer, src0);
+    if (ggml.backend.ggml_backend_buffer_get_usage(src0.buffer) == ggml.impl.ggml_c.GGML_BACKEND_BUFFER_USAGE_COMPUTE) {
+        const size_data = ggml.types.ggml_nbytes(src0);
+        const size_alloc = ggml.backend.ggml_backend_buffer_get_alloc_size(src0.buffer, src0);
         if (size_alloc > size_data) {
-            ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguously_allocated(src0), "ggml_is_contiguously_allocated(src0)");
+            ggml.impl.assert(ggml.types.ggml_is_contiguously_allocated(src0), "ggml_is_contiguously_allocated(src0)");
             ggml.impl.assert(src0.view_src == null, "!src0->view_src");
             ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemsetAsync(@as([*]u8, @ptrCast(src0.data.?)) + size_data, 0, size_alloc - size_data, stream), "cudaMemsetAsync((char *) src0->data + size_data, 0, size_alloc - size_data, stream)", @src());
         }
@@ -656,7 +656,7 @@ pub fn mulMatVecQ(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.
     const stride_channel_dst = if (has_ids) s1 else s2;
     const stride_channel_y = if (has_ids) s11 else s12;
 
-    const ids_stride: i64 = if (ids) |i| @intCast(i.nb[1] / ggml.impl.ggml_c.ggml_type_size(i.type)) else 0;
+    const ids_stride: i64 = if (ids) |i| @intCast(i.nb[1] / ggml.types.ggml_type_size(i.type)) else 0;
 
     switchType(
         src0.data,

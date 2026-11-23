@@ -87,7 +87,7 @@ pub fn im2col3d(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submi
     const OD = @divTrunc(dst.ne[3], N);
     const OH = dst.ne[2];
     const OW = dst.ne[1];
-    const ts: u64 = ggml.impl.ggml_c.ggml_type_size(src1.type);
+    const ts: u64 = ggml.types.ggml_type_size(src1.type);
 
     var pc: ggml.vulkan.push.Im2col3d = std.mem.zeroes(ggml.vulkan.push.Im2col3d);
     pc.dst_addr = dstAddr(dst);
@@ -125,7 +125,7 @@ pub fn im2col3d(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submi
 /// Ports `ggml_vk_timestep_embedding` (ggml-vulkan.cpp:12290 @b1b770d90).
 pub fn timestepEmbedding(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Context, src0: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     var pc = std.mem.zeroes(ggml.vulkan.push.TimestepEmbedding);
-    set(&pc, "nb1", @intCast(dst.nb[1] / ggml.impl.ggml_c.ggml_type_size(dst.type)));
+    set(&pc, "nb1", @intCast(dst.nb[1] / ggml.types.ggml_type_size(dst.type)));
     set(&pc, "dim", param(dst, 0));
     set(&pc, "max_period", param(dst, 1));
     ggml.vulkan.ops.opF32(ctx, subctx, src0, null, null, null, dst, ggml.impl.ggml_c.GGML_OP_TIMESTEP_EMBEDDING, pc);
@@ -285,7 +285,7 @@ pub fn conv3d(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.
 /// Ports `ggml_vk_conv_2d_dw` (ggml-vulkan.cpp:12528 @b1b770d90).
 pub fn conv2dDw(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Context, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     var p = std.mem.zeroes(ggml.vulkan.push.Conv2dDw);
-    set(&p, "ne", ggml.impl.ggml_c.ggml_nelements(dst));
+    set(&p, "ne", ggml.types.ggml_nelements(dst));
     set(&p, "channels", dst.ne[2]);
     set(&p, "batches", dst.ne[3]);
     set(&p, "dst_w", dst.ne[0]);

@@ -15,11 +15,11 @@ pub fn opFill(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor
     const dst_d: ?*anyopaque = dst.data;
     const stream = ctx.stream();
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
 
     const value: f32 = @bitCast(dst.op_params[0]);
 
-    const k: i64 = ggml.impl.ggml_c.ggml_nelements(dst);
+    const k: i64 = ggml.types.ggml_nelements(dst);
     const num_blocks: i64 = @divTrunc(k + block_size - 1, block_size);
     const p: ggml.cuda.kernels.LaunchParams = .{
         .grid = .{ .x = @truncate(@as(u64, @bitCast(num_blocks))) },

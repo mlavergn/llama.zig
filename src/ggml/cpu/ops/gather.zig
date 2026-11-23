@@ -44,19 +44,19 @@ fn getRows(comptime kind: RowKind, params: *const ggml.cpu.defs.ComputeParams, d
     const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
     const nc = l.ne00;
-    const nr: i64 = ggml.impl.ggml_c.ggml_nelements(src1);
+    const nr: i64 = ggml.types.ggml_nelements(src1);
 
     std.debug.assert(l.ne0 == nc);
     std.debug.assert(l.ne02 == l.ne11);
     std.debug.assert(l.nb00 == switch (kind) {
-        .q => ggml.impl.ggml_c.ggml_type_size(src0.type),
+        .q => ggml.types.ggml_type_size(src0.type),
         .f16 => @sizeOf(ggml.impl.ggml_c.ggml_fp16_t),
         .bf16 => @sizeOf(ggml.impl.ggml_c.ggml_bf16_t),
         .f32 => @sizeOf(f32),
     });
-    std.debug.assert(ggml.impl.ggml_c.ggml_nrows(dst) == nr);
+    std.debug.assert(ggml.types.ggml_nrows(dst) == nr);
 
-    const dequantize_row_q = if (kind == .q) ggml.impl.ggml_c.ggml_get_type_traits(src0.type).*.to_float.? else {};
+    const dequantize_row_q = if (kind == .q) ggml.types.ggml_get_type_traits(src0.type).*.to_float.? else {};
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
@@ -82,8 +82,8 @@ fn getRows(comptime kind: RowKind, params: *const ggml.cpu.defs.ComputeParams, d
 
         switch (kind) {
             .q => dequantize_row_q(ggml.cpu.ops.common.ptr(u8, src0.data, src_off), dst_row, nc),
-            .f16 => ggml.impl.ggml_c.ggml_cpu_fp16_to_fp32(ggml.cpu.ops.common.ptr(ggml.impl.ggml_c.ggml_fp16_t, src0.data, src_off), dst_row, nc),
-            .bf16 => ggml.impl.ggml_c.ggml_cpu_bf16_to_fp32(ggml.cpu.ops.common.ptr(ggml.impl.ggml_c.ggml_bf16_t, src0.data, src_off), dst_row, nc),
+            .f16 => ggml.cpu.convert.ggml_cpu_fp16_to_fp32(ggml.cpu.ops.common.ptr(ggml.impl.ggml_c.ggml_fp16_t, src0.data, src_off), dst_row, nc),
+            .bf16 => ggml.cpu.convert.ggml_cpu_bf16_to_fp32(ggml.cpu.ops.common.ptr(ggml.impl.ggml_c.ggml_bf16_t, src0.data, src_off), dst_row, nc),
             .f32 => ggml.cpu.ops.vecinline.cpy_f32(nc, dst_row, ggml.cpu.ops.common.ptr(f32, src0.data, src_off)),
         }
     }
@@ -163,9 +163,9 @@ fn setRowsImpl(comptime SrcT: type, comptime IdxT: type, params: *const ggml.cpu
     const ir0 = dr * ith;
     const ir1 = @min(ir0 + dr, nr);
 
-    const rs = ggml.impl.ggml_c.ggml_row_size(src0.type, nc);
+    const rs = ggml.types.ggml_row_size(src0.type, nc);
 
-    const from_float = ggml.impl.ggml_c.ggml_get_type_traits_cpu(dst.type).*.from_float;
+    const from_float = ggml.cpu.traits.ggml_get_type_traits_cpu(dst.type).*.from_float;
 
     var j03: i64 = 0;
     while (j03 < l.ne03) : (j03 += 1) {
@@ -192,7 +192,7 @@ fn setRowsImpl(comptime SrcT: type, comptime IdxT: type, params: *const ggml.cpu
                     } else {
                         const wbase: [*]f32 = @ptrCast(@alignCast(params.wdata.?));
                         const wdata = wbase + (@as(usize, @intCast(nc)) + ggml.cpu.ops.common.cache_line_size_f32) * @as(usize, @intCast(ith));
-                        ggml.impl.ggml_c.ggml_fp16_to_fp32_row(ggml.cpu.ops.common.ptr(ggml.impl.ggml_c.ggml_fp16_t, src0.data, src_off), wdata, nc);
+                        ggml.runtime.ggml_fp16_to_fp32_row(ggml.cpu.ops.common.ptr(ggml.impl.ggml_c.ggml_fp16_t, src0.data, src_off), wdata, nc);
                         from_float.?(wdata, dst_row, nc);
                     }
                 } else {
@@ -241,14 +241,14 @@ fn getRowsBackF32F16(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl
 
     if (params.ith != 0) return;
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
 
     // ggml_compute_forward_dup_same_cont(params, opt0, dst);
 
-    @memset(ggml.cpu.ops.common.ptr(u8, dst.data, 0)[0..ggml.impl.ggml_c.ggml_nbytes(dst)], 0);
+    @memset(ggml.cpu.ops.common.ptr(u8, dst.data, 0)[0..ggml.types.ggml_nbytes(dst)], 0);
 
     const nc: i64 = src0.ne[0];
-    const nr: i64 = ggml.impl.ggml_c.ggml_nelements(src1);
+    const nr: i64 = ggml.types.ggml_nelements(src1);
 
     ggml.impl.assert(dst.ne[0] == nc, "dst->ne[0] == nc");
     ggml.impl.assert(src0.nb[0] == @sizeOf(ggml.impl.ggml_c.ggml_fp16_t), "src0->nb[0] == sizeof(ggml_fp16_t)");
@@ -278,14 +278,14 @@ fn getRowsBackF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.gg
 
     if (params.ith != 0) return;
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
 
     // ggml_compute_forward_dup_same_cont(params, opt0, dst);
 
-    @memset(ggml.cpu.ops.common.ptr(u8, dst.data, 0)[0..ggml.impl.ggml_c.ggml_nbytes(dst)], 0);
+    @memset(ggml.cpu.ops.common.ptr(u8, dst.data, 0)[0..ggml.types.ggml_nbytes(dst)], 0);
 
     const nc: i64 = src0.ne[0];
-    const nr: i64 = ggml.impl.ggml_c.ggml_nelements(src1);
+    const nr: i64 = ggml.types.ggml_nelements(src1);
 
     ggml.impl.assert(dst.ne[0] == nc, "dst->ne[0] == nc");
     ggml.impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");

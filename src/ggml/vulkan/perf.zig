@@ -85,9 +85,9 @@ pub const PerfLogger = struct {
     fn nodeFusionName(w: *std.Io.Writer, node: *const ggml.impl.ggml_c.ggml_tensor, fusion_name: ?[*:0]const u8, n_flops: *u64) void {
         n_flops.* = ggml.vulkan.graph.getNodeFlops(node);
         if (fusion_name) |f| w.print("{s} ", .{std.mem.span(f)}) catch {};
-        const op_name = std.mem.span(ggml.impl.ggml_c.ggml_op_name(node.op));
+        const op_name = std.mem.span(ggml.types.ggml_op_name(node.op));
         if (node.op == ggml.impl.ggml_c.GGML_OP_UNARY) {
-            w.writeAll(std.mem.span(ggml.impl.ggml_c.ggml_unary_op_name(ggml.impl.ggml_c.ggml_get_unary_op(node)))) catch {};
+            w.writeAll(std.mem.span(ggml.types.ggml_unary_op_name(ggml.types.ggml_get_unary_op(node)))) catch {};
             return;
         }
         if (node.op == ggml.impl.ggml_c.GGML_OP_MUL_MAT or node.op == ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID) {
@@ -101,7 +101,7 @@ pub const PerfLogger = struct {
             {
                 w.writeAll("_VEC") catch {};
             }
-            w.print(" {s} m={d} n={d} k={d}", .{ std.mem.span(ggml.impl.ggml_c.ggml_type_name(node.src[0].*.type)), mm, n, k }) catch {};
+            w.print(" {s} m={d} n={d} k={d}", .{ std.mem.span(ggml.types.ggml_type_name(node.src[0].*.type)), mm, n, k }) catch {};
             if (node.op == ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID) w.print(" n_expert={d}", .{node.src[0].*.ne[2]}) catch {};
             if (batch > 1) w.print(" batch={d}", .{batch}) catch {};
             return;

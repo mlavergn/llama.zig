@@ -45,13 +45,13 @@ pub fn opConv2dDw(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_te
 
     const p: ggml.cuda.kernels.LaunchParams = .{ .grid = .{ .x = @bitCast(blocks) }, .block = .{ .x = block_size }, .shmem = 0, .stream = st };
     const args = .{ x_d, w_d, y_d, in_w, in_h, out_w, out_h, kernel_w, kernel_h, stride_x, stride_y, padding_x, padding_y, dilation_x, dilation_y, channels, batches };
-    if (ggml.impl.ggml_c.ggml_is_contiguous(input)) {
+    if (ggml.types.ggml_is_contiguous(input)) {
         if (kernel.type == ggml.impl.ggml_c.GGML_TYPE_F16) {
             ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv2d-dw", "conv2d_dw_kernel<__half, whcn_layout>"), p, args);
         } else {
             ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv2d-dw", "conv2d_dw_kernel<float, whcn_layout>"), p, args);
         }
-    } else if (ggml.impl.ggml_c.ggml_is_contiguous_channels(input)) {
+    } else if (ggml.types.ggml_is_contiguous_channels(input)) {
         if (kernel.type == ggml.impl.ggml_c.GGML_TYPE_F16) {
             ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv2d-dw", "conv2d_dw_kernel<__half, cwhn_layout>"), p, args);
         } else {

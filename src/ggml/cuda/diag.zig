@@ -20,8 +20,8 @@ pub fn opDiag(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor
 
     const stream = ctx.stream();
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
 
     const ne00 = src0.ne[0];
     const ne01 = src0.ne[1];
@@ -38,7 +38,7 @@ pub fn opDiag(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor
     ggml.impl.assert(ne02 == ne2, "ne02 == ne2");
     ggml.impl.assert(ne03 == ne3, "ne03 == ne3");
 
-    const n_elems: i64 = ggml.impl.ggml_c.ggml_nelements(dst);
+    const n_elems: i64 = ggml.types.ggml_nelements(dst);
     const num_blocks: i64 = @divTrunc(n_elems + block_size - 1, block_size);
     const p: ggml.cuda.kernels.LaunchParams = .{
         .grid = .{ .x = @truncate(@as(u64, @bitCast(num_blocks))) },

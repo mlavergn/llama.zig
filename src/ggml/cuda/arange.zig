@@ -34,7 +34,7 @@ pub fn opArange(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tens
 
     // `ceil` is the `double` overload: the quotient is a `float`, widened.
     const steps: i64 = @intFromFloat(@ceil(@as(f64, (stop - start) / step)));
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_nelements(dst) == steps, "ggml_nelements(dst) == steps");
+    ggml.impl.assert(ggml.types.ggml_nelements(dst) == steps, "ggml_nelements(dst) == steps");
 
     arangeF32Cuda(dst_d, @truncate(dst.ne[0]), start, step, stream);
 }

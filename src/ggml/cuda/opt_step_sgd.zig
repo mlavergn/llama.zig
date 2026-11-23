@@ -31,15 +31,15 @@ pub fn opOptStepSgd(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_
     ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type      == GGML_TYPE_F32");
     ggml.impl.assert(src0_grad.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0_grad->type == GGML_TYPE_F32");
     ggml.impl.assert(params.type == ggml.impl.ggml_c.GGML_TYPE_F32, "params->type    == GGML_TYPE_F32");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0_grad), "ggml_is_contiguous(src0_grad)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(params), "ggml_is_contiguous(params)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, src0_grad), "ggml_are_same_shape(src0, src0_grad)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_nelements(params) == 2, "ggml_nelements(params) == 2");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0_grad), "ggml_is_contiguous(src0_grad)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(params), "ggml_is_contiguous(params)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src0, src0_grad), "ggml_are_same_shape(src0, src0_grad)");
+    ggml.impl.assert(ggml.types.ggml_nelements(params) == 2, "ggml_nelements(params) == 2");
 
     const stream = ctx.stream();
 
-    const ne = ggml.impl.ggml_c.ggml_nelements(src0);
+    const ne = ggml.types.ggml_nelements(src0);
 
     optStepSgdF32Cuda(src0.data, src0_grad.data, params.data, ne, stream);
 }

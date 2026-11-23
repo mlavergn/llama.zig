@@ -19,7 +19,7 @@ pub const descriptor_pool_size = 256;
 
 /// Ports `vk_semaphore` (ggml-vulkan-types.h:1106 @b1b770d90).
 pub const Semaphore = struct {
-    s: ggml.vulkan.common.vk.VkSemaphore = null,
+    s: ggml.vulkan.common.vulkan_c.VkSemaphore = null,
     value: u64 = 0,
 };
 
@@ -70,7 +70,7 @@ pub const Context = struct {
     }
 
     /// `ctx->s->buffer->buf`: the command buffer being recorded.
-    pub fn cmd(self: *Context) ggml.vulkan.common.vk.VkCommandBuffer {
+    pub fn cmd(self: *Context) ggml.vulkan.common.vulkan_c.VkCommandBuffer {
         return self.s().buffer.?.buf;
     }
 
@@ -109,11 +109,11 @@ pub fn createTemporaryContext(p: *ggml.vulkan.device.CommandPool) *Context {
 
 /// Ports `ggml_vk_create_cmd_buffer` (ggml-vulkan.cpp:893 @b1b770d90).
 fn createCmdBuffer(device: *ggml.vulkan.device.Device, p: *ggml.vulkan.device.CommandPool) *ggml.vulkan.device.CommandBuffer {
-    var info = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkCommandBufferAllocateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO);
+    var info = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkCommandBufferAllocateInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO);
     info.commandPool = p.pool;
-    info.level = ggml.vulkan.common.vk.VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    info.level = ggml.vulkan.common.vulkan_c.VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     info.commandBufferCount = 1;
-    var buf: ggml.vulkan.common.vk.VkCommandBuffer = null;
+    var buf: ggml.vulkan.common.vulkan_c.VkCommandBuffer = null;
     ggml.vulkan.common.checkOrAbort(ggml.vulkan.common.dispatch.vkAllocateCommandBuffers.?(device.device, &info, &buf), "vk::Device::allocateCommandBuffers");
     const cb = std.heap.c_allocator.create(ggml.vulkan.device.CommandBuffer) catch oom();
     cb.* = .{ .buf = buf, .use_counter = 0, .in_use = true };
@@ -137,15 +137,15 @@ pub fn getOrCreateCmdBuffer(device: *ggml.vulkan.device.Device, pool: *ggml.vulk
 pub fn beginSubmission(device: *ggml.vulkan.device.Device, p: *ggml.vulkan.device.CommandPool, one_time: bool) Submission {
     var sub: Submission = .{};
     sub.buffer = getOrCreateCmdBuffer(device, p);
-    var info = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkCommandBufferBeginInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO);
-    info.flags = if (one_time) ggml.vulkan.common.vk.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT else 0;
+    var info = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkCommandBufferBeginInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO);
+    info.flags = if (one_time) ggml.vulkan.common.vulkan_c.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT else 0;
     ggml.vulkan.common.checkOrAbort(ggml.vulkan.common.dispatch.vkBeginCommandBuffer.?(sub.buffer.?.buf, &info), "vk::CommandBuffer::begin");
     return sub;
 }
 
 /// Ports `ggml_vk_cmd_label_begin` (ggml-vulkan.cpp:6059 @b1b770d90).
-fn cmdLabelBegin(buf: ggml.vulkan.common.vk.VkCommandBuffer, name: [*:0]const u8) void {
-    var label = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkDebugUtilsLabelEXT, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT);
+fn cmdLabelBegin(buf: ggml.vulkan.common.vulkan_c.VkCommandBuffer, name: [*:0]const u8) void {
+    var label = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkDebugUtilsLabelEXT, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT);
     label.pLabelName = name;
     label.color = .{ 1.0, 1.0, 1.0, 1.0 };
     ggml.vulkan.instance.instance.pfn_vkCmdBeginDebugUtilsLabelEXT.?(buf, &label);
@@ -177,11 +177,11 @@ pub const DebugLabel = struct {
         if (!ggml.vulkan.instance.instance.debug_utils_support or !ctx.has_s) return self;
         var name: std.ArrayList(u8) = .empty;
         const first: *const ggml.impl.ggml_c.ggml_tensor = cgraph.nodes[@intCast(node_idx)].?;
-        name.appendSlice(std.heap.c_allocator, std.mem.span(ggml.impl.ggml_c.ggml_op_name(first.op))) catch oom();
+        name.appendSlice(std.heap.c_allocator, std.mem.span(ggml.types.ggml_op_name(first.op))) catch oom();
         var i: c_int = 1;
         while (i <= n_fused) : (i += 1) {
             name.append(std.heap.c_allocator, '+') catch oom();
-            name.appendSlice(std.heap.c_allocator, std.mem.span(ggml.impl.ggml_c.ggml_op_name(cgraph.nodes[@intCast(node_idx + i)].?.op))) catch oom();
+            name.appendSlice(std.heap.c_allocator, std.mem.span(ggml.types.ggml_op_name(cgraph.nodes[@intCast(node_idx + i)].?.op))) catch oom();
         }
         name.append(std.heap.c_allocator, ' ') catch oom();
         name.appendSlice(std.heap.c_allocator, std.mem.sliceTo(&first.name, 0)) catch oom();
@@ -195,7 +195,7 @@ pub const DebugLabel = struct {
         var self: DebugLabel = .{};
         const h = handle orelse return self;
         if (!ggml.vulkan.instance.instance.debug_utils_support) return self;
-        var label = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkDebugUtilsLabelEXT, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT);
+        var label = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkDebugUtilsLabelEXT, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT);
         label.pLabelName = name;
         label.color = .{ 1.0, 1.0, 1.0, 1.0 };
         self.qhandle = h;
@@ -270,26 +270,26 @@ pub fn ctxBegin(device: *ggml.vulkan.device.Device, subctx: *Context) void {
 /// synchronises itself, and first by the device's submit mutex where the
 /// NVIDIA workaround set one. A lost device prints what is known about it
 /// before the C++'s rethrow, which nothing catches here.
-pub fn queueSubmit(h: *ggml.vulkan.device.QueueHandle, submits: []const ggml.vulkan.common.vk.VkSubmitInfo, fence: ggml.vulkan.common.vk.VkFence) void {
+pub fn queueSubmit(h: *ggml.vulkan.device.QueueHandle, submits: []const ggml.vulkan.common.vulkan_c.VkSubmitInfo, fence: ggml.vulkan.common.vulkan_c.VkFence) void {
     queueSubmitChecked(h, submits, fence) catch ggml.vulkan.common.abortLastError();
 }
 
 /// `queueSubmit` where the C++'s caller catches the throw:
 /// `error.VulkanError`, with `common.last_error` set.
-pub fn queueSubmitChecked(h: *ggml.vulkan.device.QueueHandle, submits: []const ggml.vulkan.common.vk.VkSubmitInfo, fence: ggml.vulkan.common.vk.VkFence) ggml.vulkan.common.VkError!void {
+pub fn queueSubmitChecked(h: *ggml.vulkan.device.QueueHandle, submits: []const ggml.vulkan.common.vulkan_c.VkSubmitInfo, fence: ggml.vulkan.common.vulkan_c.VkFence) ggml.vulkan.common.VkError!void {
     // Workaround for NVIDIA driver bug
     if (h.device_submit_mutex) |dm| dm.lock();
     h.lock();
     const result = ggml.vulkan.common.dispatch.vkQueueSubmit.?(h.queue, @intCast(submits.len), submits.ptr, fence);
     h.unlock();
     if (h.device_submit_mutex) |dm| dm.unlock();
-    if (result == ggml.vulkan.common.vk.VK_ERROR_DEVICE_LOST) printDeviceLostInfo(h.device);
+    if (result == ggml.vulkan.common.vulkan_c.VK_ERROR_DEVICE_LOST) printDeviceLostInfo(h.device);
     return ggml.vulkan.common.check(result, "vk::Queue::submit");
 }
 
 /// Ports `ggml_vk_submit` (ggml-vulkan.cpp:904 @b1b770d90): submits every
 /// recorded sequence as timeline-semaphore submissions, then forgets them.
-pub fn submit(ctx: *Context, fence: ggml.vulkan.common.vk.VkFence) void {
+pub fn submit(ctx: *Context, fence: ggml.vulkan.common.vulkan_c.VkFence) void {
     const h = ctx.p.?.q.?.handle;
     if (ctx.seqs.items.len == 0) {
         if (fence != null) queueSubmit(h, &.{}, fence);
@@ -299,15 +299,15 @@ pub fn submit(ctx: *Context, fence: ggml.vulkan.common.vk.VkFence) void {
     var n: usize = 0;
     for (ctx.seqs.items) |seq| n += seq.items.len;
 
-    const submit_infos = std.heap.c_allocator.alloc(ggml.vulkan.common.vk.VkSubmitInfo, n) catch oom();
+    const submit_infos = std.heap.c_allocator.alloc(ggml.vulkan.common.vulkan_c.VkSubmitInfo, n) catch oom();
     defer std.heap.c_allocator.free(submit_infos);
-    const tl_infos = std.heap.c_allocator.alloc(ggml.vulkan.common.vk.VkTimelineSemaphoreSubmitInfo, n) catch oom();
+    const tl_infos = std.heap.c_allocator.alloc(ggml.vulkan.common.vulkan_c.VkTimelineSemaphoreSubmitInfo, n) catch oom();
     defer std.heap.c_allocator.free(tl_infos);
     var scratch: std.ArrayList(u64) = .empty;
     defer scratch.deinit(std.heap.c_allocator);
-    var sems: std.ArrayList(ggml.vulkan.common.vk.VkSemaphore) = .empty;
+    var sems: std.ArrayList(ggml.vulkan.common.vulkan_c.VkSemaphore) = .empty;
     defer sems.deinit(std.heap.c_allocator);
-    var stages: std.ArrayList(ggml.vulkan.common.vk.VkPipelineStageFlags) = .empty;
+    var stages: std.ArrayList(ggml.vulkan.common.vulkan_c.VkPipelineStageFlags) = .empty;
     defer stages.deinit(std.heap.c_allocator);
     // Size the scratch arrays first: pointers into them must not move.
     var total_sems: usize = 0;
@@ -341,7 +341,7 @@ pub fn submit(ctx: *Context, fence: ggml.vulkan.common.vk.VkFence) void {
             sems.appendAssumeCapacity(sem.s);
         }
         tl_infos[idx] = .{
-            .sType = ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+            .sType = ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
             .pNext = null,
             .waitSemaphoreValueCount = @intCast(nw),
             .pWaitSemaphoreValues = scratch.items.ptr + wait_vals,
@@ -349,7 +349,7 @@ pub fn submit(ctx: *Context, fence: ggml.vulkan.common.vk.VkFence) void {
             .pSignalSemaphoreValues = scratch.items.ptr + signal_vals,
         };
         submit_infos[idx] = .{
-            .sType = ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .sType = ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_SUBMIT_INFO,
             .pNext = &tl_infos[idx],
             .waitSemaphoreCount = @intCast(nw),
             .pWaitSemaphores = sems.items.ptr + wait_sems,
@@ -370,24 +370,24 @@ pub fn submit(ctx: *Context, fence: ggml.vulkan.common.vk.VkFence) void {
 /// `VK_CHECK` (ggml-vulkan-types.h:195 @b1b770d90) around a wait: a lost device
 /// prints what is known about it; any failure logs and throws, and nothing
 /// catches it.
-pub fn vkCheck(result: ggml.vulkan.common.vk.VkResult, comptime msg: [:0]const u8, device: *ggml.vulkan.device.Device) void {
+pub fn vkCheck(result: ggml.vulkan.common.vulkan_c.VkResult, comptime msg: [:0]const u8, device: *ggml.vulkan.device.Device) void {
     vkCheckChecked(result, msg, device) catch ggml.impl.abort("ggml_vulkan: " ++ msg);
 }
 
 /// `VK_CHECK` where the C++'s caller catches the throw: logs as `vkCheck`
 /// does, then returns `error.VulkanError` with `common.last_error` naming
 /// `"ggml_vulkan: " msg`, the exception's message.
-pub fn vkCheckChecked(result: ggml.vulkan.common.vk.VkResult, comptime msg: [:0]const u8, device: *ggml.vulkan.device.Device) ggml.vulkan.common.VkError!void {
-    if (result == ggml.vulkan.common.vk.VK_SUCCESS) return;
-    if (result == ggml.vulkan.common.vk.VK_ERROR_DEVICE_LOST) printDeviceLostInfo(device);
+pub fn vkCheckChecked(result: ggml.vulkan.common.vulkan_c.VkResult, comptime msg: [:0]const u8, device: *ggml.vulkan.device.Device) ggml.vulkan.common.VkError!void {
+    if (result == ggml.vulkan.common.vulkan_c.VK_SUCCESS) return;
+    if (result == ggml.vulkan.common.vulkan_c.VK_ERROR_DEVICE_LOST) printDeviceLostInfo(device);
     ggml.impl.logError("ggml_vulkan: %s error %s\n", .{ @as([*:0]const u8, msg), ggml.vulkan.common.resultString(result).ptr });
     return ggml.vulkan.common.check(result, "ggml_vulkan: " ++ msg);
 }
 
 /// `device->device.waitForFences({ fence }, true, UINT64_MAX)` under
 /// `VK_CHECK`, then `resetFences`: the end of every synchronous transfer.
-pub fn waitAndResetFence(device: *ggml.vulkan.device.Device, fence: ggml.vulkan.common.vk.VkFence, comptime msg: [:0]const u8) void {
-    vkCheck(ggml.vulkan.common.dispatch.vkWaitForFences.?(device.device, 1, &fence, ggml.vulkan.common.vk.VK_TRUE, std.math.maxInt(u64)), msg, device);
+pub fn waitAndResetFence(device: *ggml.vulkan.device.Device, fence: ggml.vulkan.common.vulkan_c.VkFence, comptime msg: [:0]const u8) void {
+    vkCheck(ggml.vulkan.common.dispatch.vkWaitForFences.?(device.device, 1, &fence, ggml.vulkan.common.vulkan_c.VK_TRUE, std.math.maxInt(u64)), msg, device);
     ggml.vulkan.common.checkOrAbort(ggml.vulkan.common.dispatch.vkResetFences.?(device.device, 1, &fence), "vk::Device::resetFences");
 }
 
@@ -395,27 +395,27 @@ pub fn waitAndResetFence(device: *ggml.vulkan.device.Device, fence: ggml.vulkan.
 pub fn printDeviceFaultInfo(device: *ggml.vulkan.device.Device) void {
     const pfn = device.pfn_vkGetDeviceFaultInfoEXT orelse return;
     if (!device.device_fault) return;
-    var counts = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkDeviceFaultCountsEXT, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT);
+    var counts = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkDeviceFaultCountsEXT, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT);
     var res = pfn(device.device, &counts, null);
-    if (res != ggml.vulkan.common.vk.VK_SUCCESS) {
+    if (res != ggml.vulkan.common.vulkan_c.VK_SUCCESS) {
         ggml.impl.logError("ggml_vulkan: vkGetDeviceFaultInfoEXT (counts) failed: %d\n", .{res});
         return;
     }
-    const address_infos = std.heap.c_allocator.alloc(ggml.vulkan.common.vk.VkDeviceFaultAddressInfoEXT, counts.addressInfoCount) catch oom();
+    const address_infos = std.heap.c_allocator.alloc(ggml.vulkan.common.vulkan_c.VkDeviceFaultAddressInfoEXT, counts.addressInfoCount) catch oom();
     defer std.heap.c_allocator.free(address_infos);
-    const vendor_infos = std.heap.c_allocator.alloc(ggml.vulkan.common.vk.VkDeviceFaultVendorInfoEXT, counts.vendorInfoCount) catch oom();
+    const vendor_infos = std.heap.c_allocator.alloc(ggml.vulkan.common.vulkan_c.VkDeviceFaultVendorInfoEXT, counts.vendorInfoCount) catch oom();
     defer std.heap.c_allocator.free(vendor_infos);
-    @memset(address_infos, std.mem.zeroes(ggml.vulkan.common.vk.VkDeviceFaultAddressInfoEXT));
-    @memset(vendor_infos, std.mem.zeroes(ggml.vulkan.common.vk.VkDeviceFaultVendorInfoEXT));
+    @memset(address_infos, std.mem.zeroes(ggml.vulkan.common.vulkan_c.VkDeviceFaultAddressInfoEXT));
+    @memset(vendor_infos, std.mem.zeroes(ggml.vulkan.common.vulkan_c.VkDeviceFaultVendorInfoEXT));
     const vendor_binary = std.heap.c_allocator.alloc(u8, @intCast(counts.vendorBinarySize)) catch oom();
     defer std.heap.c_allocator.free(vendor_binary);
     @memset(vendor_binary, 0);
-    var info = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkDeviceFaultInfoEXT, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT);
+    var info = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkDeviceFaultInfoEXT, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT);
     info.pAddressInfos = address_infos.ptr;
     info.pVendorInfos = vendor_infos.ptr;
     info.pVendorBinaryData = if (vendor_binary.len == 0) null else vendor_binary.ptr;
     res = pfn(device.device, &counts, &info);
-    if (res != ggml.vulkan.common.vk.VK_SUCCESS) {
+    if (res != ggml.vulkan.common.vulkan_c.VK_SUCCESS) {
         ggml.impl.logError("ggml_vulkan: vkGetDeviceFaultInfoEXT (info) failed: %d\n", .{res});
         return;
     }
@@ -463,28 +463,28 @@ pub fn queueCommandPoolsCleanup(device: *ggml.vulkan.device.Device) void {
 /// adds.
 pub fn syncBuffersBarrier(subctx: *Context) void {
     const q = subctx.p.?.q.?;
-    const access: ggml.vulkan.common.vk.VkAccessFlags = if (!q.transfer_only)
-        ggml.vulkan.common.vk.VK_ACCESS_SHADER_READ_BIT | ggml.vulkan.common.vk.VK_ACCESS_SHADER_WRITE_BIT | ggml.vulkan.common.vk.VK_ACCESS_TRANSFER_READ_BIT | ggml.vulkan.common.vk.VK_ACCESS_TRANSFER_WRITE_BIT
+    const access: ggml.vulkan.common.vulkan_c.VkAccessFlags = if (!q.transfer_only)
+        ggml.vulkan.common.vulkan_c.VK_ACCESS_SHADER_READ_BIT | ggml.vulkan.common.vulkan_c.VK_ACCESS_SHADER_WRITE_BIT | ggml.vulkan.common.vulkan_c.VK_ACCESS_TRANSFER_READ_BIT | ggml.vulkan.common.vulkan_c.VK_ACCESS_TRANSFER_WRITE_BIT
     else
-        ggml.vulkan.common.vk.VK_ACCESS_TRANSFER_READ_BIT | ggml.vulkan.common.vk.VK_ACCESS_TRANSFER_WRITE_BIT;
-    var barrier = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkMemoryBarrier, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_MEMORY_BARRIER);
+        ggml.vulkan.common.vulkan_c.VK_ACCESS_TRANSFER_READ_BIT | ggml.vulkan.common.vulkan_c.VK_ACCESS_TRANSFER_WRITE_BIT;
+    var barrier = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkMemoryBarrier, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_MEMORY_BARRIER);
     barrier.srcAccessMask = access;
     barrier.dstAccessMask = access;
     ggml.vulkan.common.dispatch.vkCmdPipelineBarrier.?(subctx.cmd(), q.stage_flags, q.stage_flags, 0, 1, &barrier, 0, null, 0, null);
 }
 
 /// Ports `ggml_vk_reset_event` (ggml-vulkan.cpp:1175 @b1b770d90).
-pub fn resetEvent(ctx: *Context, event: ggml.vulkan.common.vk.VkEvent) void {
+pub fn resetEvent(ctx: *Context, event: ggml.vulkan.common.vulkan_c.VkEvent) void {
     ggml.vulkan.common.dispatch.vkCmdResetEvent.?(ctx.cmd(), event, ctx.p.?.q.?.stage_flags);
 }
 
 /// Ports `ggml_vk_set_event` (ggml-vulkan.cpp:1184 @b1b770d90).
-pub fn setEvent(ctx: *Context, event: ggml.vulkan.common.vk.VkEvent) void {
+pub fn setEvent(ctx: *Context, event: ggml.vulkan.common.vulkan_c.VkEvent) void {
     ggml.vulkan.common.dispatch.vkCmdSetEvent.?(ctx.cmd(), event, ctx.p.?.q.?.stage_flags);
 }
 
 /// Ports `ggml_vk_wait_events` (ggml-vulkan.cpp:1193 @b1b770d90).
-pub fn waitEvents(ctx: *Context, events: []const ggml.vulkan.common.vk.VkEvent) void {
+pub fn waitEvents(ctx: *Context, events: []const ggml.vulkan.common.vulkan_c.VkEvent) void {
     if (events.len == 0) return;
     const stage = ctx.p.?.q.?.stage_flags;
     ggml.vulkan.common.dispatch.vkCmdWaitEvents.?(ctx.cmd(), @intCast(events.len), events.ptr, stage, stage, 0, null, 0, null, 0, null);
@@ -519,26 +519,26 @@ pub fn runMemsets(list: []const StagingMemset) void {
 }
 
 /// The `vk::CommandBuffer::copyBuffer` of a slice list.
-pub fn copyBuffer(cmdbuf: ggml.vulkan.common.vk.VkCommandBuffer, src: ggml.vulkan.common.vk.VkBuffer, dst: ggml.vulkan.common.vk.VkBuffer, slices: []const ggml.vulkan.common.vk.VkBufferCopy) void {
+pub fn copyBuffer(cmdbuf: ggml.vulkan.common.vulkan_c.VkCommandBuffer, src: ggml.vulkan.common.vulkan_c.VkBuffer, dst: ggml.vulkan.common.vulkan_c.VkBuffer, slices: []const ggml.vulkan.common.vulkan_c.VkBufferCopy) void {
     ggml.vulkan.common.dispatch.vkCmdCopyBuffer.?(cmdbuf, src, dst, @intCast(slices.len), slices.ptr);
 }
 
 /// The C++'s direct `vkCmdCopyBuffer` -- the loader's exported symbol, not
 /// the dispatcher's pointer (measured with `nm` on the reference).
-pub extern fn vkCmdCopyBuffer(commandBuffer: ggml.vulkan.common.vk.VkCommandBuffer, srcBuffer: ggml.vulkan.common.vk.VkBuffer, dstBuffer: ggml.vulkan.common.vk.VkBuffer, regionCount: u32, pRegions: [*]const ggml.vulkan.common.vk.VkBufferCopy) void;
+pub extern fn vkCmdCopyBuffer(commandBuffer: ggml.vulkan.common.vulkan_c.VkCommandBuffer, srcBuffer: ggml.vulkan.common.vulkan_c.VkBuffer, dstBuffer: ggml.vulkan.common.vulkan_c.VkBuffer, regionCount: u32, pRegions: [*]const ggml.vulkan.common.vulkan_c.VkBufferCopy) void;
 
 // -----------------------------------------------------------------------------
 // Synchronous transfers
 
 /// The `std::vector<vk::BufferCopy>` the 2-D transfers build: one slice
 /// when both pitches equal the width, one per row otherwise.
-fn slices2d(src_off: usize, dst_off: usize, spitch: usize, dpitch: usize, width: usize, height: usize, single: bool) []ggml.vulkan.common.vk.VkBufferCopy {
+fn slices2d(src_off: usize, dst_off: usize, spitch: usize, dpitch: usize, width: usize, height: usize, single: bool) []ggml.vulkan.common.vulkan_c.VkBufferCopy {
     if (single) {
-        const out = std.heap.c_allocator.alloc(ggml.vulkan.common.vk.VkBufferCopy, 1) catch oom();
+        const out = std.heap.c_allocator.alloc(ggml.vulkan.common.vulkan_c.VkBufferCopy, 1) catch oom();
         out[0] = .{ .srcOffset = src_off, .dstOffset = dst_off, .size = width * height };
         return out;
     }
-    const out = std.heap.c_allocator.alloc(ggml.vulkan.common.vk.VkBufferCopy, height) catch oom();
+    const out = std.heap.c_allocator.alloc(ggml.vulkan.common.vulkan_c.VkBufferCopy, height) catch oom();
     for (out, 0..) |*s, i| s.* = .{ .srcOffset = src_off + i * spitch, .dstOffset = dst_off + i * dpitch, .size = width };
     return out;
 }
@@ -548,7 +548,7 @@ pub fn ensureSyncStagingBuffer(device: *ggml.vulkan.device.Device, size: usize) 
     if (device.sync_staging == null or device.sync_staging.?.size < size) {
         ggml.vulkan.buffer.logMemory("ggml_vk_ensure_sync_staging_buffer(%zu)", .{size});
         ggml.vulkan.buffer.destroyBuffer(&device.sync_staging);
-        device.sync_staging = ggml.vulkan.buffer.createBufferCheck(device, size, ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_CACHED_BIT, ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        device.sync_staging = ggml.vulkan.buffer.createBufferCheck(device, size, ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_CACHED_BIT, ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     }
 }
 
@@ -620,8 +620,8 @@ fn submitSync(device: *ggml.vulkan.device.Device, subctx: *Context) void {
 /// Ports `ggml_vk_buffer_write_2d` (ggml-vulkan-buffers.cpp:604 @b1b770d90).
 pub fn bufferWrite2d(dst: *ggml.vulkan.buffer.Buffer, offset: usize, src: [*]const u8, spitch: usize, dpitch: usize, width: usize, height: usize) void {
     // Buffer is already mapped
-    if (dst.memory_property_flags & ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT != 0) {
-        ggml.impl.assert(dst.memory_property_flags & ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT != 0, "dst->memory_property_flags & vk::MemoryPropertyFlagBits::eHostCoherent");
+    if (dst.memory_property_flags & ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT != 0) {
+        ggml.impl.assert(dst.memory_property_flags & ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT != 0, "dst->memory_property_flags & vk::MemoryPropertyFlagBits::eHostCoherent");
         const p: [*]u8 = @ptrCast(dst.ptr.?);
         if (width == spitch and width == dpitch) {
             @memcpy(p[offset..][0 .. width * height], src[0 .. width * height]);
@@ -696,24 +696,24 @@ fn bufferHostReadDirect(buf: *const ggml.vulkan.buffer.Buffer) bool {
     // the HW device to host copy path.
     // AMD UMA: uncached host-visible memory is write-combined, CPU reads are slow
     const slow_host_read = buf.device.vendor_id == ggml.vulkan.common.vendor_id.amd and
-        buf.memory_property_flags & ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_CACHED_BIT == 0;
-    return buf.memory_property_flags & ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT != 0 and buf.device.uma and !slow_host_read;
+        buf.memory_property_flags & ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_CACHED_BIT == 0;
+    return buf.memory_property_flags & ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT != 0 and buf.device.uma and !slow_host_read;
 }
 
 /// The host-read barrier both direct read paths record: makes the GPU's
 /// shader and transfer writes visible to the host.
 fn hostReadBarrier(subctx: *Context) void {
-    var barrier = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkMemoryBarrier, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_MEMORY_BARRIER);
-    barrier.srcAccessMask = ggml.vulkan.common.vk.VK_ACCESS_SHADER_WRITE_BIT | ggml.vulkan.common.vk.VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrier.dstAccessMask = ggml.vulkan.common.vk.VK_ACCESS_HOST_READ_BIT;
-    ggml.vulkan.common.dispatch.vkCmdPipelineBarrier.?(subctx.cmd(), ggml.vulkan.common.vk.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | ggml.vulkan.common.vk.VK_PIPELINE_STAGE_TRANSFER_BIT, ggml.vulkan.common.vk.VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &barrier, 0, null, 0, null);
+    var barrier = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkMemoryBarrier, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_MEMORY_BARRIER);
+    barrier.srcAccessMask = ggml.vulkan.common.vulkan_c.VK_ACCESS_SHADER_WRITE_BIT | ggml.vulkan.common.vulkan_c.VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = ggml.vulkan.common.vulkan_c.VK_ACCESS_HOST_READ_BIT;
+    ggml.vulkan.common.dispatch.vkCmdPipelineBarrier.?(subctx.cmd(), ggml.vulkan.common.vulkan_c.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | ggml.vulkan.common.vulkan_c.VK_PIPELINE_STAGE_TRANSFER_BIT, ggml.vulkan.common.vulkan_c.VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &barrier, 0, null, 0, null);
 }
 
 /// Ports `ggml_vk_buffer_read_2d` (ggml-vulkan-buffers.cpp:721 @b1b770d90).
 pub fn bufferRead2d(src: *ggml.vulkan.buffer.Buffer, offset: usize, dst: [*]u8, spitch: usize, dpitch: usize, width: usize, height: usize) void {
     const device = src.device;
     if (bufferHostReadDirect(src)) {
-        ggml.impl.assert(src.memory_property_flags & ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT != 0, "src->memory_property_flags & vk::MemoryPropertyFlagBits::eHostCoherent");
+        ggml.impl.assert(src.memory_property_flags & ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT != 0, "src->memory_property_flags & vk::MemoryPropertyFlagBits::eHostCoherent");
         device.lock();
         defer device.unlock();
         const subctx = beginSyncCtx(device, &device.compute_queue.?.cmd_pool);
@@ -748,7 +748,7 @@ pub fn bufferRead(src: *ggml.vulkan.buffer.Buffer, offset: usize, dst: [*]u8, si
 pub fn bufferCopyAsync(ctx: *Context, dst: *ggml.vulkan.buffer.Buffer, dst_offset: usize, src: *ggml.vulkan.buffer.Buffer, src_offset: usize, size: usize) void {
     // Make sure both buffers are on same device
     ggml.impl.assert(src.device == dst.device, "src->device == dst->device");
-    const bc: ggml.vulkan.common.vk.VkBufferCopy = .{ .srcOffset = src_offset, .dstOffset = dst_offset, .size = size };
+    const bc: ggml.vulkan.common.vulkan_c.VkBufferCopy = .{ .srcOffset = src_offset, .dstOffset = dst_offset, .size = size };
     vkCmdCopyBuffer(ctx.cmd(), src.buffer, dst.buffer, 1, @ptrCast(&bc));
 }
 
@@ -775,7 +775,7 @@ pub fn bufferCopy(dst: *ggml.vulkan.buffer.Buffer, dst_offset: usize, src: *ggml
 
 /// Ports `ggml_vk_buffer_memset_async` (ggml-vulkan-buffers.cpp:790 @b1b770d90).
 pub fn bufferMemsetAsync(ctx: *Context, dst: *ggml.vulkan.buffer.Buffer, offset: usize, val: u32, size: usize) void {
-    if (dst.memory_property_flags & ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT != 0 and dst.device.uma) {
+    if (dst.memory_property_flags & ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT != 0 and dst.device.uma) {
         deferredMemset(@as([*]u8, @ptrCast(dst.ptr.?)) + offset, val, size, &ctx.memsets);
         return;
     }
@@ -785,7 +785,7 @@ pub fn bufferMemsetAsync(ctx: *Context, dst: *ggml.vulkan.buffer.Buffer, offset:
 
 /// Ports `ggml_vk_buffer_memset` (ggml-vulkan-buffers.cpp:803 @b1b770d90).
 pub fn bufferMemset(dst: *ggml.vulkan.buffer.Buffer, offset: usize, val: u32, size: usize) void {
-    if (dst.memory_property_flags & ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT != 0 and dst.device.uma) {
+    if (dst.memory_property_flags & ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT != 0 and dst.device.uma) {
         @memset((@as([*]u8, @ptrCast(dst.ptr.?)) + offset)[0..size], @truncate(val));
         return;
     }
@@ -816,8 +816,8 @@ pub const BufferCopyRegion = struct {
     size: usize,
 };
 
-fn copyOne(cmd: ggml.vulkan.common.vk.VkCommandBuffer, src: ggml.vulkan.common.vk.VkBuffer, dst: ggml.vulkan.common.vk.VkBuffer, src_offset: usize, dst_offset: usize, size: usize) void {
-    const bc: ggml.vulkan.common.vk.VkBufferCopy = .{ .srcOffset = src_offset, .dstOffset = dst_offset, .size = size };
+fn copyOne(cmd: ggml.vulkan.common.vulkan_c.VkCommandBuffer, src: ggml.vulkan.common.vulkan_c.VkBuffer, dst: ggml.vulkan.common.vulkan_c.VkBuffer, src_offset: usize, dst_offset: usize, size: usize) void {
+    const bc: ggml.vulkan.common.vulkan_c.VkBufferCopy = .{ .srcOffset = src_offset, .dstOffset = dst_offset, .size = size };
     vkCmdCopyBuffer(cmd, src, dst, 1, @ptrCast(&bc));
 }
 
@@ -914,8 +914,8 @@ pub fn bufferWriteN(regions: []const BufferRegion) void {
 
     for (regions) |r| {
         if (r.size == 0) continue;
-        if (r.buf.memory_property_flags & ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT != 0) {
-            ggml.impl.assert(r.buf.memory_property_flags & ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT != 0, "r.buf->memory_property_flags & vk::MemoryPropertyFlagBits::eHostCoherent");
+        if (r.buf.memory_property_flags & ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT != 0) {
+            ggml.impl.assert(r.buf.memory_property_flags & ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT != 0, "r.buf->memory_property_flags & vk::MemoryPropertyFlagBits::eHostCoherent");
             @memcpy((@as([*]u8, @ptrCast(r.buf.ptr.?)) + r.offset)[0..r.size], @as([*]const u8, @ptrCast(r.host.?))[0..r.size]);
             continue;
         }
@@ -956,7 +956,7 @@ pub fn bufferReadN(regions: []const BufferRegion) void {
         if (r.size == 0) continue;
         ggml.impl.assert((direct.items.len == 0 and pending.items.len == 0) or r.buf.device == (if (direct.items.len == 0) pending.items[0] else direct.items[0]).buf.device, "(direct.empty() && pending.empty()) || r.buf->device == (direct.empty() ? pending[0] : direct[0]).buf->device");
         if (bufferHostReadDirect(r.buf)) {
-            ggml.impl.assert(r.buf.memory_property_flags & ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT != 0, "r.buf->memory_property_flags & vk::MemoryPropertyFlagBits::eHostCoherent");
+            ggml.impl.assert(r.buf.memory_property_flags & ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT != 0, "r.buf->memory_property_flags & vk::MemoryPropertyFlagBits::eHostCoherent");
             direct.append(std.heap.c_allocator, r) catch oom();
         } else {
             pending.append(std.heap.c_allocator, r) catch oom();

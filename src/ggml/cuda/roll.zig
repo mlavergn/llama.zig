@@ -35,7 +35,7 @@ pub fn opRoll(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor
     const nb03: i64 = @bitCast(src0.nb[3]);
 
     ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->src[0]->type == GGML_TYPE_F32");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(dst->src[0], dst)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(dst->src[0], dst)");
 
     const stream = ctx.stream();
 

@@ -305,12 +305,12 @@ pub const File = struct {
         self.fp = fp;
         if (comptime is_windows) self.fp_win32 = osHandle(fp);
         errdefer {
-            _ = mod.impl.llama_c.fclose(fp);
+            _ = stdlib.libc.fclose(fp);
             self.fp = null;
         }
-        try self.seek(0, mod.impl.llama_c.SEEK_END, exc);
+        try self.seek(0, std.c.SEEK.END, exc);
         self.size = try self.tell(exc);
-        try self.seek(0, mod.impl.llama_c.SEEK_SET, exc);
+        try self.seek(0, std.c.SEEK.SET, exc);
     }
 
     /// Ports `llama_file`'s `impl`'s `FILE *` constructors, the Windows one
@@ -331,9 +331,9 @@ pub const File = struct {
         };
         errdefer std.heap.c_allocator.free(f.fname);
         if (comptime is_windows) f.fp_win32 = osHandle(fp);
-        try f.seek(0, mod.impl.llama_c.SEEK_END, exc);
+        try f.seek(0, std.c.SEEK.END, exc);
         f.size = try f.tell(exc);
-        try f.seek(0, mod.impl.llama_c.SEEK_SET, exc);
+        try f.seek(0, std.c.SEEK.SET, exc);
         return f;
     }
 
@@ -348,12 +348,12 @@ pub const File = struct {
                 _ = mod.win32.CloseHandle(self.fp_win32_direct);
             }
             if (self.owns_fp) if (self.fp) |fp| {
-                _ = mod.impl.llama_c.fclose(fp);
+                _ = stdlib.libc.fclose(fp);
             };
         } else if (self.fd != -1) {
             _ = std.c.close(self.fd);
         } else if (self.owns_fp) {
-            if (self.fp) |fp| _ = mod.impl.llama_c.fclose(fp);
+            if (self.fp) |fp| _ = stdlib.libc.fclose(fp);
         }
         std.heap.c_allocator.free(self.fname);
     }
@@ -372,7 +372,7 @@ pub const File = struct {
             return @intCast(li);
         }
         if (self.fd == -1) {
-            const ret = mod.impl.llama_c.ftello(self.fp.?);
+            const ret = stdlib.libc.ftello(self.fp.?);
             if (ret == -1) return exc.throw(.runtime_error, "ftell error: {s}", .{errnoText()});
             return @intCast(ret);
         }
@@ -395,7 +395,7 @@ pub const File = struct {
             return;
         }
         const ret: i64 = if (self.fd == -1)
-            mod.impl.llama_c.fseeko(self.fp.?, @bitCast(offset), whence)
+            stdlib.libc.fseeko(self.fp.?, @bitCast(offset), whence)
         else
             std.c.lseek(self.fd, @bitCast(offset), @intCast(whence));
         if (ret == -1) {
@@ -417,8 +417,8 @@ pub const File = struct {
         if (self.fd == -1) {
             const read_offset = try self.tell(exc);
             const to_read = @min(len, self.size -% read_offset);
-            const ret = mod.impl.llama_c.fread(ptr, to_read, 1, self.fp.?);
-            if (mod.impl.llama_c.ferror(self.fp.?) != 0) return exc.throw(.runtime_error, "read error: {s}", .{errnoText()});
+            const ret = stdlib.libc.fread(ptr, to_read, 1, self.fp.?);
+            if (stdlib.libc.ferror(self.fp.?) != 0) return exc.throw(.runtime_error, "read error: {s}", .{errnoText()});
             if (to_read > 0 and ret != 1) return exc.throw(.runtime_error, "unexpectedly reached end of file", .{});
             return;
         }
@@ -437,7 +437,7 @@ pub const File = struct {
                     self.fd = -1;
                     self.alignment = 1;
                     try self.initFp("rb", exc);
-                    try self.seek(read_offset, mod.impl.llama_c.SEEK_SET, exc);
+                    try self.seek(read_offset, std.c.SEEK.SET, exc);
                     return self.readRawUnsafe(ptr, len, exc);
                 }
                 return exc.throw(.runtime_error, "read error: {s}", .{errnoText()});
@@ -480,12 +480,12 @@ pub const File = struct {
             self.fd = -1;
             self.alignment = 1;
             try self.initFp("rb", exc);
-            try self.seek(offset, mod.impl.llama_c.SEEK_SET, exc);
+            try self.seek(offset, std.c.SEEK.SET, exc);
             return self.readRawUnsafe(dest, len, exc);
         }
         defer std.c.free(raw_buffer);
 
-        try self.seek(aligned_offset, mod.impl.llama_c.SEEK_SET, exc);
+        try self.seek(aligned_offset, std.c.SEEK.SET, exc);
 
         const buf: [*]const u8 = @ptrCast(raw_buffer.?);
         const out: [*]u8 = @ptrCast(dest);
@@ -504,7 +504,7 @@ pub const File = struct {
             done += n;
         }
 
-        try self.seek(offset + len, mod.impl.llama_c.SEEK_SET, exc);
+        try self.seek(offset + len, std.c.SEEK.SET, exc);
     }
 
     /// Ports `llama_file`'s `impl`'s `read_raw`, the Windows one
@@ -541,7 +541,7 @@ pub const File = struct {
         if (comptime is_windows) return self.writeRawWin32(ptr, len, exc);
         if (len == 0) return;
         std.c._errno().* = 0;
-        if (mod.impl.llama_c.fwrite(ptr, len, 1, self.fp.?) != 1) return exc.throw(.runtime_error, "write error: {s}", .{errnoText()});
+        if (stdlib.libc.fwrite(ptr, len, 1, self.fp.?) != 1) return exc.throw(.runtime_error, "write error: {s}", .{errnoText()});
     }
 
     /// Ports `llama_file`'s `impl`'s `write_u32` (llama-mmap.cpp:616 @b1b770d90).
@@ -664,14 +664,14 @@ pub const File = struct {
         if (err == mod.win32.ERROR_INVALID_PARAMETER or err == mod.win32.ERROR_INVALID_USER_BUFFER or err == mod.win32.ERROR_NOACCESS) {
             self.warnWin32Fallback("read_raw_unsafe", err);
             self.dropDirectWin32();
-            try self.seek(read_offset, mod.impl.llama_c.SEEK_SET, exc);
+            try self.seek(read_offset, std.c.SEEK.SET, exc);
             return self.readRawUnsafeWin32(ptr, len, exc);
         }
         if (err != mod.win32.ERROR_SUCCESS) {
             return throwWin32(exc, "read error: {s}", err);
         }
 
-        try self.seek(if (len > self.size - read_offset) self.size else read_offset + len, mod.impl.llama_c.SEEK_SET, exc);
+        try self.seek(if (len > self.size - read_offset) self.size else read_offset + len, std.c.SEEK.SET, exc);
     }
 
     /// Ports `llama_file`'s `_WIN32` `impl`'s `read_aligned_chunk`
@@ -701,12 +701,12 @@ pub const File = struct {
             defer std.heap.c_allocator.free(msg_z);
             mod.impl.logWarn("%s: Falling back to buffered I/O due to %s\n", .{ "read_aligned_chunk", msg_z.ptr });
             self.dropDirectWin32();
-            try self.seek(offset, mod.impl.llama_c.SEEK_SET, exc);
+            try self.seek(offset, std.c.SEEK.SET, exc);
             return self.readRawUnsafeWin32(dest, len, exc);
         };
         defer stdlib.libc._aligned_free(raw_buffer);
 
-        try self.seek(aligned_offset, mod.impl.llama_c.SEEK_SET, exc);
+        try self.seek(aligned_offset, std.c.SEEK.SET, exc);
 
         const buf: [*]const u8 = @ptrCast(raw_buffer);
         const out: [*]u8 = @ptrCast(dest);
@@ -726,7 +726,7 @@ pub const File = struct {
             done += n;
         }
 
-        try self.seek(offset + len, mod.impl.llama_c.SEEK_SET, exc);
+        try self.seek(offset + len, std.c.SEEK.SET, exc);
     }
 
     /// Ports `llama_file`'s `_WIN32` `impl`'s `write_raw` (llama-mmap.cpp:372

@@ -26,12 +26,12 @@ pub fn opCrossEntropyLoss(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c
     ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
     ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F32");
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src1), "ggml_is_contiguous(src1)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src1), "ggml_is_contiguous(src1)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
 
     const ne00 = src0.ne[0];
-    const nrows = ggml.impl.ggml_c.ggml_nrows(src0);
+    const nrows = ggml.types.ggml_nrows(src0);
 
     const pool = ctx.pool();
     const stream = ctx.stream();
@@ -72,15 +72,15 @@ pub fn opCrossEntropyLossBack(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.gg
     ggml.impl.assert(grad.type == ggml.impl.ggml_c.GGML_TYPE_F32, " grad->type == GGML_TYPE_F32");
     ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "  dst->type == GGML_TYPE_F32");
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_scalar(grad), "ggml_is_scalar(grad)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0f), "ggml_is_contiguous(src0f)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src1f), "ggml_is_contiguous(src1f)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0f, src1f), "ggml_are_same_shape(src0f, src1f)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0f, dst), "ggml_are_same_shape(src0f, dst)");
+    ggml.impl.assert(ggml.types.ggml_is_scalar(grad), "ggml_is_scalar(grad)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0f), "ggml_is_contiguous(src0f)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src1f), "ggml_is_contiguous(src1f)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src0f, src1f), "ggml_are_same_shape(src0f, src1f)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src0f, dst), "ggml_are_same_shape(src0f, dst)");
 
     const ne00 = src0f.ne[0];
-    const nrows = ggml.impl.ggml_c.ggml_nrows(src0f);
+    const nrows = ggml.types.ggml_nrows(src0f);
 
     const stream = ctx.stream();
 

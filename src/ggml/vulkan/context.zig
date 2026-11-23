@@ -35,7 +35,7 @@ pub const RmsNormMode = enum(u32) { mul, mul_add, mul_add_mul, mul_rope, mul_rop
 pub const GarbageCollector = struct {
     tl_semaphores: std.ArrayList(*ggml.vulkan.submit.Semaphore) = .empty,
     semaphores: std.ArrayList(*ggml.vulkan.submit.Semaphore) = .empty,
-    events: std.ArrayList(ggml.vulkan.common.vk.VkEvent) = .empty,
+    events: std.ArrayList(ggml.vulkan.common.vulkan_c.VkEvent) = .empty,
     contexts: std.ArrayList(*ggml.vulkan.submit.Context) = .empty,
 };
 
@@ -44,9 +44,9 @@ pub const GarbageCollector = struct {
 /// takes more than `MAX_PARAMETER_COUNT`.
 pub const DescriptorSetBindings = struct {
     len: u32 = 0,
-    infos: [ggml.vulkan.pipeline.max_parameter_count]ggml.vulkan.common.vk.VkDescriptorBufferInfo = undefined,
+    infos: [ggml.vulkan.pipeline.max_parameter_count]ggml.vulkan.common.vulkan_c.VkDescriptorBufferInfo = undefined,
 
-    fn items(self: *const DescriptorSetBindings) []const ggml.vulkan.common.vk.VkDescriptorBufferInfo {
+    fn items(self: *const DescriptorSetBindings) []const ggml.vulkan.common.vulkan_c.VkDescriptorBufferInfo {
         return self.infos[0..self.len];
     }
 };
@@ -70,8 +70,8 @@ pub const BackendCtx = struct {
     prealloc_split_k: ?*ggml.vulkan.buffer.Buffer = null,
     prealloc_add_rms_partials: ?*ggml.vulkan.buffer.Buffer = null,
     sync_staging: ?*ggml.vulkan.buffer.Buffer = null,
-    fence: ggml.vulkan.common.vk.VkFence = null,
-    almost_ready_fence: ggml.vulkan.common.vk.VkFence = null,
+    fence: ggml.vulkan.common.vulkan_c.VkFence = null,
+    almost_ready_fence: ggml.vulkan.common.vulkan_c.VkFence = null,
     submit_pending: bool = false,
     almost_ready_fence_pending: bool = false,
     // Set before op_add and unset after op_rms_norm to indicate that the add
@@ -103,8 +103,8 @@ pub const BackendCtx = struct {
 
     tensor_ctxs: std.ArrayList(?*ggml.vulkan.submit.Context) = .empty,
 
-    descriptor_pools: std.ArrayList(ggml.vulkan.common.vk.VkDescriptorPool) = .empty,
-    descriptor_sets: std.ArrayList(ggml.vulkan.common.vk.VkDescriptorSet) = .empty,
+    descriptor_pools: std.ArrayList(ggml.vulkan.common.vulkan_c.VkDescriptorPool) = .empty,
+    descriptor_sets: std.ArrayList(ggml.vulkan.common.vulkan_c.VkDescriptorSet) = .empty,
     // last bindings written to each set; descriptor_sets is append-only so an index always names the same set
     descriptor_set_bindings: std.ArrayList(DescriptorSetBindings) = .empty,
     descriptor_set_bindings_destroy_count: u64 = 0,
@@ -127,7 +127,7 @@ pub const BackendCtx = struct {
 
     // for GGML_VK_PERF_LOGGER
     perf_logger: ?*ggml.vulkan.perf.PerfLogger = null,
-    query_pool: ggml.vulkan.common.vk.VkQueryPool = null,
+    query_pool: ggml.vulkan.common.vulkan_c.VkQueryPool = null,
     query_fusion_names: std.ArrayList(?[*:0]const u8) = .empty,
     query_fusion_node_count: std.ArrayList(c_int) = .empty,
     query_nodes: std.ArrayList(?*ggml.impl.ggml_c.ggml_tensor) = .empty,
@@ -153,13 +153,13 @@ pub fn init(ctx: *BackendCtx, idx: usize) void {
     // Fixed size of 1KB, for deterministic behavior
     ctx.prealloc_size_add_rms_partials = 1024;
 
-    var fci = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkFenceCreateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_FENCE_CREATE_INFO);
+    var fci = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkFenceCreateInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_FENCE_CREATE_INFO);
     ggml.vulkan.common.checkOrAbort(ggml.vulkan.common.dispatch.vkCreateFence.?(ctx.device.device, &fci, null, &ctx.fence), "vk::Device::createFence");
     ggml.vulkan.common.checkOrAbort(ggml.vulkan.common.dispatch.vkCreateFence.?(ctx.device.device, &fci, null, &ctx.almost_ready_fence), "vk::Device::createFence");
 
     ctx.compute_cmd_pool.init(ctx.device, ctx.device.compute_queue.?);
     if (ctx.device.async_use_transfer_queue) {
-        ctx.transfer_semaphore.s = createSemaphore(ctx.device, ggml.vulkan.common.vk.VK_SEMAPHORE_TYPE_TIMELINE);
+        ctx.transfer_semaphore.s = createSemaphore(ctx.device, ggml.vulkan.common.vulkan_c.VK_SEMAPHORE_TYPE_TIMELINE);
         ctx.transfer_semaphore.value = 0;
         ctx.transfer_cmd_pool.init(ctx.device, ctx.device.transfer_queue.?);
     }
@@ -167,13 +167,13 @@ pub fn init(ctx: *BackendCtx, idx: usize) void {
     if (ggml.vulkan.instance.loggers.perf_logger_enabled) ctx.perf_logger = ggml.vulkan.perf.PerfLogger.create();
 }
 
-fn createSemaphore(device: *ggml.vulkan.device.Device, ty: ggml.vulkan.common.vk.VkSemaphoreType) ggml.vulkan.common.vk.VkSemaphore {
-    var tci = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkSemaphoreTypeCreateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO);
+fn createSemaphore(device: *ggml.vulkan.device.Device, ty: ggml.vulkan.common.vulkan_c.VkSemaphoreType) ggml.vulkan.common.vulkan_c.VkSemaphore {
+    var tci = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkSemaphoreTypeCreateInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO);
     tci.semaphoreType = ty;
     tci.initialValue = 0;
-    var ci = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkSemaphoreCreateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO);
+    var ci = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkSemaphoreCreateInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO);
     ci.pNext = &tci;
-    var s: ggml.vulkan.common.vk.VkSemaphore = null;
+    var s: ggml.vulkan.common.vulkan_c.VkSemaphore = null;
     ggml.vulkan.common.checkOrAbort(ggml.vulkan.common.dispatch.vkCreateSemaphore.?(device.device, &ci, null, &s), "vk::Device::createSemaphore");
     return s;
 }
@@ -188,10 +188,10 @@ pub fn createContext(ctx: *BackendCtx, p: *ggml.vulkan.device.CommandPool) *ggml
 
 /// Ports `ggml_vk_create_binary_semaphore` (ggml-vulkan.cpp:1092 @b1b770d90):
 /// pooled, and handed out again only after `graphCleanup` resets the index.
-pub fn createBinarySemaphore(ctx: *BackendCtx) ggml.vulkan.common.vk.VkSemaphore {
+pub fn createBinarySemaphore(ctx: *BackendCtx) ggml.vulkan.common.vulkan_c.VkSemaphore {
     if (ctx.binary_semaphore_idx >= ctx.gc.semaphores.items.len) {
         const s = std.heap.c_allocator.create(ggml.vulkan.submit.Semaphore) catch oom();
-        s.* = .{ .s = createSemaphore(ctx.device, ggml.vulkan.common.vk.VK_SEMAPHORE_TYPE_BINARY), .value = 0 };
+        s.* = .{ .s = createSemaphore(ctx.device, ggml.vulkan.common.vulkan_c.VK_SEMAPHORE_TYPE_BINARY), .value = 0 };
         ctx.gc.semaphores.append(std.heap.c_allocator, s) catch oom();
     }
     defer ctx.binary_semaphore_idx += 1;
@@ -202,7 +202,7 @@ pub fn createBinarySemaphore(ctx: *BackendCtx) ggml.vulkan.common.vk.VkSemaphore
 pub fn createTimelineSemaphore(ctx: *BackendCtx) *ggml.vulkan.submit.Semaphore {
     if (ctx.semaphore_idx >= ctx.gc.tl_semaphores.items.len) {
         const s = std.heap.c_allocator.create(ggml.vulkan.submit.Semaphore) catch oom();
-        s.* = .{ .s = createSemaphore(ctx.device, ggml.vulkan.common.vk.VK_SEMAPHORE_TYPE_TIMELINE), .value = 0 };
+        s.* = .{ .s = createSemaphore(ctx.device, ggml.vulkan.common.vulkan_c.VK_SEMAPHORE_TYPE_TIMELINE), .value = 0 };
         ctx.gc.tl_semaphores.append(std.heap.c_allocator, s) catch oom();
     }
     defer ctx.semaphore_idx += 1;
@@ -210,10 +210,10 @@ pub fn createTimelineSemaphore(ctx: *BackendCtx) *ggml.vulkan.submit.Semaphore {
 }
 
 /// Ports `ggml_vk_create_event` (ggml-vulkan.cpp:1116 @b1b770d90).
-pub fn createEvent(ctx: *BackendCtx) ggml.vulkan.common.vk.VkEvent {
+pub fn createEvent(ctx: *BackendCtx) ggml.vulkan.common.vulkan_c.VkEvent {
     if (ctx.event_idx >= ctx.gc.events.items.len) {
-        var ci = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkEventCreateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_EVENT_CREATE_INFO);
-        var e: ggml.vulkan.common.vk.VkEvent = null;
+        var ci = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkEventCreateInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_EVENT_CREATE_INFO);
+        var e: ggml.vulkan.common.vulkan_c.VkEvent = null;
         ggml.vulkan.common.checkOrAbort(ggml.vulkan.common.dispatch.vkCreateEvent.?(ctx.device.device, &ci, null, &e), "vk::Device::createEvent");
         ctx.gc.events.append(std.heap.c_allocator, e) catch oom();
     }
@@ -269,7 +269,7 @@ fn descriptorOffset(tensor_offset: usize, alignment: usize, type_size: usize) us
 /// Ports `get_misalign_bytes` (ggml-vulkan.cpp:291 @b1b770d90).
 pub fn getMisalignBytes(ctx: *const BackendCtx, t: *const ggml.impl.ggml_c.ggml_tensor) u32 {
     const tensor_offset = tensorBufferOffset(ctx, t);
-    const descriptor_offset = descriptorOffset(tensor_offset, ctx.device.properties.limits.minStorageBufferOffsetAlignment, ggml.impl.ggml_c.ggml_type_size(t.type));
+    const descriptor_offset = descriptorOffset(tensor_offset, ctx.device.properties.limits.minStorageBufferOffsetAlignment, ggml.types.ggml_type_size(t.type));
     ggml.impl.assert(tensor_offset - descriptor_offset <= std.math.maxInt(u32), "tensor_offset - descriptor_offset <= UINT32_MAX");
     return @intCast(tensor_offset - descriptor_offset);
 }
@@ -288,8 +288,8 @@ pub fn tensorSubbuffer(ctx: *const BackendCtx, tensor: *const ggml.impl.ggml_c.g
     }
     ggml.impl.assert(buffer != null, "buffer != nullptr");
 
-    var size = ggml.impl.ggml_c.ggml_nbytes(tensor);
-    const descriptor_offset = descriptorOffset(offset, ctx.device.properties.limits.minStorageBufferOffsetAlignment, ggml.impl.ggml_c.ggml_type_size(tensor.type));
+    var size = ggml.types.ggml_nbytes(tensor);
+    const descriptor_offset = descriptorOffset(offset, ctx.device.properties.limits.minStorageBufferOffsetAlignment, ggml.types.ggml_type_size(tensor.type));
     const misalign_bytes = offset - descriptor_offset;
     // The shader must support misaligned offsets when indexing into the buffer
     ggml.impl.assert(allow_misalign or misalign_bytes == 0, "allow_misalign || misalign_bytes == 0");
@@ -304,7 +304,7 @@ pub fn ensureSyncStagingBuffer(ctx: *BackendCtx, size: usize) void {
     if (ctx.sync_staging == null or ctx.sync_staging.?.size < size) {
         ggml.vulkan.buffer.logMemory("ggml_vk_ensure_sync_staging_buffer(%zu)", .{size});
         ggml.vulkan.buffer.destroyBuffer(&ctx.sync_staging);
-        ctx.sync_staging = ggml.vulkan.buffer.createBufferCheck(ctx.device, size, ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_CACHED_BIT, ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        ctx.sync_staging = ggml.vulkan.buffer.createBufferCheck(ctx.device, size, ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_CACHED_BIT, ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     }
 }
 
@@ -367,13 +367,13 @@ pub fn waitForFence(ctx: *BackendCtx) void {
     // Spin (w/pause) waiting for the graph to finish executing.
     while (true) {
         const result = ggml.vulkan.common.dispatch.vkGetFenceStatus.?(dev.device, ctx.fence);
-        if (result == ggml.vulkan.common.vk.VK_ERROR_DEVICE_LOST) {
+        if (result == ggml.vulkan.common.vulkan_c.VK_ERROR_DEVICE_LOST) {
             ggml.vulkan.submit.printDeviceLostInfo(dev);
             ggml.impl.logError("ggml_vulkan: getFenceStatus\n", .{});
             ggml.vulkan.common.abortLastError();
         }
-        if (result == ggml.vulkan.common.vk.VK_SUCCESS) break;
-        if (result != ggml.vulkan.common.vk.VK_NOT_READY) {
+        if (result == ggml.vulkan.common.vulkan_c.VK_SUCCESS) break;
+        if (result != ggml.vulkan.common.vulkan_c.VK_NOT_READY) {
             ggml.impl.logError("ggml_vulkan: error %s\n", .{ggml.vulkan.common.resultString(result).ptr});
             ggml.impl.abort("ggml_vulkan: getFenceStatus");
         }
@@ -415,11 +415,11 @@ pub fn synchronize(ctx: *BackendCtx) void {
         if (ctx.device.serialize_submissions) {
             ctx.submit_pending = false;
         } else if (ctx.device.async_use_transfer_queue and ctx.transfer_semaphore_last_submitted < ctx.transfer_semaphore.value) {
-            var tl_info = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkTimelineSemaphoreSubmitInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO);
+            var tl_info = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkTimelineSemaphoreSubmitInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO);
             tl_info.waitSemaphoreValueCount = 1;
             tl_info.pWaitSemaphoreValues = &ctx.transfer_semaphore.value;
-            const stage: ggml.vulkan.common.vk.VkPipelineStageFlags = ctx.device.transfer_queue.?.stage_flags;
-            var si = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkSubmitInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_SUBMIT_INFO);
+            const stage: ggml.vulkan.common.vulkan_c.VkPipelineStageFlags = ctx.device.transfer_queue.?.stage_flags;
+            var si = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkSubmitInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_SUBMIT_INFO);
             si.waitSemaphoreCount = 1;
             si.pWaitSemaphores = &ctx.transfer_semaphore.s;
             si.pWaitDstStageMask = &stage;
@@ -561,20 +561,20 @@ pub fn allocateDescriptorSets(ctx: *BackendCtx) void {
         pool_remaining = pool_size;
 
         if (pool_idx >= ctx.descriptor_pools.items.len) {
-            const dps: ggml.vulkan.common.vk.VkDescriptorPoolSize = .{ .type = ggml.vulkan.common.vk.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = ggml.vulkan.pipeline.max_parameter_count * pool_size };
-            var dpci = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkDescriptorPoolCreateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO);
+            const dps: ggml.vulkan.common.vulkan_c.VkDescriptorPoolSize = .{ .type = ggml.vulkan.common.vulkan_c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = ggml.vulkan.pipeline.max_parameter_count * pool_size };
+            var dpci = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkDescriptorPoolCreateInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO);
             dpci.maxSets = pool_size;
             dpci.poolSizeCount = 1;
             dpci.pPoolSizes = &dps;
-            var pool: ggml.vulkan.common.vk.VkDescriptorPool = null;
+            var pool: ggml.vulkan.common.vulkan_c.VkDescriptorPool = null;
             ggml.vulkan.common.checkOrAbort(ggml.vulkan.common.dispatch.vkCreateDescriptorPool.?(device.device, &dpci, null, &pool), "vk::Device::createDescriptorPool");
             ctx.descriptor_pools.append(std.heap.c_allocator, pool) catch oom();
         }
 
-        const layouts = std.heap.c_allocator.alloc(ggml.vulkan.common.vk.VkDescriptorSetLayout, alloc_count) catch oom();
+        const layouts = std.heap.c_allocator.alloc(ggml.vulkan.common.vulkan_c.VkDescriptorSetLayout, alloc_count) catch oom();
         defer std.heap.c_allocator.free(layouts);
         @memset(layouts, device.dsl);
-        var dsai = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkDescriptorSetAllocateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO);
+        var dsai = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkDescriptorSetAllocateInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO);
         dsai.descriptorPool = ctx.descriptor_pools.items[pool_idx];
         dsai.descriptorSetCount = alloc_count;
         dsai.pSetLayouts = layouts.ptr;
@@ -610,7 +610,7 @@ pub fn dispatchPipeline(ctx: *BackendCtx, subctx: *ggml.vulkan.submit.Context, p
     ctx.descriptor_set_idx += 1;
     const descriptor_set = ctx.descriptor_sets.items[descriptor_set_idx];
 
-    var infos: [ggml.vulkan.pipeline.max_parameter_count]ggml.vulkan.common.vk.VkDescriptorBufferInfo = undefined;
+    var infos: [ggml.vulkan.pipeline.max_parameter_count]ggml.vulkan.common.vulkan_c.VkDescriptorBufferInfo = undefined;
     for (descriptor_buffer_infos, 0..) |sb, i| infos[i] = sb.info();
     const n = descriptor_buffer_infos.len;
 
@@ -633,12 +633,12 @@ pub fn dispatchPipeline(ctx: *BackendCtx, subctx: *ggml.vulkan.submit.Context, p
         }
     }
     if (!same) {
-        var wds = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkWriteDescriptorSet, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+        var wds = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkWriteDescriptorSet, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
         wds.dstSet = descriptor_set;
         wds.dstBinding = 0;
         wds.dstArrayElement = 0;
         wds.descriptorCount = pipeline.parameter_count;
-        wds.descriptorType = ggml.vulkan.common.vk.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        wds.descriptorType = ggml.vulkan.common.vulkan_c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         wds.pBufferInfo = &infos;
         ggml.vulkan.common.dispatch.vkUpdateDescriptorSets.?(ctx.device.device, 1, &wds, 0, null);
         bindings.len = @intCast(n);
@@ -646,9 +646,9 @@ pub fn dispatchPipeline(ctx: *BackendCtx, subctx: *ggml.vulkan.submit.Context, p
     }
 
     const cmd = subctx.cmd();
-    ggml.vulkan.common.dispatch.vkCmdPushConstants.?(cmd, pipeline.layout, ggml.vulkan.common.vk.VK_SHADER_STAGE_COMPUTE_BIT, 0, @intCast(push_constants.len), push_constants.ptr);
-    ggml.vulkan.common.dispatch.vkCmdBindPipeline.?(cmd, ggml.vulkan.common.vk.VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.pipeline);
-    ggml.vulkan.common.dispatch.vkCmdBindDescriptorSets.?(cmd, ggml.vulkan.common.vk.VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.layout, 0, 1, &descriptor_set, 0, null);
+    ggml.vulkan.common.dispatch.vkCmdPushConstants.?(cmd, pipeline.layout, ggml.vulkan.common.vulkan_c.VK_SHADER_STAGE_COMPUTE_BIT, 0, @intCast(push_constants.len), push_constants.ptr);
+    ggml.vulkan.common.dispatch.vkCmdBindPipeline.?(cmd, ggml.vulkan.common.vulkan_c.VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.pipeline);
+    ggml.vulkan.common.dispatch.vkCmdBindDescriptorSets.?(cmd, ggml.vulkan.common.vulkan_c.VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.layout, 0, 1, &descriptor_set, 0, null);
     {
         var dbg = ggml.vulkan.submit.DebugLabel.dispatch(subctx, pipeline.name, wg0, wg1, wg2);
         defer dbg.close();

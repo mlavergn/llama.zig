@@ -20,7 +20,7 @@ const block_nt = 256;
 /// block of `GGML_CUDA_FWHT_BLOCK_NT` threads.
 fn opFwhtImpl(comptime T: type, ctx: *ggml.cuda.common.Context, src: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor) bool {
     const n: c_int = @truncate(src.ne[0]);
-    const rows = ggml.impl.ggml_c.ggml_nrows(src);
+    const rows = ggml.types.ggml_nrows(src);
 
     const src_d: ?*const anyopaque = src.data;
     const dst_d: ?*anyopaque = dst.data;
@@ -73,8 +73,8 @@ pub fn opMulMatUseFwht(op: *const ggml.impl.ggml_c.ggml_tensor) bool {
 
     return op.op == ggml.impl.ggml_c.GGML_OP_MUL_MAT and ggml.impl.getOpParamsI32(op, 1) == ggml.impl.ggml_c.GGML_HINT_SRC0_IS_HADAMARD and
         a.type == ggml.impl.ggml_c.GGML_TYPE_F32 and op.type == ggml.impl.ggml_c.GGML_TYPE_F32 and
-        (b.type == ggml.impl.ggml_c.GGML_TYPE_F32 or b.type == ggml.impl.ggml_c.GGML_TYPE_F16) and ggml.impl.ggml_c.ggml_is_contiguous(b) and ggml.impl.ggml_c.ggml_is_contiguous(op) and
-        ggml.impl.ggml_c.ggml_are_same_shape(b, op);
+        (b.type == ggml.impl.ggml_c.GGML_TYPE_F32 or b.type == ggml.impl.ggml_c.GGML_TYPE_F16) and ggml.types.ggml_is_contiguous(b) and ggml.types.ggml_is_contiguous(op) and
+        ggml.types.ggml_are_same_shape(b, op);
 }
 
 /// Ports `ggml_cuda_op_fwht` (fwht.cu:225 @b1b770d90).
@@ -84,8 +84,8 @@ pub fn opMulMatUseFwht(op: *const ggml.impl.ggml_c.ggml_tensor) bool {
 /// F16, or a row length other than a power of two from 64 to 8192, with
 /// nothing launched.
 pub fn opFwht(ctx: *ggml.cuda.common.Context, src: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor) bool {
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src, dst), "ggml_are_same_shape(src, dst)");
-    if (!ggml.impl.ggml_c.ggml_is_contiguous(src) or !ggml.impl.ggml_c.ggml_is_contiguous(dst)) {
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src, dst), "ggml_are_same_shape(src, dst)");
+    if (!ggml.types.ggml_is_contiguous(src) or !ggml.types.ggml_is_contiguous(dst)) {
         return false;
     }
     if (dst.type != ggml.impl.ggml_c.GGML_TYPE_F32) {

@@ -221,23 +221,23 @@ pub fn mulMatVecF(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.
     const ne2 = dst.ne[2];
     const ne3 = dst.ne[3];
 
-    const ts_src0 = ggml.impl.ggml_c.ggml_type_size(src0.type);
-    const ts_src1 = ggml.impl.ggml_c.ggml_type_size(src1.type);
-    const ts_dst = ggml.impl.ggml_c.ggml_type_size(dst.type);
+    const ts_src0 = ggml.types.ggml_type_size(src0.type);
+    const ts_src1 = ggml.types.ggml_type_size(src1.type);
+    const ts_dst = ggml.types.ggml_type_size(dst.type);
 
     ggml.impl.assert(ids == null or ne12 <= max_batch_size, "!ids || ne12 <= MMVF_MAX_BATCH_SIZE");
     ggml.impl.assert(ne13 == ne3, "ne13 == ne3");
 
     ggml.impl.assert(src0.nb[0] == ts_src0, "        nb00       == ts_src0");
     ggml.impl.assert(src1.nb[0] == ts_src1, "        nb10       == ts_src1");
-    ggml.impl.assert(ids == null or ids.?.nb[0] == ggml.impl.ggml_c.ggml_type_size(ids.?.type), "!ids || ids->nb[0] == ggml_type_size(ids->type)");
+    ggml.impl.assert(ids == null or ids.?.nb[0] == ggml.types.ggml_type_size(ids.?.type), "!ids || ids->nb[0] == ggml_type_size(ids->type)");
     ggml.impl.assert(dst.nb[0] == ts_dst, "        nb0        == ts_dst");
     ggml.impl.assert(src0.type != ggml.impl.ggml_c.GGML_TYPE_F8_E4M3 or @intFromPtr(src0.data) % @alignOf(u16) == 0, "src0->type != GGML_TYPE_F8_E4M3 || (uintptr_t) src0->data % alignof(uint16_t) == 0");
 
     const x = ggml.cuda.common.info().devices[@intCast(ggml.cuda.common.getDevice())].cc;
     // the fused GLU path gets the GLU node as dst, which carries no matmul precision, so it accumulates in F32
     const fused_gate = if (fusion) |f| f.gate != null else false;
-    const prec: ggml.impl.ggml_c.enum_ggml_prec = if (ggml.cuda.common.fastFp16Available(x) and !fused_gate) ggml.impl.ggml_c.ggml_prec_get_acc(dst) else ggml.impl.ggml_c.GGML_PREC_F32;
+    const prec: ggml.impl.ggml_c.enum_ggml_prec = if (ggml.cuda.common.fastFp16Available(x) and !fused_gate) ggml.ops.ggml_prec_get_acc(dst) else ggml.impl.ggml_c.GGML_PREC_F32;
 
     const src1_d: ?*const f32 = @ptrCast(@alignCast(src1.data));
     const ids_d: ?*const i32 = if (ids) |i| @ptrCast(@alignCast(i.data)) else null;
@@ -256,7 +256,7 @@ pub fn mulMatVecF(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.
             fusion_local.x_bias = b.data;
         }
         if (f.gate) |g| {
-            ggml.impl.assert(g.type == src0.type and ggml.impl.ggml_c.ggml_are_same_stride(g, src0), "fusion->gate->type == src0->type && ggml_are_same_stride(fusion->gate, src0)");
+            ggml.impl.assert(g.type == src0.type and ggml.types.ggml_are_same_stride(g, src0), "fusion->gate->type == src0->type && ggml_are_same_stride(fusion->gate, src0)");
             ggml.impl.assert(src0.type != ggml.impl.ggml_c.GGML_TYPE_F8_E4M3 or @intFromPtr(g.data) % @alignOf(u16) == 0, "src0->type != GGML_TYPE_F8_E4M3 || (uintptr_t) fusion->gate->data % alignof(uint16_t) == 0");
             fusion_local.gate = g.data;
         }
@@ -269,14 +269,14 @@ pub fn mulMatVecF(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.
         const n_scale: i64 = if (ids != null) src0.ne[2] else 1;
         if (f.x_scale) |sc| {
             ggml.impl.assert(sc.type == ggml.impl.ggml_c.GGML_TYPE_F32, "fusion->x_scale->type == GGML_TYPE_F32");
-            ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(sc), "ggml_is_contiguous(fusion->x_scale)");
-            ggml.impl.assert(ggml.impl.ggml_c.ggml_nelements(sc) == n_scale, "ggml_nelements(fusion->x_scale) == (ids ? src0->ne[2] : 1)");
+            ggml.impl.assert(ggml.types.ggml_is_contiguous(sc), "ggml_is_contiguous(fusion->x_scale)");
+            ggml.impl.assert(ggml.types.ggml_nelements(sc) == n_scale, "ggml_nelements(fusion->x_scale) == (ids ? src0->ne[2] : 1)");
             fusion_local.x_scale = sc.data;
         }
         if (f.gate_scale) |sc| {
             ggml.impl.assert(sc.type == ggml.impl.ggml_c.GGML_TYPE_F32, "fusion->gate_scale->type == GGML_TYPE_F32");
-            ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(sc), "ggml_is_contiguous(fusion->gate_scale)");
-            ggml.impl.assert(ggml.impl.ggml_c.ggml_nelements(sc) == n_scale, "ggml_nelements(fusion->gate_scale) == (ids ? src0->ne[2] : 1)");
+            ggml.impl.assert(ggml.types.ggml_is_contiguous(sc), "ggml_is_contiguous(fusion->gate_scale)");
+            ggml.impl.assert(ggml.types.ggml_nelements(sc) == n_scale, "ggml_nelements(fusion->gate_scale) == (ids ? src0->ne[2] : 1)");
             fusion_local.gate_scale = sc.data;
         }
         fusion_local.glu_op = f.glu_op;
@@ -303,7 +303,7 @@ pub fn mulMatVecF(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.
     const stride_channel_dst = if (has_ids) s1 else s2;
     const stride_channel_y = if (has_ids) s11 else s12;
 
-    const ids_stride: i64 = if (ids) |i| @intCast(i.nb[1] / ggml.impl.ggml_c.ggml_type_size(i.type)) else 0;
+    const ids_stride: i64 = if (ids) |i| @intCast(i.nb[1] / ggml.types.ggml_type_size(i.type)) else 0;
 
     const stream = ctx.stream();
     switch (src0.type) {
@@ -312,7 +312,7 @@ pub fn mulMatVecF(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.
         ggml.impl.ggml_c.GGML_TYPE_BF16 => mulMatVecFCuda(ggml.cuda.kernels.bf16, src0.data, src1_d, ids_d, fusion_local, dst_d, ne00, ne01, ncols_dst, s01, stride_col_y, i32Of(stride_col_dst), ne02, nchannels_y, nchannels_dst, s02, stride_channel_y, stride_channel_dst, ne03, ne3, s03, s13, s3, ids_stride, prec, stream),
         ggml.impl.ggml_c.GGML_TYPE_F8_E4M3 => mulMatVecFCuda(ggml.cuda.kernels.fp8_e4m3, src0.data, src1_d, ids_d, fusion_local, dst_d, ne00, ne01, ncols_dst, s01, stride_col_y, i32Of(stride_col_dst), ne02, nchannels_y, nchannels_dst, s02, stride_channel_y, stride_channel_dst, ne03, ne3, s03, s13, s3, ids_stride, prec, stream),
         else => {
-            ggml.impl.logError("unsupported type: %s\n", .{ggml.impl.ggml_c.ggml_type_name(src0.type)});
+            ggml.impl.logError("unsupported type: %s\n", .{ggml.types.ggml_type_name(src0.type)});
             ggml.impl.abort("unsupported type");
         },
     }
@@ -331,7 +331,7 @@ pub fn shouldUseMmvf(src0: *const ggml.impl.ggml_c.ggml_tensor, x: c_int, warp_s
 
     if (@rem(src0_ne[0], 2) != 0) return false;
 
-    const ts = ggml.impl.ggml_c.ggml_type_size(ty);
+    const ts = ggml.types.ggml_type_size(ty);
     if (src0_nb[0] != ts) return false;
 
     if (!ggml.cuda.common.isAligned(src0, 2 * ts)) return false;

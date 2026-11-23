@@ -167,7 +167,7 @@ fn applyBinaryOp(
     const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
     ggml.impl.assert(
-        ggml.impl.ggml_c.ggml_can_repeat(src1, src0) and ggml.impl.ggml_c.ggml_are_same_shape(src0, dst),
+        ggml.types.ggml_can_repeat(src1, src0) and ggml.types.ggml_are_same_shape(src0, dst),
         "ggml_can_repeat(src1, src0) && ggml_are_same_shape(src0, dst)",
     );
 
@@ -177,7 +177,7 @@ fn applyBinaryOp(
     ggml.impl.assert(l.nb00 == @sizeOf(Src0), "nb00 == sizeof(src0_t)");
 
     const ir0, const ir1 = ggml.cpu.ops.common.getThreadRange(params, src0);
-    const is_src1_contiguous_rows = ggml.impl.ggml_c.ggml_is_contiguous_rows(src1);
+    const is_src1_contiguous_rows = ggml.types.ggml_is_contiguous_rows(src1);
 
     // The C++ picks the vDSP routine here, by comparing the template's `op`
     // pointer; `Op.vdsp` makes the same choice at compile time. The type guard
@@ -264,7 +264,7 @@ fn binaryOp(comptime op: Op, params: *const ggml.cpu.defs.ComputeParams, dst: *g
     } else {
         ggml.impl.logError(
             "%s: unsupported types: dst: %s, src0: %s, src1: %s\n",
-            .{ "binary_op", ggml.impl.ggml_c.ggml_type_name(dst.type), ggml.impl.ggml_c.ggml_type_name(src0.type), ggml.impl.ggml_c.ggml_type_name(src1.type) },
+            .{ "binary_op", ggml.types.ggml_type_name(dst.type), ggml.types.ggml_type_name(src0.type), ggml.types.ggml_type_name(src1.type) },
         );
         ggml.impl.abort("unsupported types");
     }

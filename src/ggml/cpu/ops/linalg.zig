@@ -162,7 +162,7 @@ fn outProdWiden(comptime is_f16: bool, params: *const ggml.cpu.defs.ComputeParam
     const nth: i64 = params.nth;
 
     const @"type" = src0.type;
-    const dequantize_row_q = if (is_f16) undefined else ggml.impl.ggml_c.ggml_get_type_traits(@"type").*.to_float.?;
+    const dequantize_row_q = if (is_f16) undefined else ggml.types.ggml_get_type_traits(@"type").*.to_float.?;
 
     if (is_f16) {
         ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F16, "src0->type == GGML_TYPE_F16");
@@ -179,7 +179,7 @@ fn outProdWiden(comptime is_f16: bool, params: *const ggml.cpu.defs.ComputeParam
         ggml.impl.assert(l.nb00 == @sizeOf(ggml.impl.ggml_c.ggml_fp16_t), "nb00 == sizeof(ggml_fp16_t)");
     } else {
         // we don't support permuted src0 dim0
-        ggml.impl.assert(l.nb00 == ggml.impl.ggml_c.ggml_type_size(@"type"), "nb00 == ggml_type_size(type)");
+        ggml.impl.assert(l.nb00 == ggml.types.ggml_type_size(@"type"), "nb00 == ggml_type_size(type)");
     }
 
     // dst dim0 cannot be transposed or permuted
@@ -233,7 +233,7 @@ fn outProdWiden(comptime is_f16: bool, params: *const ggml.cpu.defs.ComputeParam
             const s1: [*]const f32 = @ptrCast(@alignCast(s1b + ggml.cpu.ops.common.byteOff(j1, l.nb10) + ggml.cpu.ops.common.byteOff(j11, l.nb11) + ggml.cpu.ops.common.byteOff(j12, l.nb12) + ggml.cpu.ops.common.byteOff(j13, l.nb13)));
 
             if (is_f16) {
-                ggml.impl.ggml_c.ggml_fp16_to_fp32_row(@ptrCast(@alignCast(s0)), wdata, l.ne0);
+                ggml.runtime.ggml_fp16_to_fp32_row(@ptrCast(@alignCast(s0)), wdata, l.ne0);
             } else {
                 dequantize_row_q(s0, wdata, l.ne0);
             }
@@ -288,9 +288,9 @@ pub fn ggml_compute_forward_out_prod(params: *const ggml.cpu.defs.ComputeParams,
 fn scaleF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(src0), "ggml_is_contiguous_rows(src0)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(dst), "ggml_is_contiguous_rows(dst)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(src0), "ggml_is_contiguous_rows(src0)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(dst), "ggml_is_contiguous_rows(dst)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
 
     const s = ggml.impl.getOpParamsF32(dst, 0); // scale factor
     const b = ggml.impl.getOpParamsF32(dst, 1); // bias
@@ -299,7 +299,7 @@ fn scaleF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.g
     const nth: c_int = params.nth;
 
     const nc: c_int = @intCast(src0.ne[0]);
-    const nr: c_int = @intCast(ggml.impl.ggml_c.ggml_nrows(src0));
+    const nr: c_int = @intCast(ggml.types.ggml_nrows(src0));
 
     const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
@@ -348,9 +348,9 @@ fn scaleF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.g
 fn scaleBf16(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(src0), "ggml_is_contiguous_rows(src0)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(dst), "ggml_is_contiguous_rows(dst)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(src0), "ggml_is_contiguous_rows(src0)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(dst), "ggml_is_contiguous_rows(dst)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
 
     const s = ggml.impl.getOpParamsF32(dst, 0); // scale factor
     const b = ggml.impl.getOpParamsF32(dst, 1); // bias
@@ -359,7 +359,7 @@ fn scaleBf16(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.
     const nth: c_int = params.nth;
 
     const nc: c_int = @intCast(src0.ne[0]);
-    const nr: c_int = @intCast(ggml.impl.ggml_c.ggml_nrows(src0));
+    const nr: c_int = @intCast(ggml.types.ggml_nrows(src0));
 
     const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
@@ -406,8 +406,8 @@ fn setT(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml
     const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
     const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst) and ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(dst) && ggml_is_contiguous(src0)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(dst) and ggml.types.ggml_is_contiguous(src0), "ggml_is_contiguous(dst) && ggml_is_contiguous(src0)");
 
     // view src0 and dst with these strides and data offset inbytes during set
     // nb0 is implicitly element_size because src0 and dst are contiguous
@@ -422,7 +422,7 @@ fn setT(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml
         if (params.ith == 0) {
             // memcpy needs to be synchronized across threads to avoid race conditions.
             // => do it in INIT phase
-            const n = ggml.impl.ggml_c.ggml_nbytes(dst);
+            const n = ggml.types.ggml_nbytes(dst);
             const d: [*]u8 = @ptrCast(dst.data.?);
             const s: [*]const u8 = @ptrCast(src0.data.?);
             @memcpy(d[0..n], s[0..n]);
@@ -433,7 +433,7 @@ fn setT(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml
     const ith: c_int = params.ith;
     const nth: c_int = params.nth;
 
-    const nr: c_int = @intCast(ggml.impl.ggml_c.ggml_nrows(src1));
+    const nr: c_int = @intCast(ggml.types.ggml_nrows(src1));
     const nc: c_int = @intCast(src1.ne[0]);
 
     const ne10 = src1.ne[0];
@@ -446,14 +446,14 @@ fn setT(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml
     const nb13 = src1.nb[3];
 
     // src0 and dst as viewed during set
-    const nb0: usize = ggml.impl.ggml_c.ggml_element_size(src0);
+    const nb0: usize = ggml.types.ggml_element_size(src0);
 
     const im0: usize = @intCast(if (ne10 == 0) 0 else ne10 - 1);
     const im1: usize = @intCast(if (ne11 == 0) 0 else ne11 - 1);
     const im2: usize = @intCast(if (ne12 == 0) 0 else ne12 - 1);
     const im3: usize = @intCast(if (ne13 == 0) 0 else ne13 - 1);
 
-    ggml.impl.assert(offset + im0 * nb0 + im1 * nb1 + im2 * nb2 + im3 * nb3 <= ggml.impl.ggml_c.ggml_nbytes(dst), "offset + im0*nb0  + im1*nb1  + im2*nb2  + im3*nb3  <= ggml_nbytes(dst)");
+    ggml.impl.assert(offset + im0 * nb0 + im1 * nb1 + im2 * nb2 + im3 * nb3 <= ggml.types.ggml_nbytes(dst), "offset + im0*nb0  + im1*nb1  + im2*nb2  + im3*nb3  <= ggml_nbytes(dst)");
 
     ggml.impl.assert(nb10 == @sizeOf(T), "nb10 == sizeof(T)");
 

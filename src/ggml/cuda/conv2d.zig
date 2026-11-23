@@ -91,8 +91,8 @@ pub fn opConv2d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tens
     const Y_D: ?*anyopaque = dst.data;
 
     ggml.impl.assert(input.type == ggml.impl.ggml_c.GGML_TYPE_F32 and dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "input->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(input), "ggml_is_contiguous(input)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(kernel), "ggml_is_contiguous(kernel)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(input), "ggml_is_contiguous(input)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(kernel), "ggml_is_contiguous(kernel)");
     ggml.impl.assert(kernel.type == ggml.impl.ggml_c.GGML_TYPE_F16 or kernel.type == ggml.impl.ggml_c.GGML_TYPE_F32, "kernel->type == GGML_TYPE_F16 || kernel->type == GGML_TYPE_F32");
 
     // same number of input channels
@@ -155,7 +155,7 @@ pub fn opConv2d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tens
     const padded_fits = padded_w > 0 and padded_w <= limit and padded_h > 0 and padded_h <= limit and
         padded_w * padded_h <= limit and IC * B <= @divTrunc(limit, padded_w * padded_h);
     if (kernel.type == ggml.impl.ggml_c.GGML_TYPE_F16 and (use_mma or use_blas or use_simt) and (use_blas or !small_conv) and
-        ggml.impl.ggml_c.ggml_nelements(input) <= limit and ggml.impl.ggml_c.ggml_nelements(kernel) <= limit and total <= limit and padded_fits and
+        ggml.types.ggml_nelements(input) <= limit and ggml.types.ggml_nelements(kernel) <= limit and total <= limit and padded_fits and
         PD_X >= 0 and PD_Y >= 0 and ST_X > 0 and ST_Y > 0 and DL_X > 0 and DL_Y > 0 and
         (OW - 1) * ST_X + (KW - 1) * DL_X < padded_w and (OH - 1) * ST_Y + (KH - 1) * DL_Y < padded_h and
         @divTrunc(OC + 63, 64) <= 65535 and B <= 65535)

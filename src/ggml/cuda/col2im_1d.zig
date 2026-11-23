@@ -13,7 +13,7 @@ pub fn opCol2im1d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_te
     const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
     const stream = ctx.stream();
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
 
     const s0 = ggml.impl.getOpParamsI32(dst, 0);
     const OC = ggml.impl.getOpParamsI32(dst, 1);

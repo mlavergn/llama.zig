@@ -17,6 +17,7 @@
 //! names, and `exports.zig` exports them once libllama swaps.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const llama = @import("../module.zig");
 
 /// The port's adapter behind a `llama_adapter_lora *`.
@@ -38,7 +39,7 @@ fn metaAt(a: *llama.adapter.Lora, i: usize) struct { key: []const u8, value: [:0
 /// `snprintf(buf, buf_size, "%s", s)` for a string that is not
 /// NUL-terminated where it is stored.
 fn printStr(buf: [*c]u8, buf_size: usize, s: []const u8) i32 {
-    return llama.impl.llama_c.snprintf(buf, buf_size, "%.*s", @as(c_int, @intCast(s.len)), s.ptr);
+    return stdlib.libc.snprintf(buf, buf_size, "%.*s", @as(c_int, @intCast(s.len)), s.ptr);
 }
 
 /// Ports `llama_adapter_lora_init` (llama-adapter.cpp:430 @b1b770d90).
@@ -64,7 +65,7 @@ pub fn llama_adapter_meta_val_str(a: ?*const llama.impl.llama_c.struct_llama_ada
         if (buf_size > 0) buf[0] = 0;
         return -1;
     };
-    return llama.impl.llama_c.snprintf(buf, buf_size, "%s", v.*.ptr);
+    return stdlib.libc.snprintf(buf, buf_size, "%s", v.*.ptr);
 }
 
 /// Ports `llama_adapter_meta_count` (llama-adapter.cpp:476 @b1b770d90).
@@ -95,7 +96,7 @@ pub fn llama_adapter_meta_val_str_by_index(a: ?*const llama.impl.llama_c.struct_
         if (buf_size > 0) buf[0] = 0;
         return -1;
     }
-    return llama.impl.llama_c.snprintf(buf, buf_size, "%s", metaAt(l, @intCast(i)).value.ptr);
+    return stdlib.libc.snprintf(buf, buf_size, "%s", metaAt(l, @intCast(i)).value.ptr);
 }
 
 /// Ports `llama_adapter_lora_free` (llama-adapter.cpp:504 @b1b770d90).

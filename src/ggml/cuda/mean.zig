@@ -27,10 +27,10 @@ pub fn opMean(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor
 
     ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
     ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(src0), "ggml_is_contiguous_rows(src0)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(src0), "ggml_is_contiguous_rows(src0)");
 
     const ncols: i64 = src0.ne[0];
-    const nrows: i64 = ggml.impl.ggml_c.ggml_nrows(src0);
+    const nrows: i64 = ggml.types.ggml_nrows(src0);
 
     // Special case for reducing vectors
     var iscapturing: ggml.cuda.common.cu.cudaStreamCaptureStatus = undefined;
@@ -76,7 +76,7 @@ pub fn opMean(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor
     }
     const launch_params: ggml.cuda.kernels.LaunchParams = .{ .grid = block_nums, .block = block_dims, .stream = stream };
 
-    if (ggml.impl.ggml_c.ggml_is_contiguous(src0)) {
+    if (ggml.types.ggml_is_contiguous(src0)) {
         ggml.cuda.kernels.launchPdl(kernel, launch_params, .{ src0_d, dst_d, n });
         return;
     }

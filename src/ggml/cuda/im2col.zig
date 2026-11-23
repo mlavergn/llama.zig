@@ -200,7 +200,7 @@ pub fn opIm2col3d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_te
     const OH = dst.ne[2];
     const OW = dst.ne[1];
 
-    const es = ggml.impl.ggml_c.ggml_element_size(src1);
+    const es = ggml.types.ggml_element_size(src1);
     const stride_x: i64 = @bitCast(src1.nb[0] / es);
     const stride_y: i64 = @bitCast(src1.nb[1] / es);
     const stride_z: i64 = @bitCast(src1.nb[2] / es);

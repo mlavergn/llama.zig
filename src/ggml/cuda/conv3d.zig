@@ -100,7 +100,7 @@ pub fn opConv3d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tens
     const input = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
     ggml.impl.assert(input.type == ggml.impl.ggml_c.GGML_TYPE_F32 and dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "input->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32");
     ggml.impl.assert(kernel.type == ggml.impl.ggml_c.GGML_TYPE_F16 or kernel.type == ggml.impl.ggml_c.GGML_TYPE_F32, "kernel->type == GGML_TYPE_F16 || kernel->type == GGML_TYPE_F32");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(input) and ggml.impl.ggml_c.ggml_is_contiguous(kernel) and ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(input) && ggml_is_contiguous(kernel) && ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(input) and ggml.types.ggml_is_contiguous(kernel) and ggml.types.ggml_is_contiguous(dst), "ggml_is_contiguous(input) && ggml_is_contiguous(kernel) && ggml_is_contiguous(dst)");
 
     var p: [12]i32 = undefined;
     for (&p, 0..) |*v, i| v.* = ggml.impl.getOpParamsI32(dst, i);
@@ -118,7 +118,7 @@ pub fn opConv3d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tens
     const OC: i64 = p[11];
     ggml.impl.assert(IC > 0 and B > 0 and OC > 0 and input.ne[3] == IC * B and kernel.ne[3] == IC * OC, "IC > 0 && B > 0 && OC > 0 && input->ne[3] == IC * B && kernel->ne[3] == IC * OC");
     ggml.impl.assert(dst.ne[3] == OC * B and p[0] > 0 and p[1] > 0 and p[2] > 0 and p[6] > 0 and p[7] > 0 and p[8] > 0, "dst->ne[3] == OC * B && p[0] > 0 && p[1] > 0 && p[2] > 0 && p[6] > 0 && p[7] > 0 && p[8] > 0");
-    const total: i64 = ggml.impl.ggml_c.ggml_nelements(dst);
+    const total: i64 = ggml.types.ggml_nelements(dst);
     const params: Conv3dParams = .{
         .IW = IW,
         .IH = IH,
@@ -157,8 +157,8 @@ pub fn opConv3d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tens
     const pd: i64 = ID + 2 * @as(i64, p[5]);
     const padded_fits = pw > 0 and pw <= limit and ph > 0 and ph <= limit and pd > 0 and pd <= limit and
         pw * ph <= @divTrunc(limit, pd) and IC * B <= @divTrunc(limit, pw * ph * pd);
-    if (kernel.type == ggml.impl.ggml_c.GGML_TYPE_F16 and KW > 0 and KH > 0 and KD > 0 and ggml.impl.ggml_c.ggml_nelements(input) <= limit and
-        ggml.impl.ggml_c.ggml_nelements(kernel) <= limit and total <= limit and padded_fits and p[3] >= 0 and p[4] >= 0 and p[5] >= 0 and
+    if (kernel.type == ggml.impl.ggml_c.GGML_TYPE_F16 and KW > 0 and KH > 0 and KD > 0 and ggml.types.ggml_nelements(input) <= limit and
+        ggml.types.ggml_nelements(kernel) <= limit and total <= limit and padded_fits and p[3] >= 0 and p[4] >= 0 and p[5] >= 0 and
         (OW - 1) * p[0] + (KW - 1) * p[6] < pw and (OH - 1) * p[1] + (KH - 1) * p[7] < ph and
         (OD - 1) * p[2] + (KD - 1) * p[8] < pd and @divTrunc(OC + 63, 64) <= 65535 and B <= 65535)
     {

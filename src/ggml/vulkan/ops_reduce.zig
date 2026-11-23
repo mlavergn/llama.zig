@@ -37,7 +37,7 @@ pub fn softMax(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit
     const max_bias = f32Param(dst, 1);
 
     const ncols = ggml.vulkan.ops.u32Of(src0.ne[0]);
-    const nrows_x = ggml.vulkan.ops.u32Of(ggml.impl.ggml_c.ggml_nrows(src0));
+    const nrows_x = ggml.vulkan.ops.u32Of(ggml.types.ggml_nrows(src0));
     const nrows_y = ggml.vulkan.ops.u32Of(src0.ne[1]);
 
     const ne12: u32 = if (src1) |s| ggml.vulkan.ops.u32Of(s.ne[2]) else 0;
@@ -127,7 +127,7 @@ pub fn softMax(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit
 
 /// Ports `ggml_vk_soft_max_back` (ggml-vulkan.cpp:11619 @b1b770d90).
 pub fn softMaxBack(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Context, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor) void {
-    ggml.vulkan.ops.opF32(ctx, subctx, src0, src1, null, null, dst, ggml.impl.ggml_c.GGML_OP_SOFT_MAX_BACK, opPc(ggml.vulkan.ops.u32Of(src0.ne[0]), ggml.vulkan.ops.u32Of(ggml.impl.ggml_c.ggml_nrows(src0)), f32Param(dst, 0), f32Param(dst, 1)));
+    ggml.vulkan.ops.opF32(ctx, subctx, src0, src1, null, null, dst, ggml.impl.ggml_c.GGML_OP_SOFT_MAX_BACK, opPc(ggml.vulkan.ops.u32Of(src0.ne[0]), ggml.vulkan.ops.u32Of(ggml.types.ggml_nrows(src0)), f32Param(dst, 0), f32Param(dst, 1)));
 }
 
 /// Ports `ggml_vk_topk_moe` (ggml-vulkan.cpp:11624 @b1b770d90): the expert
@@ -159,7 +159,7 @@ pub fn topkMoe(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit
     const n_rows: c_int = @truncate(logits.ne[1]);
     const n_expert_used: c_int = @truncate(weights.ne[1]);
 
-    ggml.impl.assert(ids.nb[1] / ggml.impl.ggml_c.ggml_type_size(ids.type) == @as(usize, @intCast(n_experts)), "ids->nb[1] / ggml_type_size(ids->type) == (size_t) n_experts");
+    ggml.impl.assert(ids.nb[1] / ggml.types.ggml_type_size(ids.type) == @as(usize, @intCast(n_experts)), "ids->nb[1] / ggml_type_size(ids->type) == (size_t) n_experts");
 
     const pipeline = ggml.vulkan.op_pipeline.getPipeline(ctx, null, null, null, at(cgraph, node_idx), ggml.impl.ggml_c.GGML_OP_SOFT_MAX).?;
     ggml.vulkan.context.requestDescriptorSets(ctx, pipeline, 1);
@@ -226,7 +226,7 @@ pub fn rope(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Co
     // indices as src3, and its tensor as the destination.
     if (ctx.num_additional_fused_ops > 0) {
         const sr = at(cgraph, node_idx + 2);
-        set_rows_stride = @truncate(sr.nb[1] / ggml.impl.ggml_c.ggml_type_size(sr.type));
+        set_rows_stride = @truncate(sr.nb[1] / ggml.types.ggml_type_size(sr.type));
         src3 = sr.src[1];
         dst = sr;
     }
@@ -239,7 +239,7 @@ pub fn rope(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Co
 pub fn argsort(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Context, src0: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const op: [*]const u32 = @ptrCast(&dst.op_params);
     const ncols = ggml.vulkan.ops.u32Of(src0.ne[0]);
-    const nrows = ggml.vulkan.ops.u32Of(ggml.impl.ggml_c.ggml_nrows(src0));
+    const nrows = ggml.vulkan.ops.u32Of(ggml.types.ggml_nrows(src0));
     const ncols_pad_log2: u32 = @intFromFloat(@ceil(@as(f32, stdlib.libm.log2fInt(ncols))));
     const ncolsp2: u32 = @as(u32, 1) << @intCast(ncols_pad_log2);
 
@@ -270,7 +270,7 @@ pub fn argsort(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit
         subbuf1 = prealloc(ctx.prealloc_x, 0, ctx.prealloc_x.?.size);
     }
 
-    const elements = [3]u32{ ncolsp2, @min(ggml.vulkan.ops.u32Of(ggml.impl.ggml_c.ggml_nrows(src0)), dev.properties.limits.maxComputeWorkGroupCount[1]), 1 };
+    const elements = [3]u32{ ncolsp2, @min(ggml.vulkan.ops.u32Of(ggml.types.ggml_nrows(src0)), dev.properties.limits.maxComputeWorkGroupCount[1]), 1 };
 
     // First dispatch initializes tmp_idx and does the passes that stay in a workgroup.
     {
@@ -327,7 +327,7 @@ pub fn topkTournamentFits(dev: *const ggml.vulkan.device.Device, k: u32) bool {
 /// radix-select per row.
 pub fn topk(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Context, src0: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const ncols = ggml.vulkan.ops.u32Of(src0.ne[0]);
-    const nrows = ggml.vulkan.ops.u32Of(ggml.impl.ggml_c.ggml_nrows(src0));
+    const nrows = ggml.vulkan.ops.u32Of(ggml.types.ggml_nrows(src0));
     const k = ggml.vulkan.ops.u32Of(dst.ne[0]);
     const dev = ctx.device;
 
@@ -498,7 +498,7 @@ pub fn topkQsa(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit
 /// Ports `ggml_vk_sum`, `ggml_vk_sum_rows` and `ggml_vk_mean`
 /// (ggml-vulkan.cpp:12000, 12005, 12010 @b1b770d90).
 pub fn sumRows(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Context, src0: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor, op: ggml.impl.ggml_c.enum_ggml_op) void {
-    var p = ggml.vulkan.ops.sumRowsPushConstantsInit(src0, dst, if (op == ggml.impl.ggml_c.GGML_OP_SUM) ggml.impl.ggml_c.ggml_nelements(src0) else src0.ne[0]);
+    var p = ggml.vulkan.ops.sumRowsPushConstantsInit(src0, dst, if (op == ggml.impl.ggml_c.GGML_OP_SUM) ggml.types.ggml_nelements(src0) else src0.ne[0]);
     if (op == ggml.impl.ggml_c.GGML_OP_MEAN) p.weight = 1.0 / @as(f32, @floatFromInt(src0.ne[0]));
     ggml.vulkan.ops.opF32(ctx, subctx, src0, null, null, null, dst, op, p);
 }
@@ -507,7 +507,7 @@ pub fn sumRows(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit
 /// short rows or many rows, otherwise block partials and a second pass.
 pub fn cumsum(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Context, src0: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const pc = ggml.vulkan.ops.sumRowsPushConstantsInit(src0, dst, src0.ne[0]);
-    if (dst.ne[0] <= 4096 or ggml.impl.ggml_c.ggml_nrows(dst) >= ctx.device.shader_core_count) {
+    if (dst.ne[0] <= 4096 or ggml.types.ggml_nrows(dst) >= ctx.device.shader_core_count) {
         ggml.vulkan.ops.opF32(ctx, subctx, src0, null, null, null, dst, ggml.impl.ggml_c.GGML_OP_CUMSUM, pc);
         return;
     }
@@ -518,8 +518,8 @@ pub fn cumsum(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.
     ggml.vulkan.context.requestDescriptorSets(ctx, p1, 1);
     ggml.vulkan.context.requestDescriptorSets(ctx, p2, 1);
 
-    const elements = [3]u32{ ggml.vulkan.ops.u32Of(dst.ne[0]), ggml.vulkan.ops.u32Of(ggml.impl.ggml_c.ggml_nrows(dst)), 1 };
-    const temp_size: usize = @sizeOf(f32) * @as(usize, elements[0]) * @as(usize, @intCast(ggml.impl.ggml_c.ggml_nrows(dst)));
+    const elements = [3]u32{ ggml.vulkan.ops.u32Of(dst.ne[0]), ggml.vulkan.ops.u32Of(ggml.types.ggml_nrows(dst)), 1 };
+    const temp_size: usize = @sizeOf(f32) * @as(usize, elements[0]) * @as(usize, @intCast(ggml.types.ggml_nrows(dst)));
     if (ctx.prealloc_size_split_k < temp_size) {
         ctx.prealloc_size_split_k = temp_size;
         ggml.vulkan.nodes.preallocateBuffers(ctx, subctx);
@@ -556,14 +556,14 @@ pub fn crossEntropyLoss(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulk
     ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
     ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
     ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type  == GGML_TYPE_F32");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src1), "ggml_is_contiguous(src1)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, src1), "ggml_are_same_shape(src0, src1)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_scalar(dst), "ggml_is_scalar(dst)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src1), "ggml_is_contiguous(src1)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src0, src1), "ggml_are_same_shape(src0, src1)");
+    ggml.impl.assert(ggml.types.ggml_is_scalar(dst), "ggml_is_scalar(dst)");
 
     const nclasses: u32 = @truncate(@as(u64, @bitCast(src0.ne[0])));
-    const nrows: u32 = @truncate(@as(u64, @bitCast(ggml.impl.ggml_c.ggml_nrows(src0))));
+    const nrows: u32 = @truncate(@as(u64, @bitCast(ggml.types.ggml_nrows(src0))));
 
     const dev = ctx.device;
     const pipeline = ggml.vulkan.op_pipeline.getPipeline(ctx, src0, src1, null, dst, ggml.impl.ggml_c.GGML_OP_CROSS_ENTROPY_LOSS) orelse ggml.impl.abort("GGML_ASSERT(pipeline != nullptr) failed");
@@ -595,7 +595,7 @@ pub fn crossEntropyLoss(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulk
     sp.ne03 = 1;
     sp.weight = 1.0;
     ggml.vulkan.ops.initPushconstFastdiv(&sp);
-    sp.misalign_offsets = @truncate(ggml.vulkan.context.getMisalignBytes(ctx, dst) / ggml.impl.ggml_c.ggml_type_size(dst.type));
+    sp.misalign_offsets = @truncate(ggml.vulkan.context.getMisalignBytes(ctx, dst) / ggml.types.ggml_type_size(dst.type));
 
     ggml.vulkan.context.dispatch(ctx, subctx, dev.pipeline_sum_rows_f32.?, &.{ tmp_buf, dst_buf }, &sp, .{ 1, 1, 1 });
     ctx.prealloc_x_need_sync = true;
@@ -611,16 +611,16 @@ pub fn crossEntropyLossBack(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.
     ggml.impl.assert(logits.type == ggml.impl.ggml_c.GGML_TYPE_F32, "logits->type == GGML_TYPE_F32");
     ggml.impl.assert(labels.type == ggml.impl.ggml_c.GGML_TYPE_F32, "labels->type == GGML_TYPE_F32");
     ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "dst->type    == GGML_TYPE_F32");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_scalar(grad), "ggml_is_scalar(grad)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(grad), "ggml_is_contiguous(grad)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(logits), "ggml_is_contiguous(logits)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(labels), "ggml_is_contiguous(labels)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(logits, labels), "ggml_are_same_shape(logits, labels)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(logits, dst), "ggml_are_same_shape(logits, dst)");
+    ggml.impl.assert(ggml.types.ggml_is_scalar(grad), "ggml_is_scalar(grad)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(grad), "ggml_is_contiguous(grad)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(logits), "ggml_is_contiguous(logits)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(labels), "ggml_is_contiguous(labels)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(logits, labels), "ggml_are_same_shape(logits, labels)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(logits, dst), "ggml_are_same_shape(logits, dst)");
 
     const nclasses: u32 = @truncate(@as(u64, @bitCast(logits.ne[0])));
-    const nrows: u32 = @truncate(@as(u64, @bitCast(ggml.impl.ggml_c.ggml_nrows(logits))));
+    const nrows: u32 = @truncate(@as(u64, @bitCast(ggml.types.ggml_nrows(logits))));
 
     const pipeline = ggml.vulkan.op_pipeline.getPipeline(ctx, grad, logits, labels, dst, ggml.impl.ggml_c.GGML_OP_CROSS_ENTROPY_LOSS_BACK) orelse ggml.impl.abort("GGML_ASSERT(pipeline != nullptr) failed");
 
@@ -642,12 +642,12 @@ pub fn argmax(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.
 
 /// Ports `ggml_vk_count_equal` (ggml-vulkan.cpp:12165 @b1b770d90).
 pub fn countEqual(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Context, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor) void {
-    ggml.vulkan.ops.opF32(ctx, subctx, src0, src1, null, null, dst, ggml.impl.ggml_c.GGML_OP_COUNT_EQUAL, opPc(ggml.vulkan.ops.u32Of(ggml.impl.ggml_c.ggml_nelements(src0)), 0, 0, 0));
+    ggml.vulkan.ops.opF32(ctx, subctx, src0, src1, null, null, dst, ggml.impl.ggml_c.GGML_OP_COUNT_EQUAL, opPc(ggml.vulkan.ops.u32Of(ggml.types.ggml_nelements(src0)), 0, 0, 0));
 }
 
 /// Ports `ggml_vk_solve_tri` (ggml-vulkan.cpp:12169 @b1b770d90).
 pub fn solveTri(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Context, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor) void {
-    ggml.vulkan.ops.opF32(ctx, subctx, src0, src1, null, null, dst, ggml.impl.ggml_c.GGML_OP_SOLVE_TRI, ggml.vulkan.ops.binaryPc(ggml.vulkan.ops.u32Of(ggml.impl.ggml_c.ggml_nelements(src0)), src0, src1, dst, 0, 0, 0));
+    ggml.vulkan.ops.opF32(ctx, subctx, src0, src1, null, null, dst, ggml.impl.ggml_c.GGML_OP_SOLVE_TRI, ggml.vulkan.ops.binaryPc(ggml.vulkan.ops.u32Of(ggml.types.ggml_nelements(src0)), src0, src1, dst, 0, 0, 0));
 }
 
 // -----------------------------------------------------------------------------

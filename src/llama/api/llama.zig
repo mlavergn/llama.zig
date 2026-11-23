@@ -13,6 +13,7 @@
 //! names, and `exports.zig` exports them once libllama swaps.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const llama = @import("../module.zig");
 
 /// `LLAMA_VERSION`, which the C++ takes from the `llama-version.h` the build
@@ -268,7 +269,7 @@ pub fn llama_chat_apply_template(
 ///
 /// Return: the length written, or 0 when it did not fit.
 pub fn llama_split_path(split_path: [*c]u8, maxlen: usize, path_prefix: [*c]const u8, split_no: i32, split_count: i32) callconv(.c) i32 {
-    const written = llama.impl.llama_c.snprintf(split_path, maxlen, "%s-%05d-of-%05d.gguf", path_prefix, split_no +% 1, split_count);
+    const written = stdlib.libc.snprintf(split_path, maxlen, "%s-%05d-of-%05d.gguf", path_prefix, split_no +% 1, split_count);
     if (written < 0 or @as(usize, @intCast(written)) >= maxlen) return 0;
     return written;
 }
@@ -283,14 +284,14 @@ pub fn llama_split_prefix(split_prefix: [*c]u8, maxlen: usize, split_path: [*c]c
     const str_split_path = std.mem.span(@as([*:0]const u8, @ptrCast(split_path)));
 
     var postfix: [32]u8 = undefined;
-    _ = llama.impl.llama_c.snprintf(&postfix, postfix.len, "-%05d-of-%05d.gguf", split_no +% 1, split_count);
+    _ = stdlib.libc.snprintf(&postfix, postfix.len, "-%05d-of-%05d.gguf", split_no +% 1, split_count);
     const str_postfix = std.mem.sliceTo(&postfix, 0);
     if (str_split_path.len <= str_postfix.len) return 0;
 
     const size_prefix = str_split_path.len - str_postfix.len;
     if (std.mem.eql(u8, str_split_path[size_prefix..], str_postfix)) {
         const copy_len = @min(size_prefix + 1, maxlen);
-        _ = llama.impl.llama_c.snprintf(split_prefix, copy_len, "%s", split_path);
+        _ = stdlib.libc.snprintf(split_prefix, copy_len, "%s", split_path);
         return @truncate(@as(i64, @intCast(size_prefix)));
     }
     return 0;

@@ -189,7 +189,7 @@ fn addRelPosF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml
     const inplace = ggml.impl.getOpParamsI32(dst, 0) != 0;
     if (!inplace) {
         if (params.ith == 0) {
-            const n = ggml.impl.ggml_c.ggml_nbytes(dst);
+            const n = ggml.types.ggml_nbytes(dst);
             const dd: [*]u8 = @ptrCast(dst.data.?);
             const ss: [*]const u8 = @ptrCast(src0.data.?);
             @memcpy(dd[0..n], ss[0..n]);

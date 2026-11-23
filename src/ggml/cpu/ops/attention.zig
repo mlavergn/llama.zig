@@ -131,9 +131,9 @@ fn checkShapes(dst: *const ggml.impl.ggml_c.ggml_tensor) void {
     ggml.impl.assert(dst.ne[2] == N, "ne2 == N");
 
     // input tensor rows must be contiguous
-    ggml.impl.assert(q.nb[0] == ggml.impl.ggml_c.ggml_type_size(q.type), "nbq0 == ggml_type_size(q->type)");
-    ggml.impl.assert(k.nb[0] == ggml.impl.ggml_c.ggml_type_size(k.type), "nbk0 == ggml_type_size(k->type)");
-    ggml.impl.assert(v.nb[0] == ggml.impl.ggml_c.ggml_type_size(v.type), "nbv0 == ggml_type_size(v->type)");
+    ggml.impl.assert(q.nb[0] == ggml.types.ggml_type_size(q.type), "nbq0 == ggml_type_size(q->type)");
+    ggml.impl.assert(k.nb[0] == ggml.types.ggml_type_size(k.type), "nbk0 == ggml_type_size(k->type)");
+    ggml.impl.assert(v.nb[0] == ggml.types.ggml_type_size(v.type), "nbv0 == ggml_type_size(v->type)");
 
     ggml.impl.assert(q.ne[0] == DK, "neq0 == DK");
     ggml.impl.assert(k.ne[0] == DK, "nek0 == DK");
@@ -241,10 +241,10 @@ fn oneChunk(
 
     const ap = AttnParams.of(dst, @intCast(neq2));
 
-    const k_vec_dot_type = ggml.impl.ggml_c.ggml_get_type_traits_cpu(k.type).*.vec_dot_type;
-    const q_to_vec_dot = ggml.impl.ggml_c.ggml_get_type_traits_cpu(k_vec_dot_type).*.from_float;
-    const kq_vec_dot = ggml.impl.ggml_c.ggml_get_type_traits_cpu(k.type).*.vec_dot;
-    const v_to_float = ggml.impl.ggml_c.ggml_get_type_traits(v.type).*.to_float;
+    const k_vec_dot_type = ggml.cpu.traits.ggml_get_type_traits_cpu(k.type).*.vec_dot_type;
+    const q_to_vec_dot = ggml.cpu.traits.ggml_get_type_traits_cpu(k_vec_dot_type).*.from_float;
+    const kq_vec_dot = ggml.cpu.traits.ggml_get_type_traits_cpu(k.type).*.vec_dot;
+    const v_to_float = ggml.types.ggml_get_type_traits(v.type).*.to_float;
 
     ggml.impl.assert(q_to_vec_dot != null, "q_to_vec_dot && \"fattn: unsupported K-type\"");
     ggml.impl.assert(v.type == ggml.impl.ggml_c.GGML_TYPE_F32 or v_to_float != null, "(v->type == GGML_TYPE_F32 || v_to_float) && \"fattn: unsupported V-type\"");
@@ -884,7 +884,7 @@ fn flashAttnExtF16(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.g
 
 /// Ports `ggml_compute_forward_flash_attn_ext` (ops.cpp:9455 @b1b770d90).
 pub fn ggml_compute_forward_flash_attn_ext(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
-    switch (ggml.impl.ggml_c.ggml_prec_get_acc(dst)) {
+    switch (ggml.ops.ggml_prec_get_acc(dst)) {
         ggml.impl.ggml_c.GGML_PREC_UNDEFINED, ggml.impl.ggml_c.GGML_PREC_F32, ggml.impl.ggml_c.GGML_PREC_BF16 => {
             // uses F32 accumulators
             flashAttnExtF16(params, dst);
@@ -970,12 +970,12 @@ fn flashAttnBackF32(params: *const ggml.cpu.defs.ComputeParams, masked: bool, ds
     }
     ggml.cpu.threading.ggml_barrier(params.threadpool.?);
 
-    const elem_q: usize = @intCast(ggml.impl.ggml_c.ggml_nelements(q));
-    const elem_k: usize = @intCast(ggml.impl.ggml_c.ggml_nelements(k));
+    const elem_q: usize = @intCast(ggml.types.ggml_nelements(q));
+    const elem_k: usize = @intCast(ggml.types.ggml_nelements(k));
 
     const result_type = dst.type;
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_blck_size(result_type) == 1, "ggml_blck_size(result_type) == 1");
-    const tsize = ggml.impl.ggml_c.ggml_type_size(result_type);
+    ggml.impl.assert(ggml.types.ggml_blck_size(result_type) == 1, "ggml_blck_size(result_type) == 1");
+    const tsize = ggml.types.ggml_type_size(result_type);
 
     const offs_q: usize = 0;
     const offs_k = offs_q + stdlib.num.pad(usize, elem_q * tsize, ggml.impl.ggml_c.GGML_MEM_ALIGN);
@@ -1192,11 +1192,11 @@ pub fn ggml_compute_forward_lightning_indexer(params: *const ggml.cpu.defs.Compu
     ggml.impl.assert(w.type == ggml.impl.ggml_c.GGML_TYPE_F32, "w->type == GGML_TYPE_F32");
     ggml.impl.assert(m.type == ggml.impl.ggml_c.GGML_TYPE_F16, "m->type == GGML_TYPE_F16");
 
-    ggml.impl.assert(dst.nb[0] == ggml.impl.ggml_c.ggml_type_size(dst.type), "nb0 == ggml_type_size(dst->type)");
-    ggml.impl.assert(q.nb[0] == ggml.impl.ggml_c.ggml_type_size(q.type), "nbq0 == ggml_type_size(q->type)");
-    ggml.impl.assert(k.nb[0] == ggml.impl.ggml_c.ggml_type_size(k.type), "nbk0 == ggml_type_size(k->type)");
-    ggml.impl.assert(w.nb[0] == ggml.impl.ggml_c.ggml_type_size(w.type), "nbw0 == ggml_type_size(w->type)");
-    ggml.impl.assert(m.nb[0] == ggml.impl.ggml_c.ggml_type_size(m.type), "nbm0 == ggml_type_size(m->type)");
+    ggml.impl.assert(dst.nb[0] == ggml.types.ggml_type_size(dst.type), "nb0 == ggml_type_size(dst->type)");
+    ggml.impl.assert(q.nb[0] == ggml.types.ggml_type_size(q.type), "nbq0 == ggml_type_size(q->type)");
+    ggml.impl.assert(k.nb[0] == ggml.types.ggml_type_size(k.type), "nbk0 == ggml_type_size(k->type)");
+    ggml.impl.assert(w.nb[0] == ggml.types.ggml_type_size(w.type), "nbw0 == ggml_type_size(w->type)");
+    ggml.impl.assert(m.nb[0] == ggml.types.ggml_type_size(m.type), "nbm0 == ggml_type_size(m->type)");
 
     const n_embd = q.ne[0];
     const n_head = q.ne[1];
@@ -1204,7 +1204,7 @@ pub fn ggml_compute_forward_lightning_indexer(params: *const ggml.cpu.defs.Compu
     const n_stream = q.ne[3];
     const n_kv = k.ne[2];
 
-    const k_to_float = ggml.impl.ggml_c.ggml_get_type_traits(k.type).*.to_float;
+    const k_to_float = ggml.types.ggml_get_type_traits(k.type).*.to_float;
     ggml.impl.assert(k.type == ggml.impl.ggml_c.GGML_TYPE_F32 or k_to_float != null, "(k->type == GGML_TYPE_F32 || k_to_float) && \"lightning indexer: unsupported K-type\"");
 
     const nr = n_kv;

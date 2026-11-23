@@ -102,7 +102,7 @@ fn unaryRows(
     const nth: i64 = params.nth;
 
     const nc: i64 = @as(c_int, @truncate(src0.ne[0]));
-    const nr: i64 = @as(c_int, @truncate(ggml.impl.ggml_c.ggml_nrows(src0)));
+    const nr: i64 = @as(c_int, @truncate(ggml.types.ggml_nrows(src0)));
 
     // rows per thread
     const dr = @divTrunc(nr + nth - 1, nth);
@@ -188,7 +188,7 @@ fn leakyReluRows(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, d
 
     if (params.ith != 0) return;
 
-    const n: i64 = @as(c_int, @truncate(ggml.impl.ggml_c.ggml_nrows(src0)));
+    const n: i64 = @as(c_int, @truncate(ggml.types.ggml_nrows(src0)));
     const nc: i64 = @as(c_int, @truncate(src0.ne[0]));
 
     const negative_slope: f32 = ggml.impl.getOpParamsF32(dst, 0);
@@ -231,7 +231,7 @@ fn siluBackRows(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, ds
     const nth: i64 = params.nth;
 
     const nc: i64 = @as(c_int, @truncate(src1.ne[0]));
-    const nr: i64 = @as(c_int, @truncate(ggml.impl.ggml_c.ggml_nrows(src1)));
+    const nr: i64 = @as(c_int, @truncate(ggml.types.ggml_nrows(src1)));
 
     // rows per thread
     const dr = @divTrunc(nr + nth - 1, nth);
@@ -293,11 +293,11 @@ const GluRows = struct {
         const src0_o = src0.nb[1];
         const src1_o = if (src1) |s| s.nb[1] else src0.nb[1];
 
-        ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_1(src0), "ggml_is_contiguous_1(src0)");
-        ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_1(dst), "ggml_is_contiguous_1(dst)");
+        ggml.impl.assert(ggml.types.ggml_is_contiguous_1(src0), "ggml_is_contiguous_1(src0)");
+        ggml.impl.assert(ggml.types.ggml_is_contiguous_1(dst), "ggml_is_contiguous_1(dst)");
 
         if (src1) |s| {
-            ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_1(s), "ggml_is_contiguous_1(src1)");
+            ggml.impl.assert(ggml.types.ggml_is_contiguous_1(s), "ggml_is_contiguous_1(src1)");
             ggml.impl.assert(src0.type == s.type, "src0->type == src1->type");
         }
 
@@ -305,10 +305,10 @@ const GluRows = struct {
         const nth: i64 = params.nth;
 
         const nc: i64 = @as(c_int, @truncate(if (src1 != null) src0.ne[0] else @divTrunc(src0.ne[0], 2)));
-        const nr: i64 = @as(c_int, @truncate(ggml.impl.ggml_c.ggml_nrows(src0)));
+        const nr: i64 = @as(c_int, @truncate(ggml.types.ggml_nrows(src0)));
 
         ggml.impl.assert(dst.ne[0] == nc, "dst->ne[0] == nc");
-        ggml.impl.assert(ggml.impl.ggml_c.ggml_nrows(dst) == nr, "ggml_nrows(dst) == nr");
+        ggml.impl.assert(ggml.types.ggml_nrows(dst) == nr, "ggml_nrows(dst) == nr");
 
         const swapped = ggml.impl.getOpParamsI32(dst, 1);
 
@@ -525,7 +525,7 @@ fn swigluClamp(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_
 
 /// Ports `ggml_compute_forward_unary` (ops.cpp:10245 @b1b770d90).
 pub fn ggml_compute_forward_unary(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
-    const op = ggml.impl.ggml_c.ggml_get_unary_op(dst);
+    const op = ggml.types.ggml_get_unary_op(dst);
 
     switch (op) {
         ggml.impl.ggml_c.GGML_UNARY_OP_ABS => ggml.cpu.unary_ops.entry(.abs)(params, dst),
@@ -556,7 +556,7 @@ pub fn ggml_compute_forward_unary(params: *const ggml.cpu.defs.ComputeParams, ds
 
 /// Ports `ggml_compute_forward_glu` (ops.cpp:10349 @b1b770d90).
 pub fn ggml_compute_forward_glu(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) callconv(.c) void {
-    const op = ggml.impl.ggml_c.ggml_get_glu_op(dst);
+    const op = ggml.types.ggml_get_glu_op(dst);
 
     switch (op) {
         ggml.impl.ggml_c.GGML_GLU_OP_REGLU => reglu(params, dst),

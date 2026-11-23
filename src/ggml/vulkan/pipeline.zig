@@ -24,9 +24,9 @@ pub const max_fused_adds = max_parameter_count - 3;
 /// read without it, so it is atomic, as in the C++.
 pub const Pipeline = struct {
     name: [:0]const u8 = "",
-    shader_module: ggml.vulkan.common.vk.VkShaderModule = null,
-    layout: ggml.vulkan.common.vk.VkPipelineLayout = null,
-    pipeline: ggml.vulkan.common.vk.VkPipeline = null,
+    shader_module: ggml.vulkan.common.vulkan_c.VkShaderModule = null,
+    layout: ggml.vulkan.common.vulkan_c.VkPipelineLayout = null,
+    pipeline: ggml.vulkan.common.vulkan_c.VkPipeline = null,
     push_constant_size: u32 = 0,
     parameter_count: u32 = 0,
     wg_denoms: [3]u32 = .{ 0, 0, 0 },
@@ -79,8 +79,8 @@ pub const MatmulTileSelector = *const fn (mm: u32, n: u32, k: u32, shader_core_c
 
 // SPIR-V passes
 
-const op_code_mask: u32 = ggml.vulkan.common.vk.SpvOpCodeMask;
-const word_count_shift: u5 = ggml.vulkan.common.vk.SpvWordCountShift;
+const op_code_mask: u32 = ggml.vulkan.common.vulkan_c.SpvOpCodeMask;
+const word_count_shift: u5 = ggml.vulkan.common.vulkan_c.SpvWordCountShift;
 
 /// Ports `kSpvOpCooperativeMatrixLoadTensorNV`,
 /// `kSpvCapabilityCooperativeMatrixDecodeVectorNV` and
@@ -121,7 +121,7 @@ fn stripDecodeVector(code: []const u32) ?[]u32 {
         const wc = wcOf(code[pos]);
         const op = opOf(code[pos]);
         ggml.impl.assert(wc > 0 and pos + wc <= code.len, "wc > 0 && pos + wc <= word_count");
-        if (op == ggml.vulkan.common.vk.SpvOpExtension and wc >= 2 and literalEq(code[pos + 1 .. pos + wc], ext)) {
+        if (op == ggml.vulkan.common.vulkan_c.SpvOpExtension and wc >= 2 and literalEq(code[pos + 1 .. pos + wc], ext)) {
             uses_decode_vector = true;
             break;
         }
@@ -144,13 +144,13 @@ fn stripDecodeVector(code: []const u32) ?[]u32 {
         const op = opOf(code[pos]);
         ggml.impl.assert(wc > 0 and pos + wc <= code.len, "wc > 0 && pos + wc <= word_count");
 
-        if (op == ggml.vulkan.common.vk.SpvOpExtension and wc >= 2 and literalEq(code[pos + 1 .. pos + wc], ext)) {
+        if (op == ggml.vulkan.common.vulkan_c.SpvOpExtension and wc >= 2 and literalEq(code[pos + 1 .. pos + wc], ext)) {
             flush(&out, code, run_start, pos);
             pos += wc;
             run_start = pos;
             continue;
         }
-        if (op == ggml.vulkan.common.vk.SpvOpCapability and wc == 2 and code[pos + 1] == capability_cooperative_matrix_decode_vector_nv) {
+        if (op == ggml.vulkan.common.vulkan_c.SpvOpCapability and wc == 2 and code[pos + 1] == capability_cooperative_matrix_decode_vector_nv) {
             flush(&out, code, run_start, pos);
             pos += wc;
             run_start = pos;
@@ -213,10 +213,10 @@ fn rollBkLoop(code: []const u32) ?[]u32 {
         const wc = wcOf(code[pos]);
         const op = opOf(code[pos]);
         if (wc == 0 or pos + wc > code.len) return null;
-        if (op == ggml.vulkan.common.vk.SpvOpLoopMerge and wc >= 4) {
+        if (op == ggml.vulkan.common.vulkan_c.SpvOpLoopMerge and wc >= 4) {
             loops.append(std.heap.c_allocator, .{ .header = pos, .end = 0, .control = code[pos + 3] }) catch ggml.impl.abort("ggml_vulkan: out of memory");
         }
-        if (op == ggml.vulkan.common.vk.SpvOpLabel and wc >= 2) {
+        if (op == ggml.vulkan.common.vulkan_c.SpvOpLabel and wc >= 2) {
             for (loops.items) |*l| {
                 if (l.end == 0 and code[l.header + 1] == code[pos + 1]) l.end = pos;
             }
@@ -232,14 +232,14 @@ fn rollBkLoop(code: []const u32) ?[]u32 {
 
     var bk: ?Loop = null;
     for (loops.items) |h| {
-        if (h.control != ggml.vulkan.common.vk.SpvLoopControlUnrollMask) continue;
+        if (h.control != ggml.vulkan.common.vulkan_c.SpvLoopControlUnrollMask) continue;
         var parent: ?Loop = null;
         var has_child = false;
         for (loops.items) |g| {
             if (encloses(g, h) and (parent == null or g.header > parent.?.header)) parent = g;
             if (encloses(h, g)) has_child = true;
         }
-        if (parent != null and parent.?.control == ggml.vulkan.common.vk.SpvLoopControlMaskNone and has_child and
+        if (parent != null and parent.?.control == ggml.vulkan.common.vulkan_c.SpvLoopControlMaskNone and has_child and
             (bk == null or h.header > bk.?.header))
         {
             bk = h;
@@ -247,7 +247,7 @@ fn rollBkLoop(code: []const u32) ?[]u32 {
     }
     const b = bk orelse return null;
     const out = std.heap.c_allocator.dupe(u32, code) catch ggml.impl.abort("ggml_vulkan: out of memory");
-    out[b.header + 3] = ggml.vulkan.common.vk.SpvLoopControlDontUnrollMask;
+    out[b.header + 3] = ggml.vulkan.common.vulkan_c.SpvLoopControlDontUnrollMask;
     return out;
 }
 
@@ -267,15 +267,15 @@ fn patchFloatControls(device: *const ggml.vulkan.device.Device, spv_words: []con
         const opcode = opOf(spirv.items[pos]);
         const len = wcOf(spirv.items[pos]);
         if (len == 0) break;
-        if (opcode == ggml.vulkan.common.vk.SpvOpCapability) {
+        if (opcode == ggml.vulkan.common.vulkan_c.SpvOpCapability) {
             cap_insert_pos = pos + len;
             ext_insert_pos = pos + len;
-        } else if (opcode == ggml.vulkan.common.vk.SpvOpExtension) {
+        } else if (opcode == ggml.vulkan.common.vulkan_c.SpvOpExtension) {
             ext_insert_pos = pos + len;
-        } else if (opcode == ggml.vulkan.common.vk.SpvOpEntryPoint) {
+        } else if (opcode == ggml.vulkan.common.vulkan_c.SpvOpEntryPoint) {
             entry_point_id = spirv.items[pos + 2];
             exec_insert_pos = pos + len;
-        } else if (opcode == ggml.vulkan.common.vk.SpvOpExecutionMode or opcode == ggml.vulkan.common.vk.SpvOpExecutionModeId) {
+        } else if (opcode == ggml.vulkan.common.vulkan_c.SpvOpExecutionMode or opcode == ggml.vulkan.common.vulkan_c.SpvOpExecutionModeId) {
             exec_insert_pos = pos + len;
         } else if (entry_point_id != 0) {
             break;
@@ -288,26 +288,26 @@ fn patchFloatControls(device: *const ggml.vulkan.device.Device, spv_words: []con
             list.insertSlice(std.heap.c_allocator, at, words) catch ggml.impl.abort("ggml_vulkan: out of memory");
         }
     }.f;
-    const exec_mode_op = (4 << word_count_shift) | @as(u32, ggml.vulkan.common.vk.SpvOpExecutionMode);
+    const exec_mode_op = (4 << word_count_shift) | @as(u32, ggml.vulkan.common.vulkan_c.SpvOpExecutionMode);
     // Insert from latest position first so earlier indices stay valid.
     if (device.float_controls_rte_fp16) {
-        insert(&spirv, exec_insert_pos, &.{ exec_mode_op, entry_point_id, ggml.vulkan.common.vk.SpvExecutionModeRoundingModeRTE, 16 });
+        insert(&spirv, exec_insert_pos, &.{ exec_mode_op, entry_point_id, ggml.vulkan.common.vulkan_c.SpvExecutionModeRoundingModeRTE, 16 });
     }
     if (device.float_controls_denorm_preserve_fp16) {
-        insert(&spirv, exec_insert_pos, &.{ exec_mode_op, entry_point_id, ggml.vulkan.common.vk.SpvExecutionModeDenormPreserve, 16 });
+        insert(&spirv, exec_insert_pos, &.{ exec_mode_op, entry_point_id, ggml.vulkan.common.vulkan_c.SpvExecutionModeDenormPreserve, 16 });
     }
 
     // OpExtension "SPV_KHR_float_controls"
     const ext_str = "SPV_KHR_float_controls";
     const ext_str_words = (ext_str.len + 1 + 3) / 4;
     var extension: [1 + ext_str_words]u32 = @splat(0);
-    extension[0] = ((1 + ext_str_words) << word_count_shift) | @as(u32, ggml.vulkan.common.vk.SpvOpExtension);
+    extension[0] = ((1 + ext_str_words) << word_count_shift) | @as(u32, ggml.vulkan.common.vulkan_c.SpvOpExtension);
     @memcpy(std.mem.sliceAsBytes(extension[1..])[0..ext_str.len], ext_str);
     insert(&spirv, ext_insert_pos, &extension);
 
-    const cap_op = (2 << word_count_shift) | @as(u32, ggml.vulkan.common.vk.SpvOpCapability);
-    if (device.float_controls_rte_fp16) insert(&spirv, cap_insert_pos, &.{ cap_op, ggml.vulkan.common.vk.SpvCapabilityRoundingModeRTE });
-    if (device.float_controls_denorm_preserve_fp16) insert(&spirv, cap_insert_pos, &.{ cap_op, ggml.vulkan.common.vk.SpvCapabilityDenormPreserve });
+    const cap_op = (2 << word_count_shift) | @as(u32, ggml.vulkan.common.vulkan_c.SpvOpCapability);
+    if (device.float_controls_rte_fp16) insert(&spirv, cap_insert_pos, &.{ cap_op, ggml.vulkan.common.vulkan_c.SpvCapabilityRoundingModeRTE });
+    if (device.float_controls_denorm_preserve_fp16) insert(&spirv, cap_insert_pos, &.{ cap_op, ggml.vulkan.common.vulkan_c.SpvCapabilityDenormPreserve });
 
     return spirv.toOwnedSlice(std.heap.c_allocator) catch ggml.impl.abort("ggml_vulkan: out of memory");
 }
@@ -328,8 +328,8 @@ pub const CompileArgs = struct {
 /// One of `ggml_vk_create_pipeline_func`'s three `catch` blocks: a failed
 /// create prints `ggml_vulkan: <what> creation failed for <pipeline>:
 /// <e.what()>` and rethrows, which nothing catches.
-fn createOrAbort(result: ggml.vulkan.common.vk.VkResult, comptime what: []const u8, comptime call: []const u8, pipeline: *const Pipeline) void {
-    if (result == ggml.vulkan.common.vk.VK_SUCCESS) return;
+fn createOrAbort(result: ggml.vulkan.common.vulkan_c.VkResult, comptime what: []const u8, comptime call: []const u8, pipeline: *const Pipeline) void {
+    if (result == ggml.vulkan.common.vulkan_c.VK_SUCCESS) return;
     ggml.impl.fprintfStderr("ggml_vulkan: " ++ what ++ " creation failed for %s: " ++ call ++ ": %s\n", .{ pipeline.name.ptr, ggml.vulkan.common.resultString(result).ptr });
     ggml.impl.abort("ggml_vulkan: uncaught vk::SystemError");
 }
@@ -368,9 +368,9 @@ pub fn createPipelineFunc(device: *ggml.vulkan.device.Device, pipeline: *Pipelin
         }
     }
 
-    if (comptime ggml.vulkan.common.vk.VK_HEADER_VERSION >= 287) {
+    if (comptime ggml.vulkan.common.vulkan_c.VK_HEADER_VERSION >= 287) {
         // Roll the mul_mm BK loop on Asahi Linux. Skip bf16 and the mul_mmq pipelines.
-        if (device.driver_id == ggml.vulkan.common.vk.VK_DRIVER_ID_MESA_HONEYKRISP and
+        if (device.driver_id == ggml.vulkan.common.vulkan_c.VK_DRIVER_ID_MESA_HONEYKRISP and
             std.mem.startsWith(u8, pipeline.name, "matmul") and
             std.mem.indexOf(u8, pipeline.name, "bf16") == null and
             std.mem.indexOf(u8, pipeline.name, "q8_1") == null)
@@ -383,68 +383,68 @@ pub fn createPipelineFunc(device: *ggml.vulkan.device.Device, pipeline: *Pipelin
         }
     }
 
-    var smci = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkShaderModuleCreateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO);
+    var smci = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkShaderModuleCreateInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO);
     // The C++ hands the unpatched module over by its byte size.
     smci.codeSize = if (owned == null) args.spv.len else code.len * 4;
     smci.pCode = code.ptr;
     createOrAbort(ggml.vulkan.common.dispatch.vkCreateShaderModule.?(device.device, &smci, null, &pipeline.shader_module), "shader module", "vk::Device::createShaderModule", pipeline);
 
-    const pcr: ggml.vulkan.common.vk.VkPushConstantRange = .{ .stageFlags = ggml.vulkan.common.vk.VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = pipeline.push_constant_size };
-    var plci = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPipelineLayoutCreateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO);
+    const pcr: ggml.vulkan.common.vulkan_c.VkPushConstantRange = .{ .stageFlags = ggml.vulkan.common.vulkan_c.VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = pipeline.push_constant_size };
+    var plci = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPipelineLayoutCreateInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO);
     plci.setLayoutCount = 1;
     plci.pSetLayouts = &device.dsl;
     plci.pushConstantRangeCount = 1;
     plci.pPushConstantRanges = &pcr;
     createOrAbort(ggml.vulkan.common.dispatch.vkCreatePipelineLayout.?(device.device, &plci, null, &pipeline.layout), "pipeline layout", "vk::Device::createPipelineLayout", pipeline);
 
-    const entries = std.heap.c_allocator.alloc(ggml.vulkan.common.vk.VkSpecializationMapEntry, args.specialization_constants.len) catch ggml.impl.abort("ggml_vulkan: out of memory");
+    const entries = std.heap.c_allocator.alloc(ggml.vulkan.common.vulkan_c.VkSpecializationMapEntry, args.specialization_constants.len) catch ggml.impl.abort("ggml_vulkan: out of memory");
     defer std.heap.c_allocator.free(entries);
     for (entries, 0..) |*e, i| {
         e.* = .{ .constantID = @intCast(i), .offset = @intCast(i * @sizeOf(u32)), .size = @sizeOf(u32) };
     }
-    const specialization_info: ggml.vulkan.common.vk.VkSpecializationInfo = .{
+    const specialization_info: ggml.vulkan.common.vulkan_c.VkSpecializationInfo = .{
         .mapEntryCount = @intCast(entries.len),
         .pMapEntries = entries.ptr,
         .dataSize = args.specialization_constants.len * @sizeOf(u32),
         .pData = args.specialization_constants.ptr,
     };
 
-    var stage_flags: ggml.vulkan.common.vk.VkPipelineShaderStageCreateFlags = 0;
+    var stage_flags: ggml.vulkan.common.vulkan_c.VkPipelineShaderStageCreateFlags = 0;
     if (device.subgroup_require_full_support and args.require_full_subgroups) {
-        stage_flags |= ggml.vulkan.common.vk.VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT_EXT;
+        stage_flags |= ggml.vulkan.common.vulkan_c.VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT_EXT;
     }
-    var stage = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPipelineShaderStageCreateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO);
+    var stage = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPipelineShaderStageCreateInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO);
     stage.flags = stage_flags;
-    stage.stage = ggml.vulkan.common.vk.VK_SHADER_STAGE_COMPUTE_BIT;
+    stage.stage = ggml.vulkan.common.vulkan_c.VK_SHADER_STAGE_COMPUTE_BIT;
     stage.module = pipeline.shader_module;
     stage.pName = args.entrypoint.ptr;
     stage.pSpecializationInfo = &specialization_info;
 
-    var rss = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO);
+    var rss = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO);
     rss.requiredSubgroupSize = args.required_subgroup_size;
     if (device.subgroup_size_control and args.required_subgroup_size > 0) {
         ggml.impl.assert(device.subgroup_min_size <= args.required_subgroup_size and args.required_subgroup_size <= device.subgroup_max_size, "device->subgroup_min_size <= required_subgroup_size && required_subgroup_size <= device->subgroup_max_size");
         stage.pNext = &rss;
     }
 
-    var cpci = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkComputePipelineCreateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO);
-    cpci.flags = if (device.pipeline_executable_properties_support) ggml.vulkan.common.vk.VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR else 0;
+    var cpci = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkComputePipelineCreateInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO);
+    cpci.flags = if (device.pipeline_executable_properties_support) ggml.vulkan.common.vulkan_c.VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR else 0;
     cpci.stage = stage;
     cpci.layout = pipeline.layout;
 
-    var rci = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPipelineRobustnessCreateInfoEXT, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO);
+    var rci = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPipelineRobustnessCreateInfoEXT, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO);
     if (device.pipeline_robustness and args.disable_robustness) {
-        rci.storageBuffers = ggml.vulkan.common.vk.VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DISABLED;
-        rci.uniformBuffers = ggml.vulkan.common.vk.VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DISABLED;
+        rci.storageBuffers = ggml.vulkan.common.vulkan_c.VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DISABLED;
+        rci.uniformBuffers = ggml.vulkan.common.vulkan_c.VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DISABLED;
         cpci.pNext = &rci;
     }
 
-    var flags2 = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPipelineCreateFlags2CreateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO);
-    if (comptime @hasDecl(ggml.vulkan.common.vk, "VK_EXT_shader_64bit_indexing")) {
+    var flags2 = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPipelineCreateFlags2CreateInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO);
+    if (comptime @hasDecl(ggml.vulkan.common.vulkan_c, "VK_EXT_shader_64bit_indexing")) {
         if (pipeline.is_64b_indexing) {
-            flags2.flags = ggml.vulkan.common.vk.VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT;
+            flags2.flags = ggml.vulkan.common.vulkan_c.VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT;
             if (device.pipeline_executable_properties_support) {
-                flags2.flags |= ggml.vulkan.common.vk.VK_PIPELINE_CREATE_2_CAPTURE_STATISTICS_BIT_KHR;
+                flags2.flags |= ggml.vulkan.common.vulkan_c.VK_PIPELINE_CREATE_2_CAPTURE_STATISTICS_BIT_KHR;
             }
             flags2.pNext = cpci.pNext;
             cpci.pNext = &flags2;
@@ -454,13 +454,13 @@ pub fn createPipelineFunc(device: *ggml.vulkan.device.Device, pipeline: *Pipelin
     // `vk::Device::createComputePipeline` accepts VK_PIPELINE_COMPILE_REQUIRED
     // as well as success.
     const result = ggml.vulkan.common.dispatch.vkCreateComputePipelines.?(device.device, null, 1, &cpci, null, &pipeline.pipeline);
-    if (result != ggml.vulkan.common.vk.VK_SUCCESS and result != ggml.vulkan.common.vk.VK_PIPELINE_COMPILE_REQUIRED) {
+    if (result != ggml.vulkan.common.vulkan_c.VK_SUCCESS and result != ggml.vulkan.common.vulkan_c.VK_PIPELINE_COMPILE_REQUIRED) {
         createOrAbort(result, "compute pipeline", "vk::Device::createComputePipeline", pipeline);
     }
 
     if (ggml.vulkan.instance.instance.debug_utils_support) {
-        var duoni = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkDebugUtilsObjectNameInfoEXT, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT);
-        duoni.objectType = ggml.vulkan.common.vk.VK_OBJECT_TYPE_PIPELINE;
+        var duoni = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkDebugUtilsObjectNameInfoEXT, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT);
+        duoni.objectType = ggml.vulkan.common.vulkan_c.VK_OBJECT_TYPE_PIPELINE;
         duoni.pObjectName = pipeline.name.ptr;
         duoni.objectHandle = @intFromPtr(pipeline.pipeline);
         _ = ggml.vulkan.instance.instance.pfn_vkSetDebugUtilsObjectNameEXT.?(device.device, &duoni);
@@ -482,9 +482,9 @@ pub fn createPipelineFunc(device: *ggml.vulkan.device.Device, pipeline: *Pipelin
 /// every statistic of a pipeline `GGML_VK_PIPELINE_STATS` names, and keeps
 /// the register count NVIDIA reports.
 fn readStatistics(device: *ggml.vulkan.device.Device, pipeline: *Pipeline) void {
-    var info = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPipelineExecutableInfoKHR, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_INFO_KHR);
+    var info = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPipelineExecutableInfoKHR, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_INFO_KHR);
     info.pipeline = pipeline.pipeline;
-    const stats = ggml.vulkan.common.enumerateWith(ggml.vulkan.common.vk.VkPipelineExecutableStatisticKHR, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_STATISTIC_KHR, "vk::Device::getPipelineExecutableStatisticsKHR", ggml.vulkan.common.dispatch.vkGetPipelineExecutableStatisticsKHR.?, .{ device.device, &info }) catch
+    const stats = ggml.vulkan.common.enumerateWith(ggml.vulkan.common.vulkan_c.VkPipelineExecutableStatisticKHR, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_STATISTIC_KHR, "vk::Device::getPipelineExecutableStatisticsKHR", ggml.vulkan.common.dispatch.vkGetPipelineExecutableStatisticsKHR.?, .{ device.device, &info }) catch
         ggml.vulkan.common.abortLastError();
     defer std.heap.c_allocator.free(stats);
 
@@ -498,11 +498,11 @@ fn readStatistics(device: *ggml.vulkan.device.Device, pipeline: *Pipeline) void 
         if (print_stats) {
             const sname: [*:0]const u8 = @ptrCast(&s.name);
             switch (s.format) {
-                ggml.vulkan.common.vk.VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_BOOL32_KHR => ggml.impl.fprintfStderr("ggml_vulkan:   %s: %s\n", .{ sname, @as([*:0]const u8, if (s.value.b32 != 0) "true" else "false") }),
-                ggml.vulkan.common.vk.VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_INT64_KHR => ggml.impl.fprintfStderr("ggml_vulkan:   %s: %lld\n", .{ sname, @as(c_longlong, s.value.i64) }),
-                ggml.vulkan.common.vk.VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_UINT64_KHR => ggml.impl.fprintfStderr("ggml_vulkan:   %s: %llu\n", .{ sname, @as(c_ulonglong, s.value.u64) }),
+                ggml.vulkan.common.vulkan_c.VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_BOOL32_KHR => ggml.impl.fprintfStderr("ggml_vulkan:   %s: %s\n", .{ sname, @as([*:0]const u8, if (s.value.b32 != 0) "true" else "false") }),
+                ggml.vulkan.common.vulkan_c.VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_INT64_KHR => ggml.impl.fprintfStderr("ggml_vulkan:   %s: %lld\n", .{ sname, @as(c_longlong, s.value.i64) }),
+                ggml.vulkan.common.vulkan_c.VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_UINT64_KHR => ggml.impl.fprintfStderr("ggml_vulkan:   %s: %llu\n", .{ sname, @as(c_ulonglong, s.value.u64) }),
                 // `std::cerr << double` is `%g`.
-                ggml.vulkan.common.vk.VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_FLOAT64_KHR => ggml.impl.fprintfStderr("ggml_vulkan:   %s: %g\n", .{ sname, s.value.f64 }),
+                ggml.vulkan.common.vulkan_c.VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_FLOAT64_KHR => ggml.impl.fprintfStderr("ggml_vulkan:   %s: %g\n", .{ sname, s.value.f64 }),
                 else => ggml.impl.fprintfStderr("ggml_vulkan:   %s: \n", .{sname}),
             }
         }
@@ -514,7 +514,7 @@ fn readStatistics(device: *ggml.vulkan.device.Device, pipeline: *Pipeline) void 
 }
 
 /// Ports `ggml_vk_destroy_pipeline` (ggml-vulkan.cpp:836 @b1b770d90).
-pub fn destroyPipeline(device: ggml.vulkan.common.vk.VkDevice, pipeline: *Pipeline) void {
+pub fn destroyPipeline(device: ggml.vulkan.common.vulkan_c.VkDevice, pipeline: *Pipeline) void {
     ggml.vulkan.common.dispatch.vkDestroyPipelineLayout.?(device, pipeline.layout, null);
     ggml.vulkan.common.dispatch.vkDestroyShaderModule.?(device, pipeline.shader_module, null);
     ggml.vulkan.common.dispatch.vkDestroyPipeline.?(device, pipeline.pipeline, null);
@@ -530,16 +530,16 @@ test {
 test "rollBkLoop takes the last unrolled loop with a child under a hint-free parent" {
     const L = struct {
         fn merge(id: u32, control: u32) [4]u32 {
-            return .{ (4 << word_count_shift) | @as(u32, ggml.vulkan.common.vk.SpvOpLoopMerge), id, 0, control };
+            return .{ (4 << word_count_shift) | @as(u32, ggml.vulkan.common.vulkan_c.SpvOpLoopMerge), id, 0, control };
         }
         fn label(id: u32) [2]u32 {
-            return .{ (2 << word_count_shift) | @as(u32, ggml.vulkan.common.vk.SpvOpLabel), id };
+            return .{ (2 << word_count_shift) | @as(u32, ggml.vulkan.common.vulkan_c.SpvOpLabel), id };
         }
     };
     // K-tile loop (no hint) { BK loop (unroll) { inner (unroll) } }
     const code = [_]u32{ 0, 0, 0, 0, 0 } ++ L.merge(1, 0) ++ L.merge(2, 1) ++ L.merge(3, 1) ++ L.label(3) ++ L.label(2) ++ L.label(1);
     const out = rollBkLoop(&code).?;
     defer std.heap.c_allocator.free(out);
-    try std.testing.expectEqual(@as(u32, ggml.vulkan.common.vk.SpvLoopControlDontUnrollMask), out[5 + 4 + 3]);
+    try std.testing.expectEqual(@as(u32, ggml.vulkan.common.vulkan_c.SpvLoopControlDontUnrollMask), out[5 + 4 + 3]);
     try std.testing.expectEqual(@as(u32, 1), out[5 + 8 + 3]);
 }

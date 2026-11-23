@@ -241,7 +241,7 @@ fn ropeFlt(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *g
     const n_dims: c_int = ggml.impl.getOpParamsI32(dst, 1);
     const mode: c_int = ggml.impl.getOpParamsI32(dst, 2);
     const n_ctx_orig: c_int = ggml.impl.getOpParamsI32(dst, 4);
-    const truncate = ggml.impl.ggml_c.ggml_rope_get_truncate(dst);
+    const truncate = ggml.ops.ggml_rope_get_truncate(dst);
 
     const freq_base = ggml.impl.getOpParamsF32(dst, 5);
     const freq_scale = ggml.impl.getOpParamsF32(dst, 6);
@@ -266,7 +266,7 @@ fn ropeFlt(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *g
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const nr: i64 = ggml.impl.ggml_c.ggml_nrows(dst);
+    const nr: i64 = ggml.types.ggml_nrows(dst);
 
     ggml.impl.assert(n_dims <= l.ne0, "n_dims <= ne0");
     ggml.impl.assert(@rem(n_dims, 2) == 0, "n_dims % 2 == 0");
@@ -288,7 +288,7 @@ fn ropeFlt(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *g
     const theta_scale = stdlib.libm.powf(freq_base, -2.0 / @as(f32, @floatFromInt(n_dims)));
 
     var corr_dims: [2]f32 = undefined;
-    ggml.impl.ggml_c.ggml_rope_yarn_corr_dims(n_dims, n_ctx_orig, freq_base, beta_fast, beta_slow, truncate, &corr_dims);
+    ggml.ops.ggml_rope_yarn_corr_dims(n_dims, n_ctx_orig, freq_base, beta_fast, beta_slow, truncate, &corr_dims);
 
     const is_imrope = mode == ggml.impl.ggml_c.GGML_ROPE_TYPE_IMROPE; // qwen3vl apply interleaved mrope
     const mrope_used = (mode & ggml.impl.ggml_c.GGML_ROPE_TYPE_MROPE) != 0; // ggml_rope_multi, note: also true for vision (24 & 8 == true) and for imrope

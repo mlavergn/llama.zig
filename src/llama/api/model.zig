@@ -20,6 +20,7 @@
 //! strings -- so the two print the same bytes and return the same length.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const llama = @import("../module.zig");
 
 /// The port's model behind a `llama_model *`.
@@ -29,7 +30,7 @@ fn modelOf(model: ?*const llama.impl.llama_c.struct_llama_model) *const llama.mo
 
 /// `snprintf(buf, buf_size, "%s", s)` for a string with no NUL in it.
 fn printTo(buf: [*c]u8, buf_size: usize, s: []const u8) i32 {
-    return llama.impl.llama_c.snprintf(buf, buf_size, "%.*s", @as(c_int, @intCast(s.len)), s.ptr);
+    return stdlib.libc.snprintf(buf, buf_size, "%.*s", @as(c_int, @intCast(s.len)), s.ptr);
 }
 
 /// The `i`-th entry of `gguf_kv`, in its iteration order.

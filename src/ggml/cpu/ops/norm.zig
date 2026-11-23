@@ -44,7 +44,7 @@ extern fn vDSP_measqv(a: [*]const f32, ia: Stride, cc: *f32, n: Length) void;
 fn normF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
@@ -152,7 +152,7 @@ fn rmsNormF32(comptime fuse_op: RmsNormFuseOp, params: *const ggml.cpu.defs.Comp
         dst = f;
     }
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
 
     ggml.impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
 
@@ -248,7 +248,7 @@ fn rmsNormBackF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.gg
     const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]); // gradients from forward pass output
     const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]); // src1 from forward pass
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst) and ggml.impl.ggml_c.ggml_are_same_shape(src0, src1), "ggml_are_same_shape(src0, dst) && ggml_are_same_shape(src0, src1)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src0, dst) and ggml.types.ggml_are_same_shape(src0, src1), "ggml_are_same_shape(src0, dst) && ggml_are_same_shape(src0, src1)");
 
     ggml.impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
     ggml.impl.assert(src1.nb[0] == @sizeOf(f32), "src1->nb[0] == sizeof(float)");
@@ -328,7 +328,7 @@ pub fn ggml_compute_forward_rms_norm_back(params: *const ggml.cpu.defs.ComputePa
 fn groupNormF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
 
     ggml.impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
 
@@ -428,7 +428,7 @@ pub fn ggml_compute_forward_group_norm(params: *const ggml.cpu.defs.ComputeParam
 fn l2NormF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;

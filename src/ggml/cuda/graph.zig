@@ -49,7 +49,7 @@ fn computeForward(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_te
         ggml.impl.ggml_c.GGML_OP_COUNT_EQUAL => ggml.cuda.count_equal.opCountEqual(ctx, dst),
         ggml.impl.ggml_c.GGML_OP_ADD_ID => ggml.cuda.add_id.opAddId(ctx, dst),
         ggml.impl.ggml_c.GGML_OP_ACC => ggml.cuda.acc.opAcc(ctx, dst),
-        ggml.impl.ggml_c.GGML_OP_UNARY => switch (ggml.impl.ggml_c.ggml_get_unary_op(dst)) {
+        ggml.impl.ggml_c.GGML_OP_UNARY => switch (ggml.types.ggml_get_unary_op(dst)) {
             ggml.impl.ggml_c.GGML_UNARY_OP_ABS => ggml.cuda.unary.opUnary(.abs, ctx, dst),
             ggml.impl.ggml_c.GGML_UNARY_OP_SGN => ggml.cuda.unary.opUnary(.sgn, ctx, dst),
             ggml.impl.ggml_c.GGML_UNARY_OP_NEG => ggml.cuda.unary.opUnary(.neg, ctx, dst),
@@ -74,7 +74,7 @@ fn computeForward(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_te
             ggml.impl.ggml_c.GGML_UNARY_OP_SOFTPLUS => ggml.cuda.unary.opUnary(.softplus, ctx, dst),
             else => return false,
         },
-        ggml.impl.ggml_c.GGML_OP_GLU => switch (ggml.impl.ggml_c.ggml_get_glu_op(dst)) {
+        ggml.impl.ggml_c.GGML_OP_GLU => switch (ggml.types.ggml_get_glu_op(dst)) {
             ggml.impl.ggml_c.GGML_GLU_OP_REGLU => ggml.cuda.unary.opGated(.relu, ctx, dst),
             ggml.impl.ggml_c.GGML_GLU_OP_GEGLU => ggml.cuda.unary.opGated(.gelu, ctx, dst),
             ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU => ggml.cuda.unary.opGated(.silu, ctx, dst),
@@ -157,7 +157,7 @@ fn computeForward(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_te
 
     const err = ggml.cuda.common.cu.cudaGetLastError();
     if (err != ggml.cuda.common.cu.cudaSuccess) {
-        ggml.impl.logError("%s: %s failed\n", .{ "ggml_cuda_compute_forward", ggml.impl.ggml_c.ggml_op_desc(dst) });
+        ggml.impl.logError("%s: %s failed\n", .{ "ggml_cuda_compute_forward", ggml.types.ggml_op_desc(dst) });
         ggml.cuda.common.cudaCheck(err, "err", @src());
     }
     return true;
@@ -171,7 +171,7 @@ fn computeForward(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_te
 
 /// Ports `ggml_cuda_is_view_or_noop` (ggml-cuda.cu:3195 @b1b770d90).
 fn isViewOrNoop(t: *const ggml.impl.ggml_c.ggml_tensor) bool {
-    return ggml.impl.ggml_c.ggml_is_empty(t) or t.op == ggml.impl.ggml_c.GGML_OP_RESHAPE or t.op == ggml.impl.ggml_c.GGML_OP_TRANSPOSE or
+    return ggml.types.ggml_is_empty(t) or t.op == ggml.impl.ggml_c.GGML_OP_RESHAPE or t.op == ggml.impl.ggml_c.GGML_OP_TRANSPOSE or
         t.op == ggml.impl.ggml_c.GGML_OP_VIEW or t.op == ggml.impl.ggml_c.GGML_OP_PERMUTE or t.op == ggml.impl.ggml_c.GGML_OP_NONE;
 }
 
@@ -510,7 +510,7 @@ fn graphEvaluateAndCapture(cuda_ctx: *ggml.cuda.common.Context, cgraph: *ggml.im
 
                 const ok = computeForward(cuda_ctx, node);
                 if (!ok) {
-                    ggml.impl.logError("%s: op not supported %s (%s)\n", .{ "ggml_cuda_graph_evaluate_and_capture", @as([*:0]const u8, @ptrCast(&node.name)), ggml.impl.ggml_c.ggml_op_name(node.op) });
+                    ggml.impl.logError("%s: op not supported %s (%s)\n", .{ "ggml_cuda_graph_evaluate_and_capture", @as([*:0]const u8, @ptrCast(&node.name)), ggml.types.ggml_op_name(node.op) });
                 }
                 ggml.impl.assert(ok, "ok");
 
@@ -650,7 +650,7 @@ pub fn graphCompute(backend_c: ggml.impl.ggml_c.ggml_backend_t, cgraph_c: ?*ggml
 // Graph optimisation
 
 fn isNoop(node: *const ggml.impl.ggml_c.ggml_tensor) bool {
-    return ggml.impl.ggml_c.ggml_is_empty(node) or node.op == ggml.impl.ggml_c.GGML_OP_NONE or node.op == ggml.impl.ggml_c.GGML_OP_RESHAPE or
+    return ggml.types.ggml_is_empty(node) or node.op == ggml.impl.ggml_c.GGML_OP_NONE or node.op == ggml.impl.ggml_c.GGML_OP_RESHAPE or
         node.op == ggml.impl.ggml_c.GGML_OP_TRANSPOSE or node.op == ggml.impl.ggml_c.GGML_OP_VIEW or node.op == ggml.impl.ggml_c.GGML_OP_PERMUTE;
 }
 
@@ -916,7 +916,7 @@ pub fn graphOptimize(backend_c: ggml.impl.ggml_c.ggml_backend_t, cgraph_c: ?*ggm
         if (isNoop(node)) continue;
         for (node.src) |src| {
             //TODO: check why nrows > 1 fails
-            if (!isNoop(node) and ggml.impl.ggml_c.ggml_nrows(node) <= 1) {
+            if (!isNoop(node) and ggml.types.ggml_nrows(node) <= 1) {
                 const gop = fan_out.getOrPut(std.heap.c_allocator, src) catch ggml.impl.abort("ggml-cuda: out of memory");
                 if (!gop.found_existing) gop.value_ptr.* = 0;
                 gop.value_ptr.* += 1;

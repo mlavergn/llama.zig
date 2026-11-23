@@ -39,15 +39,15 @@ pub fn makeRopeConstants(dst: *const ggml.impl.ggml_c.ggml_tensor, src0: *const 
     const is_imrope = mode == ggml.impl.ggml_c.GGML_ROPE_TYPE_IMROPE;
 
     var corr_dims: [2]f32 = undefined;
-    ggml.impl.ggml_c.ggml_rope_yarn_corr_dims(n_dims, n_ctx_orig, freq_base, beta_fast, beta_slow, ggml.impl.ggml_c.ggml_rope_get_truncate(dst), &corr_dims);
+    ggml.ops.ggml_rope_yarn_corr_dims(n_dims, n_ctx_orig, freq_base, beta_fast, beta_slow, ggml.ops.ggml_rope_get_truncate(dst), &corr_dims);
 
     const theta_scale = stdlib.libm.powf(freq_base, -2.0 / @as(f32, @floatFromInt(n_dims)));
 
-    const ts0 = ggml.impl.ggml_c.ggml_type_size(src0.type);
-    const tsd = ggml.impl.ggml_c.ggml_type_size(dst.type);
+    const ts0 = ggml.types.ggml_type_size(src0.type);
+    const tsd = ggml.types.ggml_type_size(dst.type);
     return .{
         .rope_mode = @bitCast(mode),
-        .nrows = ggml.vulkan.ops.u32Of(ggml.impl.ggml_c.ggml_nrows(src0)),
+        .nrows = ggml.vulkan.ops.u32Of(ggml.types.ggml_nrows(src0)),
         .n_dims = @bitCast(n_dims),
         .n_offs = @bitCast(n_offs),
         .freq_scale = freq_scale,
@@ -90,7 +90,7 @@ fn bindingOf(ctx: *const ggml.vulkan.context.BackendCtx, t: *const ggml.impl.ggm
 
 /// Ports `ggml_vk_rms_norm_push_constants` (ggml-vulkan-push-constants.h:1129 @b1b770d90).
 fn rmsNormPushConstants(src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, dst: *const ggml.impl.ggml_c.ggml_tensor, eps: f32, num_partials: u32) ggml.vulkan.push.Binary {
-    return ggml.vulkan.ops.binaryPc(ggml.vulkan.ops.u32Of(ggml.impl.ggml_c.ggml_nelements(src0)), src0, src1, dst, eps, 0, @bitCast(num_partials));
+    return ggml.vulkan.ops.binaryPc(ggml.vulkan.ops.u32Of(ggml.types.ggml_nelements(src0)), src0, src1, dst, eps, 0, @bitCast(num_partials));
 }
 
 /// Ports `ggml_vk_rms_norm_finish` (ggml-vulkan.cpp:11264 @b1b770d90).
@@ -213,7 +213,7 @@ pub fn rmsNorm(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit
         const t5 = at(cgraph, node_idx + ctx.num_additional_fused_ops); // dst
         tensors[5] = t5;
         tensors[6] = if (do_set_rows) t5.src[1] else null;
-        const set_rows_stride: u32 = if (do_set_rows) @truncate(t5.nb[1] / ggml.impl.ggml_c.ggml_type_size(t5.type)) else 0;
+        const set_rows_stride: u32 = if (do_set_rows) @truncate(t5.nb[1] / ggml.types.ggml_type_size(t5.type)) else 0;
 
         var pc: ggml.vulkan.push.RmsNormMulRope = .{};
         pc.bin = bin;
@@ -268,7 +268,7 @@ pub fn rwkvWkv(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit
         .C = ggml.vulkan.ops.u32Of(dst.ne[0]), // n_embed
         .H = ggml.vulkan.ops.u32Of(s0.ne[1]), // n_heads
     };
-    for (0..num_srcs) |i| ggml.impl.assert(!ggml.impl.ggml_c.ggml_is_quantized(dst.src[i].*.type), "!ggml_is_quantized(dst->src[i]->type)");
+    for (0..num_srcs) |i| ggml.impl.assert(!ggml.types.ggml_is_quantized(dst.src[i].*.type), "!ggml_is_quantized(dst->src[i]->type)");
     ggml.impl.assert(dst.buffer != null, "dst->buffer != nullptr");
 
     const pipeline = ggml.vulkan.op_pipeline.getPipeline(ctx, dst.src[0], dst.src[1], dst.src[2], dst, dst.op) orelse ggml.impl.abort("GGML_ASSERT(pipeline != nullptr) failed");
@@ -418,7 +418,7 @@ pub fn ssmScan(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit
     const pipeline = ggml.vulkan.op_pipeline.getPipeline(ctx, dst.src[0], dst.src[1], dst.src[2], dst, dst.op) orelse ggml.impl.abort("GGML_ASSERT(pipeline != nullptr) failed");
     ggml.vulkan.context.requestDescriptorSets(ctx, pipeline, 1);
 
-    const s_off: i64 = ggml.impl.ggml_c.ggml_nelements(dst.src[1]) * @sizeOf(f32);
+    const s_off: i64 = ggml.types.ggml_nelements(dst.src[1]) * @sizeOf(f32);
     const pc: ggml.vulkan.push.SsmScan = .{
         .nb02 = @truncate(src0.nb[2]),
         .nb03 = @truncate(src0.nb[3]),
@@ -496,16 +496,16 @@ pub fn optStepAdamw(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.s
     const p = dst.src[4];
     for ([_]*const ggml.impl.ggml_c.ggml_tensor{ x, g, gm, gv, p }) |t| ggml.impl.assert(t.type == ggml.impl.ggml_c.GGML_TYPE_F32, "->type == GGML_TYPE_F32");
     ggml.impl.assert(dst.buffer != null, "dst->buffer != nullptr");
-    for ([_]*const ggml.impl.ggml_c.ggml_tensor{ x, g, gm, gv, p }) |t| ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(t), "ggml_is_contiguous");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(x, g), "ggml_are_same_shape(x, g)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(x, gm), "ggml_are_same_shape(x, gm)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(x, gv), "ggml_are_same_shape(x, gv)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_nelements(p) == 7, "ggml_nelements(p) == 7");
+    for ([_]*const ggml.impl.ggml_c.ggml_tensor{ x, g, gm, gv, p }) |t| ggml.impl.assert(ggml.types.ggml_is_contiguous(t), "ggml_is_contiguous");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(x, g), "ggml_are_same_shape(x, g)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(x, gm), "ggml_are_same_shape(x, gm)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(x, gv), "ggml_are_same_shape(x, gv)");
+    ggml.impl.assert(ggml.types.ggml_nelements(p) == 7, "ggml_nelements(p) == 7");
 
     const pipeline = ggml.vulkan.op_pipeline.getPipeline(ctx, g, gm, gv, dst, ggml.impl.ggml_c.GGML_OP_OPT_STEP_ADAMW) orelse ggml.impl.abort("GGML_ASSERT(pipeline != nullptr) failed");
     ggml.vulkan.context.requestDescriptorSets(ctx, pipeline, 1);
 
-    const n = ggml.vulkan.ops.u32Of(ggml.impl.ggml_c.ggml_nelements(x));
+    const n = ggml.vulkan.ops.u32Of(ggml.types.ggml_nelements(x));
     const pc: ggml.vulkan.push.Op = .{ .KX = n, .KY = 0, .param1 = 0, .param2 = 0, .param3 = 0, .param4 = 0 };
     ggml.vulkan.context.dispatch(ctx, subctx, pipeline, &.{
         ggml.vulkan.context.tensorSubbuffer(ctx, x, false),
@@ -518,7 +518,7 @@ pub fn optStepAdamw(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.s
 
 /// Ports `ggml_vk_opt_step_sgd` (ggml-vulkan.cpp:10941 @b1b770d90).
 pub fn optStepSgd(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Context, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, src2: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor) void {
-    const n = ggml.vulkan.ops.u32Of(ggml.impl.ggml_c.ggml_nelements(dst.src[0]));
+    const n = ggml.vulkan.ops.u32Of(ggml.types.ggml_nelements(dst.src[0]));
     ggml.vulkan.ops.opF32(ctx, subctx, src0, src1, src2, null, dst, ggml.impl.ggml_c.GGML_OP_OPT_STEP_SGD, ggml.vulkan.push.Op{ .KX = n, .KY = 0, .param1 = 0, .param2 = 0, .param3 = 0, .param4 = 0 });
 }
 

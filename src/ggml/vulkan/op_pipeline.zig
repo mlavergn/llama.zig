@@ -21,8 +21,8 @@ fn isF16(t: *const ggml.impl.ggml_c.ggml_tensor) usize {
 /// Ports `ggml_vk_concat_unit_size` (ggml-vulkan.cpp:299 @b1b770d90): the
 /// widest copy unit, for a quantized type the widest that divides a block.
 pub fn concatUnitSize(ty: ggml.impl.ggml_c.ggml_type) u32 {
-    const type_size: u32 = @intCast(ggml.impl.ggml_c.ggml_type_size(ty));
-    if (!ggml.impl.ggml_c.ggml_is_quantized(ty)) return type_size;
+    const type_size: u32 = @intCast(ggml.types.ggml_type_size(ty));
+    if (!ggml.types.ggml_is_quantized(ty)) return type_size;
     if (type_size % 8 == 0) return 8;
     if (type_size % 4 == 0) return 4;
     if (type_size % 2 == 0) return 2;
@@ -32,18 +32,18 @@ pub fn concatUnitSize(ty: ggml.impl.ggml_c.ggml_type) u32 {
 /// Ports `ggml_vk_concat_supported` (ggml-vulkan.cpp:318 @b1b770d90).
 pub fn concatSupported(src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, dst: *const ggml.impl.ggml_c.ggml_tensor) bool {
     if (src0.type != src1.type or src0.type != dst.type) return false;
-    if (!ggml.impl.ggml_c.ggml_is_quantized(src0.type)) {
-        const type_size = ggml.impl.ggml_c.ggml_type_size(src0.type);
+    if (!ggml.types.ggml_is_quantized(src0.type)) {
+        const type_size = ggml.types.ggml_type_size(src0.type);
         return type_size == 1 or type_size == 2 or type_size == 4 or type_size == 8;
     }
     // Quantized tensor rows are block-aligned when created.
-    return ggml.impl.ggml_c.ggml_is_contiguous_rows(src0) and ggml.impl.ggml_c.ggml_is_contiguous_rows(src1) and ggml.impl.ggml_c.ggml_is_contiguous_rows(dst);
+    return ggml.types.ggml_is_contiguous_rows(src0) and ggml.types.ggml_is_contiguous_rows(src1) and ggml.types.ggml_is_contiguous_rows(dst);
 }
 
 /// Ports `ggml_vk_dim01_contiguous` (ggml-vulkan.cpp:6405 @b1b770d90).
 pub fn dim01Contiguous(t: *const ggml.impl.ggml_c.ggml_tensor) bool {
-    return t.nb[0] == ggml.impl.ggml_c.ggml_type_size(t.type) and
-        t.nb[1] == (t.nb[0] * @as(usize, @intCast(t.ne[0]))) / @as(usize, @intCast(ggml.impl.ggml_c.ggml_blck_size(t.type))) and
+    return t.nb[0] == ggml.types.ggml_type_size(t.type) and
+        t.nb[1] == (t.nb[0] * @as(usize, @intCast(t.ne[0]))) / @as(usize, @intCast(ggml.types.ggml_blck_size(t.type))) and
         (t.ne[3] == 1 or t.nb[3] == t.nb[2] * @as(usize, @intCast(t.ne[2])));
 }
 
@@ -54,18 +54,18 @@ pub fn dim01Contiguous(t: *const ggml.impl.ggml_c.ggml_tensor) bool {
 pub fn getCpyPipeline(ctx: *ggml.vulkan.context.BackendCtx, src: *const ggml.impl.ggml_c.ggml_tensor, dst: ?*const ggml.impl.ggml_c.ggml_tensor, to: ggml.impl.ggml_c.ggml_type) ?*ggml.vulkan.pipeline.Pipeline {
     const dev = ctx.device;
     // Choose "contiguous copy" shader if src/dst are contiguous
-    const contig = ggml.impl.ggml_c.ggml_is_contiguous(src) and (dst == null or ggml.impl.ggml_c.ggml_is_contiguous(dst.?));
-    const to_size = ggml.impl.ggml_c.ggml_type_size(to);
+    const contig = ggml.types.ggml_is_contiguous(src) and (dst == null or ggml.types.ggml_is_contiguous(dst.?));
+    const to_size = ggml.types.ggml_type_size(to);
 
     // Use optimized "transpose" shader if src dim1 is the innermost dimension.
-    const transpose = dst != null and src.nb[1] == to_size and ggml.impl.ggml_c.ggml_are_same_shape(dst.?, src);
+    const transpose = dst != null and src.nb[1] == to_size and ggml.types.ggml_are_same_shape(dst.?, src);
     if (transpose and src.type == to) {
         if (to_size == 4) return dev.pipeline_cpy_transpose_32;
         if (to_size == 2) return dev.pipeline_cpy_transpose_16;
     }
 
     // Same, for a 0<->2 swap: src dim2 is the innermost dimension.
-    const transpose02 = dst != null and !contig and src.nb[2] == to_size and ggml.impl.ggml_c.ggml_is_contiguous(dst.?) and ggml.impl.ggml_c.ggml_are_same_shape(dst.?, src);
+    const transpose02 = dst != null and !contig and src.nb[2] == to_size and ggml.types.ggml_is_contiguous(dst.?) and ggml.types.ggml_are_same_shape(dst.?, src);
     if (transpose02 and src.type == to) {
         if (to_size == 4) return dev.pipeline_cpy_transpose_02_32;
         if (to_size == 2) return dev.pipeline_cpy_transpose_02_16;
@@ -94,13 +94,13 @@ pub fn getCpyPipeline(ctx: *ggml.vulkan.context.BackendCtx, src: *const ggml.imp
 
     if (src.type == to) {
         // Copy two or four bytes at a time, depending on block size.
-        const src_size = ggml.impl.ggml_c.ggml_type_size(src.type);
-        ggml.impl.assert(ggml.impl.ggml_c.ggml_is_quantized(to) or src_size == 2 or src_size == 4, "ggml_is_quantized(to) || ggml_type_size(src->type) == 2 || ggml_type_size(src->type) == 4");
+        const src_size = ggml.types.ggml_type_size(src.type);
+        ggml.impl.assert(ggml.types.ggml_is_quantized(to) or src_size == 2 or src_size == 4, "ggml_is_quantized(to) || ggml_type_size(src->type) == 2 || ggml_type_size(src->type) == 4");
         if (src_size % 4 == 0) return if (contig) dev.pipeline_contig_cpy_32 else dev.pipeline_cpy_32;
         return if (contig) dev.pipeline_contig_cpy_16 else dev.pipeline_cpy_16;
     }
 
-    ggml.impl.fprintfStderr("Missing CPY op for types: %s %s\n", .{ ggml.impl.ggml_c.ggml_type_name(src.type), ggml.impl.ggml_c.ggml_type_name(to) });
+    ggml.impl.fprintfStderr("Missing CPY op for types: %s %s\n", .{ ggml.types.ggml_type_name(src.type), ggml.types.ggml_type_name(to) });
     ggml.impl.abort("fatal error");
 }
 
@@ -138,7 +138,7 @@ pub fn conv3dSelectShape(ctx: *const ggml.vulkan.context.BackendCtx, K: u32, NPQ
     const dev = ctx.device;
     const shader_core_count = dev.shader_core_count;
     // Slowdowns were observed on DGX Spark with drivers older than R615.
-    const driver_supported = dev.driver_id != ggml.vulkan.common.vk.VK_DRIVER_ID_NVIDIA_PROPRIETARY or
+    const driver_supported = dev.driver_id != ggml.vulkan.common.vulkan_c.VK_DRIVER_ID_NVIDIA_PROPRIETARY or
         (dev.properties.driverVersion >> 22) >= 615;
     if (dev.coopmat2 and shader_core_count > 0 and K % block.K == 0 and driver_supported) {
         const n_tiles = @as(u64, K / block.K) * (std.math.divCeil(u64, NPQ, block.NPQ) catch unreachable);
@@ -169,7 +169,7 @@ pub fn rmsNormPipeline(pipelines: *const [3]?*ggml.vulkan.pipeline.Pipeline, nco
 pub fn concatIsTransposed(device: *const ggml.vulkan.device.Device, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, dst: *const ggml.impl.ggml_c.ggml_tensor) bool {
     if (dst.op_params[0] != 0) return false; // dim 0 only
     if (src0.ne[2] != 1 or src0.ne[3] != 1 or src1.ne[2] != 1 or src1.ne[3] != 1) return false;
-    const ts = ggml.impl.ggml_c.ggml_type_size(src0.type);
+    const ts = ggml.types.ggml_type_size(src0.type);
     if (src0.nb[0] != ts or dst.nb[0] != ts) return false; // src0 and dst rows must be contiguous
     if (src1.nb[0] <= src1.nb[1]) return false; // src1 must actually be transposed
     if (@divTrunc(src1.ne[1] + 31, 32) > device.properties.limits.maxComputeWorkGroupCount[0]) return false;
@@ -228,7 +228,7 @@ pub fn getPipeline(ctx: *ggml.vulkan.context.BackendCtx, src0_: ?*const ggml.imp
             const src0 = src0_.?;
             const src1 = src1_.?;
             if ((src0.type != F32 and src0.type != F16) or (src1.type != F32 and src1.type != F16) or (dst.type != F32 and dst.type != F16)) return null;
-            const same = ggml.impl.ggml_c.ggml_are_same_shape(src0, src1);
+            const same = ggml.types.ggml_are_same_shape(src0, src1);
             const tbl = switch (op) {
                 ggml.impl.ggml_c.GGML_OP_ADD => blk: {
                     if (ctx.num_additional_fused_ops > 0) {
@@ -254,7 +254,7 @@ pub fn getPipeline(ctx: *ggml.vulkan.context.BackendCtx, src0_: ?*const ggml.imp
         },
         ggml.impl.ggml_c.GGML_OP_CONCAT => {
             if (!concatSupported(src0_.?, src1_.?, dst)) return null;
-            if (!ggml.impl.ggml_c.ggml_is_quantized(src0_.?.type) and concatIsTransposed(dev, src0_.?, src1_.?, dst)) {
+            if (!ggml.types.ggml_is_quantized(src0_.?.type) and concatIsTransposed(dev, src0_.?, src1_.?, dst)) {
                 switch (concatUnitSize(src0_.?.type)) {
                     1 => return dev.pipeline_concat_transpose_i8,
                     2 => return dev.pipeline_concat_transpose_i16,
@@ -318,8 +318,8 @@ pub fn getPipeline(ctx: *ggml.vulkan.context.BackendCtx, src0_: ?*const ggml.imp
             return null;
         },
         ggml.impl.ggml_c.GGML_OP_REPEAT => {
-            const s0 = ggml.impl.ggml_c.ggml_type_size(src0_.?.type);
-            const sd = ggml.impl.ggml_c.ggml_type_size(dst.type);
+            const s0 = ggml.types.ggml_type_size(src0_.?.type);
+            const sd = ggml.types.ggml_type_size(dst.type);
             if (s0 == @sizeOf(f32) and sd == @sizeOf(f32)) return dev.pipeline_repeat_i32;
             if (s0 == 2 and sd == 2) return dev.pipeline_repeat_i16;
             return null;
@@ -369,7 +369,7 @@ pub fn getPipeline(ctx: *ggml.vulkan.context.BackendCtx, src0_: ?*const ggml.imp
             const src0 = src0_.?;
             if ((src0.type != F32 and src0.type != F16) or (dst.type != F32 and dst.type != F16) or src0.type != dst.type) return null;
             const i = isF16(dst);
-            return switch (ggml.impl.ggml_c.ggml_get_unary_op(dst)) {
+            return switch (ggml.types.ggml_get_unary_op(dst)) {
                 ggml.impl.ggml_c.GGML_UNARY_OP_EXP => dev.pipeline_exp[i],
                 ggml.impl.ggml_c.GGML_UNARY_OP_EXPM1 => dev.pipeline_expm1[i],
                 ggml.impl.ggml_c.GGML_UNARY_OP_ELU => dev.pipeline_elu[i],
@@ -399,7 +399,7 @@ pub fn getPipeline(ctx: *ggml.vulkan.context.BackendCtx, src0_: ?*const ggml.imp
             const src0 = src0_.?;
             if ((src0.type != F32 and src0.type != F16) or (dst.type != F32 and dst.type != F16) or src0.type != dst.type) return null;
             const i = isF16(dst);
-            return switch (ggml.impl.ggml_c.ggml_get_glu_op(dst)) {
+            return switch (ggml.types.ggml_get_glu_op(dst)) {
                 ggml.impl.ggml_c.GGML_GLU_OP_GEGLU => dev.pipeline_geglu[i],
                 ggml.impl.ggml_c.GGML_GLU_OP_REGLU => dev.pipeline_reglu[i],
                 ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU => dev.pipeline_swiglu[i],
@@ -633,11 +633,11 @@ pub fn getPipeline(ctx: *ggml.vulkan.context.BackendCtx, src0_: ?*const ggml.imp
         ggml.impl.ggml_c.GGML_OP_CONV_2D_DW => {
             const src1 = src1_.?;
             if (src0_.?.type == F32 and dst.type == F32) {
-                if (ggml.impl.ggml_c.ggml_is_contiguous(src1)) return dev.pipeline_conv2d_dw_whcn_f32;
-                if (ggml.impl.ggml_c.ggml_is_contiguous_channels(src1)) return dev.pipeline_conv2d_dw_cwhn_f32;
+                if (ggml.types.ggml_is_contiguous(src1)) return dev.pipeline_conv2d_dw_whcn_f32;
+                if (ggml.types.ggml_is_contiguous_channels(src1)) return dev.pipeline_conv2d_dw_cwhn_f32;
             } else if (src0_.?.type == F16 and dst.type == F32) {
-                if (ggml.impl.ggml_c.ggml_is_contiguous(src1)) return dev.pipeline_conv2d_dw_whcn_f16_f32;
-                if (ggml.impl.ggml_c.ggml_is_contiguous_channels(src1)) return dev.pipeline_conv2d_dw_cwhn_f16_f32;
+                if (ggml.types.ggml_is_contiguous(src1)) return dev.pipeline_conv2d_dw_whcn_f16_f32;
+                if (ggml.types.ggml_is_contiguous_channels(src1)) return dev.pipeline_conv2d_dw_cwhn_f16_f32;
             }
             return null;
         },
@@ -705,7 +705,7 @@ test "conv3dSelectShape takes 256x128 only on coopmat2, past R615 on NVIDIA, wit
     device.coopmat_support = false;
     device.coopmat_support_16x16x16_f16acc = false;
     device.shader_core_count = 48;
-    device.driver_id = ggml.vulkan.common.vk.VK_DRIVER_ID_NVIDIA_PROPRIETARY;
+    device.driver_id = ggml.vulkan.common.vulkan_c.VK_DRIVER_ID_NVIDIA_PROPRIETARY;
     device.properties.driverVersion = 615 << 22;
     // The shared memory the tile needs: (256 * 24 + 16 * 136 + 8) * 2.
     device.properties.limits.maxComputeSharedMemorySize = 16656;
@@ -727,7 +727,7 @@ test "conv3dSelectShape takes 256x128 only on coopmat2, past R615 on NVIDIA, wit
     device.properties.driverVersion = (615 << 22) - 1;
     try std.testing.expect(conv3dSelectShape(&ctx, 256, 48 * 128) != .@"256x128");
     // The driver test is NVIDIA's alone.
-    device.driver_id = ggml.vulkan.common.vk.VK_DRIVER_ID_MESA_NVK;
+    device.driver_id = ggml.vulkan.common.vulkan_c.VK_DRIVER_ID_MESA_NVK;
     try std.testing.expectEqual(ggml.vulkan.backend.ConvShape.@"256x128", conv3dSelectShape(&ctx, 256, 48 * 128));
 
     device.shader_core_count = 0;

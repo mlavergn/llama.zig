@@ -39,9 +39,9 @@ pub fn conv2dTransposeP0(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.
 
     const st = ctx.stream();
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(input), "ggml_is_contiguous(input)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(kernel), "ggml_is_contiguous(kernel)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(input), "ggml_is_contiguous(input)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(kernel), "ggml_is_contiguous(kernel)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
 
     const total: c_int = output_w *% output_h *% channels_out *% batches;
     const blocks: c_int = @divTrunc(total +% (block_size - 1), block_size);

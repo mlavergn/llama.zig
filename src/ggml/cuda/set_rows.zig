@@ -162,7 +162,7 @@ fn setRowsCuda(comptime S: type, comptime I: type, ctx: *ggml.cuda.common.Contex
         if (dst.type == ggml.impl.ggml_c.GGML_TYPE_F16) {
             setRowsCudaLaunch(ggml.cuda.kernels.half, I, ggml.cuda.kernels.half, src0_d, src1_d, d, a, stream);
         } else {
-            ggml.impl.ggml_c.ggml_abort(@src().file.ptr, @intCast(@src().line), "unsupported type %s", ggml.impl.ggml_c.ggml_type_name(dst.type));
+            ggml.impl.ggml_c.ggml_abort(@src().file.ptr, @intCast(@src().line), "unsupported type %s", ggml.types.ggml_type_name(dst.type));
         }
         return;
     }
@@ -178,7 +178,7 @@ fn setRowsCuda(comptime S: type, comptime I: type, ctx: *ggml.cuda.common.Contex
         ggml.impl.ggml_c.GGML_TYPE_Q5_1 => setRowsCudaQuant(I, "block_q5_1", 32, "quantize_f32_q5_1_block", src0_d, src1_d, d, a, stream),
         ggml.impl.ggml_c.GGML_TYPE_Q8_0 => setRowsCudaQuant(I, "block_q8_0", 32, "quantize_f32_q8_0_block", src0_d, src1_d, d, a, stream),
         ggml.impl.ggml_c.GGML_TYPE_IQ4_NL => setRowsCudaQuant(I, "block_iq4_nl", 32, "quantize_f32_iq4_nl_block", src0_d, src1_d, d, a, stream),
-        else => ggml.impl.ggml_c.ggml_abort(@src().file.ptr, @intCast(@src().line), "unsupported type %s", ggml.impl.ggml_c.ggml_type_name(dst.type)),
+        else => ggml.impl.ggml_c.ggml_abort(@src().file.ptr, @intCast(@src().line), "unsupported type %s", ggml.types.ggml_type_name(dst.type)),
     }
 }
 
@@ -203,6 +203,6 @@ pub fn opSetRows(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_ten
             setRowsCuda(ggml.cuda.kernels.half, i32, ctx, src0, src1, dst);
         }
     } else {
-        ggml.impl.ggml_c.ggml_abort(@src().file.ptr, @intCast(@src().line), "unsupported type %s", ggml.impl.ggml_c.ggml_type_name(src0.type));
+        ggml.impl.ggml_c.ggml_abort(@src().file.ptr, @intCast(@src().line), "unsupported type %s", ggml.types.ggml_type_name(src0.type));
     }
 }

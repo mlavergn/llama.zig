@@ -288,7 +288,7 @@ fn tuningCoopmat2(dev: *const ggml.vulkan.device.Device, hsk: u32, hsv: u32, n_r
     if (small_rows) {
         r.block_rows = 32;
         r.block_cols = 32;
-    } else if (ggml.impl.ggml_c.ggml_is_quantized(k_type) or ggml.impl.ggml_c.ggml_is_quantized(v_type) or hsk >= 256 or hsv >= 256) {
+    } else if (ggml.types.ggml_is_quantized(k_type) or ggml.types.ggml_is_quantized(v_type) or hsk >= 256 or hsv >= 256) {
         r.block_rows = if (hsk >= 512 or hsv >= 512) 32 else 64;
         r.block_cols = 32;
     } else {
@@ -329,7 +329,7 @@ pub fn tuningParams(dev: *const ggml.vulkan.device.Device, hsk: u32, hsv: u32, n
 
 /// Ports `get_fa_pipeline_state` (ggml-vulkan.cpp:1393 @b1b770d90).
 pub fn pipelineState(dev: *const ggml.vulkan.device.Device, params: *const FaTuningParams, hsk: u32, hsv: u32, aligned: bool, f32acc: bool, use_mask: bool, use_mask_opt: bool, use_logit_softcap: bool, use_sparse: bool, k_type: ggml.impl.ggml_c.ggml_type, v_type: ggml.impl.ggml_c.ggml_type) ggml.vulkan.device.FaPipelineState {
-    const old_amd_windows = dev.vendor_id == vendor_id_amd and dev.driver_id == ggml.vulkan.common.vk.VK_DRIVER_ID_AMD_PROPRIETARY and
+    const old_amd_windows = dev.vendor_id == vendor_id_amd and dev.driver_id == ggml.vulkan.common.vulkan_c.VK_DRIVER_ID_AMD_PROPRIETARY and
         (dev.architecture == .amd_gcn or dev.architecture == .amd_rdna1 or dev.architecture == .amd_rdna2);
     const flags: u32 = @as(u32, @intFromBool(use_mask_opt)) |
         @as(u32, if (use_mask) 2 else 0) |
@@ -449,8 +449,8 @@ fn dynamicPipeline(ctx: *ggml.vulkan.context.BackendCtx, map: anytype, key: anyt
 /// Whether a K or V tensor is a dense cache: rows contiguous, heads then
 /// cells packed with no gaps, and streams too unless there is only one.
 fn isDenseKvCache(t: *const ggml.impl.ggml_c.ggml_tensor) bool {
-    return t.nb[0] == ggml.impl.ggml_c.ggml_type_size(t.type) and
-        t.nb[2] == ggml.impl.ggml_c.ggml_row_size(t.type, t.ne[0]) and
+    return t.nb[0] == ggml.types.ggml_type_size(t.type) and
+        t.nb[2] == ggml.types.ggml_row_size(t.type, t.ne[0]) and
         t.nb[1] == t.nb[2] * @as(usize, @intCast(t.ne[2])) and
         (t.ne[3] == 1 or t.nb[3] == t.nb[1] * @as(usize, @intCast(t.ne[1])));
 }
@@ -474,9 +474,9 @@ pub fn flashAttn(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.subm
     ggml.impl.assert(dst.ne[0] == HSV, "ne0 == HSV");
     ggml.impl.assert(dst.ne[2] == N, "ne2 == N");
     // input tensor rows must be contiguous
-    ggml.impl.assert(q.nb[0] == ggml.impl.ggml_c.ggml_type_size(q.type), "nbq0 == ggml_type_size(q->type)");
-    ggml.impl.assert(k.nb[0] == ggml.impl.ggml_c.ggml_type_size(k.type), "nbk0 == ggml_type_size(k->type)");
-    ggml.impl.assert(v.nb[0] == ggml.impl.ggml_c.ggml_type_size(v.type), "nbv0 == ggml_type_size(v->type)");
+    ggml.impl.assert(q.nb[0] == ggml.types.ggml_type_size(q.type), "nbq0 == ggml_type_size(q->type)");
+    ggml.impl.assert(k.nb[0] == ggml.types.ggml_type_size(k.type), "nbk0 == ggml_type_size(k->type)");
+    ggml.impl.assert(v.nb[0] == ggml.types.ggml_type_size(v.type), "nbv0 == ggml_type_size(v->type)");
     ggml.impl.assert(q.ne[0] == HSK, "neq0 == HSK");
     ggml.impl.assert(q.ne[1] == N, "neq1 == N");
     ggml.impl.assert(v.ne[1] == k.ne[1], "nev1 == nek1");
@@ -492,7 +492,7 @@ pub fn flashAttn(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.subm
     var workgroups_y = u(q.ne[2]);
     const workgroups_z = u(q.ne[3]);
 
-    const f32acc = !dev.fp16 or !ggml.vulkan.ops_matmul.precAllowsF16acc(ggml.impl.ggml_c.ggml_prec_get_acc(dst)) or k.type == ggml.impl.ggml_c.GGML_TYPE_BF16;
+    const f32acc = !dev.fp16 or !ggml.vulkan.ops_matmul.precAllowsF16acc(ggml.ops.ggml_prec_get_acc(dst)) or k.type == ggml.impl.ggml_c.GGML_TYPE_BF16;
 
     // Dequantize K/V once into an f16 scratch, reordered so FA can read without a stride.
     const isF = struct {
@@ -509,20 +509,20 @@ pub fn flashAttn(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.subm
         dev.architecture != .amd_rdna4 and
         q.ne[1] >= 256 and
         kv_raw and
-        (k.nb[1] != @as(u64, HSK) * ggml.impl.ggml_c.ggml_type_size(k.type) or
-            v.nb[1] != @as(u64, HSV) * ggml.impl.ggml_c.ggml_type_size(v.type)) and
+        (k.nb[1] != @as(u64, HSK) * ggml.types.ggml_type_size(k.type) or
+            v.nb[1] != @as(u64, HSV) * ggml.types.ggml_type_size(v.type)) and
         (HSK % 8) == 0 and (HSV % 8) == 0;
-    const kv_scratch_ts: u64 = if (kv_raw_strided) ggml.impl.ggml_c.ggml_type_size(k.type) else fp16sz;
+    const kv_scratch_ts: u64 = if (kv_raw_strided) ggml.types.ggml_type_size(k.type) else fp16sz;
     // K and V share one scratch buffer, so the sum must fit in one allocation
-    const dequant_kv_sz: u64 = (@as(u64, @intCast(ggml.impl.ggml_c.ggml_nelements(k))) + @as(u64, @intCast(ggml.impl.ggml_c.ggml_nelements(v)))) *% kv_scratch_ts;
+    const dequant_kv_sz: u64 = (@as(u64, @intCast(ggml.types.ggml_nelements(k))) + @as(u64, @intCast(ggml.types.ggml_nelements(v)))) *% kv_scratch_ts;
     const cm2_min_queries: u32 = if (KV >= 8192) 512 else 1024;
     const cm2_min_reuse: u32 = if (KV >= 8192) 4096 else 8192;
     // Query reuse must cover the conversion and synchronization cost.
     const cm2_dequant_kv = KV >= 4096 and q.ne[1] >= cm2_min_queries and @as(u64, @bitCast(q.ne[1])) *% qk_ratio >= cm2_min_reuse;
     const use_dequant_kv = ((k_quant and v_quant) or kv_raw_strided) and q.ne[1] >= 64 and
         isDenseKvCache(k) and isDenseKvCache(v) and
-        @as(u64, @intCast(ggml.impl.ggml_c.ggml_nelements(k))) * kv_scratch_ts <= limits.maxStorageBufferRange and
-        @as(u64, @intCast(ggml.impl.ggml_c.ggml_nelements(v))) * kv_scratch_ts <= limits.maxStorageBufferRange and
+        @as(u64, @intCast(ggml.types.ggml_nelements(k))) * kv_scratch_ts <= limits.maxStorageBufferRange and
+        @as(u64, @intCast(ggml.types.ggml_nelements(v))) * kv_scratch_ts <= limits.maxStorageBufferRange and
         dequant_kv_sz <= dev.max_buffer_size and
         dequant_kv_sz <= dev.max_memory_allocation_size and
         (kv_raw_strided or
@@ -579,10 +579,10 @@ pub fn flashAttn(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.subm
         @as(i64, KV) >= @max(4096, min_ratio * @as(i64, n_kv_max)) and
         (gqa_ratio > 1 or (tuning.path == .scalar and N == 1));
 
-    const q_stride: u32 = @truncate(q.nb[1] / ggml.impl.ggml_c.ggml_type_size(q.type));
-    const q_stride_eff: u32 = if (gqa_ratio > 1) @truncate(q.nb[2] / ggml.impl.ggml_c.ggml_type_size(q.type)) else q_stride;
-    var k_stride: u32 = @truncate(k.nb[1] / ggml.impl.ggml_c.ggml_type_size(k.type));
-    var v_stride: u32 = @truncate(v.nb[1] / ggml.impl.ggml_c.ggml_type_size(v.type));
+    const q_stride: u32 = @truncate(q.nb[1] / ggml.types.ggml_type_size(q.type));
+    const q_stride_eff: u32 = if (gqa_ratio > 1) @truncate(q.nb[2] / ggml.types.ggml_type_size(q.type)) else q_stride;
+    var k_stride: u32 = @truncate(k.nb[1] / ggml.types.ggml_type_size(k.type));
+    var v_stride: u32 = @truncate(v.nb[1] / ggml.types.ggml_type_size(v.type));
     // For F32, the shader treats it as a block of size 4 (for vec4 loads)
     if (k.type == ggml.impl.ggml_c.GGML_TYPE_F32) k_stride /= 4;
     if (v.type == ggml.impl.ggml_c.GGML_TYPE_F32) v_stride /= 4;
@@ -649,8 +649,8 @@ pub fn flashAttn(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.subm
             const neq1: i64 = q.ne[1];
             const nek1: i64 = k.ne[1];
             if (neq1 > 8 or pv_ratio > 64) {
-                const head_stride_q: u32 = @truncate(q.nb[2] / ggml.impl.ggml_c.ggml_type_size(q.type));
-                const batch_stride_q: u32 = @truncate(q.nb[3] / ggml.impl.ggml_c.ggml_type_size(q.type));
+                const head_stride_q: u32 = @truncate(q.nb[2] / ggml.types.ggml_type_size(q.type));
+                const batch_stride_q: u32 = @truncate(q.nb[3] / ggml.types.ggml_type_size(q.type));
                 var prefill_state: ggml.vulkan.device.XeFaPipelineState = .{ .HSK = u(q.ne[0]), .HSV = u(v.ne[0]), .qk_ratio = qk_ratio, .pv_ratio = pv_ratio, .decode_n = 0 };
                 prefill_state.unaligned_seq_len = @rem(nek1, 32) != 0;
                 prefill_state.unaligned_q = head_stride_q % 8 != 0 or q_stride % 8 != 0 or batch_stride_q % 8 != 0;
@@ -823,16 +823,16 @@ pub fn flashAttn(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.subm
     }
 
     if (use_dequant_kv) {
-        const k_sz = @as(u64, @intCast(ggml.impl.ggml_c.ggml_nelements(k))) * kv_scratch_ts;
-        const v_sz = @as(u64, @intCast(ggml.impl.ggml_c.ggml_nelements(v))) * kv_scratch_ts;
+        const k_sz = @as(u64, @intCast(ggml.types.ggml_nelements(k))) * kv_scratch_ts;
+        const v_sz = @as(u64, @intCast(ggml.types.ggml_nelements(v))) * kv_scratch_ts;
         if (ctx.prealloc_size_x < k_sz + v_sz) {
             ctx.prealloc_size_x = k_sz + v_sz;
             ggml.vulkan.nodes.preallocateBuffers(ctx, subctx);
         }
         const k_dst = ggml.vulkan.ops_matmul.sub(ctx.prealloc_x, 0, k_sz);
         const v_dst = ggml.vulkan.ops_matmul.sub(ctx.prealloc_x, k_sz, v_sz);
-        const k_nel = u(ggml.impl.ggml_c.ggml_nelements(k));
-        const v_nel = u(ggml.impl.ggml_c.ggml_nelements(v));
+        const k_nel = u(ggml.types.ggml_nelements(k));
+        const v_nel = u(ggml.types.ggml_nelements(v));
         if (kv_raw_strided) {
             // Copy the strided f16/bf16 K/V once into a contiguous
             // [KV][heads][HS] scratch, laid out as the dequant transpose's.
@@ -1085,13 +1085,13 @@ pub fn upperPowerOf2(in: u32) u32 {
 /// against V into `dst`.
 fn xeFa(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Context, q: *const ggml.impl.ggml_c.ggml_tensor, k: *const ggml.impl.ggml_c.ggml_tensor, v: *const ggml.impl.ggml_c.ggml_tensor, dst: *const ggml.impl.ggml_c.ggml_tensor, a: XeFaArgs) void {
     const u = ggml.vulkan.ops.u32Of;
-    const head_stride_q: u32 = @truncate(q.nb[2] / ggml.impl.ggml_c.ggml_type_size(q.type));
-    const head_stride_k: u32 = @truncate(k.nb[2] / ggml.impl.ggml_c.ggml_type_size(k.type));
-    const head_stride_v: u32 = @truncate(v.nb[2] / ggml.impl.ggml_c.ggml_type_size(v.type));
-    const batch_stride_q: u32 = @truncate(q.nb[3] / ggml.impl.ggml_c.ggml_type_size(q.type));
-    const batch_stride_k: u32 = @truncate(k.nb[3] / ggml.impl.ggml_c.ggml_type_size(k.type));
-    const batch_stride_v: u32 = @truncate(v.nb[3] / ggml.impl.ggml_c.ggml_type_size(v.type));
-    const batch_stride_o: u32 = @truncate(dst.nb[3] / ggml.impl.ggml_c.ggml_type_size(dst.type));
+    const head_stride_q: u32 = @truncate(q.nb[2] / ggml.types.ggml_type_size(q.type));
+    const head_stride_k: u32 = @truncate(k.nb[2] / ggml.types.ggml_type_size(k.type));
+    const head_stride_v: u32 = @truncate(v.nb[2] / ggml.types.ggml_type_size(v.type));
+    const batch_stride_q: u32 = @truncate(q.nb[3] / ggml.types.ggml_type_size(q.type));
+    const batch_stride_k: u32 = @truncate(k.nb[3] / ggml.types.ggml_type_size(k.type));
+    const batch_stride_v: u32 = @truncate(v.nb[3] / ggml.types.ggml_type_size(v.type));
+    const batch_stride_o: u32 = @truncate(dst.nb[3] / ggml.types.ggml_type_size(dst.type));
 
     var pc_xe_fa: ggml.vulkan.push.XeFa = .{
         .neq1 = u(q.ne[1]),

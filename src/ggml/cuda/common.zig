@@ -1100,7 +1100,7 @@ pub const ConcurrentEvent = struct {
     fn rangeOf(tensor: *const ggml.impl.ggml_c.ggml_tensor) Range {
         const t: *const ggml.impl.ggml_c.ggml_tensor = if (tensor.view_src) |v| v else tensor;
         const start: i64 = @intCast(@intFromPtr(t.data));
-        return .{ .start = start, .end = start + @as(i64, @intCast(ggml.impl.ggml_c.ggml_nbytes(t))) };
+        return .{ .start = start, .end = start + @as(i64, @intCast(ggml.types.ggml_nbytes(t))) };
     }
 
     /// Ports `ggml_cuda_concurrent_event`'s `is_valid` (graph.cuh:113 @b1b770d90):
@@ -1265,7 +1265,7 @@ pub const Context = struct {
     /// Ports `ggml_backend_cuda_context`'s `cuda_graph` (ggml-cuda.cu:796 @b1b770d90)
     /// with its defaulted `time_now = ggml_time_us()`.
     pub fn cudaGraph(self: *Context, first_node_ptr: ?*const anyopaque) *Graph {
-        return self.cudaGraphAt(first_node_ptr, ggml.impl.ggml_c.ggml_time_us());
+        return self.cudaGraphAt(first_node_ptr, ggml.runtime.ggml_time_us());
     }
 
     /// Ports `ggml_backend_cuda_context`'s `cuda_graph` (ggml-cuda.cu:796 @b1b770d90)

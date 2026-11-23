@@ -50,8 +50,8 @@ fn softMaxF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c
     const src1: ?*ggml.impl.ggml_c.ggml_tensor = dst.src[1];
     const src2: ?*ggml.impl.ggml_c.ggml_tensor = dst.src[2];
 
-    std.debug.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst));
-    std.debug.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst));
+    std.debug.assert(ggml.types.ggml_is_contiguous(dst));
+    std.debug.assert(ggml.types.ggml_are_same_shape(src0, dst));
 
     const scale = ggml.impl.getOpParamsF32(dst, 0);
     const max_bias = ggml.impl.getOpParamsF32(dst, 1);
@@ -174,11 +174,11 @@ fn softMaxExtBackF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl
     const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
     const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src1), "ggml_is_contiguous(src1)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src1, dst), "ggml_are_same_shape(src1, dst)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src1), "ggml_is_contiguous(src1)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src1, dst), "ggml_are_same_shape(src1, dst)");
 
     const scale = ggml.impl.getOpParamsF32(dst, 0);
     const max_bias = ggml.impl.getOpParamsF32(dst, 1);
@@ -191,7 +191,7 @@ fn softMaxExtBackF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl
     const nth: i64 = params.nth;
 
     const nc: i64 = src0.ne[0];
-    const nr: i64 = ggml.impl.ggml_c.ggml_nrows(src0);
+    const nr: i64 = ggml.types.ggml_nrows(src0);
 
     // rows per thread
     const dr = @divTrunc(nr + nth - 1, nth);
@@ -245,7 +245,7 @@ fn clamp(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggm
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const n: i64 = ggml.impl.ggml_c.ggml_nrows(src0);
+    const n: i64 = ggml.types.ggml_nrows(src0);
     const nc: usize = @intCast(src0.ne[0]);
 
     // GGML_TENSOR_UNARY_OP_LOCALS

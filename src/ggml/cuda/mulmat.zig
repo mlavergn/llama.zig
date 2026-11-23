@@ -58,8 +58,8 @@ fn mulMatCublasImpl(comptime compute_type: ggml.impl.ggml_c.enum_ggml_type, ctx:
     const ts_cuda = traits.cuda_type_size;
 
     // F32 chunks can have padding between rows to preserve the original destination stride.
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst) or
-        (compute_type == ggml.impl.ggml_c.GGML_TYPE_F32 and ggml.impl.ggml_c.ggml_is_contiguous_1(dst)), "ggml_is_contiguous(dst) || (compute_type == GGML_TYPE_F32 && ggml_is_contiguous_1(dst))");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(dst) or
+        (compute_type == ggml.impl.ggml_c.GGML_TYPE_F32 and ggml.types.ggml_is_contiguous_1(dst)), "ggml_is_contiguous(dst) || (compute_type == GGML_TYPE_F32 && ggml_is_contiguous_1(dst))");
 
     const ne00 = src0.ne[0];
     const ne01 = src0.ne[1];
@@ -72,17 +72,17 @@ fn mulMatCublasImpl(comptime compute_type: ggml.impl.ggml_c.enum_ggml_type, ctx:
     const ne1 = dst.ne[1];
 
     const ldc: i64 = @intCast(dst.nb[1] / @sizeOf(f32));
-    const ne_dst = ggml.impl.ggml_c.ggml_nelements(dst);
+    const ne_dst = ggml.types.ggml_nelements(dst);
     const main_stream = ctx.stream();
     const cublas_h = ctx.cublasHandle();
 
-    const src0_ts = ggml.impl.ggml_c.ggml_type_size(src0.type);
+    const src0_ts = ggml.types.ggml_type_size(src0.type);
     ggml.impl.assert(src0.nb[0] == src0_ts, "nb00 == src0_ts");
     var s01: i64 = @intCast(src0.nb[1] / src0_ts);
     var s02: i64 = @intCast(src0.nb[2] / src0_ts);
     var s03: i64 = @intCast(src0.nb[3] / src0_ts);
 
-    const src1_ts = ggml.impl.ggml_c.ggml_type_size(src1.type);
+    const src1_ts = ggml.types.ggml_type_size(src1.type);
     ggml.impl.assert(src1.nb[0] == src1_ts, "nb10 == src1_ts");
     var s11: i64 = @intCast(src1.nb[1] / src1_ts);
     var s12: i64 = @intCast(src1.nb[2] / src1_ts);
@@ -99,19 +99,19 @@ fn mulMatCublasImpl(comptime compute_type: ggml.impl.ggml_c.enum_ggml_type, ctx:
     var src1_alloc = ggml.cuda.common.PoolAlloc(u8).init(ctx.pool());
     defer src1_alloc.deinit();
 
-    var is_src0_cont_2 = ggml.impl.ggml_c.ggml_is_contiguous_2(src0);
-    var is_src1_cont_2 = ggml.impl.ggml_c.ggml_is_contiguous_2(src1);
+    var is_src0_cont_2 = ggml.types.ggml_is_contiguous_2(src0);
+    var is_src1_cont_2 = ggml.types.ggml_is_contiguous_2(src1);
 
     if (src0.type == compute_type) {
         src0_ptr = src0.data;
     } else {
-        _ = src0_alloc.alloc(@as(usize, @intCast(ggml.impl.ggml_c.ggml_nelements(src0))) * ts_cuda);
+        _ = src0_alloc.alloc(@as(usize, @intCast(ggml.types.ggml_nelements(src0))) * ts_cuda);
 
-        if (ggml.impl.ggml_c.ggml_is_contiguously_allocated(src0)) {
+        if (ggml.types.ggml_is_contiguously_allocated(src0)) {
             const convert_func = traits.convert(src0.type);
             ggml.impl.assert(convert_func != null, "convert_func != nullptr");
-            convert_func.?(src0.data, src0_alloc.get(), ggml.impl.ggml_c.ggml_nelements(src0), main_stream);
-            const src0_bs: i64 = ggml.impl.ggml_c.ggml_blck_size(src0.type);
+            convert_func.?(src0.data, src0_alloc.get(), ggml.types.ggml_nelements(src0), main_stream);
+            const src0_bs: i64 = ggml.types.ggml_blck_size(src0.type);
             s01 *= src0_bs;
             s02 *= src0_bs;
             s03 *= src0_bs;
@@ -130,13 +130,13 @@ fn mulMatCublasImpl(comptime compute_type: ggml.impl.ggml_c.enum_ggml_type, ctx:
     if (src1.type == compute_type) {
         src1_ptr = src1.data;
     } else {
-        _ = src1_alloc.alloc(@as(usize, @intCast(ggml.impl.ggml_c.ggml_nelements(src1))) * ts_cuda);
+        _ = src1_alloc.alloc(@as(usize, @intCast(ggml.types.ggml_nelements(src1))) * ts_cuda);
 
-        if (ggml.impl.ggml_c.ggml_is_contiguously_allocated(src1)) {
+        if (ggml.types.ggml_is_contiguously_allocated(src1)) {
             const convert_func = traits.convert(src1.type);
             ggml.impl.assert(convert_func != null, "convert_func != nullptr");
-            convert_func.?(src1.data, src1_alloc.get(), ggml.impl.ggml_c.ggml_nelements(src1), main_stream);
-            const src1_bs: i64 = ggml.impl.ggml_c.ggml_blck_size(src1.type);
+            convert_func.?(src1.data, src1_alloc.get(), ggml.types.ggml_nelements(src1), main_stream);
+            const src1_bs: i64 = ggml.types.ggml_blck_size(src1.type);
             s11 *= src1_bs;
             s12 *= src1_bs;
             s13 *= src1_bs;
@@ -257,9 +257,9 @@ fn mulMatCublasImpl(comptime compute_type: ggml.impl.ggml_c.enum_ggml_type, ctx:
 /// weight converts as a quantized one does.
 pub fn mulMatCublas(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const x = ggml.cuda.common.info().devices[@intCast(ctx.device)].cc;
-    const prec: ggml.impl.ggml_c.enum_ggml_prec = ggml.impl.ggml_c.ggml_prec_get_acc(dst);
+    const prec: ggml.impl.ggml_c.enum_ggml_prec = ggml.ops.ggml_prec_get_acc(dst);
     var compute_type = src0.type;
-    if (ggml.impl.ggml_c.ggml_is_quantized(compute_type) or compute_type == ggml.impl.ggml_c.GGML_TYPE_F8_E4M3) {
+    if (ggml.types.ggml_is_quantized(compute_type) or compute_type == ggml.impl.ggml_c.GGML_TYPE_F8_E4M3) {
         compute_type = if (ggml.cuda.common.fastFp16HardwareAvailable(x)) ggml.impl.ggml_c.GGML_TYPE_F16 else ggml.impl.ggml_c.GGML_TYPE_F32;
     } else if (compute_type == ggml.impl.ggml_c.GGML_TYPE_F16 and !ggml.cuda.common.fastFp16HardwareAvailable(x)) {
         compute_type = ggml.impl.ggml_c.GGML_TYPE_F32;
@@ -299,7 +299,7 @@ pub fn mulMatCublas(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_
     }
 
     const max_src0_convert_size: usize = 512 * 1024 * 1024;
-    const src0_f32_size = @as(usize, @bitCast(ggml.impl.ggml_c.ggml_nelements(src0))) * @sizeOf(f32);
+    const src0_f32_size = @as(usize, @bitCast(ggml.types.ggml_nelements(src0))) * @sizeOf(f32);
 
     if (compute_type == ggml.impl.ggml_c.GGML_TYPE_F32 and
         (src0.type == ggml.impl.ggml_c.GGML_TYPE_F16 or src0.type == ggml.impl.ggml_c.GGML_TYPE_BF16) and
@@ -382,13 +382,13 @@ pub fn shouldFuseMulMat(ffn_up: *const ggml.impl.ggml_c.ggml_tensor, ffn_gate: *
 
     const up0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, ffn_up.src[0]);
     const gate0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, ffn_gate.src[0]);
-    if (up0.type != gate0.type or !ggml.impl.ggml_c.ggml_are_same_shape(up0, gate0) or !ggml.impl.ggml_c.ggml_are_same_stride(up0, gate0)) return false;
+    if (up0.type != gate0.type or !ggml.types.ggml_are_same_shape(up0, gate0) or !ggml.types.ggml_are_same_stride(up0, gate0)) return false;
 
     if (ffn_up.src[1] != ffn_gate.src[1]) return false;
 
     if (is_mul_mat_id and ffn_up.src[2] != ffn_gate.src[2]) return false;
 
-    const glu_op = ggml.impl.ggml_c.ggml_get_glu_op(glu);
+    const glu_op = ggml.types.ggml_get_glu_op(glu);
     if (glu_op != ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU and glu_op != ggml.impl.ggml_c.GGML_GLU_OP_GEGLU and glu_op != ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU_OAI and
         glu_op != ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU_CLAMP) return false;
 
@@ -435,8 +435,8 @@ pub fn shouldFuseMulMatVecQ(tensor: *const ggml.impl.ggml_c.ggml_tensor) bool {
     const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, tensor.src[1]);
     const dst = tensor;
 
-    const bad_padding_clear = ggml.impl.ggml_c.ggml_backend_buffer_get_usage(src0.buffer) == ggml.impl.ggml_c.GGML_BACKEND_BUFFER_USAGE_COMPUTE and
-        ggml.impl.ggml_c.ggml_nbytes(src0) != ggml.impl.ggml_c.ggml_backend_buffer_get_alloc_size(src0.buffer, src0) and src0.view_src != null;
+    const bad_padding_clear = ggml.backend.ggml_backend_buffer_get_usage(src0.buffer) == ggml.impl.ggml_c.GGML_BACKEND_BUFFER_USAGE_COMPUTE and
+        ggml.types.ggml_nbytes(src0) != ggml.backend.ggml_backend_buffer_get_alloc_size(src0.buffer, src0) and src0.view_src != null;
 
     const x = ggml.cuda.common.info().devices[@intCast(ggml.cuda.common.getDevice())].cc;
     const use_mul_mat_vec_q = ggml.cuda.mmvq.shouldUseMmvq(src0.type, x, src1.ne[1]) and !bad_padding_clear and
@@ -463,8 +463,8 @@ pub fn getMulMatScale(scale_node: *const ggml.impl.ggml_c.ggml_tensor, mm_node: 
     const scale = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, if (scale_lhs_mm) scale_node.src[1] else scale_node.src[0]);
     const w = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, mm_node.src[0]);
     if ((w.type != ggml.impl.ggml_c.GGML_TYPE_NVFP4 and w.type != ggml.impl.ggml_c.GGML_TYPE_F8_E4M3) or scale_node.type != ggml.impl.ggml_c.GGML_TYPE_F32 or
-        scale.type != ggml.impl.ggml_c.GGML_TYPE_F32 or !ggml.impl.ggml_c.ggml_is_contiguous(scale) or ggml.impl.ggml_c.ggml_nelements(scale) != 1 or
-        !ggml.impl.ggml_c.ggml_are_same_shape(scale_node, mm_node)) return null;
+        scale.type != ggml.impl.ggml_c.GGML_TYPE_F32 or !ggml.types.ggml_is_contiguous(scale) or ggml.types.ggml_nelements(scale) != 1 or
+        !ggml.types.ggml_are_same_shape(scale_node, mm_node)) return null;
 
     return scale;
 }
@@ -480,8 +480,8 @@ pub fn getMulMatIdScale(reshape: *const ggml.impl.ggml_c.ggml_tensor, repeat: *c
     const scale = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, reshape.src[0]);
     const w = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, mm_node.src[0]);
     if ((w.type != ggml.impl.ggml_c.GGML_TYPE_NVFP4 and w.type != ggml.impl.ggml_c.GGML_TYPE_F8_E4M3) or scale_node.type != ggml.impl.ggml_c.GGML_TYPE_F32 or
-        scale.type != ggml.impl.ggml_c.GGML_TYPE_F32 or !ggml.impl.ggml_c.ggml_is_contiguous(scale) or ggml.impl.ggml_c.ggml_nelements(scale) != w.ne[2] or
-        !ggml.impl.ggml_c.ggml_are_same_shape(scale_node, mm_node)) return null;
+        scale.type != ggml.impl.ggml_c.GGML_TYPE_F32 or !ggml.types.ggml_is_contiguous(scale) or ggml.types.ggml_nelements(scale) != w.ne[2] or
+        !ggml.types.ggml_are_same_shape(scale_node, mm_node)) return null;
 
     return scale;
 }
@@ -508,10 +508,10 @@ pub fn mulMatQFusionMatches(up: *const ggml.impl.ggml_c.ggml_tensor, gate: *cons
     if (!shouldFuseMulMat(up, gate, glu, null, null, up_scale, gate_scale)) return false;
 
     // The fused kernel runs both MUL_MATs at one src1 precision, see ggml_cuda_mul_mat_q.
-    if (ggml.impl.ggml_c.ggml_prec_get_src(up, 1) != ggml.impl.ggml_c.ggml_prec_get_src(gate, 1)) return false;
+    if (ggml.ops.ggml_prec_get_src(up, 1) != ggml.ops.ggml_prec_get_src(gate, 1)) return false;
 
     // The fused write-back applies SWIGLU_OAI with the default alpha and limit of ggml_cuda_op_swiglu_oai_single.
-    if (ggml.impl.ggml_c.ggml_get_glu_op(glu) == ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU_OAI and (ggml.impl.getOpParamsF32(glu, 2) != 1.702 or ggml.impl.getOpParamsF32(glu, 3) != 7.0)) return false;
+    if (ggml.types.ggml_get_glu_op(glu) == ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU_OAI and (ggml.impl.getOpParamsF32(glu, 2) != 1.702 or ggml.impl.getOpParamsF32(glu, 3) != 7.0)) return false;
 
     // NVIDIA only: the fused write-back relies on the MMA accumulator layout.
     return ggml.cuda.common.turingMmaAvailable(ggml.cuda.common.info().devices[@intCast(device)].cc);
@@ -521,8 +521,8 @@ pub fn mulMatQFusionMatches(up: *const ggml.impl.ggml_c.ggml_tensor, gate: *cons
 /// the padding of a compute-buffer weight that is a view cannot be cleared,
 /// see `ggml_cuda_mul_mat`.
 fn badPaddingClear(x: *const ggml.impl.ggml_c.ggml_tensor) bool {
-    return ggml.impl.ggml_c.ggml_backend_buffer_get_usage(x.buffer) == ggml.impl.ggml_c.GGML_BACKEND_BUFFER_USAGE_COMPUTE and
-        ggml.impl.ggml_c.ggml_nbytes(x) != ggml.impl.ggml_c.ggml_backend_buffer_get_alloc_size(x.buffer, x) and x.view_src != null;
+    return ggml.backend.ggml_backend_buffer_get_usage(x.buffer) == ggml.impl.ggml_c.GGML_BACKEND_BUFFER_USAGE_COMPUTE and
+        ggml.types.ggml_nbytes(x) != ggml.backend.ggml_backend_buffer_get_alloc_size(x.buffer, x) and x.view_src != null;
 }
 
 /// Ports `ggml_cuda_should_fuse_mul_mat_q` (ggml-cuda.cu:2407 @b1b770d90):
@@ -551,7 +551,7 @@ pub fn shouldFuseMulMatQ(up: *const ggml.impl.ggml_c.ggml_tensor, gate: *const g
     if (use_mmvq or !ggml.cuda.mmq.shouldUseMmq(x_up.type, x, ncols, if (is_id) x_up.ne[2] else 0)) return false;
 
     // The fused kernel needs one block per tile (no stream-k split), so only fuse if the tiling is efficient.
-    return ggml.cuda.mmq.fusionIsEfficient(x_up.type, ggml.impl.ggml_c.ggml_prec_get_src(up, 1), x_up.ne[1], ncols, nchannels, device);
+    return ggml.cuda.mmq.fusionIsEfficient(x_up.type, ggml.ops.ggml_prec_get_src(up, 1), x_up.ne[1], ncols, nchannels, device);
 }
 
 /// Ports `ggml_cuda_mul_mat` (ggml-cuda.cu:2446 @b1b770d90). Few-row MMQ takes a per-type number of `src1` columns up to 24 ahead of
@@ -569,8 +569,8 @@ pub fn mulMat(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.ggml
     // needs to be cleared for mul_mat_vec_q or mul_mat_q. But if src0 is
     // also a view of another tensor then this cannot be done safely, so
     // cuBLAS is used.
-    const bad_padding_clear = ggml.impl.ggml_c.ggml_backend_buffer_get_usage(src0.buffer) == ggml.impl.ggml_c.GGML_BACKEND_BUFFER_USAGE_COMPUTE and
-        ggml.impl.ggml_c.ggml_nbytes(src0) != ggml.impl.ggml_c.ggml_backend_buffer_get_alloc_size(src0.buffer, src0) and src0.view_src != null;
+    const bad_padding_clear = ggml.backend.ggml_backend_buffer_get_usage(src0.buffer) == ggml.impl.ggml_c.GGML_BACKEND_BUFFER_USAGE_COMPUTE and
+        ggml.types.ggml_nbytes(src0) != ggml.backend.ggml_backend_buffer_get_alloc_size(src0.buffer, src0) and src0.view_src != null;
     if (bad_padding_clear or src1.type != ggml.impl.ggml_c.GGML_TYPE_F32 or dst.type != ggml.impl.ggml_c.GGML_TYPE_F32) {
         mulMatCublas(ctx, src0, src1, dst);
         return;
@@ -588,7 +588,7 @@ pub fn mulMat(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.ggml
     // A transposed vector can still use MMVF (i.e. ne01 == 1)
     if (ne01 == 1 and ne11 > ggml.cuda.mmvf.max_batch_size and ne2 == 1 and ne3 == 1 and
         src0.type == ggml.impl.ggml_c.GGML_TYPE_F32 and
-        ggml.impl.ggml_c.ggml_is_contiguous(src0) and ggml.impl.ggml_c.ggml_is_contiguous(src1) and ggml.impl.ggml_c.ggml_is_contiguous(dst) and
+        ggml.types.ggml_is_contiguous(src0) and ggml.types.ggml_is_contiguous(src1) and ggml.types.ggml_is_contiguous(dst) and
         ggml.cuda.mmvf.shouldUseMmvf(src1, x, warp_size, 1))
     {
         var dst_vec = dst.*;
@@ -632,7 +632,7 @@ pub fn mulMatIdNeedsSync(dst: *const ggml.impl.ggml_c.ggml_tensor, x: c_int) boo
     if (src1.type != ggml.impl.ggml_c.GGML_TYPE_F32 or dst.type != ggml.impl.ggml_c.GGML_TYPE_F32) return true;
 
     if (dst.ne[2] <= ggml.cuda.mmvq.max_batch_size) {
-        if (ggml.impl.ggml_c.ggml_is_quantized(src0.type)) {
+        if (ggml.types.ggml_is_quantized(src0.type)) {
             if (dst.ne[2] <= ggml.cuda.mmvq.getMmidMaxBatch(src0.type, x)) return false;
         } else if (src0.type == ggml.impl.ggml_c.GGML_TYPE_F8_E4M3 and ggml.cuda.mmvf.shouldUseMmvf(src0, x, warp_size, dst.ne[2])) {
             return false;
@@ -679,7 +679,7 @@ pub fn mulMatId(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tens
     if (src1.type == ggml.impl.ggml_c.GGML_TYPE_F32 and dst.type == ggml.impl.ggml_c.GGML_TYPE_F32) {
         comptime std.debug.assert(ggml.cuda.mmvq.max_batch_size == ggml.cuda.mmvf.max_batch_size);
         if (ne2 <= ggml.cuda.mmvq.max_batch_size) {
-            if (ggml.impl.ggml_c.ggml_is_quantized(src0.type)) {
+            if (ggml.types.ggml_is_quantized(src0.type)) {
                 const mmvq_mmid_max = ggml.cuda.mmvq.getMmidMaxBatch(src0.type, x);
                 if (ne2 <= mmvq_mmid_max) {
                     ggml.cuda.mmvq.mulMatVecQ(ctx, src0, src1, ids, dst, null);
@@ -716,10 +716,10 @@ pub fn mulMatId(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tens
     ggml.impl.assert(nb2 % nb1 == 0, "nb2  % nb1  == 0");
 
     const type_src1_sorted: ggml.impl.ggml_c.enum_ggml_type = if ((src0.type == ggml.impl.ggml_c.GGML_TYPE_F16 and !ggml.cuda.common.fastFp16HardwareAvailable(x)) or
-        ggml.impl.ggml_c.ggml_is_quantized(src0.type) or src0.type == ggml.impl.ggml_c.GGML_TYPE_F8_E4M3) ggml.impl.ggml_c.GGML_TYPE_F32 else src0.type;
+        ggml.types.ggml_is_quantized(src0.type) or src0.type == ggml.impl.ggml_c.GGML_TYPE_F8_E4M3) ggml.impl.ggml_c.GGML_TYPE_F32 else src0.type;
     const type_dst_sorted: ggml.impl.ggml_c.enum_ggml_type = ggml.impl.ggml_c.GGML_TYPE_F32;
-    const ts_src1_sorted = ggml.impl.ggml_c.ggml_type_size(type_src1_sorted);
-    const ts_dst_sorted = ggml.impl.ggml_c.ggml_type_size(type_dst_sorted);
+    const ts_src1_sorted = ggml.types.ggml_type_size(type_src1_sorted);
+    const ts_dst_sorted = ggml.types.ggml_type_size(type_dst_sorted);
 
     const n_expert_used = ids.ne[0];
     const ne_get_rows = ne12 * n_expert_used;
@@ -747,9 +747,9 @@ pub fn mulMatId(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tens
     var dst_sorted = ggml.cuda.common.PoolAlloc(u8).initAlloc(ctx.pool(), n_dst_sorted * ts_dst_sorted);
     defer dst_sorted.deinit();
 
-    const ids_host = std.heap.c_allocator.alloc(u8, ggml.impl.ggml_c.ggml_nbytes(ids)) catch ggml.impl.abort("out of memory");
+    const ids_host = std.heap.c_allocator.alloc(u8, ggml.types.ggml_nbytes(ids)) catch ggml.impl.abort("out of memory");
     defer std.heap.c_allocator.free(ids_host);
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(ids_host.ptr, ids.data, ggml.impl.ggml_c.ggml_nbytes(ids), ggml.cuda.common.cu.cudaMemcpyDeviceToHost, stream), "cudaMemcpyAsync(ids_host.data(), ids->data, ggml_nbytes(ids), cudaMemcpyDeviceToHost, stream)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(ids_host.ptr, ids.data, ggml.types.ggml_nbytes(ids), ggml.cuda.common.cu.cudaMemcpyDeviceToHost, stream), "cudaMemcpyAsync(ids_host.data(), ids->data, ggml_nbytes(ids), cudaMemcpyDeviceToHost, stream)", @src());
     ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamSynchronize(stream), "cudaStreamSynchronize(stream)", @src());
 
     var j02: i64 = 0;

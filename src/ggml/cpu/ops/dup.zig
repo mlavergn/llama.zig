@@ -28,17 +28,17 @@ const ggml = @import("../../module.zig");
 fn dupSameCont(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_nelements(dst) == ggml.impl.ggml_c.ggml_nelements(src0), "ggml_nelements(dst) == ggml_nelements(src0)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst) and ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(dst) && ggml_is_contiguous(src0)");
+    ggml.impl.assert(ggml.types.ggml_nelements(dst) == ggml.types.ggml_nelements(src0), "ggml_nelements(dst) == ggml_nelements(src0)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(dst) and ggml.types.ggml_is_contiguous(src0), "ggml_is_contiguous(dst) && ggml_is_contiguous(src0)");
     ggml.impl.assert(src0.type == dst.type, "src0->type == dst->type");
 
-    const nb0 = ggml.impl.ggml_c.ggml_type_size(src0.type);
+    const nb0 = ggml.types.ggml_type_size(src0.type);
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
     // parallelize by blocks
-    const nk: i64 = @intCast(@divTrunc(ggml.impl.ggml_c.ggml_nelements(src0), ggml.impl.ggml_c.ggml_blck_size(src0.type)));
+    const nk: i64 = @intCast(@divTrunc(ggml.types.ggml_nelements(src0), ggml.types.ggml_blck_size(src0.type)));
     const dr = @divTrunc(nk + nth - 1, nth);
     const k0 = dr * ith;
     const k1 = @min(k0 + dr, nk);
@@ -57,8 +57,8 @@ fn dupSameCont(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_
 fn dupFlt(comptime SrcT: type, comptime DstT: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_nelements(dst) == ggml.impl.ggml_c.ggml_nelements(src0), "ggml_nelements(dst) == ggml_nelements(src0)");
-    ggml.impl.assert(!ggml.impl.ggml_c.ggml_is_quantized(src0.type) and !ggml.impl.ggml_c.ggml_is_quantized(dst.type), "!ggml_is_quantized(src0->type) && !ggml_is_quantized(dst->type)");
+    ggml.impl.assert(ggml.types.ggml_nelements(dst) == ggml.types.ggml_nelements(src0), "ggml_nelements(dst) == ggml_nelements(src0)");
+    ggml.impl.assert(!ggml.types.ggml_is_quantized(src0.type) and !ggml.types.ggml_is_quantized(dst.type), "!ggml_is_quantized(src0->type) && !ggml_is_quantized(dst->type)");
 
     const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
@@ -76,7 +76,7 @@ fn dupFlt(comptime SrcT: type, comptime DstT: type, params: *const ggml.cpu.defs
 
     // case: type & row size equal
     if (src0.type == dst.type and l.ne00 == l.ne0 and
-        l.nb00 == ggml.impl.ggml_c.ggml_type_size(src0.type) and l.nb0 == ggml.impl.ggml_c.ggml_type_size(dst.type))
+        l.nb00 == ggml.types.ggml_type_size(src0.type) and l.nb0 == ggml.types.ggml_type_size(dst.type))
     {
         // copy by rows
         const rs = @as(usize, @intCast(l.ne00)) * l.nb00;
@@ -96,7 +96,7 @@ fn dupFlt(comptime SrcT: type, comptime DstT: type, params: *const ggml.cpu.defs
     }
 
     // case: dst tensor is contiguous
-    if (ggml.impl.ggml_c.ggml_is_contiguous(dst)) {
+    if (ggml.types.ggml_is_contiguous(dst)) {
         if (l.nb00 == @sizeOf(SrcT)) {
             if (SrcT == DstT) {
                 // same type
@@ -309,8 +309,8 @@ fn dupFlt(comptime SrcT: type, comptime DstT: type, params: *const ggml.cpu.defs
 fn dupToQ(comptime SrcT: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_nelements(dst) == ggml.impl.ggml_c.ggml_nelements(src0), "ggml_nelements(dst) == ggml_nelements(src0)");
-    ggml.impl.assert(!ggml.impl.ggml_c.ggml_is_quantized(src0.type), "!ggml_is_quantized(src0->type)");
+    ggml.impl.assert(ggml.types.ggml_nelements(dst) == ggml.types.ggml_nelements(src0), "ggml_nelements(dst) == ggml_nelements(src0)");
+    ggml.impl.assert(!ggml.types.ggml_is_quantized(src0.type), "!ggml_is_quantized(src0->type)");
 
     const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
@@ -323,15 +323,15 @@ fn dupToQ(comptime SrcT: type, params: *const ggml.cpu.defs.ComputeParams, dst: 
     const ir0 = dr * ith;
     const ir1 = @min(ir0 + dr, nr);
 
-    const traits = ggml.impl.ggml_c.ggml_get_type_traits_cpu(dst.type);
-    if (ggml.impl.ggml_c.ggml_is_contiguous(dst) and l.nb00 == @sizeOf(SrcT) and traits.*.from_float != null) {
+    const traits = ggml.cpu.traits.ggml_get_type_traits_cpu(dst.type);
+    if (ggml.types.ggml_is_contiguous(dst) and l.nb00 == @sizeOf(SrcT) and traits.*.from_float != null) {
         // casting non-quantized types --> intermediate f32 --> quantized
         const quantize_row_q = traits.*.from_float.?;
         const wdata: [*]f32 = @ptrCast(@alignCast(params.wdata.?));
         const src0_f32 = wdata + (@as(usize, @intCast(l.ne00)) + ggml.cpu.ops.common.cache_line_size_f32) * @as(usize, @intCast(ith));
 
         var id: usize = 0;
-        const rs = l.nb0 * @as(usize, @intCast(@divTrunc(l.ne00, ggml.impl.ggml_c.ggml_blck_size(dst.type))));
+        const rs = l.nb0 * @as(usize, @intCast(@divTrunc(l.ne00, ggml.types.ggml_blck_size(dst.type))));
         const dst_ptr: [*]u8 = @ptrCast(dst.data.?);
         const sdata: [*]const u8 = @ptrCast(src0.data.?);
 
@@ -368,17 +368,17 @@ fn dupToQ(comptime SrcT: type, params: *const ggml.cpu.defs.ComputeParams, dst: 
 fn dupBytes(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggml_tensor) void {
     const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_nelements(dst) == ggml.impl.ggml_c.ggml_nelements(src0), "ggml_nelements(dst) == ggml_nelements(src0)");
+    ggml.impl.assert(ggml.types.ggml_nelements(dst) == ggml.types.ggml_nelements(src0), "ggml_nelements(dst) == ggml_nelements(src0)");
     ggml.impl.assert(src0.type == dst.type, "src0->type == dst->type");
 
     const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
-    if (ggml.impl.ggml_c.ggml_is_contiguous(src0) and ggml.impl.ggml_c.ggml_is_contiguous(dst)) {
+    if (ggml.types.ggml_is_contiguous(src0) and ggml.types.ggml_is_contiguous(dst)) {
         dupSameCont(params, dst);
         return;
     }
 
-    const type_size = ggml.impl.ggml_c.ggml_type_size(src0.type);
+    const type_size = ggml.types.ggml_type_size(src0.type);
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
@@ -392,11 +392,11 @@ fn dupBytes(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.g
     const sdata: [*]const u8 = @ptrCast(src0.data.?);
     const ddata: [*]u8 = @ptrCast(dst.data.?);
 
-    if (src0.type == dst.type and ggml.impl.ggml_c.ggml_are_same_shape(src0, dst) and
+    if (src0.type == dst.type and ggml.types.ggml_are_same_shape(src0, dst) and
         l.nb00 == type_size and l.nb0 == type_size)
     {
         // copy by rows
-        const rs = ggml.impl.ggml_c.ggml_row_size(src0.type, l.ne00);
+        const rs = ggml.types.ggml_row_size(src0.type, l.ne00);
         var j03: i64 = 0;
         while (j03 < l.ne03) : (j03 += 1) {
             var j02: i64 = 0;
@@ -412,7 +412,7 @@ fn dupBytes(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.g
         return;
     }
 
-    if (ggml.impl.ggml_c.ggml_is_contiguous(dst)) {
+    if (ggml.types.ggml_is_contiguous(dst)) {
         var id: usize = 0;
         const rs = @as(usize, @intCast(l.ne00)) * type_size;
 
@@ -462,8 +462,8 @@ fn dupBytes(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.g
     var j13: i64 = 0;
 
     // number of blocks in a row
-    const nk00 = @divTrunc(l.ne00, ggml.impl.ggml_c.ggml_blck_size(src0.type));
-    const nk0 = @divTrunc(l.ne0, ggml.impl.ggml_c.ggml_blck_size(dst.type));
+    const nk00 = @divTrunc(l.ne00, ggml.types.ggml_blck_size(src0.type));
+    const nk0 = @divTrunc(l.ne0, ggml.types.ggml_blck_size(dst.type));
 
     var j03: i64 = 0;
     while (j03 < l.ne03) : (j03 += 1) {
@@ -535,15 +535,15 @@ fn dupFromQ(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.g
     const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
     const @"type" = src0.type;
-    const dequantize_row_q = ggml.impl.ggml_c.ggml_get_type_traits(@"type").*.to_float.?;
+    const dequantize_row_q = ggml.types.ggml_get_type_traits(@"type").*.to_float.?;
 
-    const qk = ggml.impl.ggml_c.ggml_blck_size(@"type");
-    const nr = @divTrunc(ggml.impl.ggml_c.ggml_nelements(src1), qk);
+    const qk = ggml.types.ggml_blck_size(@"type");
+    const nr = @divTrunc(ggml.types.ggml_nelements(src1), qk);
 
     // destination must be contiguous in the first dimension
-    ggml.impl.assert(l.nb10 == ggml.impl.ggml_c.ggml_type_size(dst.type), "nb10 == ggml_type_size(dst->type)");
+    ggml.impl.assert(l.nb10 == ggml.types.ggml_type_size(dst.type), "nb10 == ggml_type_size(dst->type)");
     // must either have first dimension large enough to hold a row, or fully contiguous
-    ggml.impl.assert(@rem(l.ne10, qk) == 0 or ggml.impl.ggml_c.ggml_is_contiguous(dst), "(ne10 % qk) == 0 || ggml_is_contiguous(dst)");
+    ggml.impl.assert(@rem(l.ne10, qk) == 0 or ggml.types.ggml_is_contiguous(dst), "(ne10 % qk) == 0 || ggml_is_contiguous(dst)");
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
@@ -609,7 +609,7 @@ pub fn ggml_compute_forward_dup(params: *const ggml.cpu.defs.ComputeParams, dst:
             if (dst.type == ggml.impl.ggml_c.GGML_TYPE_F32) dupFlt(i32, f32, params, dst) else ggml.impl.abort("not implemented");
         },
         else => {
-            if (ggml.impl.ggml_c.ggml_is_quantized(src0.type) and dst.type == ggml.impl.ggml_c.GGML_TYPE_F32) {
+            if (ggml.types.ggml_is_quantized(src0.type) and dst.type == ggml.impl.ggml_c.GGML_TYPE_F32) {
                 dupFromQ(params, dst);
                 return;
             }

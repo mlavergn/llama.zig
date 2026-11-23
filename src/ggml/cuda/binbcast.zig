@@ -107,7 +107,7 @@ fn launchBinBcastPack(
         }
     }.f;
 
-    if (ggml.impl.ggml_c.ggml_is_contiguous(src0) and ggml.impl.ggml_c.ggml_is_contiguous(src1) and !ggml.impl.ggml_c.ggml_is_permuted(src0) and !ggml.impl.ggml_c.ggml_is_permuted(src1)) {
+    if (ggml.types.ggml_is_contiguous(src0) and ggml.types.ggml_is_contiguous(src1) and !ggml.types.ggml_is_permuted(src0) and !ggml.types.ggml_is_permuted(src1)) {
         for (0..4) |i| {
             if (nr[i] != 1) break;
             if (i > 0) {
@@ -298,7 +298,7 @@ fn opBinBcast(comptime op: Op, comptime n_fuse: usize, src0: *const ggml.impl.gg
     } else if (src0.type == F16 and dst.type == F32) {
         launchBinBcastPack(op, ggml.cuda.kernels.half, f32, f32, n_fuse, src0, src1, dst, src0_dd, src1_dd, dst_dd, stream);
     } else {
-        ggml.impl.fprintfStderr("%s: unsupported types: dst: %s, src0: %s, src1: %s\n", .{ "ggml_cuda_op_bin_bcast", ggml.impl.ggml_c.ggml_type_name(dst.type), ggml.impl.ggml_c.ggml_type_name(src0.type), ggml.impl.ggml_c.ggml_type_name(src1.type) });
+        ggml.impl.fprintfStderr("%s: unsupported types: dst: %s, src0: %s, src1: %s\n", .{ "ggml_cuda_op_bin_bcast", ggml.types.ggml_type_name(dst.type), ggml.types.ggml_type_name(src0.type), ggml.types.ggml_type_name(src1.type) });
         ggml.impl.abort("fatal error");
     }
 }
@@ -345,7 +345,7 @@ fn fusedBinBcastImpl(comptime op: Op, comptime n_fuse: usize, ctx: *ggml.cuda.co
     } else if (src0.type == F16 and dst.type == F32) {
         launchBinBcastPack(op, ggml.cuda.kernels.half, f32, f32, n_fuse, src0, src1, dst, src0.data, src1.data, dst.data, stream);
     } else {
-        ggml.impl.logError("%s: unsupported types for fusion: dst: %s, src0: %s, src1: %s\n", .{ "ggml_cuda_op_fused_binbcast_impl", ggml.impl.ggml_c.ggml_type_name(dst.type), ggml.impl.ggml_c.ggml_type_name(src0.type), ggml.impl.ggml_c.ggml_type_name(src1.type) });
+        ggml.impl.logError("%s: unsupported types for fusion: dst: %s, src0: %s, src1: %s\n", .{ "ggml_cuda_op_fused_binbcast_impl", ggml.types.ggml_type_name(dst.type), ggml.types.ggml_type_name(src0.type), ggml.types.ggml_type_name(src1.type) });
         ggml.impl.abort("fatal error");
     }
 }
@@ -367,8 +367,8 @@ pub fn opRepeatBack(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_
     const src0 = srcOf(dst, 0);
 
     ggml.impl.assert(src0.type == dst.type, "src0->type == dst->type");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_can_repeat(dst, src0), "ggml_can_repeat(dst, src0)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.types.ggml_can_repeat(dst, src0), "ggml_can_repeat(dst, src0)");
 
     const stream = ctx.stream();
     const ne0 = dst.ne[0];
@@ -378,7 +378,7 @@ pub fn opRepeatBack(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_
 
     ggml.impl.assert(ne2 * ne3 <= (1 << 15), "ne2*ne3 <= (1 << 15)");
 
-    const ts = ggml.impl.ggml_c.ggml_type_size(src0.type);
+    const ts = ggml.types.ggml_type_size(src0.type);
     const s00 = src0.nb[0] / ts;
     const s01 = src0.nb[1] / ts;
     const s02 = src0.nb[2] / ts;

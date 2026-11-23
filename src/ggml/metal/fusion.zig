@@ -183,9 +183,9 @@ fn overlap(a: *const ggml.impl.ggml_c.ggml_tensor, b: *const ggml.impl.ggml_c.gg
     }
 
     return if (bid_a.offs <= bid_b.offs)
-        bid_b.offs - bid_a.offs < ggml.impl.ggml_c.ggml_nbytes(a)
+        bid_b.offs - bid_a.offs < ggml.types.ggml_nbytes(a)
     else
-        bid_a.offs - bid_b.offs < ggml.impl.ggml_c.ggml_nbytes(b);
+        bid_a.offs - bid_b.offs < ggml.types.ggml_nbytes(b);
 }
 
 // -----------------------------------------------------------------------------
@@ -343,7 +343,7 @@ fn checkGdnCache(fusion: *const Fusion, nodes: [*]const *const ggml.impl.ggml_c.
 
     // src must be this gdn's snapshot tail (contiguous, at the tail offset)
     if (s.op != ggml.impl.ggml_c.GGML_OP_VIEW or s.view_src != gdn or
-        s.view_offs != tail_off or !ggml.impl.ggml_c.ggml_is_contiguous(s))
+        s.view_offs != tail_off or !ggml.types.ggml_is_contiguous(s))
     {
         return false;
     }
@@ -383,7 +383,7 @@ fn checkSnake(fusion: *const Fusion, nodes: [*]const *const ggml.impl.ggml_c.ggm
     const add = nodes[4];
 
     // x carries the full activation shape, a is the broadcast operand
-    const x = if (ggml.impl.ggml_c.ggml_are_same_shape(mul0, src(mul0, 0))) src(mul0, 0) else src(mul0, 1);
+    const x = if (ggml.types.ggml_are_same_shape(mul0, src(mul0, 0))) src(mul0, 0) else src(mul0, 1);
     const a = if (x == src(mul0, 0)) src(mul0, 1) else src(mul0, 0);
 
     // mul1 reads sqr and inv_b in either operand order
@@ -402,7 +402,7 @@ fn checkSnake(fusion: *const Fusion, nodes: [*]const *const ggml.impl.ggml_c.ggm
         (add.type == x.type);
 
     // a / inv_b collapse to [1, C, 1, 1], x and add stay 2D
-    const shape_ok = ggml.impl.ggml_c.ggml_are_same_shape(a, inv_b) and a.ne[0] == 1 and a.ne[1] == x.ne[1];
+    const shape_ok = ggml.types.ggml_are_same_shape(a, inv_b) and a.ne[0] == 1 and a.ne[1] == x.ne[1];
     const dim_ok =
         (x.ne[2] == 1) and (x.ne[3] == 1) and
         (add.ne[2] == 1) and (add.ne[3] == 1) and
@@ -411,8 +411,8 @@ fn checkSnake(fusion: *const Fusion, nodes: [*]const *const ggml.impl.ggml_c.ggm
 
     // kernel reads x[idx] and a[c] / inv_b[c] linearly, so every operand is contiguous
     const contig_ok =
-        ggml.impl.ggml_c.ggml_is_contiguous(x) and ggml.impl.ggml_c.ggml_is_contiguous(add) and
-        ggml.impl.ggml_c.ggml_is_contiguous(a) and ggml.impl.ggml_c.ggml_is_contiguous(inv_b);
+        ggml.types.ggml_is_contiguous(x) and ggml.types.ggml_is_contiguous(add) and
+        ggml.types.ggml_is_contiguous(a) and ggml.types.ggml_is_contiguous(inv_b);
 
     return types_ok and shape_ok and dim_ok and contig_ok and x_in_add == x;
 }
@@ -533,8 +533,8 @@ fn checkTopkMoe(fusion: *const Fusion, nodes: [*]const *const ggml.impl.ggml_c.g
 
     // the unary chains start at the sigmoid or the softplus node and rank biased scores
     const with_unary = first.op == ggml.impl.ggml_c.GGML_OP_UNARY;
-    const with_sp = with_unary and ggml.impl.ggml_c.ggml_get_unary_op(first) == ggml.impl.ggml_c.GGML_UNARY_OP_SOFTPLUS;
-    const with_sig = with_unary and ggml.impl.ggml_c.ggml_get_unary_op(first) == ggml.impl.ggml_c.GGML_UNARY_OP_SIGMOID;
+    const with_sp = with_unary and ggml.types.ggml_get_unary_op(first) == ggml.impl.ggml_c.GGML_UNARY_OP_SOFTPLUS;
+    const with_sig = with_unary and ggml.types.ggml_get_unary_op(first) == ggml.impl.ggml_c.GGML_UNARY_OP_SIGMOID;
 
     if (with_unary and !with_sp and !with_sig) {
         return false;
@@ -569,7 +569,7 @@ fn checkTopkMoe(fusion: *const Fusion, nodes: [*]const *const ggml.impl.ggml_c.g
 
         // the selection bias is a per-expert vector shared by all rows
         const bias = src(scores, 1);
-        if (bias.type != ggml.impl.ggml_c.GGML_TYPE_F32 or scores.type != ggml.impl.ggml_c.GGML_TYPE_F32 or !ggml.impl.ggml_c.ggml_is_contiguous(bias) or
+        if (bias.type != ggml.impl.ggml_c.GGML_TYPE_F32 or scores.type != ggml.impl.ggml_c.GGML_TYPE_F32 or !ggml.types.ggml_is_contiguous(bias) or
             bias.ne[0] != probs.ne[0] or bias.ne[1] != 1 or bias.ne[2] != 1 or bias.ne[3] != 1)
         {
             return false;
@@ -615,7 +615,7 @@ fn checkTopkMoe(fusion: *const Fusion, nodes: [*]const *const ggml.impl.ggml_c.g
         return false;
     }
 
-    if (!ggml.impl.ggml_c.ggml_is_contiguous(logits) or !ggml.impl.ggml_c.ggml_is_contiguous(out) or
+    if (!ggml.types.ggml_is_contiguous(logits) or !ggml.types.ggml_is_contiguous(out) or
         ids.nb[0] != ggml.types.ggml_type_size(ggml.impl.ggml_c.GGML_TYPE_I32) or
         ids.nb[1] != ggml.types.ggml_type_size(ggml.impl.ggml_c.GGML_TYPE_I32) *% @as(usize, @bitCast(n_expert)))
     {
@@ -755,7 +755,7 @@ fn matchMoeReduce(gf: *const ggml.impl.CGraph, node_idx: c_int, ops_all: []const
         return null;
     }
 
-    if (!ggml.impl.ggml_c.ggml_is_contiguous(experts) or !ggml.impl.ggml_c.ggml_is_contiguous(weights) or !ggml.impl.ggml_c.ggml_is_contiguous(dst)) {
+    if (!ggml.types.ggml_is_contiguous(experts) or !ggml.types.ggml_is_contiguous(weights) or !ggml.types.ggml_is_contiguous(dst)) {
         return null;
     }
 
@@ -837,7 +837,7 @@ fn checkMoeReduce(fusion: *const Fusion, nodes: [*]const *const ggml.impl.ggml_c
 fn tensorIsWeight(t: *const ggml.impl.ggml_c.ggml_tensor) bool {
     const base: *const ggml.impl.ggml_c.ggml_tensor = if (t.view_src != null) ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, t.view_src) else t;
 
-    return base.buffer != null and ggml.impl.ggml_c.ggml_backend_buffer_get_usage(base.buffer) == ggml.impl.ggml_c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS;
+    return base.buffer != null and ggml.backend.ggml_backend_buffer_get_usage(base.buffer) == ggml.impl.ggml_c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS;
 }
 
 /// Ports `ggml_metal_mul_mat_add_operand` (ggml-metal-fusion.cpp:759
@@ -861,8 +861,8 @@ fn mulMatAddOperand(mm: *const ggml.impl.ggml_c.ggml_tensor, add: *const ggml.im
 fn mulMatAddResidual(mm: *const ggml.impl.ggml_c.ggml_tensor, add: *const ggml.impl.ggml_c.ggml_tensor) ?*const ggml.impl.ggml_c.ggml_tensor {
     const res = mulMatAddOperand(mm, add);
 
-    const ok = res != null and ggml.impl.ggml_c.ggml_are_same_shape(res.?, mm) and
-        ggml.impl.ggml_c.ggml_is_contiguous(res.?) and ggml.impl.ggml_c.ggml_is_contiguous(mm) and ggml.impl.ggml_c.ggml_is_contiguous(add);
+    const ok = res != null and ggml.types.ggml_are_same_shape(res.?, mm) and
+        ggml.types.ggml_is_contiguous(res.?) and ggml.types.ggml_is_contiguous(mm) and ggml.types.ggml_is_contiguous(add);
 
     return if (ok) res else null;
 }
@@ -1489,7 +1489,7 @@ pub fn ggml_metal_fusion_next(
                     ok = false;
                     break;
                 }
-                if (!ggml.impl.ggml_c.ggml_are_same_shape(nodes[j], nodes[j - 1])) {
+                if (!ggml.types.ggml_are_same_shape(nodes[j], nodes[j - 1])) {
                     ok = false;
                     break;
                 }

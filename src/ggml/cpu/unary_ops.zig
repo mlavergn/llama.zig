@@ -189,7 +189,7 @@ fn applyUnaryOp(
     const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     ggml.impl.assert(
-        ggml.impl.ggml_c.ggml_is_contiguous_rows(src0) and ggml.impl.ggml_c.ggml_is_contiguous_rows(dst) and ggml.impl.ggml_c.ggml_are_same_shape(src0, dst),
+        ggml.types.ggml_is_contiguous_rows(src0) and ggml.types.ggml_is_contiguous_rows(dst) and ggml.types.ggml_are_same_shape(src0, dst),
         "ggml_is_contiguous_rows(src0) && ggml_is_contiguous_rows(dst) && ggml_are_same_shape(src0, dst)",
     );
 
@@ -239,7 +239,7 @@ fn unaryOp(comptime op: Op, params: *const ggml.cpu.defs.ComputeParams, dst: *gg
     } else {
         ggml.impl.fprintfStderr(
             "%s: unsupported types: dst: %s, src0: %s\n",
-            .{ "unary_op", ggml.impl.ggml_c.ggml_type_name(dst.type), ggml.impl.ggml_c.ggml_type_name(src0.type) },
+            .{ "unary_op", ggml.types.ggml_type_name(dst.type), ggml.types.ggml_type_name(src0.type) },
         );
         ggml.impl.abort("fatal error");
     }
@@ -274,7 +274,7 @@ fn applyUnaryOpFunctor(
     const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]);
 
     ggml.impl.assert(
-        ggml.impl.ggml_c.ggml_is_contiguous_1(src0) and ggml.impl.ggml_c.ggml_is_contiguous_1(dst) and ggml.impl.ggml_c.ggml_are_same_shape(src0, dst),
+        ggml.types.ggml_is_contiguous_1(src0) and ggml.types.ggml_is_contiguous_1(dst) and ggml.types.ggml_are_same_shape(src0, dst),
         "ggml_is_contiguous_1(src0) && ggml_is_contiguous_1(dst) && ggml_are_same_shape(src0, dst)",
     );
 
@@ -320,7 +320,7 @@ fn unaryOpFunctor(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.gg
     } else {
         ggml.impl.fprintfStderr(
             "%s: unsupported types: dst: %s, src0: %s\n",
-            .{ "unary_op_functor", ggml.impl.ggml_c.ggml_type_name(dst.type), ggml.impl.ggml_c.ggml_type_name(src0.type) },
+            .{ "unary_op_functor", ggml.types.ggml_type_name(dst.type), ggml.types.ggml_type_name(src0.type) },
         );
         ggml.impl.abort("fatal error");
     }

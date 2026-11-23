@@ -149,12 +149,12 @@ pub fn getF16ExtraData(dst: *const ggml.impl.ggml_c.ggml_tensor, need_f16_K: boo
     const V_is_K_view = vIsKView(K, V);
 
     var data: F16ExtraData = .{};
-    data.end = @intFromPtr(dst.data) +% ggml.impl.ggml_c.ggml_nbytes(dst);
+    data.end = @intFromPtr(dst.data) +% ggml.types.ggml_nbytes(dst);
 
     if (need_f16_K and K.type != ggml.impl.ggml_c.GGML_TYPE_F16) {
         data.end = stdlib.num.pad(usize, data.end, 128);
         data.K = data.end;
-        data.end +%= @as(usize, @bitCast(ggml.impl.ggml_c.ggml_nelements(K))) *% ggml.impl.ggml_c.ggml_type_size(ggml.impl.ggml_c.GGML_TYPE_F16);
+        data.end +%= @as(usize, @bitCast(ggml.types.ggml_nelements(K))) *% ggml.types.ggml_type_size(ggml.impl.ggml_c.GGML_TYPE_F16);
     }
 
     if (need_f16_V and V.type != ggml.impl.ggml_c.GGML_TYPE_F16) {
@@ -163,7 +163,7 @@ pub fn getF16ExtraData(dst: *const ggml.impl.ggml_c.ggml_tensor, need_f16_K: boo
         } else {
             data.end = stdlib.num.pad(usize, data.end, 128);
             data.V = data.end;
-            data.end +%= @as(usize, @bitCast(ggml.impl.ggml_c.ggml_nelements(V))) *% ggml.impl.ggml_c.ggml_type_size(ggml.impl.ggml_c.GGML_TYPE_F16);
+            data.end +%= @as(usize, @bitCast(ggml.types.ggml_nelements(V))) *% ggml.types.ggml_type_size(ggml.impl.ggml_c.GGML_TYPE_F16);
         }
     }
 
@@ -274,9 +274,9 @@ pub fn launchFattn(
     ggml.impl.assert(Q.type == ggml.impl.ggml_c.GGML_TYPE_F32, "Q->type == GGML_TYPE_F32");
     ggml.impl.assert(KQV.type == ggml.impl.ggml_c.GGML_TYPE_F32, "KQV->type == GGML_TYPE_F32");
 
-    ggml.impl.assert(Q.nb[0] == ggml.impl.ggml_c.ggml_element_size(Q), "Q->nb[0] == ggml_element_size(Q)");
-    ggml.impl.assert(K.nb[0] == ggml.impl.ggml_c.ggml_element_size(K), "K->nb[0] == ggml_element_size(K)");
-    ggml.impl.assert(V.nb[0] == ggml.impl.ggml_c.ggml_element_size(V), "V->nb[0] == ggml_element_size(V)");
+    ggml.impl.assert(Q.nb[0] == ggml.types.ggml_element_size(Q), "Q->nb[0] == ggml_element_size(Q)");
+    ggml.impl.assert(K.nb[0] == ggml.types.ggml_element_size(K), "K->nb[0] == ggml_element_size(K)");
+    ggml.impl.assert(V.nb[0] == ggml.types.ggml_element_size(V), "V->nb[0] == ggml_element_size(V)");
 
     ggml.impl.assert(mask == null or mask.?.type == ggml.impl.ggml_c.GGML_TYPE_F16, "!mask || mask->type == GGML_TYPE_F16");
 
@@ -306,14 +306,14 @@ pub fn launchFattn(
     var nb23: usize = V.nb[3];
 
     if (a.need_f16_K and K.type != ggml.impl.ggml_c.GGML_TYPE_F16) {
-        const bs: usize = @intCast(ggml.impl.ggml_c.ggml_blck_size(K.type));
-        const ts: usize = ggml.impl.ggml_c.ggml_type_size(K.type);
+        const bs: usize = @intCast(ggml.types.ggml_blck_size(K.type));
+        const ts: usize = ggml.types.ggml_type_size(K.type);
 
         ggml.impl.assert(f16_extra.K != 0, "f16_extra.K != 0");
         const K_f16: ?*anyopaque = @ptrFromInt(f16_extra.K);
-        if (ggml.impl.ggml_c.ggml_is_contiguously_allocated(K)) {
+        if (ggml.types.ggml_is_contiguously_allocated(K)) {
             const to_fp16 = ggml.cuda.convert.getToFp16(K.type).?;
-            to_fp16(K_data, K_f16, ggml.impl.ggml_c.ggml_nelements(K), main_stream);
+            to_fp16(K_data, K_f16, ggml.types.ggml_nelements(K), main_stream);
 
             nb11 = nb11 * bs * sizeof_half / ts;
             nb12 = nb12 * bs * sizeof_half / ts;
@@ -340,14 +340,14 @@ pub fn launchFattn(
             nb22 = nb12;
             nb23 = nb13;
         } else {
-            const bs: usize = @intCast(ggml.impl.ggml_c.ggml_blck_size(V.type));
-            const ts: usize = ggml.impl.ggml_c.ggml_type_size(V.type);
+            const bs: usize = @intCast(ggml.types.ggml_blck_size(V.type));
+            const ts: usize = ggml.types.ggml_type_size(V.type);
 
             ggml.impl.assert(f16_extra.V != 0, "f16_extra.V != 0");
             const V_f16: ?*anyopaque = @ptrFromInt(f16_extra.V);
-            if (ggml.impl.ggml_c.ggml_is_contiguously_allocated(V)) {
+            if (ggml.types.ggml_is_contiguously_allocated(V)) {
                 const to_fp16 = ggml.cuda.convert.getToFp16(V.type).?;
-                to_fp16(V_data, V_f16, ggml.impl.ggml_c.ggml_nelements(V), main_stream);
+                to_fp16(V_data, V_f16, ggml.types.ggml_nelements(V), main_stream);
                 V_data = @ptrCast(V_f16);
 
                 nb21 = nb21 * bs * sizeof_half / ts;
@@ -493,8 +493,8 @@ pub fn launchFattn(
         blocks_num.z = u32Of(@as(i64, ntiles_z_gqa) * K.ne[2] * Q.ne[3]);
 
         if (parallel_blocks > 1) {
-            _ = dst_tmp.alloc(@bitCast(@as(i64, parallel_blocks) * ggml.impl.ggml_c.ggml_nelements(KQV)));
-            _ = dst_tmp_meta.alloc(@bitCast(@as(i64, parallel_blocks) * ggml.impl.ggml_c.ggml_nrows(KQV)));
+            _ = dst_tmp.alloc(@bitCast(@as(i64, parallel_blocks) * ggml.types.ggml_nelements(KQV)));
+            _ = dst_tmp_meta.alloc(@bitCast(@as(i64, parallel_blocks) * ggml.types.ggml_nrows(KQV)));
         }
     }
 

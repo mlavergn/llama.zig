@@ -142,8 +142,8 @@ pub fn opSsmConv(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_ten
     ggml.impl.assert(out.type == ggml.impl.ggml_c.GGML_TYPE_F32, "out->type == GGML_TYPE_F32");
     if (fuse_bias) {
         ggml.impl.assert(bias.?.type == ggml.impl.ggml_c.GGML_TYPE_F32, "bias->type == GGML_TYPE_F32");
-        ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(bias.?), "ggml_is_contiguous(bias)");
-        ggml.impl.assert(ggml.impl.ggml_c.ggml_nelements(bias.?) == nr, "ggml_nelements(bias) == nr");
+        ggml.impl.assert(ggml.types.ggml_is_contiguous(bias.?), "ggml_is_contiguous(bias)");
+        ggml.impl.assert(ggml.types.ggml_nelements(bias.?) == nr, "ggml_nelements(bias) == nr");
     }
 
     if (fuse_silu) {

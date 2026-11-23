@@ -148,40 +148,40 @@ const type_traits = blk: {
         .blck_size = 1,
         .type_size = @sizeOf(mod.impl.ggml_c.ggml_fp16_t),
         .is_quantized = false,
-        .to_float = @ptrCast(&mod.impl.ggml_c.ggml_fp16_to_fp32_row),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.ggml_fp32_to_fp16_row),
+        .to_float = @ptrCast(&mod.runtime.ggml_fp16_to_fp32_row),
+        .from_float_ref = @ptrCast(&mod.runtime.ggml_fp32_to_fp16_row),
     };
     t[mod.impl.ggml_c.GGML_TYPE_Q1_0] = .{
         .type_name = "q1_0",
         .blck_size = mod.impl.ggml_c.QK1_0,
         .type_size = @sizeOf(mod.impl.ggml_c.block_q1_0),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_q1_0),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.quantize_row_q1_0_ref),
+        .to_float = @ptrCast(&mod.quants.legacy.dequantize_row_q1_0),
+        .from_float_ref = @ptrCast(&mod.quants.legacy.quantize_row_q1_0_ref),
     };
     t[mod.impl.ggml_c.GGML_TYPE_Q2_0] = .{
         .type_name = "q2_0",
         .blck_size = mod.impl.ggml_c.QK2_0,
         .type_size = @sizeOf(mod.impl.ggml_c.block_q2_0),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_q2_0),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.quantize_row_q2_0_ref),
+        .to_float = @ptrCast(&mod.quants.legacy.dequantize_row_q2_0),
+        .from_float_ref = @ptrCast(&mod.quants.legacy.quantize_row_q2_0_ref),
     };
     t[mod.impl.ggml_c.GGML_TYPE_Q4_0] = .{
         .type_name = "q4_0",
         .blck_size = mod.impl.ggml_c.QK4_0,
         .type_size = @sizeOf(mod.impl.ggml_c.block_q4_0),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_q4_0),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.quantize_row_q4_0_ref),
+        .to_float = @ptrCast(&mod.quants.legacy.dequantize_row_q4_0),
+        .from_float_ref = @ptrCast(&mod.quants.legacy.quantize_row_q4_0_ref),
     };
     t[mod.impl.ggml_c.GGML_TYPE_Q4_1] = .{
         .type_name = "q4_1",
         .blck_size = mod.impl.ggml_c.QK4_1,
         .type_size = @sizeOf(mod.impl.ggml_c.block_q4_1),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_q4_1),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.quantize_row_q4_1_ref),
+        .to_float = @ptrCast(&mod.quants.legacy.dequantize_row_q4_1),
+        .from_float_ref = @ptrCast(&mod.quants.legacy.quantize_row_q4_1_ref),
     };
     t[4] = .{
         .type_name = "REMOVED",
@@ -200,163 +200,163 @@ const type_traits = blk: {
         .blck_size = mod.impl.ggml_c.QK5_0,
         .type_size = @sizeOf(mod.impl.ggml_c.block_q5_0),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_q5_0),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.quantize_row_q5_0_ref),
+        .to_float = @ptrCast(&mod.quants.legacy.dequantize_row_q5_0),
+        .from_float_ref = @ptrCast(&mod.quants.legacy.quantize_row_q5_0_ref),
     };
     t[mod.impl.ggml_c.GGML_TYPE_Q5_1] = .{
         .type_name = "q5_1",
         .blck_size = mod.impl.ggml_c.QK5_1,
         .type_size = @sizeOf(mod.impl.ggml_c.block_q5_1),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_q5_1),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.quantize_row_q5_1_ref),
+        .to_float = @ptrCast(&mod.quants.legacy.dequantize_row_q5_1),
+        .from_float_ref = @ptrCast(&mod.quants.legacy.quantize_row_q5_1_ref),
     };
     t[mod.impl.ggml_c.GGML_TYPE_Q8_0] = .{
         .type_name = "q8_0",
         .blck_size = mod.impl.ggml_c.QK8_0,
         .type_size = @sizeOf(mod.impl.ggml_c.block_q8_0),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_q8_0),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.quantize_row_q8_0_ref),
+        .to_float = @ptrCast(&mod.quants.legacy.dequantize_row_q8_0),
+        .from_float_ref = @ptrCast(&mod.quants.legacy.quantize_row_q8_0_ref),
     };
     t[mod.impl.ggml_c.GGML_TYPE_Q8_1] = .{
         .type_name = "q8_1",
         .blck_size = mod.impl.ggml_c.QK8_1,
         .type_size = @sizeOf(mod.impl.ggml_c.block_q8_1),
         .is_quantized = true,
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.quantize_row_q8_1_ref),
+        .from_float_ref = @ptrCast(&mod.quants.legacy.quantize_row_q8_1_ref),
     };
     t[mod.impl.ggml_c.GGML_TYPE_MXFP4] = .{
         .type_name = "mxfp4",
         .blck_size = mod.impl.ggml_c.QK_MXFP4,
         .type_size = @sizeOf(mod.impl.ggml_c.block_mxfp4),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_mxfp4),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.quantize_row_mxfp4_ref),
+        .to_float = @ptrCast(&mod.quants.legacy.dequantize_row_mxfp4),
+        .from_float_ref = @ptrCast(&mod.quants.legacy.quantize_row_mxfp4_ref),
     };
     t[mod.impl.ggml_c.GGML_TYPE_NVFP4] = .{
         .type_name = "nvfp4",
         .blck_size = mod.impl.ggml_c.QK_NVFP4,
         .type_size = @sizeOf(mod.impl.ggml_c.block_nvfp4),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_nvfp4),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.quantize_row_nvfp4_ref),
+        .to_float = @ptrCast(&mod.quants.legacy.dequantize_row_nvfp4),
+        .from_float_ref = @ptrCast(&mod.quants.legacy.quantize_row_nvfp4_ref),
     };
     t[mod.impl.ggml_c.GGML_TYPE_F8_E4M3] = .{
         .type_name = "f8_e4m3",
         .blck_size = 1,
         .type_size = @sizeOf(mod.impl.ggml_c.ggml_fp8_e4m3_t),
         .is_quantized = false,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_f8_e4m3),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.quantize_row_f8_e4m3_ref),
+        .to_float = @ptrCast(&mod.quants.legacy.dequantize_row_f8_e4m3),
+        .from_float_ref = @ptrCast(&mod.quants.legacy.quantize_row_f8_e4m3_ref),
     };
     t[mod.impl.ggml_c.GGML_TYPE_Q2_K] = .{
         .type_name = "q2_K",
         .blck_size = mod.impl.ggml_c.QK_K,
         .type_size = @sizeOf(mod.impl.ggml_c.block_q2_K),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_q2_K),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.quantize_row_q2_K_ref),
+        .to_float = @ptrCast(&mod.quants.k.dequantize_row_q2_K),
+        .from_float_ref = @ptrCast(&mod.quants.k.quantize_row_q2_K_ref),
     };
     t[mod.impl.ggml_c.GGML_TYPE_Q3_K] = .{
         .type_name = "q3_K",
         .blck_size = mod.impl.ggml_c.QK_K,
         .type_size = @sizeOf(mod.impl.ggml_c.block_q3_K),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_q3_K),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.quantize_row_q3_K_ref),
+        .to_float = @ptrCast(&mod.quants.k.dequantize_row_q3_K),
+        .from_float_ref = @ptrCast(&mod.quants.k.quantize_row_q3_K_ref),
     };
     t[mod.impl.ggml_c.GGML_TYPE_Q4_K] = .{
         .type_name = "q4_K",
         .blck_size = mod.impl.ggml_c.QK_K,
         .type_size = @sizeOf(mod.impl.ggml_c.block_q4_K),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_q4_K),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.quantize_row_q4_K_ref),
+        .to_float = @ptrCast(&mod.quants.k.dequantize_row_q4_K),
+        .from_float_ref = @ptrCast(&mod.quants.k.quantize_row_q4_K_ref),
     };
     t[mod.impl.ggml_c.GGML_TYPE_Q5_K] = .{
         .type_name = "q5_K",
         .blck_size = mod.impl.ggml_c.QK_K,
         .type_size = @sizeOf(mod.impl.ggml_c.block_q5_K),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_q5_K),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.quantize_row_q5_K_ref),
+        .to_float = @ptrCast(&mod.quants.k.dequantize_row_q5_K),
+        .from_float_ref = @ptrCast(&mod.quants.k.quantize_row_q5_K_ref),
     };
     t[mod.impl.ggml_c.GGML_TYPE_Q6_K] = .{
         .type_name = "q6_K",
         .blck_size = mod.impl.ggml_c.QK_K,
         .type_size = @sizeOf(mod.impl.ggml_c.block_q6_K),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_q6_K),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.quantize_row_q6_K_ref),
+        .to_float = @ptrCast(&mod.quants.k.dequantize_row_q6_K),
+        .from_float_ref = @ptrCast(&mod.quants.k.quantize_row_q6_K_ref),
     };
     t[mod.impl.ggml_c.GGML_TYPE_IQ2_XXS] = .{
         .type_name = "iq2_xxs",
         .blck_size = mod.impl.ggml_c.QK_K,
         .type_size = @sizeOf(mod.impl.ggml_c.block_iq2_xxs),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_iq2_xxs),
+        .to_float = @ptrCast(&mod.quants.iq_dequant.dequantize_row_iq2_xxs),
     };
     t[mod.impl.ggml_c.GGML_TYPE_IQ2_XS] = .{
         .type_name = "iq2_xs",
         .blck_size = mod.impl.ggml_c.QK_K,
         .type_size = @sizeOf(mod.impl.ggml_c.block_iq2_xs),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_iq2_xs),
+        .to_float = @ptrCast(&mod.quants.iq_dequant.dequantize_row_iq2_xs),
     };
     t[mod.impl.ggml_c.GGML_TYPE_IQ3_XXS] = .{
         .type_name = "iq3_xxs",
         .blck_size = mod.impl.ggml_c.QK_K,
         .type_size = @sizeOf(mod.impl.ggml_c.block_iq3_xxs),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_iq3_xxs),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.quantize_row_iq3_xxs_ref),
+        .to_float = @ptrCast(&mod.quants.iq_dequant.dequantize_row_iq3_xxs),
+        .from_float_ref = @ptrCast(&mod.quants.iq3.quantize_row_iq3_xxs_ref),
     };
     t[mod.impl.ggml_c.GGML_TYPE_IQ3_S] = .{
         .type_name = "iq3_s",
         .blck_size = mod.impl.ggml_c.QK_K,
         .type_size = @sizeOf(mod.impl.ggml_c.block_iq3_s),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_iq3_s),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.quantize_row_iq3_s_ref),
+        .to_float = @ptrCast(&mod.quants.iq_dequant.dequantize_row_iq3_s),
+        .from_float_ref = @ptrCast(&mod.quants.iq3.quantize_row_iq3_s_ref),
     };
     t[mod.impl.ggml_c.GGML_TYPE_IQ2_S] = .{
         .type_name = "iq2_s",
         .blck_size = mod.impl.ggml_c.QK_K,
         .type_size = @sizeOf(mod.impl.ggml_c.block_iq2_s),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_iq2_s),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.quantize_row_iq2_s_ref),
+        .to_float = @ptrCast(&mod.quants.iq_dequant.dequantize_row_iq2_s),
+        .from_float_ref = @ptrCast(&mod.quants.iq2.quantize_row_iq2_s_ref),
     };
     t[mod.impl.ggml_c.GGML_TYPE_IQ1_S] = .{
         .type_name = "iq1_s",
         .blck_size = mod.impl.ggml_c.QK_K,
         .type_size = @sizeOf(mod.impl.ggml_c.block_iq1_s),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_iq1_s),
+        .to_float = @ptrCast(&mod.quants.iq_dequant.dequantize_row_iq1_s),
     };
     t[mod.impl.ggml_c.GGML_TYPE_IQ1_M] = .{
         .type_name = "iq1_m",
         .blck_size = mod.impl.ggml_c.QK_K,
         .type_size = @sizeOf(mod.impl.ggml_c.block_iq1_m),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_iq1_m),
+        .to_float = @ptrCast(&mod.quants.iq_dequant.dequantize_row_iq1_m),
     };
     t[mod.impl.ggml_c.GGML_TYPE_IQ4_NL] = .{
         .type_name = "iq4_nl",
         .blck_size = mod.impl.ggml_c.QK4_NL,
         .type_size = @sizeOf(mod.impl.ggml_c.block_iq4_nl),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_iq4_nl),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.quantize_row_iq4_nl_ref),
+        .to_float = @ptrCast(&mod.quants.iq_dequant.dequantize_row_iq4_nl),
+        .from_float_ref = @ptrCast(&mod.quants.iq4.quantize_row_iq4_nl_ref),
     };
     t[mod.impl.ggml_c.GGML_TYPE_IQ4_XS] = .{
         .type_name = "iq4_xs",
         .blck_size = mod.impl.ggml_c.QK_K,
         .type_size = @sizeOf(mod.impl.ggml_c.block_iq4_xs),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_iq4_xs),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.quantize_row_iq4_xs_ref),
+        .to_float = @ptrCast(&mod.quants.iq_dequant.dequantize_row_iq4_xs),
+        .from_float_ref = @ptrCast(&mod.quants.iq4.quantize_row_iq4_xs_ref),
     };
     t[mod.impl.ggml_c.GGML_TYPE_Q8_K] = .{
         .type_name = "q8_K",
@@ -369,8 +369,8 @@ const type_traits = blk: {
         .blck_size = 1,
         .type_size = @sizeOf(mod.impl.ggml_c.ggml_bf16_t),
         .is_quantized = false,
-        .to_float = @ptrCast(&mod.impl.ggml_c.ggml_bf16_to_fp32_row),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.ggml_fp32_to_bf16_row_ref),
+        .to_float = @ptrCast(&mod.runtime.ggml_bf16_to_fp32_row),
+        .from_float_ref = @ptrCast(&mod.runtime.ggml_fp32_to_bf16_row_ref),
     };
     t[31] = .{
         .type_name = "TYPE_Q4_0_4_4 REMOVED, use Q4_0 with runtime repacking",
@@ -395,16 +395,16 @@ const type_traits = blk: {
         .blck_size = mod.impl.ggml_c.QK_K,
         .type_size = @sizeOf(mod.impl.ggml_c.block_tq1_0),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_tq1_0),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.quantize_row_tq1_0_ref),
+        .to_float = @ptrCast(&mod.quants.ternary.dequantize_row_tq1_0),
+        .from_float_ref = @ptrCast(&mod.quants.ternary.quantize_row_tq1_0_ref),
     };
     t[mod.impl.ggml_c.GGML_TYPE_TQ2_0] = .{
         .type_name = "tq2_0",
         .blck_size = mod.impl.ggml_c.QK_K,
         .type_size = @sizeOf(mod.impl.ggml_c.block_tq2_0),
         .is_quantized = true,
-        .to_float = @ptrCast(&mod.impl.ggml_c.dequantize_row_tq2_0),
-        .from_float_ref = @ptrCast(&mod.impl.ggml_c.quantize_row_tq2_0_ref),
+        .to_float = @ptrCast(&mod.quants.ternary.dequantize_row_tq2_0),
+        .from_float_ref = @ptrCast(&mod.quants.ternary.quantize_row_tq2_0_ref),
     };
     t[36] = .{
         .type_name = "TYPE_IQ4_NL_4_4 REMOVED, use IQ4_NL with runtime repacking",
@@ -881,11 +881,11 @@ test "traits conversion pointers name the right routines" {
     // identity against the real symbols in ggml-quants.c, which this file does
     // not export, so the comparison is genuine.
     const cases = .{
-        .{ mod.impl.ggml_c.GGML_TYPE_Q4_K, &mod.impl.ggml_c.dequantize_row_q4_K, &mod.impl.ggml_c.quantize_row_q4_K_ref },
-        .{ mod.impl.ggml_c.GGML_TYPE_Q5_K, &mod.impl.ggml_c.dequantize_row_q5_K, &mod.impl.ggml_c.quantize_row_q5_K_ref },
-        .{ mod.impl.ggml_c.GGML_TYPE_Q6_K, &mod.impl.ggml_c.dequantize_row_q6_K, &mod.impl.ggml_c.quantize_row_q6_K_ref },
-        .{ mod.impl.ggml_c.GGML_TYPE_Q8_0, &mod.impl.ggml_c.dequantize_row_q8_0, &mod.impl.ggml_c.quantize_row_q8_0_ref },
-        .{ mod.impl.ggml_c.GGML_TYPE_IQ4_XS, &mod.impl.ggml_c.dequantize_row_iq4_xs, &mod.impl.ggml_c.quantize_row_iq4_xs_ref },
+        .{ mod.impl.ggml_c.GGML_TYPE_Q4_K, &mod.quants.k.dequantize_row_q4_K, &mod.quants.k.quantize_row_q4_K_ref },
+        .{ mod.impl.ggml_c.GGML_TYPE_Q5_K, &mod.quants.k.dequantize_row_q5_K, &mod.quants.k.quantize_row_q5_K_ref },
+        .{ mod.impl.ggml_c.GGML_TYPE_Q6_K, &mod.quants.k.dequantize_row_q6_K, &mod.quants.k.quantize_row_q6_K_ref },
+        .{ mod.impl.ggml_c.GGML_TYPE_Q8_0, &mod.quants.legacy.dequantize_row_q8_0, &mod.quants.legacy.quantize_row_q8_0_ref },
+        .{ mod.impl.ggml_c.GGML_TYPE_IQ4_XS, &mod.quants.iq_dequant.dequantize_row_iq4_xs, &mod.quants.iq4.quantize_row_iq4_xs_ref },
     };
     inline for (cases) |case| {
         const tr = &type_traits[@intCast(case[0])];

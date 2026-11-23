@@ -70,7 +70,7 @@ var g_devices: c_int = 1;
 /// Ports `ggml_backend_buffer_is_metal` (ggml-metal.cpp:247 @b1b770d90).
 fn bufferIsMetal(buffer: ggml.impl.ggml_c.ggml_backend_buffer_t) bool {
     if (buffer == null) return false;
-    const name = ggml.impl.ggml_c.ggml_backend_buffer_name(buffer);
+    const name = ggml.backend.ggml_backend_buffer_name(buffer);
     if (name == null) return false;
     return std.mem.startsWith(u8, std.mem.span(name), metal_name);
 }
@@ -222,7 +222,7 @@ fn bufferTypeAllocBuffer(buft: ggml.impl.ggml_c.ggml_backend_buffer_type_t, size
     else
         private_buffer.iface;
 
-    return ggml.impl.ggml_c.ggml_backend_buffer_init(buft, buf_i, res, size);
+    return ggml.backend.ggml_backend_buffer_init(buft, buf_i, res, size);
 }
 
 /// Ports `ggml_backend_metal_buffer_type_get_alloc_size` (ggml-metal.cpp:286
@@ -231,7 +231,7 @@ fn bufferTypeAllocBuffer(buft: ggml.impl.ggml_c.ggml_backend_buffer_type_t, size
 fn bufferTypeGetAllocSize(buft: ggml.impl.ggml_c.ggml_backend_buffer_type_t, tensor: [*c]const ggml.impl.ggml_c.ggml_tensor) callconv(.c) usize {
     _ = buft;
     const t = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, @constCast(tensor));
-    var res = ggml.impl.ggml_c.ggml_nbytes(t);
+    var res = ggml.types.ggml_nbytes(t);
 
     // some operations require additional memory for fleeting data:
     switch (t.op) {
@@ -251,7 +251,7 @@ fn bufferTypeGetAllocSize(buft: ggml.impl.ggml_c.ggml_backend_buffer_type_t, ten
             res *= 2;
         },
         ggml.impl.ggml_c.GGML_OP_TOP_K => {
-            res = 2 * @sizeOf(i32) * @as(usize, @intCast(ggml.impl.ggml_c.ggml_nelements(t.src[0])));
+            res = 2 * @sizeOf(i32) * @as(usize, @intCast(ggml.types.ggml_nelements(t.src[0])));
         },
         ggml.impl.ggml_c.GGML_OP_ARGMAX => {
             res += ggml.metal.ops.ggml_metal_op_argmax_extra(t);
@@ -372,7 +372,7 @@ fn BufferType(comptime kind: Kind) type {
 
                         bufts[u] = .{
                             .iface = iface,
-                            .device = ggml.impl.ggml_c.ggml_backend_reg_dev_get(ggml_backend_metal_reg(), @intCast(i)),
+                            .device = ggml.backend.ggml_backend_reg_dev_get(ggml_backend_metal_reg(), @intCast(i)),
                             .context = &ctxs[u],
                         };
                     }
@@ -548,13 +548,13 @@ fn backendFromDevice(dev: ggml.impl.ggml_c.ggml_backend_dev_t) ggml.impl.ggml_c.
 /// Return: a new Metal backend on device 0, or null if the context could
 /// not be allocated. Owned by the caller, freed with `ggml_backend_free`.
 pub fn ggml_backend_metal_init() callconv(.c) ggml.impl.ggml_c.ggml_backend_t {
-    return backendFromDevice(ggml.impl.ggml_c.ggml_backend_reg_dev_get(ggml_backend_metal_reg(), 0));
+    return backendFromDevice(ggml.backend.ggml_backend_reg_dev_get(ggml_backend_metal_reg(), 0));
 }
 
 /// Ports `ggml_backend_is_metal` (ggml-metal.cpp:708 @b1b770d90).
 pub fn ggml_backend_is_metal(backend: ggml.impl.ggml_c.ggml_backend_t) callconv(.c) bool {
     return backend != null and
-        ggml.impl.ggml_c.ggml_guid_matches(ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend, backend).guid, guid());
+        ggml.runtime.ggml_guid_matches(ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend, backend).guid, guid());
 }
 
 /// Ports `ggml_backend_metal_set_abort_callback` (ggml-metal.cpp:712
@@ -658,7 +658,7 @@ fn deviceBufferMapped(dev: ggml.impl.ggml_c.ggml_backend_dev_t, ptr: ?*anyopaque
     const ctx_dev = devOf(dev);
     const res = ggml.metal.device_c.ggml_metal_buffer_map(ctx_dev, ptr, size, max_tensor_size) orelse return null;
     const props = ggml.metal.device_c.ggml_metal_device_get_props(ctx_dev);
-    return ggml.impl.ggml_c.ggml_backend_buffer_init(mapped_buft.get(props.device), shared_buffer.iface, res, size);
+    return ggml.backend.ggml_backend_buffer_init(mapped_buft.get(props.device), shared_buffer.iface, res, size);
 }
 
 /// Ports `ggml_backend_metal_device_supports_op` (ggml-metal.cpp:823
@@ -684,7 +684,7 @@ fn opBatchSize(op: *const ggml.impl.ggml_c.ggml_tensor) i64 {
     return switch (op.op) {
         ggml.impl.ggml_c.GGML_OP_MUL_MAT => op.ne[1],
         ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID => op.ne[2],
-        else => ggml.impl.ggml_c.ggml_nrows(op),
+        else => ggml.types.ggml_nrows(op),
     };
 }
 
@@ -1015,10 +1015,10 @@ test "op batch size reads the dimension the op indexes by" {
 
     // anything else falls back to the row count
     t.op = ggml.impl.ggml_c.GGML_OP_ADD;
-    try std.testing.expectEqual(ggml.impl.ggml_c.ggml_nrows(&t), opBatchSize(&t));
+    try std.testing.expectEqual(ggml.types.ggml_nrows(&t), opBatchSize(&t));
 }
 
 test "the guid is stable and matches itself" {
-    try std.testing.expect(ggml.impl.ggml_c.ggml_guid_matches(guid(), guid()));
+    try std.testing.expect(ggml.runtime.ggml_guid_matches(guid(), guid()));
     try std.testing.expect(!ggml_backend_is_metal(null));
 }

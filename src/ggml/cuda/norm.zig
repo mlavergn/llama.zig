@@ -359,7 +359,7 @@ fn rowArgs(dst: *const ggml.impl.ggml_c.ggml_tensor) RowArgs {
     const eps = ggml.impl.getOpParamsF32(dst, 0);
     ggml.impl.assert(eps >= 0.0, "eps >= 0.0f");
 
-    const ts0 = ggml.impl.ggml_c.ggml_type_size(src0.type);
+    const ts0 = ggml.types.ggml_type_size(src0.type);
     ggml.impl.assert(src0.nb[0] == ts0, "nb00 == ts0");
     return .{
         .src0 = src0,
@@ -392,7 +392,7 @@ pub fn opGroupNorm(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_t
     ggml.impl.assert(eps >= 0.0, "eps >= 0.0f");
 
     const group_size: c_int = int(src0.ne[0] * src0.ne[1] * @divTrunc(src0.ne[2] + num_groups - 1, num_groups));
-    groupNormF32Cuda(src0.data, dst.data, int(num_groups * src0.ne[3]), eps, group_size, int(ggml.impl.ggml_c.ggml_nelements(src0)), stream);
+    groupNormF32Cuda(src0.data, dst.data, int(num_groups * src0.ne[3]), eps, group_size, int(ggml.types.ggml_nelements(src0)), stream);
 }
 
 /// Ports `ggml_cuda_op_rms_norm` (norm.cu:591 @b1b770d90).
@@ -418,7 +418,7 @@ pub fn opRmsNormScaleFused(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_
 
     const scale = ggml.impl.getOpParamsF32(scale_tensor, 0);
 
-    const ts0 = ggml.impl.ggml_c.ggml_type_size(src0.type);
+    const ts0 = ggml.types.ggml_type_size(src0.type);
     ggml.impl.assert(src0.nb[0] == ts0, "nb00 == ts0");
     const s01: i64 = @intCast(src0.nb[1] / ts0);
     const s02: i64 = @intCast(src0.nb[2] / ts0);
@@ -451,7 +451,7 @@ const Bcast = struct {
 };
 
 fn bcastOf(t: *const ggml.impl.ggml_c.ggml_tensor, comptime which: []const u8) Bcast {
-    const ts = ggml.impl.ggml_c.ggml_type_size(t.type);
+    const ts = ggml.types.ggml_type_size(t.type);
     ggml.impl.assert(t.nb[0] == ts, which ++ "_src->nb[0] == ts_" ++ which);
     return .{
         .s01 = @intCast(t.nb[1] / ts),
@@ -483,7 +483,7 @@ pub fn opRmsNormFused(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggm
     const ne02 = rms_norm_src.ne[2];
     const ne03 = rms_norm_src.ne[3];
 
-    const ts0 = ggml.impl.ggml_c.ggml_type_size(rms_norm_src.type);
+    const ts0 = ggml.types.ggml_type_size(rms_norm_src.type);
     ggml.impl.assert(rms_norm_src.nb[0] == ts0, "rms_norm_src->nb[0] == ts0");
     const s01: i64 = @intCast(rms_norm_src.nb[1] / ts0);
     const s02: i64 = @intCast(rms_norm_src.nb[2] / ts0);
@@ -544,7 +544,7 @@ pub fn opRmsNormFusedAdd(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.
     const ne02 = rms_norm_src.ne[2];
     const ne03 = rms_norm_src.ne[3];
 
-    const ts0 = ggml.impl.ggml_c.ggml_type_size(rms_norm_src.type);
+    const ts0 = ggml.types.ggml_type_size(rms_norm_src.type);
     ggml.impl.assert(rms_norm_src.nb[0] == ts0, "rms_norm_src->nb[0] == ts0");
     const s01: i64 = @intCast(rms_norm_src.nb[1] / ts0);
     const s02: i64 = @intCast(rms_norm_src.nb[2] / ts0);
@@ -591,14 +591,14 @@ pub fn opRmsNormBack(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml
 
     const stream = ctx.stream();
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(grad), "ggml_is_contiguous(grad)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(grad), "ggml_is_contiguous(grad)");
 
     ggml.impl.assert(grad.type == ggml.impl.ggml_c.GGML_TYPE_F32, " grad->type == GGML_TYPE_F32");
     ggml.impl.assert(src0f.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0f->type == GGML_TYPE_F32");
     ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, "  dst->type == GGML_TYPE_F32");
 
     const ne00 = src0f.ne[0];
-    const nrows = ggml.impl.ggml_c.ggml_nrows(src0f);
+    const nrows = ggml.types.ggml_nrows(src0f);
 
     const eps = ggml.impl.getOpParamsF32(dst, 0);
     ggml.impl.assert(eps >= 0.0, "eps >= 0.0f");

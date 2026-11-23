@@ -26,7 +26,7 @@ fn elems(nb: usize, ts: usize) u32 {
 /// Ports `scale_f32_cuda` (scale.cu:31 @b1b770d90), its element type `T`
 /// comptime: `f32` or `kernels.bf16`.
 fn scaleF32Cuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, scale: f32, bias: f32, src0: *const ggml.impl.ggml_c.ggml_tensor, t: *const ggml.impl.ggml_c.ggml_tensor, stream: ggml.cuda.common.cu.cudaStream_t) void {
-    const k = ggml.impl.ggml_c.ggml_nelements(src0);
+    const k = ggml.types.ggml_nelements(src0);
     const ts: usize = @sizeOf(T);
     ggml.impl.assert(k <= std.math.maxInt(u32), "k <= std::numeric_limits<uint32_t>::max()");
 
@@ -54,7 +54,7 @@ pub fn opScale(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tenso
 
     ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32 or src0.type == ggml.impl.ggml_c.GGML_TYPE_BF16, "src0->type == GGML_TYPE_F32 || src0->type == GGML_TYPE_BF16");
     ggml.impl.assert(dst.type == src0.type, "dst->type == src0->type");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(src0) and ggml.impl.ggml_c.ggml_is_contiguous_rows(dst), "ggml_is_contiguous_rows(src0) && ggml_is_contiguous_rows(dst)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(src0) and ggml.types.ggml_is_contiguous_rows(dst), "ggml_is_contiguous_rows(src0) && ggml_is_contiguous_rows(dst)");
 
     const scale = ggml.impl.getOpParamsF32(dst, 0);
     const bias = ggml.impl.getOpParamsF32(dst, 1);

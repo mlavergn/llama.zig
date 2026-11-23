@@ -178,7 +178,7 @@ fn TensorTraits(
             ggml.impl.logDebug("%s: repack tensor %s with %s_%dx%d\n", .{
                 "repack",
                 @as([*:0]const u8, @ptrCast(&t.name)),
-                ggml.impl.ggml_c.ggml_type_name(t.type),
+                ggml.types.ggml_type_name(t.type),
                 @as(c_int, nb_cols),
                 @as(c_int, inter_size),
             });
@@ -192,11 +192,11 @@ fn TensorTraits(
             switch (op.op) {
                 // Not really a Q8_0, but the same size.
                 ggml.impl.ggml_c.GGML_OP_MUL_MAT => {
-                    size.* = ggml.impl.ggml_c.ggml_row_size(param_type, ggml.impl.ggml_c.ggml_nelements(op.src[1]));
+                    size.* = ggml.types.ggml_row_size(param_type, ggml.types.ggml_nelements(op.src[1]));
                     return true;
                 },
                 ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID => {
-                    var sz = ggml.impl.ggml_c.ggml_row_size(param_type, ggml.impl.ggml_c.ggml_nelements(op.src[1]));
+                    var sz = ggml.types.ggml_row_size(param_type, ggml.types.ggml_nelements(op.src[1]));
                     sz = stdlib.num.pad(usize, sz, @sizeOf(i64)); // + padding for the next block
 
                     // `p.*.ne[2]` on a `[*c]` types as the whole `[4]i64`
@@ -249,7 +249,7 @@ fn TensorTraits(
 
             const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
-            const src1_col_stride = ggml.impl.ggml_c.ggml_row_size(param_type, l.ne10);
+            const src1_col_stride = ggml.types.ggml_row_size(param_type, l.ne10);
 
             ggml.impl.assert(l.ne03 == 1 and l.ne13 == 1, "ne03 == 1 && ne13 == 1");
             ggml.impl.assert(@rem(l.ne12, l.ne02) == 0, "ne12 % ne02 == 0");
@@ -334,15 +334,15 @@ fn TensorTraits(
             ggml.impl.assert(l.ne3 == 1, "ne3 == 1");
 
             ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src1 is f32");
-            ggml.impl.assert(ggml.impl.ggml_c.ggml_n_dims(src0) == 2, "src0 is 2D");
+            ggml.impl.assert(ggml.types.ggml_n_dims(src0) == 2, "src0 is 2D");
 
             const wdata: [*]u8 = @ptrCast(params.wdata.?);
-            const nbw1 = ggml.impl.ggml_c.ggml_row_size(param_type, l.ne10);
+            const nbw1 = ggml.types.ggml_row_size(param_type, l.ne10);
             const nbw2 = nbw1 * @as(usize, @intCast(l.ne11));
 
             ggml.impl.assert(params.wsize >= nbw2 * @as(usize, @intCast(l.ne12)), "wsize is large enough");
 
-            const from_float = ggml.impl.ggml_c.ggml_get_type_traits_cpu(param_type).*.from_float.?;
+            const from_float = ggml.cpu.traits.ggml_get_type_traits_cpu(param_type).*.from_float.?;
 
             // Quantization is done in planes to avoid extra complexity in
             // chunking: flattening dimensions not a multiple of INTER_SIZE
@@ -376,7 +376,7 @@ fn TensorTraits(
             const disable_chunking = ggml.cpu.threading.ggml_is_numa();
 
             // 4x chunks per thread
-            const nr0 = ggml.impl.ggml_c.ggml_nrows(src0);
+            const nr0 = ggml.types.ggml_nrows(src0);
 
             const nth_scaled = nth * 4;
             const chunk_size0 = @divTrunc(nr0 + nth_scaled - 1, nth_scaled);
@@ -458,11 +458,11 @@ fn TensorTraits(
             const ith = params.ith;
             const nth = params.nth;
 
-            const from_float = ggml.impl.ggml_c.ggml_get_type_traits_cpu(param_type).*.from_float.?;
+            const from_float = ggml.cpu.traits.ggml_get_type_traits_cpu(param_type).*.from_float.?;
 
             // we don't support permuted src0 or src1
-            ggml.impl.assert(l.nb00 == ggml.impl.ggml_c.ggml_type_size(src0.type), "src0 is contiguous in its rows");
-            ggml.impl.assert(l.nb10 == ggml.impl.ggml_c.ggml_type_size(src1.type), "src1 is contiguous in its rows");
+            ggml.impl.assert(l.nb00 == ggml.types.ggml_type_size(src0.type), "src0 is contiguous in its rows");
+            ggml.impl.assert(l.nb10 == ggml.types.ggml_type_size(src1.type), "src1 is contiguous in its rows");
 
             // dst cannot be transposed or permuted
             ggml.impl.assert(l.nb0 == @sizeOf(f32), "nb0 == sizeof(float)");
@@ -480,7 +480,7 @@ fn TensorTraits(
             const n_ids = ids.ne[0]; // n_expert_used
             const n_as = l.ne02; // n_expert
 
-            const nbw1 = ggml.impl.ggml_c.ggml_row_size(param_type, l.ne10);
+            const nbw1 = ggml.types.ggml_row_size(param_type, l.ne10);
             const nbw2 = nbw1 * @as(usize, @intCast(l.ne11));
             const nbw3 = nbw2 * @as(usize, @intCast(l.ne12));
 
@@ -791,7 +791,7 @@ fn bufferSetTensor(
     _ = buffer;
     const t = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, tensor);
     ggml.impl.assert(offset == 0, "offset == 0");
-    ggml.impl.assert(size == ggml.impl.ggml_c.ggml_nbytes(t), "size == ggml_nbytes(tensor)");
+    ggml.impl.assert(size == ggml.types.ggml_nbytes(t), "size == ggml_nbytes(tensor)");
 
     // The C's downcast from `tensor_traits *` to `tensor_traits_base *`.
     const traits: *const Extended = @ptrCast(@alignCast(t.extra.?));
@@ -814,7 +814,7 @@ fn buftGetName(buft: ggml.impl.ggml_c.ggml_backend_buffer_type_t) callconv(.c) [
 /// iface entries are swapped, which is what makes this a *view* of host
 /// memory with a different write path rather than a second allocator.
 fn buftAllocBuffer(buft: ggml.impl.ggml_c.ggml_backend_buffer_type_t, size: usize) callconv(.c) ggml.impl.ggml_c.ggml_backend_buffer_t {
-    const buffer = ggml.impl.ggml_c.ggml_backend_buft_alloc_buffer(ggml.impl.ggml_c.ggml_backend_cpu_buffer_type(), size);
+    const buffer = ggml.backend.ggml_backend_buft_alloc_buffer(ggml.backend.ggml_backend_cpu_buffer_type(), size);
 
     if (buffer == null) return null;
 
@@ -862,12 +862,12 @@ const ExtraBuffer = struct {
         const dims: c_int = if (op.op == ggml.impl.ggml_c.GGML_OP_MUL_MAT) 2 else 3;
         if ((op.op == ggml.impl.ggml_c.GGML_OP_MUL_MAT or op.op == ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID) and
             src0.*.buffer != null and
-            ggml.impl.ggml_c.ggml_n_dims(src0) == dims and
+            ggml.types.ggml_n_dims(src0) == dims and
             src0.*.buffer.*.buft == bufferType() and
             getOptimalRepackType(src0) != null)
         {
             const src1 = op.src[1] orelse return false;
-            if (src1.*.buffer != null and !ggml.impl.ggml_c.ggml_backend_buft_is_host(src1.*.buffer.*.buft)) {
+            if (src1.*.buffer != null and !ggml.backend.ggml_backend_buft_is_host(src1.*.buffer.*.buft)) {
                 return false;
             }
             if (src1.*.type == ggml.impl.ggml_c.GGML_TYPE_F32) return true;
@@ -918,7 +918,7 @@ fn bufferType() ggml.impl.ggml_c.ggml_backend_buffer_type_t {
                     .get_alloc_size_n = null,
                     .is_host = null,
                 },
-                .device = ggml.impl.ggml_c.ggml_backend_reg_dev_get(ggml.impl.ggml_c.ggml_backend_cpu_reg(), 0),
+                .device = ggml.backend.ggml_backend_reg_dev_get(ggml.cpu.cpu_backend.ggml_backend_cpu_reg(), 0),
                 .context = @ptrCast(@constCast(&ExtraBuffer.instance)),
             };
             buft_ready.store(true, .release);

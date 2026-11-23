@@ -86,9 +86,9 @@ pub fn ggml_metal_op_mul_mat_use_fwht(op: *const ggml.impl.ggml_c.ggml_tensor, m
     return ggml.impl.getOpParamsI32(op, 1) == ggml.impl.ggml_c.GGML_HINT_SRC0_IS_HADAMARD and
         op.type == ggml.impl.ggml_c.GGML_TYPE_F32 and
         (src1.type == ggml.impl.ggml_c.GGML_TYPE_F32 or src1.type == ggml.impl.ggml_c.GGML_TYPE_F16) and
-        ggml.impl.ggml_c.ggml_is_contiguous(src1) and
-        ggml.impl.ggml_c.ggml_is_contiguous(op) and
-        ggml.impl.ggml_c.ggml_are_same_shape(src1, op) and
+        ggml.types.ggml_is_contiguous(src1) and
+        ggml.types.ggml_is_contiguous(op) and
+        ggml.types.ggml_are_same_shape(src1, op) and
         fwhtSupportedSize(src1.ne[0], max_tg_mem);
 }
 
@@ -105,8 +105,8 @@ pub fn ggml_metal_op_mul_mat_use_mm(op: *const ggml.impl.ggml_c.ggml_tensor, has
     const ne00 = src0.ne[0];
     const ne11 = src1.ne[1];
 
-    return !ggml.impl.ggml_c.ggml_is_transposed(src0) and
-        !ggml.impl.ggml_c.ggml_is_transposed(src1) and
+    return !ggml.types.ggml_is_transposed(src0) and
+        !ggml.types.ggml_is_transposed(src1) and
         has_simdgroup_mm and ne11 > 8 and ne00 >= 32;
 }
 
@@ -205,7 +205,7 @@ pub fn ggml_metal_mul_mv_mma_k_step(@"type": ggml.impl.ggml_c.enum_ggml_type, rt
     if (!mulMvMmaTypeSupported(@"type")) {
         return 0;
     }
-    return if (ggml_metal_mul_mv_mma_kind(@"type", rt) == .blk) ggml.impl.ggml_c.ggml_blck_size(@"type") else mma_k_chunk;
+    return if (ggml_metal_mul_mv_mma_kind(@"type", rt) == .blk) ggml.types.ggml_blck_size(@"type") else mma_k_chunk;
 }
 
 /// Ports `ggml_metal_mul_mat_mma_type_ok` (ggml-metal-common.cpp:113
@@ -214,7 +214,7 @@ fn mulMatMmaTypeOk(op: *const ggml.impl.ggml_c.ggml_tensor) bool {
     const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[0]);
     const step = ggml_metal_mul_mv_mma_k_step(src0.type, ggml_metal_mul_mv_mma_rt(op));
 
-    return step > 0 and @rem(src0.ne[0], step) == 0 and src0.nb[0] == ggml.impl.ggml_c.ggml_type_size(src0.type);
+    return step > 0 and @rem(src0.ne[0], step) == 0 and src0.nb[0] == ggml.types.ggml_type_size(src0.type);
 }
 
 /// Ports `ggml_metal_mul_mv_mma_rows_min` (ggml-metal-common.cpp:121
@@ -258,7 +258,7 @@ pub fn ggml_metal_op_mul_mat_use_mma(op: *const ggml.impl.ggml_c.ggml_tensor) ca
 
     return mulMatMmaTypeOk(op) and batch_ok and
         src1.type == ggml.impl.ggml_c.GGML_TYPE_F32 and src1.ne[1] >= mulMvMmaRowsMin(src0.type) and src1.ne[1] <= mma_rows_max and
-        !ggml.impl.ggml_c.ggml_is_transposed(src0) and !ggml.impl.ggml_c.ggml_is_transposed(src1) and
+        !ggml.types.ggml_is_transposed(src0) and !ggml.types.ggml_is_transposed(src1) and
         src1.nb[0] == @sizeOf(f32) and src1.nb[1] % 16 == 0 and src1.nb[2] % 16 == 0 and src1.nb[3] % 16 == 0;
 }
 

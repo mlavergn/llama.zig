@@ -150,7 +150,7 @@ fn allocBufferNDefault(buft: mod.impl.ggml_c.ggml_backend_buffer_type_t, tensors
             return null;
         }
 
-        var tallocr = mod.impl.ggml_c.ggml_tallocr_new(buffer);
+        var tallocr = mod.alloc.ggml_tallocr_new(buffer);
 
         // allocate tensors in the current buffer
         var t_failed: ?*mod.impl.ggml_c.ggml_tensor = null;
@@ -158,12 +158,12 @@ fn allocBufferNDefault(buft: mod.impl.ggml_c.ggml_backend_buffer_type_t, tensors
             const t = tensors[j].?;
             if (t.data == null) {
                 if (t.view_src == null) {
-                    if (mod.impl.ggml_c.ggml_tallocr_alloc(&tallocr, t) != mod.impl.ggml_c.GGML_STATUS_SUCCESS) {
+                    if (mod.alloc.ggml_tallocr_alloc(&tallocr, t) != mod.impl.ggml_c.GGML_STATUS_SUCCESS) {
                         t_failed = t;
                         break;
                     }
                 } else if (t.buffer == null) {
-                    if (mod.impl.ggml_c.ggml_backend_view_init(t) != mod.impl.ggml_c.GGML_STATUS_SUCCESS) {
+                    if (mod.backend.ggml_backend_view_init(t) != mod.impl.ggml_c.GGML_STATUS_SUCCESS) {
                         t_failed = t;
                         break;
                     }
@@ -171,7 +171,7 @@ fn allocBufferNDefault(buft: mod.impl.ggml_c.ggml_backend_buffer_type_t, tensors
             } else {
                 if (t.view_src != null and t.buffer == null) {
                     // view of a pre-allocated tensor
-                    if (mod.impl.ggml_c.ggml_backend_view_init(t) != mod.impl.ggml_c.GGML_STATUS_SUCCESS) {
+                    if (mod.backend.ggml_backend_view_init(t) != mod.impl.ggml_c.GGML_STATUS_SUCCESS) {
                         t_failed = t;
                         break;
                     }
@@ -249,18 +249,18 @@ pub fn ggml_backend_buft_get_alloc_size(buft: mod.impl.ggml_c.ggml_backend_buffe
         // The C uses plain `assert`, not GGML_ASSERT, so this one is compiled
         // out under NDEBUG on the C side. `impl.assert` is always live; the
         // condition is a backend-implementation invariant and holds.
-        mod.impl.assert(size >= mod.impl.ggml_c.ggml_nbytes(tensor), "size >= ggml_nbytes(tensor)");
+        mod.impl.assert(size >= mod.types.ggml_nbytes(tensor), "size >= ggml_nbytes(tensor)");
 
         // [TAG_ALLOC_SIZE_EXPAND]
         // if you hit this assert, update ggml_backend_op_alloc_size_may_expand() accordingly
-        mod.impl.assert(size <= mod.impl.ggml_c.ggml_nbytes(tensor) or
+        mod.impl.assert(size <= mod.types.ggml_nbytes(tensor) or
             mod.impl.opIsEmpty(tensor.*.op) or
-            mod.impl.ggml_c.ggml_is_quantized(tensor.*.type) or // [TAG_ALLOC_SIZE_EXPAND]
+            mod.types.ggml_is_quantized(tensor.*.type) or // [TAG_ALLOC_SIZE_EXPAND]
             ggml_op_alloc_size_may_expand(tensor.*.op), "size <= ggml_nbytes(tensor) || ggml_op_is_empty(tensor->op) || ggml_is_quantized(tensor->type) || ggml_op_alloc_size_may_expand(tensor->op)");
 
         return size;
     }
-    return mod.impl.ggml_c.ggml_nbytes(tensor);
+    return mod.types.ggml_nbytes(tensor);
 }
 
 /// Ports `ggml_backend_buft_get_alloc_size_n` (src/ggml-backend.cpp:213 @b1b770d90).
@@ -349,7 +349,7 @@ pub fn ggml_backend_buffer_get_size(buffer: mod.impl.ggml_c.ggml_backend_buffer_
 pub fn ggml_backend_buffer_get_base(buffer: mod.impl.ggml_c.ggml_backend_buffer_t) callconv(.c) ?*anyopaque {
     mod.impl.assert(buffer != null, "buffer");
     // get_base is optional if the buffer is zero-sized
-    if (!mod.impl.ggml_c.ggml_backend_buffer_is_meta(buffer) and buffer.*.size == 0) {
+    if (!mod.backend_meta.ggml_backend_buffer_is_meta(buffer) and buffer.*.size == 0) {
         return null;
     }
 
@@ -417,8 +417,8 @@ pub fn ggml_backend_buffer_set_usage(buffer: mod.impl.ggml_c.ggml_backend_buffer
     // FIXME: add a generic callback to the buffer interface
     if (ggml_backend_buffer_is_multi_buffer(buffer)) {
         ggml_backend_multi_buffer_set_usage(buffer, usage);
-    } else if (mod.impl.ggml_c.ggml_backend_buffer_is_meta(buffer)) {
-        mod.impl.ggml_c.ggml_backend_meta_buffer_set_usage(buffer, usage);
+    } else if (mod.backend_meta.ggml_backend_buffer_is_meta(buffer)) {
+        mod.backend_meta.ggml_backend_meta_buffer_set_usage(buffer, usage);
     }
 }
 
@@ -519,7 +519,7 @@ pub fn ggml_backend_tensor_set_async(
     mod.impl.assert(backend != null, "backend");
     mod.impl.assert(tensor != null, "tensor");
     mod.impl.assert(tensor.*.data != null, "tensor not allocated");
-    mod.impl.assert(offset + size <= mod.impl.ggml_c.ggml_nbytes(tensor), "tensor write out of bounds");
+    mod.impl.assert(offset + size <= mod.types.ggml_nbytes(tensor), "tensor write out of bounds");
 
     if (backend.*.iface.set_tensor_async) |f| {
         f(backend, tensor, data, offset, size);
@@ -540,7 +540,7 @@ pub fn ggml_backend_tensor_get_async(
     mod.impl.assert(backend != null, "backend");
     mod.impl.assert(tensor != null, "tensor");
     mod.impl.assert(tensor.*.data != null, "tensor not allocated");
-    mod.impl.assert(offset + size <= mod.impl.ggml_c.ggml_nbytes(tensor), "tensor read out of bounds");
+    mod.impl.assert(offset + size <= mod.types.ggml_nbytes(tensor), "tensor read out of bounds");
 
     if (backend.*.iface.get_tensor_async) |f| {
         f(backend, tensor, data, offset, size);
@@ -586,7 +586,7 @@ pub fn ggml_backend_tensor_set_2d_async(
     }
 
     mod.impl.assert(tensor.*.data != null, "tensor not allocated");
-    mod.impl.assert(offset + (n_copies - 1) * stride_tensor + size <= mod.impl.ggml_c.ggml_nbytes(tensor), "tensor write out of bounds");
+    mod.impl.assert(offset + (n_copies - 1) * stride_tensor + size <= mod.types.ggml_nbytes(tensor), "tensor write out of bounds");
     backend.*.iface.set_tensor_2d_async.?(backend, tensor, data, offset, size, n_copies, stride_tensor, stride_data);
 }
 
@@ -622,7 +622,7 @@ pub fn ggml_backend_tensor_get_2d_async(
     }
 
     mod.impl.assert(tensor.*.data != null, "tensor not allocated");
-    mod.impl.assert(offset + (n_copies - 1) * stride_tensor + size <= mod.impl.ggml_c.ggml_nbytes(tensor), "tensor read out of bounds");
+    mod.impl.assert(offset + (n_copies - 1) * stride_tensor + size <= mod.types.ggml_nbytes(tensor), "tensor read out of bounds");
     backend.*.iface.get_tensor_2d_async.?(backend, tensor, data, offset, size, n_copies, stride_tensor, stride_data);
 }
 
@@ -640,7 +640,7 @@ pub fn ggml_backend_tensor_set(tensor: [*c]mod.impl.ggml_c.ggml_tensor, data: ?*
     }
 
     mod.impl.assert(tensor.*.data != null, "tensor not allocated");
-    mod.impl.assert(offset + size <= mod.impl.ggml_c.ggml_nbytes(tensor), "tensor write out of bounds");
+    mod.impl.assert(offset + size <= mod.types.ggml_nbytes(tensor), "tensor write out of bounds");
 
     buf.*.iface.set_tensor.?(buf, tensor, data, offset, size);
 }
@@ -656,7 +656,7 @@ pub fn ggml_backend_tensor_get(tensor: [*c]const mod.impl.ggml_c.ggml_tensor, da
     }
 
     mod.impl.assert(tensor.*.data != null, "tensor not allocated");
-    mod.impl.assert(offset + size <= mod.impl.ggml_c.ggml_nbytes(tensor), "tensor read out of bounds");
+    mod.impl.assert(offset + size <= mod.types.ggml_nbytes(tensor), "tensor read out of bounds");
 
     buf.*.iface.get_tensor.?(buf, tensor, data, offset, size);
 }
@@ -691,7 +691,7 @@ pub fn ggml_backend_tensor_set_2d(
     }
 
     mod.impl.assert(tensor.*.data != null, "tensor not allocated");
-    mod.impl.assert(offset + (n_copies - 1) * stride_tensor + size <= mod.impl.ggml_c.ggml_nbytes(tensor), "tensor write out of bounds");
+    mod.impl.assert(offset + (n_copies - 1) * stride_tensor + size <= mod.types.ggml_nbytes(tensor), "tensor write out of bounds");
 
     buf.*.iface.set_tensor_2d.?(buf, tensor, data, offset, size, n_copies, stride_tensor, stride_data);
 }
@@ -726,7 +726,7 @@ pub fn ggml_backend_tensor_get_2d(
     }
 
     mod.impl.assert(tensor.*.data != null, "tensor not allocated");
-    mod.impl.assert(offset + (n_copies - 1) * stride_tensor + size <= mod.impl.ggml_c.ggml_nbytes(tensor), "tensor read out of bounds");
+    mod.impl.assert(offset + (n_copies - 1) * stride_tensor + size <= mod.types.ggml_nbytes(tensor), "tensor read out of bounds");
 
     buf.*.iface.get_tensor_2d.?(buf, tensor, data, offset, size, n_copies, stride_tensor, stride_data);
 }
@@ -849,7 +849,7 @@ fn tensorBatchIo(
         const tensor_buf = tensorBuffer(tensors[i]);
         mod.impl.assert(tensor_buf != null, "tensor buffer not set");
         mod.impl.assert(tensors[i].*.data != null, "tensor not allocated");
-        mod.impl.assert(offsets[i] + sizes[i] <= mod.impl.ggml_c.ggml_nbytes(tensors[i]), if (is_set) "tensor write out of bounds" else "tensor read out of bounds");
+        mod.impl.assert(offsets[i] + sizes[i] <= mod.types.ggml_nbytes(tensors[i]), if (is_set) "tensor write out of bounds" else "tensor read out of bounds");
 
         if (buf == null) {
             buf = tensor_buf;
@@ -969,7 +969,7 @@ pub fn ggml_backend_tensor_memset(tensor: [*c]mod.impl.ggml_c.ggml_tensor, value
 
     mod.impl.assert(buf != null, "tensor buffer not set");
     mod.impl.assert(tensor.*.data != null, "tensor not allocated");
-    mod.impl.assert(offset + size <= mod.impl.ggml_c.ggml_nbytes(tensor), "tensor write out of bounds");
+    mod.impl.assert(offset + size <= mod.types.ggml_nbytes(tensor), "tensor write out of bounds");
     mod.impl.assert(buf.*.iface.memset_tensor != null, "memset not implemented by backend buffer");
 
     buf.*.iface.memset_tensor.?(buf, tensor, value, offset, size);
@@ -1060,9 +1060,9 @@ pub fn ggml_backend_tensor_copy(src: [*c]const mod.impl.ggml_c.ggml_tensor, dst:
     }
 
     if (ggml_backend_buffer_is_host(src.*.buffer)) {
-        ggml_backend_tensor_set(dst, src.*.data, 0, mod.impl.ggml_c.ggml_nbytes(src));
+        ggml_backend_tensor_set(dst, src.*.data, 0, mod.types.ggml_nbytes(src));
     } else if (ggml_backend_buffer_is_host(dst.*.buffer)) {
-        ggml_backend_tensor_get(src, dst.*.data, 0, mod.impl.ggml_c.ggml_nbytes(src));
+        ggml_backend_tensor_get(src, dst.*.data, 0, mod.types.ggml_nbytes(src));
     } else if (!ggml_backend_buffer_copy_tensor(src, dst)) {
         if (!debug_off) {
             mod.impl.logDebug(
@@ -1070,7 +1070,7 @@ pub fn ggml_backend_tensor_copy(src: [*c]const mod.impl.ggml_c.ggml_tensor, dst:
                 .{ "ggml_backend_tensor_copy", ggml_backend_buffer_name(src.*.buffer), ggml_backend_buffer_name(dst.*.buffer) },
             );
         }
-        const nbytes = mod.impl.ggml_c.ggml_nbytes(src);
+        const nbytes = mod.types.ggml_nbytes(src);
         const data = std.c.malloc(nbytes);
         ggml_backend_tensor_get(src, data, 0, nbytes);
         ggml_backend_tensor_set(dst, data, 0, nbytes);
@@ -1479,8 +1479,8 @@ pub fn ggml_backend_multi_buffer_set_usage(buffer: mod.impl.ggml_c.ggml_backend_
 /// `op_params`, `flags` and first three `src` pointers. Outputs stayed right,
 /// which is why nothing caught it until `scripts/node-diff --gpu` printed the
 /// copies' ops. `p[0].arr[i]`, or a `*T`, indexes correctly.
-pub fn dupTensorLayout(ctx: ?*mod.impl.ggml_c.ggml_context, tensor: [*c]const mod.impl.ggml_c.ggml_tensor) [*c]mod.impl.ggml_c.ggml_tensor {
-    const dup = mod.impl.one(mod.impl.ggml_c.ggml_tensor, mod.impl.ggml_c.ggml_dup_tensor(ctx, tensor));
+pub fn dupTensorLayout(ctx: *mod.context.Context, tensor: [*c]const mod.impl.ggml_c.ggml_tensor) [*c]mod.impl.ggml_c.ggml_tensor {
+    const dup = mod.impl.one(mod.impl.ggml_c.ggml_tensor, mod.context.ggml_dup_tensor(ctx, tensor));
     const src = mod.impl.one(mod.impl.ggml_c.ggml_tensor, @constCast(tensor));
     for (0..mod.impl.ggml_c.GGML_MAX_DIMS) |i| {
         dup.nb[i] = src.nb[i];
@@ -1549,7 +1549,7 @@ pub fn ggml_backend_tensor_alloc(buffer: mod.impl.ggml_c.ggml_backend_buffer_t, 
     mod.impl.assert(tensor.*.view_src == null, "tensor->view_src == NULL");
     mod.impl.assert(@intFromPtr(addr) >= @intFromPtr(ggml_backend_buffer_get_base(buffer)), "addr >= ggml_backend_buffer_get_base(buffer)");
     mod.impl.assert(
-        mod.impl.ggml_c.ggml_backend_buffer_is_meta(buffer) or
+        mod.backend_meta.ggml_backend_buffer_is_meta(buffer) or
             @intFromPtr(addr) + ggml_backend_buffer_get_alloc_size(buffer, tensor) <=
                 @intFromPtr(ggml_backend_buffer_get_base(buffer)) + ggml_backend_buffer_get_size(buffer),
         "tensor does not fit in the buffer",
@@ -1573,8 +1573,8 @@ pub fn ggml_backend_tensor_alloc(buffer: mod.impl.ggml_c.ggml_backend_buffer_t, 
 fn graphCopyDupTensor(
     hash_set: mod.impl.HashSet,
     node_copies: [*c][*c]mod.impl.ggml_c.ggml_tensor,
-    ctx_allocated: ?*mod.impl.ggml_c.ggml_context,
-    ctx_unallocated: ?*mod.impl.ggml_c.ggml_context,
+    ctx_allocated: *mod.context.Context,
+    ctx_unallocated: *mod.context.Context,
     src: *mod.impl.ggml_c.ggml_tensor,
 ) *mod.impl.ggml_c.ggml_tensor {
     mod.impl.assert(src.data != null, "graph must be allocated");
@@ -1596,7 +1596,7 @@ fn graphCopyDupTensor(
     dst.op = src.op;
     dst.flags = src.flags;
     @memcpy(std.mem.asBytes(&dst.op_params), std.mem.asBytes(&src.op_params));
-    _ = mod.impl.ggml_c.ggml_set_name(dst, &src.name);
+    _ = mod.context.ggml_set_name(dst, @ptrCast(&src.name));
 
     // copy src
     for (0..mod.impl.ggml_c.GGML_MAX_SRC) |i| {
@@ -1662,13 +1662,13 @@ pub fn ggml_backend_graph_copy(backend: mod.impl.ggml_c.ggml_backend_t, graph: *
     const node_init: [*c]bool = @ptrCast(std.c.calloc(hash_set.size, @sizeOf(bool)));
 
     const params: mod.impl.ggml_c.ggml_init_params = .{
-        .mem_size = mod.impl.ggml_c.ggml_tensor_overhead() * hash_set.size + mod.impl.ggml_c.ggml_graph_overhead_custom(@intCast(graph.*.size), false),
+        .mem_size = mod.types.ggml_tensor_overhead() * hash_set.size + mod.graph.ggml_graph_overhead_custom(@intCast(graph.*.size), false),
         .mem_buffer = null,
         .no_alloc = true,
     };
 
-    const ctx_allocated = mod.impl.ggml_c.ggml_init(params);
-    const ctx_unallocated = mod.impl.ggml_c.ggml_init(params);
+    const ctx_allocated = mod.context.ggml_init(params);
+    const ctx_unallocated = mod.context.ggml_init(params);
 
     const failed: mod.impl.ggml_c.struct_ggml_backend_graph_copy = .{
         .buffer = null,
@@ -1682,26 +1682,26 @@ pub fn ggml_backend_graph_copy(backend: mod.impl.ggml_c.ggml_backend_t, graph: *
         mod.graph.ggml_hash_set_free(&hash_set);
         std.c.free(@ptrCast(node_copies));
         std.c.free(@ptrCast(node_init));
-        mod.impl.ggml_c.ggml_free(ctx_allocated);
-        mod.impl.ggml_c.ggml_free(ctx_unallocated);
+        mod.context.ggml_free(ctx_allocated);
+        mod.context.ggml_free(ctx_unallocated);
         return failed;
     }
 
     // dup nodes
     for (0..@intCast(graph.*.n_nodes)) |i| {
         const node = graph.*.nodes[i];
-        _ = graphCopyDupTensor(hash_set, node_copies, ctx_allocated, ctx_unallocated, node.?);
+        _ = graphCopyDupTensor(hash_set, node_copies, ctx_allocated.?, ctx_unallocated.?, node.?);
     }
 
     // allocate nodes
-    const buffer = mod.impl.ggml_c.ggml_backend_alloc_ctx_tensors(ctx_allocated, backend);
+    const buffer = mod.alloc.ggml_backend_alloc_ctx_tensors(@ptrCast(ctx_allocated.?), backend);
     if (buffer == null) {
         mod.impl.logError("%s: failed to allocate buffer for graph copy\n", .{"ggml_backend_graph_copy"});
         mod.graph.ggml_hash_set_free(&hash_set);
         std.c.free(@ptrCast(node_copies));
         std.c.free(@ptrCast(node_init));
-        mod.impl.ggml_c.ggml_free(ctx_allocated);
-        mod.impl.ggml_c.ggml_free(ctx_unallocated);
+        mod.context.ggml_free(ctx_allocated);
+        mod.context.ggml_free(ctx_unallocated);
         return failed;
     }
 
@@ -1712,7 +1712,7 @@ pub fn ggml_backend_graph_copy(backend: mod.impl.ggml_c.ggml_backend_t, graph: *
     }
 
     // build graph copy
-    const graph_copy: *mod.impl.CGraph = @ptrCast(@alignCast(mod.impl.ggml_c.ggml_new_graph_custom(ctx_allocated, @intCast(graph.*.size), false)));
+    const graph_copy: *mod.impl.CGraph = @ptrCast(@alignCast(mod.graph.ggml_new_graph_custom(ctx_allocated.?, @intCast(graph.*.size), false)));
     for (0..@intCast(graph.*.n_nodes)) |i| {
         const node = graph.*.nodes[i].?;
         graph_copy.nodes[i] = node_copies[mod.impl.hashFind(&hash_set, node)];
@@ -1725,8 +1725,8 @@ pub fn ggml_backend_graph_copy(backend: mod.impl.ggml_c.ggml_backend_t, graph: *
 
     return .{
         .buffer = buffer,
-        .ctx_allocated = ctx_allocated,
-        .ctx_unallocated = ctx_unallocated,
+        .ctx_allocated = @ptrCast(ctx_allocated),
+        .ctx_unallocated = @ptrCast(ctx_unallocated),
         .graph = @ptrCast(graph_copy),
     };
 }
@@ -1734,8 +1734,8 @@ pub fn ggml_backend_graph_copy(backend: mod.impl.ggml_c.ggml_backend_t, graph: *
 /// Ports `ggml_backend_graph_copy_free` (src/ggml-backend.cpp:2760 @b1b770d90).
 pub fn ggml_backend_graph_copy_free(copy: mod.impl.ggml_c.struct_ggml_backend_graph_copy) callconv(.c) void {
     ggml_backend_buffer_free(copy.buffer);
-    mod.impl.ggml_c.ggml_free(copy.ctx_allocated);
-    mod.impl.ggml_c.ggml_free(copy.ctx_unallocated);
+    mod.context.ggml_free(@ptrCast(@alignCast(copy.ctx_allocated)));
+    mod.context.ggml_free(@ptrCast(@alignCast(copy.ctx_unallocated)));
 }
 
 /// Ports `ggml_backend_compare_graph_backend` (src/ggml-backend.cpp:2766 @b1b770d90).
@@ -1872,7 +1872,7 @@ fn cpuBufferCpyTensor(buffer: mod.impl.ggml_c.ggml_backend_buffer_t, src: [*c]co
     _ = buffer;
     mod.impl.assert(src != null, "src");
     if (ggml_backend_buffer_is_host(src.*.buffer)) {
-        const n = mod.impl.ggml_c.ggml_nbytes(src);
+        const n = mod.types.ggml_nbytes(src);
         @memcpy(@as([*]u8, @ptrCast(dst.*.data))[0..n], @as([*]const u8, @ptrCast(src.*.data))[0..n]);
         return true;
     }
@@ -2069,9 +2069,9 @@ test "a CPU buffer round-trips a tensor through set and get" {
     try std.testing.expect(ggml_backend_buffer_is_host(buffer));
     try std.testing.expectEqual(buft, ggml_backend_buffer_get_type(buffer));
 
-    const gctx = mod.impl.ggml_c.ggml_init(.{ .mem_size = 1024 * 1024, .mem_buffer = null, .no_alloc = true });
-    defer mod.impl.ggml_c.ggml_free(gctx);
-    const t = mod.impl.ggml_c.ggml_new_tensor_1d(gctx, mod.impl.ggml_c.GGML_TYPE_F32, 8);
+    const gctx = mod.context.ggml_init(.{ .mem_size = 1024 * 1024, .mem_buffer = null, .no_alloc = true }).?;
+    defer mod.context.ggml_free(gctx);
+    const t = mod.context.ggml_new_tensor_1d(gctx, mod.impl.ggml_c.GGML_TYPE_F32, 8);
 
     const status = ggml_backend_tensor_alloc(buffer, t, ggml_backend_buffer_get_base(buffer));
     try std.testing.expectEqual(@as(mod.impl.ggml_c.enum_ggml_status, mod.impl.ggml_c.GGML_STATUS_SUCCESS), status);
@@ -2158,13 +2158,13 @@ test "isViewOp names exactly the four view ops" {
 }
 
 test "dupTensorLayout keeps the source's strides, not contiguous ones" {
-    const gctx = mod.impl.ggml_c.ggml_init(.{ .mem_size = 1024 * 1024, .mem_buffer = null, .no_alloc = true });
-    defer mod.impl.ggml_c.ggml_free(gctx);
+    const gctx = mod.context.ggml_init(.{ .mem_size = 1024 * 1024, .mem_buffer = null, .no_alloc = true }).?;
+    defer mod.context.ggml_free(gctx);
 
-    const base = mod.impl.ggml_c.ggml_new_tensor_2d(gctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, 8);
+    const base = mod.context.ggml_new_tensor_2d(gctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, 8);
     // A transpose has non-contiguous strides, which `ggml_dup_tensor` alone
     // would discard -- that is the whole reason this helper exists.
-    const t = mod.impl.one(mod.impl.ggml_c.ggml_tensor, mod.impl.ggml_c.ggml_transpose(gctx, base));
+    const t = mod.impl.one(mod.impl.ggml_c.ggml_tensor, mod.ops.ggml_transpose(gctx, base));
     const dup = mod.impl.one(mod.impl.ggml_c.ggml_tensor, dupTensorLayout(gctx, t));
 
     // Through single-item pointers: `t.*.nb[i]` on a `[*c]` is the whole
@@ -2177,13 +2177,13 @@ test "dupTensorLayout keeps the source's strides, not contiguous ones" {
 }
 
 test "dupTensorLayout touches nothing past the strides" {
-    const gctx = mod.impl.ggml_c.ggml_init(.{ .mem_size = 1024 * 1024, .mem_buffer = null, .no_alloc = true });
-    defer mod.impl.ggml_c.ggml_free(gctx);
+    const gctx = mod.context.ggml_init(.{ .mem_size = 1024 * 1024, .mem_buffer = null, .no_alloc = true }).?;
+    defer mod.context.ggml_free(gctx);
 
-    const a = mod.impl.ggml_c.ggml_new_tensor_2d(gctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, 8);
-    const b = mod.impl.ggml_c.ggml_new_tensor_2d(gctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, 8);
-    const src = mod.impl.one(mod.impl.ggml_c.ggml_tensor, mod.impl.ggml_c.ggml_add(gctx, a, b));
-    _ = mod.impl.ggml_c.ggml_set_output(src);
+    const a = mod.context.ggml_new_tensor_2d(gctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, 8);
+    const b = mod.context.ggml_new_tensor_2d(gctx, mod.impl.ggml_c.GGML_TYPE_F32, 4, 8);
+    const src = mod.impl.one(mod.impl.ggml_c.ggml_tensor, mod.ops.ggml_add(gctx, a, b));
+    _ = mod.ops.ggml_set_output(src);
 
     const dup = mod.impl.one(mod.impl.ggml_c.ggml_tensor, dupTensorLayout(gctx, src));
 

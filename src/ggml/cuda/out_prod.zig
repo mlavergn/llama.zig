@@ -83,7 +83,7 @@ pub fn outProd(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tenso
     const lda: i64 = @bitCast(nb01 / @sizeOf(f32));
     const ldc: i64 = @bitCast(nb1 / @sizeOf(f32));
 
-    const src1_T = ggml.impl.ggml_c.ggml_is_transposed(src1);
+    const src1_T = ggml.types.ggml_is_transposed(src1);
     const src1_cublas_op: ggml.cuda.common.cu.cublasOperation_t = if (src1_T) ggml.cuda.common.cu.CUBLAS_OP_N else ggml.cuda.common.cu.CUBLAS_OP_T;
     const ldb: i64 = @bitCast((if (src1_T) nb10 else nb11) / @sizeOf(f32));
     ggml.impl.assert((if (src1_T) nb11 else nb10) == @sizeOf(f32), "(src1_T ?        nb11 :        nb10) == sizeof(float)");

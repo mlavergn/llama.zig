@@ -213,7 +213,7 @@ const Registry = struct {
             }
         }
         if (config.use_blas) self.registerBackend(ggml_backend_blas_reg(), null);
-        self.registerBackend(mod.impl.ggml_c.ggml_backend_cpu_reg(), null);
+        self.registerBackend(mod.cpu.cpu_backend.ggml_backend_cpu_reg(), null);
     }
 
     /// Ports `ggml_backend_registry`'s `register_backend`
@@ -235,8 +235,8 @@ const Registry = struct {
         if (debug_build) {
             mod.impl.logDebug("%s: registered backend %s (%zu devices)\n", .{
                 "register_backend",
-                mod.impl.ggml_c.ggml_backend_reg_name(reg),
-                mod.impl.ggml_c.ggml_backend_reg_dev_count(reg),
+                mod.backend.ggml_backend_reg_name(reg),
+                mod.backend.ggml_backend_reg_dev_count(reg),
             });
         }
 
@@ -244,9 +244,9 @@ const Registry = struct {
             mod.impl.abort("failed to grow the backend registry");
 
         var i: usize = 0;
-        const n = mod.impl.ggml_c.ggml_backend_reg_dev_count(reg);
+        const n = mod.backend.ggml_backend_reg_dev_count(reg);
         while (i < n) : (i += 1) {
-            self.registerDevice(mod.impl.ggml_c.ggml_backend_reg_dev_get(reg, i));
+            self.registerDevice(mod.backend.ggml_backend_reg_dev_get(reg, i));
         }
     }
 
@@ -265,8 +265,8 @@ const Registry = struct {
         if (debug_build) {
             mod.impl.logDebug("%s: registered device %s (%s)\n", .{
                 "register_device",
-                mod.impl.ggml_c.ggml_backend_dev_name(device),
-                mod.impl.ggml_c.ggml_backend_dev_description(device),
+                mod.backend.ggml_backend_dev_name(device),
+                mod.backend.ggml_backend_dev_description(device),
             });
         }
 
@@ -337,7 +337,7 @@ const Registry = struct {
 
         mod.impl.logInfo("%s: loaded %s backend from %s\n", .{
             "load_backend",
-            mod.impl.ggml_c.ggml_backend_reg_name(reg),
+            mod.backend.ggml_backend_reg_name(reg),
             path,
         });
 
@@ -363,14 +363,14 @@ const Registry = struct {
         };
 
         if (!silent) {
-            mod.impl.logDebug("%s: unloading %s backend\n", .{ "unload_backend", mod.impl.ggml_c.ggml_backend_reg_name(reg) });
+            mod.impl.logDebug("%s: unloading %s backend\n", .{ "unload_backend", mod.backend.ggml_backend_reg_name(reg) });
         }
 
         // `std::remove_if` then `erase`: drop every device belonging to `reg`
         // while keeping the rest in order.
         var kept: usize = 0;
         for (self.devices.items) |dev| {
-            if (mod.impl.ggml_c.ggml_backend_dev_backend_reg(dev) == reg) continue;
+            if (mod.backend.ggml_backend_dev_backend_reg(dev) == reg) continue;
             self.devices.items[kept] = dev;
             kept += 1;
         }
@@ -466,7 +466,7 @@ pub fn ggml_backend_reg_by_name(name: [*:0]const u8) callconv(.c) mod.impl.ggml_
     var i: usize = 0;
     while (i < ggml_backend_reg_count()) : (i += 1) {
         const reg = ggml_backend_reg_get(i);
-        if (striequals(mod.impl.ggml_c.ggml_backend_reg_name(reg), name)) return reg;
+        if (striequals(mod.backend.ggml_backend_reg_name(reg), name)) return reg;
     }
     return null;
 }
@@ -502,7 +502,7 @@ pub fn ggml_backend_dev_by_name(name: [*:0]const u8) callconv(.c) mod.impl.ggml_
     var i: usize = 0;
     while (i < ggml_backend_dev_count()) : (i += 1) {
         const dev = ggml_backend_dev_get(i);
-        if (striequals(mod.impl.ggml_c.ggml_backend_dev_name(dev), name)) return dev;
+        if (striequals(mod.backend.ggml_backend_dev_name(dev), name)) return dev;
     }
     return null;
 }
@@ -517,7 +517,7 @@ pub fn ggml_backend_dev_by_type(dev_type: mod.impl.ggml_c.enum_ggml_backend_dev_
     var i: usize = 0;
     while (i < ggml_backend_dev_count()) : (i += 1) {
         const dev = ggml_backend_dev_get(i);
-        if (mod.impl.ggml_c.ggml_backend_dev_type(dev) == dev_type) return dev;
+        if (mod.backend.ggml_backend_dev_type(dev) == dev_type) return dev;
     }
     return null;
 }
@@ -535,7 +535,7 @@ pub fn ggml_backend_dev_by_type(dev_type: mod.impl.ggml_c.enum_ggml_backend_dev_
 /// caller, released with `ggml_backend_free`.
 pub fn ggml_backend_init_by_name(name: [*:0]const u8, params: ?[*:0]const u8) callconv(.c) mod.impl.ggml_c.ggml_backend_t {
     const dev = ggml_backend_dev_by_name(name) orelse return null;
-    return mod.impl.ggml_c.ggml_backend_dev_init(dev, params);
+    return mod.backend.ggml_backend_dev_init(dev, params);
 }
 
 /// Ports `ggml_backend_init_by_type` (src/ggml-backend-reg.cpp:374 @b1b770d90).
@@ -550,7 +550,7 @@ pub fn ggml_backend_init_by_type(
     params: ?[*:0]const u8,
 ) callconv(.c) mod.impl.ggml_c.ggml_backend_t {
     const dev = ggml_backend_dev_by_type(dev_type) orelse return null;
-    return mod.impl.ggml_c.ggml_backend_dev_init(dev, params);
+    return mod.backend.ggml_backend_dev_init(dev, params);
 }
 
 /// Ports `ggml_backend_init_best` (src/ggml-backend-reg.cpp:382 @b1b770d90).
@@ -563,7 +563,7 @@ pub fn ggml_backend_init_best() callconv(.c) mod.impl.ggml_c.ggml_backend_t {
     if (dev == null) dev = ggml_backend_dev_by_type(mod.impl.ggml_c.GGML_BACKEND_DEVICE_TYPE_IGPU);
     if (dev == null) dev = ggml_backend_dev_by_type(mod.impl.ggml_c.GGML_BACKEND_DEVICE_TYPE_CPU);
     if (dev == null) return null;
-    return mod.impl.ggml_c.ggml_backend_dev_init(dev, null);
+    return mod.backend.ggml_backend_dev_init(dev, null);
 }
 
 // -----------------------------------------------------------------------------
@@ -996,21 +996,21 @@ test "the registry reports the two backends this build compiles" {
     try std.testing.expectEqual(gpu_regs + 1, ggml_backend_reg_count());
 
     if (config.use_cuda) {
-        try std.testing.expectEqualStrings("CUDA", std.mem.sliceTo(mod.impl.ggml_c.ggml_backend_reg_name(ggml_backend_reg_get(0)), 0));
+        try std.testing.expectEqualStrings("CUDA", std.mem.sliceTo(mod.backend.ggml_backend_reg_name(ggml_backend_reg_get(0)), 0));
     }
 
     if (config.use_metal) {
         // The Metal backend registers itself as `GGML_METAL_NAME`, which is
         // "MTL", not "Metal" (ggml-metal/ggml-metal.cpp:15 @b1b770d90). Asserting the real names is
         // the point: the first version of this test guessed "Metal" and failed.
-        try std.testing.expectEqualStrings("MTL", std.mem.sliceTo(mod.impl.ggml_c.ggml_backend_reg_name(ggml_backend_reg_get(0)), 0));
+        try std.testing.expectEqualStrings("MTL", std.mem.sliceTo(mod.backend.ggml_backend_reg_name(ggml_backend_reg_get(0)), 0));
         try std.testing.expect(ggml_backend_reg_by_name("MTL") != null);
         // Lookup folds case, as `striequals` does.
         try std.testing.expect(ggml_backend_reg_by_name("mtl") != null);
     }
 
     const cpu = ggml_backend_reg_get(ggml_backend_reg_count() - 1);
-    try std.testing.expectEqualStrings("CPU", std.mem.sliceTo(mod.impl.ggml_c.ggml_backend_reg_name(cpu), 0));
+    try std.testing.expectEqualStrings("CPU", std.mem.sliceTo(mod.backend.ggml_backend_reg_name(cpu), 0));
     try std.testing.expect(ggml_backend_reg_by_name("CPU") != null);
     try std.testing.expect(ggml_backend_reg_by_name("cpu") != null);
     try std.testing.expect(ggml_backend_reg_by_name("nonesuch") == null);
@@ -1022,7 +1022,7 @@ test "every registered device is reachable by name and by type" {
     var i: usize = 0;
     while (i < ggml_backend_dev_count()) : (i += 1) {
         const dev = ggml_backend_dev_get(i);
-        try std.testing.expectEqual(dev, ggml_backend_dev_by_name(mod.impl.ggml_c.ggml_backend_dev_name(dev)));
+        try std.testing.expectEqual(dev, ggml_backend_dev_by_name(mod.backend.ggml_backend_dev_name(dev)));
     }
 
     // This build always has a CPU device; `init_best` falls back to it.

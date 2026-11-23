@@ -49,7 +49,7 @@ fn pool1dKsp(params: *const ggml.cpu.defs.ComputeParams, op: ggml.impl.ggml_c.en
     const IW = src.ne[0];
     const OW = dst.ne[0];
 
-    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src));
+    const nr: i64 = @intCast(ggml.types.ggml_nrows(src));
     const is_f32 = src.type == ggml.impl.ggml_c.GGML_TYPE_F32;
 
     const sd: [*]const u8 = @ptrCast(src.data.?);
@@ -134,7 +134,7 @@ pub fn ggml_compute_forward_pool_2d(params: *const ggml.cpu.defs.ComputeParams, 
     const p0 = opts[5];
     const p1 = opts[6];
     var cdata: [*]const u8 = @ptrCast(src.data.?);
-    const data_end = cdata + ggml.impl.ggml_c.ggml_nbytes(src);
+    const data_end = cdata + ggml.types.ggml_nbytes(src);
 
     const px = dst.ne[0];
     const py = dst.ne[1];
@@ -226,7 +226,7 @@ pub fn ggml_compute_forward_pool_2d_back(params: *const ggml.cpu.defs.ComputePar
 
     var cdata: [*]u8 = @ptrCast(dst.data.?);
     var cdataf: [*]const u8 = @ptrCast(dstf.data.?);
-    const nbytes = ggml.impl.ggml_c.ggml_nbytes(dst);
+    const nbytes = ggml.types.ggml_nbytes(dst);
     const data_end = cdata + nbytes;
 
     ggml.impl.assert(params.ith == 0, "params->ith == 0");

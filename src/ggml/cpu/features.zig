@@ -287,7 +287,7 @@ pub fn ggml_cpu_init() callconv(.c) void {
         ggml.context.ggml_free(ggml.context.ggml_init(params));
     }
 
-    ggml.impl.ggml_c.ggml_critical_section_start();
+    ggml.threading.ggml_critical_section_start();
 
     if (is_first_call) {
         const t_start = ggml.runtime.ggml_time_us();
@@ -309,7 +309,7 @@ pub fn ggml_cpu_init() callconv(.c) void {
         is_first_call = false;
     }
 
-    ggml.impl.ggml_c.ggml_critical_section_end();
+    ggml.threading.ggml_critical_section_end();
 }
 
 /// Ports `ggml_init_arm_arch_features` (ggml-cpu.c:741 @b1b770d90).

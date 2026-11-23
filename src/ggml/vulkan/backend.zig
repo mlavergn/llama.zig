@@ -56,7 +56,7 @@ pub fn init(dev_num: usize) callconv(.c) ggml.impl.ggml_c.ggml_backend_t {
 
 /// Ports `ggml_backend_is_vk` (ggml-vulkan.cpp:15742 @b1b770d90).
 pub fn isVk(backend: ggml.impl.ggml_c.ggml_backend_t) callconv(.c) bool {
-    return backend != null and ggml.impl.ggml_c.ggml_guid_matches(ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend, backend).guid, &guid);
+    return backend != null and ggml.runtime.ggml_guid_matches(ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend, backend).guid, &guid);
 }
 
 /// Ports `ggml_backend_vk_get_device_count` (ggml-vulkan.cpp:15746 @b1b770d90).
@@ -171,7 +171,7 @@ fn opBatchSize(op: *const ggml.impl.ggml_c.ggml_tensor) i64 {
         ggml.impl.ggml_c.GGML_OP_GET_ROWS => 0,
         ggml.impl.ggml_c.GGML_OP_MUL_MAT => op.ne[1],
         ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID, ggml.impl.ggml_c.GGML_OP_ROPE, ggml.impl.ggml_c.GGML_OP_ROPE_BACK => op.ne[2],
-        else => ggml.impl.ggml_c.ggml_nrows(op),
+        else => ggml.types.ggml_nrows(op),
     };
 }
 
@@ -259,7 +259,7 @@ fn regGetDevice(r: ggml.impl.ggml_c.ggml_backend_reg_t, device: usize) callconv(
                     .device = i,
                     .name = std.fmt.allocPrintSentinel(std.heap.c_allocator, "{s}{d}", .{ ggml.vulkan.common.name, i }, 0) catch ggml.impl.abort("ggml_vulkan: out of memory"),
                     .description = std.heap.c_allocator.dupeSentinel(u8, std.mem.sliceTo(&desc, 0), 0) catch ggml.impl.abort("ggml_vulkan: out of memory"),
-                    .is_integrated_gpu = ggml.vulkan.instance.getDeviceType(i) == ggml.vulkan.common.vk.VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU,
+                    .is_integrated_gpu = ggml.vulkan.instance.getDeviceType(i) == ggml.vulkan.common.vulkan_c.VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU,
                     .pci_bus_id = std.heap.c_allocator.dupeSentinel(u8, ggml.vulkan.instance.getDevicePciId(i, &pci), 0) catch ggml.impl.abort("ggml_vulkan: out of memory"),
                     .op_offload_min_batch_size = min_batch_size,
                 };

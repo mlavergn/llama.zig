@@ -134,7 +134,7 @@ pub const conv_shape_count = 5;
 
 /// Ports `vk_command_buffer` (ggml-vulkan-types.h:302 @b1b770d90).
 pub const CommandBuffer = struct {
-    buf: ggml.vulkan.common.vk.VkCommandBuffer = null,
+    buf: ggml.vulkan.common.vulkan_c.VkCommandBuffer = null,
     use_counter: u64 = 0,
     in_use: bool = false,
 };
@@ -143,7 +143,7 @@ pub const CommandBuffer = struct {
 /// its buffers in a `std::deque` so pointers to them survive growth; here
 /// each is its own allocation.
 pub const CommandPool = struct {
-    pool: ggml.vulkan.common.vk.VkCommandPool = null,
+    pool: ggml.vulkan.common.vulkan_c.VkCommandPool = null,
     cmd_buffers: std.ArrayList(*CommandBuffer) = .empty,
     q: ?*Queue = null,
 
@@ -151,14 +151,14 @@ pub const CommandPool = struct {
     pub fn init(self: *CommandPool, device: *Device, q: *Queue) void {
         self.clearBuffers();
         self.q = q;
-        var info = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkCommandPoolCreateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO);
-        info.flags = ggml.vulkan.common.vk.VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | ggml.vulkan.common.vk.VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        var info = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkCommandPoolCreateInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO);
+        info.flags = ggml.vulkan.common.vulkan_c.VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | ggml.vulkan.common.vulkan_c.VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
         info.queueFamilyIndex = q.queue_family_index;
         ggml.vulkan.common.checkOrAbort(ggml.vulkan.common.dispatch.vkCreateCommandPool.?(device.device, &info, null, &self.pool), "vk::Device::createCommandPool");
     }
 
     /// Ports `vk_command_pool`'s `destroy` (ggml-vulkan-types.h:1067 @b1b770d90).
-    pub fn destroy(self: *CommandPool, device: ggml.vulkan.common.vk.VkDevice) void {
+    pub fn destroy(self: *CommandPool, device: ggml.vulkan.common.vulkan_c.VkDevice) void {
         ggml.vulkan.common.dispatch.vkDestroyCommandPool.?(device, self.pool, null);
         self.pool = null;
         self.clearBuffers();
@@ -184,7 +184,7 @@ pub const CommandPool = struct {
 /// `device_submit_mutex`, set on NVIDIA, serialises submissions across
 /// every queue of the device, around a driver bug.
 pub const QueueHandle = struct {
-    queue: ggml.vulkan.common.vk.VkQueue = null,
+    queue: ggml.vulkan.common.vulkan_c.VkQueue = null,
     device: *Device,
     device_submit_mutex: ?*stdlib.sync.Mutex = null,
     synchronized: bool,
@@ -204,7 +204,7 @@ pub const Queue = struct {
     queue_family_index: u32 = 0,
     handle: *QueueHandle,
     cmd_pool: CommandPool = .{},
-    stage_flags: ggml.vulkan.common.vk.VkPipelineStageFlags = 0,
+    stage_flags: ggml.vulkan.common.vulkan_c.VkPipelineStageFlags = 0,
     transfer_only: bool = false,
 };
 
@@ -267,8 +267,8 @@ pub const Device = struct {
 
     debug_cmdbuf_idx: u32 = 0,
 
-    physical_device: ggml.vulkan.common.vk.VkPhysicalDevice = null,
-    properties: ggml.vulkan.common.vk.VkPhysicalDeviceProperties = std.mem.zeroes(ggml.vulkan.common.vk.VkPhysicalDeviceProperties),
+    physical_device: ggml.vulkan.common.vulkan_c.VkPhysicalDevice = null,
+    properties: ggml.vulkan.common.vulkan_c.VkPhysicalDeviceProperties = std.mem.zeroes(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceProperties),
     name: [:0]const u8 = "",
     max_memory_allocation_size: u64 = 0,
     max_buffer_size: u64 = 0,
@@ -280,9 +280,9 @@ pub const Device = struct {
     bf16: bool = false,
     pipeline_robustness: bool = false,
     memory_priority: bool = false,
-    device: ggml.vulkan.common.vk.VkDevice = null,
+    device: ggml.vulkan.common.vulkan_c.VkDevice = null,
     vendor_id: u32 = 0,
-    driver_id: ggml.vulkan.common.vk.VkDriverId = 0,
+    driver_id: ggml.vulkan.common.vulkan_c.VkDriverId = 0,
     architecture: ggml.vulkan.instance.Architecture = .other,
     compute_queue: ?*Queue = null,
     transfer_queue: ?*Queue = null,
@@ -356,7 +356,7 @@ pub const Device = struct {
     pipeline_executable_properties_support: bool = false,
 
     device_fault: bool = false,
-    pfn_vkGetDeviceFaultInfoEXT: ggml.vulkan.common.vk.PFN_vkGetDeviceFaultInfoEXT = null,
+    pfn_vkGetDeviceFaultInfoEXT: ggml.vulkan.common.vulkan_c.PFN_vkGetDeviceFaultInfoEXT = null,
 
     serialize_submissions: bool = false,
 
@@ -381,7 +381,7 @@ pub const Device = struct {
     mul_mat_id_m_int: [ggml.impl.ggml_c.GGML_TYPE_COUNT]bool = @splat(false),
     mul_mat_id_s_int: [ggml.impl.ggml_c.GGML_TYPE_COUNT]bool = @splat(false),
 
-    dsl: ggml.vulkan.common.vk.VkDescriptorSetLayout = null,
+    dsl: ggml.vulkan.common.vulkan_c.VkDescriptorSetLayout = null,
 
     pipeline_matmul: std.AutoHashMapUnmanaged(ggml.vulkan.pipeline.MatmulPipelineKey, *ggml.vulkan.pipeline.MatmulPipelineList) = .empty,
     matmul_tile_selector: ?ggml.vulkan.pipeline.MatmulTileSelector = null,
@@ -650,7 +650,7 @@ pub const Device = struct {
 
     all_pipelines: std.ArrayList(*ggml.vulkan.pipeline.Pipeline) = .empty,
 
-    fence: ggml.vulkan.common.vk.VkFence = null,
+    fence: ggml.vulkan.common.vulkan_c.VkFence = null,
     sync_staging: ?*ggml.vulkan.buffer.Buffer = null,
 
     buffer_type: ggml.impl.ggml_c.struct_ggml_backend_buffer_type = undefined,
@@ -705,7 +705,7 @@ pub fn matmulPipelines(device: *Device, key: ggml.vulkan.pipeline.MatmulPipeline
 }
 
 /// Ports `ggml_vk_find_queue_family_index` (ggml-vulkan.cpp:986 @b1b770d90).
-fn findQueueFamilyIndex(props: []const ggml.vulkan.common.vk.VkQueueFamilyProperties, required: ggml.vulkan.common.vk.VkQueueFlags, avoid: ggml.vulkan.common.vk.VkQueueFlags, compute_index: i32, min_num_queues: u32) u32 {
+fn findQueueFamilyIndex(props: []const ggml.vulkan.common.vulkan_c.VkQueueFamilyProperties, required: ggml.vulkan.common.vulkan_c.VkQueueFlags, avoid: ggml.vulkan.common.vulkan_c.VkQueueFlags, compute_index: i32, min_num_queues: u32) u32 {
     const qfsize: u32 = @intCast(props.len);
     const other = struct {
         fn f(ci: i32, i: u32) bool {
@@ -745,16 +745,16 @@ fn findQueueFamilyIndex(props: []const ggml.vulkan.common.vk.VkQueueFamilyProper
 }
 
 /// `vk::to_string(vk::QueueFlags)`: `{ Graphics | Compute | ... }`.
-fn queueFlagsString(flags: ggml.vulkan.common.vk.VkQueueFlags, buf: []u8) [:0]const u8 {
+fn queueFlagsString(flags: ggml.vulkan.common.vulkan_c.VkQueueFlags, buf: []u8) [:0]const u8 {
     const names = [_]struct { u32, []const u8 }{
-        .{ ggml.vulkan.common.vk.VK_QUEUE_GRAPHICS_BIT, "Graphics" },
-        .{ ggml.vulkan.common.vk.VK_QUEUE_COMPUTE_BIT, "Compute" },
-        .{ ggml.vulkan.common.vk.VK_QUEUE_TRANSFER_BIT, "Transfer" },
-        .{ ggml.vulkan.common.vk.VK_QUEUE_SPARSE_BINDING_BIT, "SparseBinding" },
-        .{ ggml.vulkan.common.vk.VK_QUEUE_PROTECTED_BIT, "Protected" },
-        .{ ggml.vulkan.common.vk.VK_QUEUE_VIDEO_DECODE_BIT_KHR, "VideoDecodeKHR" },
-        .{ ggml.vulkan.common.vk.VK_QUEUE_VIDEO_ENCODE_BIT_KHR, "VideoEncodeKHR" },
-        .{ ggml.vulkan.common.vk.VK_QUEUE_OPTICAL_FLOW_BIT_NV, "OpticalFlowNV" },
+        .{ ggml.vulkan.common.vulkan_c.VK_QUEUE_GRAPHICS_BIT, "Graphics" },
+        .{ ggml.vulkan.common.vulkan_c.VK_QUEUE_COMPUTE_BIT, "Compute" },
+        .{ ggml.vulkan.common.vulkan_c.VK_QUEUE_TRANSFER_BIT, "Transfer" },
+        .{ ggml.vulkan.common.vulkan_c.VK_QUEUE_SPARSE_BINDING_BIT, "SparseBinding" },
+        .{ ggml.vulkan.common.vulkan_c.VK_QUEUE_PROTECTED_BIT, "Protected" },
+        .{ ggml.vulkan.common.vulkan_c.VK_QUEUE_VIDEO_DECODE_BIT_KHR, "VideoDecodeKHR" },
+        .{ ggml.vulkan.common.vulkan_c.VK_QUEUE_VIDEO_ENCODE_BIT_KHR, "VideoEncodeKHR" },
+        .{ ggml.vulkan.common.vulkan_c.VK_QUEUE_OPTICAL_FLOW_BIT_NV, "OpticalFlowNV" },
     };
     if (flags == 0) return "{}";
     var w: std.Io.Writer = .fixed(buf[0 .. buf.len - 1]);
@@ -772,16 +772,16 @@ fn queueFlagsString(flags: ggml.vulkan.common.vk.VkQueueFlags, buf: []u8) [:0]co
 }
 
 /// Ports `ggml_vk_create_queue` (ggml-vulkan.cpp:1032 @b1b770d90).
-fn createQueue(device: *Device, queue_family_index: u32, queue_index: u32, stage_flags: ggml.vulkan.common.vk.VkPipelineStageFlags, transfer_only: bool) *Queue {
+fn createQueue(device: *Device, queue_family_index: u32, queue_index: u32, stage_flags: ggml.vulkan.common.vulkan_c.VkPipelineStageFlags, transfer_only: bool) *Queue {
     device.lock();
     defer device.unlock();
 
     const h = std.heap.c_allocator.create(QueueHandle) catch ggml.impl.abort("ggml_vulkan: out of memory");
     h.* = .{ .device = device, .synchronized = !device.has_internally_synchronized_queues };
-    var info2 = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkDeviceQueueInfo2, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_DEVICE_QUEUE_INFO_2);
+    var info2 = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkDeviceQueueInfo2, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_DEVICE_QUEUE_INFO_2);
     info2.queueFamilyIndex = queue_family_index;
     info2.queueIndex = queue_index;
-    if (device.has_internally_synchronized_queues) info2.flags = ggml.vulkan.common.vk.VK_DEVICE_QUEUE_CREATE_INTERNALLY_SYNCHRONIZED_BIT_KHR;
+    if (device.has_internally_synchronized_queues) info2.flags = ggml.vulkan.common.vulkan_c.VK_DEVICE_QUEUE_CREATE_INTERNALLY_SYNCHRONIZED_BIT_KHR;
     ggml.vulkan.common.dispatch.vkGetDeviceQueue2.?(device.device, &info2, &h.queue);
     // Avoid concurrent submissions on NVIDIA due to driver bug.
     if (device.vendor_id == ggml.vulkan.common.vendor_id.nvidia) {
@@ -812,8 +812,8 @@ fn createAliasedQueue(device: *Device, source: *const Queue) *Queue {
 }
 
 /// Ports `ggml_vk_intel_shader_core_count` (ggml-vulkan.cpp:16872 @b1b770d90).
-fn intelShaderCoreCount(vkdev: ggml.vulkan.common.vk.VkPhysicalDevice) u32 {
-    var props = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceProperties2, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2);
+fn intelShaderCoreCount(vkdev: ggml.vulkan.common.vulkan_c.VkPhysicalDevice) u32 {
+    var props = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceProperties2, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2);
     ggml.vulkan.common.dispatch.vkGetPhysicalDeviceProperties2.?(vkdev, &props);
     if (props.properties.vendorID != ggml.vulkan.common.vendor_id.intel) return 0;
     return switch (props.properties.deviceID) {
@@ -852,7 +852,7 @@ fn stoul(comptime var_name: []const u8, s: [*:0]const u8) u32 {
 
 /// Links `next` onto the end of a `pNext` chain at `last`, the C++'s
 /// `last_struct->pNext = ...; last_struct = ...;`.
-fn link(last: **ggml.vulkan.common.vk.VkBaseOutStructure, next: anytype) void {
+fn link(last: **ggml.vulkan.common.vulkan_c.VkBaseOutStructure, next: anytype) void {
     last.*.pNext = @ptrCast(next);
     last.* = @ptrCast(next);
 }
@@ -941,21 +941,21 @@ pub fn getDevice(idx: usize) *Device {
             device.coopmat_k = 0;
         } else if (ggml.vulkan.instance.glslc.coopmat2 and eq("VK_NV_cooperative_matrix2", n) and !ggml.vulkan.common.envSet("GGML_VK_DISABLE_COOPMAT2")) {
             coopmat2_support = true;
-        } else if (eq(ggml.vulkan.common.vk.VK_NV_COOPERATIVE_MATRIX_DECODE_VECTOR_EXTENSION_NAME, n) and !ggml.vulkan.common.envSet("GGML_VK_DISABLE_COOPMAT2_DECODE_VECTOR")) {
+        } else if (eq(ggml.vulkan.common.vulkan_c.VK_NV_COOPERATIVE_MATRIX_DECODE_VECTOR_EXTENSION_NAME, n) and !ggml.vulkan.common.envSet("GGML_VK_DISABLE_COOPMAT2_DECODE_VECTOR")) {
             coopmat2_decode_vector_support = true;
         } else if (ggml.vulkan.instance.glslc.integer_dot and eq("VK_KHR_shader_integer_dot_product", n) and !ggml.vulkan.common.envSet("GGML_VK_DISABLE_INTEGER_DOT_PRODUCT")) {
             device.integer_dot_product = true;
         } else if (ggml.vulkan.instance.glslc.bfloat16 and eq("VK_KHR_shader_bfloat16", n) and !ggml.vulkan.common.envSet("GGML_VK_DISABLE_BFLOAT16")) {
             bfloat16_support = true;
-        } else if (ggml.vulkan.instance.glslc.float_e2m1 and eq(ggml.vulkan.common.vk.VK_EXT_SHADER_OCP_MICROSCALING_TYPES_EXTENSION_NAME, n)) {
+        } else if (ggml.vulkan.instance.glslc.float_e2m1 and eq(ggml.vulkan.common.vulkan_c.VK_EXT_SHADER_OCP_MICROSCALING_TYPES_EXTENSION_NAME, n)) {
             ocp_microscaling_extension = true;
-        } else if (ggml.vulkan.instance.glslc.float_e4m3 and eq(ggml.vulkan.common.vk.VK_EXT_SHADER_FLOAT8_EXTENSION_NAME, n)) {
+        } else if (ggml.vulkan.instance.glslc.float_e4m3 and eq(ggml.vulkan.common.vulkan_c.VK_EXT_SHADER_FLOAT8_EXTENSION_NAME, n)) {
             shader_float8_extension = true;
         } else if (eq("VK_VALVE_shader_mixed_float_dot_product", n) and !ggml.vulkan.common.envSet("GGML_VK_DISABLE_DOT2")) {
             dot2_f16_support = true;
         } else if (eq("VK_KHR_pipeline_executable_properties", n)) {
             pipeline_executable_properties_support = true;
-        } else if (@hasDecl(ggml.vulkan.common.vk, "VK_KHR_workgroup_memory_explicit_layout") and eq("VK_KHR_workgroup_memory_explicit_layout", n)) {
+        } else if (@hasDecl(ggml.vulkan.common.vulkan_c, "VK_KHR_workgroup_memory_explicit_layout") and eq("VK_KHR_workgroup_memory_explicit_layout", n)) {
             workgroup_memory_explicit_layout_support = true;
         } else if (eq("VK_EXT_memory_priority", n) and ggml.vulkan.common.envSet("GGML_VK_ENABLE_MEMORY_PRIORITY")) {
             device.memory_priority = true;
@@ -963,27 +963,27 @@ pub fn getDevice(idx: usize) *Device {
             device.external_memory_host = true;
         } else if (eq("VK_KHR_external_semaphore_fd", n)) {
             device.external_semaphore = true;
-        } else if (@hasDecl(ggml.vulkan.common.vk, "VK_EXT_shader_64bit_indexing") and eq("VK_EXT_shader_64bit_indexing", n)) {
+        } else if (@hasDecl(ggml.vulkan.common.vulkan_c, "VK_EXT_shader_64bit_indexing") and eq("VK_EXT_shader_64bit_indexing", n)) {
             device.shader_64b_indexing = true;
-        } else if (eq(ggml.vulkan.common.vk.VK_KHR_INTERNALLY_SYNCHRONIZED_QUEUES_EXTENSION_NAME, n)) {
+        } else if (eq(ggml.vulkan.common.vulkan_c.VK_KHR_INTERNALLY_SYNCHRONIZED_QUEUES_EXTENSION_NAME, n)) {
             internally_sync_support = true;
         } else if (eq("VK_EXT_device_fault", n)) {
             device.device_fault = true;
         }
     }
 
-    var props2 = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceProperties2, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2);
-    var props3 = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceMaintenance3Properties, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES);
-    var props4 = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceMaintenance4Properties, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_PROPERTIES);
-    var subgroup_props = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceSubgroupProperties, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES);
-    var driver_props = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceDriverProperties, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES);
-    var sm_props = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceShaderSMBuiltinsPropertiesNV, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SM_BUILTINS_PROPERTIES_NV);
-    var amd_shader_core_properties2_props = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceShaderCoreProperties2AMD, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CORE_PROPERTIES_2_AMD);
-    var vk11_props = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceVulkan11Properties, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES);
-    var vk12_props = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceVulkan12Properties, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES);
-    var subgroup_size_control_props = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceSubgroupSizeControlPropertiesEXT, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES);
-    var shader_integer_dot_product_props = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceShaderIntegerDotProductPropertiesKHR, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_PROPERTIES);
-    var external_memory_host_props = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceExternalMemoryHostPropertiesEXT, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT);
+    var props2 = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceProperties2, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2);
+    var props3 = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceMaintenance3Properties, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES);
+    var props4 = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceMaintenance4Properties, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_PROPERTIES);
+    var subgroup_props = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceSubgroupProperties, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES);
+    var driver_props = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceDriverProperties, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES);
+    var sm_props = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceShaderSMBuiltinsPropertiesNV, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SM_BUILTINS_PROPERTIES_NV);
+    var amd_shader_core_properties2_props = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceShaderCoreProperties2AMD, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CORE_PROPERTIES_2_AMD);
+    var vk11_props = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceVulkan11Properties, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES);
+    var vk12_props = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceVulkan12Properties, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES);
+    var subgroup_size_control_props = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceSubgroupSizeControlPropertiesEXT, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES);
+    var shader_integer_dot_product_props = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceShaderIntegerDotProductPropertiesKHR, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_PROPERTIES);
+    var external_memory_host_props = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceExternalMemoryHostPropertiesEXT, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT);
 
     props2.pNext = &props3;
     props3.pNext = &subgroup_props;
@@ -991,12 +991,12 @@ pub fn getDevice(idx: usize) *Device {
     driver_props.pNext = &vk11_props;
     vk11_props.pNext = &vk12_props;
 
-    var last_struct: *ggml.vulkan.common.vk.VkBaseOutStructure = @ptrCast(&vk12_props);
+    var last_struct: *ggml.vulkan.common.vulkan_c.VkBaseOutStructure = @ptrCast(&vk12_props);
     if (maintenance4_support) link(&last_struct, &props4);
     if (sm_builtins) link(&last_struct, &sm_props);
     if (amd_shader_core_properties2) link(&last_struct, &amd_shader_core_properties2_props);
     if (device.subgroup_size_control) link(&last_struct, &subgroup_size_control_props);
-    var coopmat2_props = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceCooperativeMatrix2PropertiesNV, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_2_PROPERTIES_NV);
+    var coopmat2_props = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceCooperativeMatrix2PropertiesNV, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_2_PROPERTIES_NV);
     if (coopmat2_support) link(&last_struct, &coopmat2_props);
     if (device.integer_dot_product) link(&last_struct, &shader_integer_dot_product_props);
     if (device.external_memory_host) link(&last_struct, &external_memory_host_props);
@@ -1042,7 +1042,7 @@ pub fn getDevice(idx: usize) *Device {
 
     device.subgroup_size = subgroup_props.subgroupSize;
     device.subgroup_size_log2 = @intFromFloat(@log2(@as(f32, @floatFromInt(device.subgroup_size))));
-    device.uma = device.properties.deviceType == ggml.vulkan.common.vk.VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
+    device.uma = device.properties.deviceType == ggml.vulkan.common.vulkan_c.VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
     device.rebar = ggml.vulkan.common.hasRebar(device.physical_device);
     if (sm_builtins) {
         device.shader_core_count = sm_props.shaderSMCount;
@@ -1056,17 +1056,17 @@ pub fn getDevice(idx: usize) *Device {
     device.float_controls_rte_fp16 = vk12_props.shaderRoundingModeRTEFloat16 != 0;
     device.float_controls_denorm_preserve_fp16 = vk12_props.shaderDenormPreserveFloat16 != 0;
 
-    const compute_stage = vk11_props.subgroupSupportedStages & ggml.vulkan.common.vk.VK_SHADER_STAGE_COMPUTE_BIT != 0;
+    const compute_stage = vk11_props.subgroupSupportedStages & ggml.vulkan.common.vulkan_c.VK_SHADER_STAGE_COMPUTE_BIT != 0;
     const ops = vk11_props.subgroupSupportedOperations;
-    device.subgroup_basic = compute_stage and ops & ggml.vulkan.common.vk.VK_SUBGROUP_FEATURE_BASIC_BIT != 0;
-    device.subgroup_arithmetic = compute_stage and ops & ggml.vulkan.common.vk.VK_SUBGROUP_FEATURE_ARITHMETIC_BIT != 0;
+    device.subgroup_basic = compute_stage and ops & ggml.vulkan.common.vulkan_c.VK_SUBGROUP_FEATURE_BASIC_BIT != 0;
+    device.subgroup_arithmetic = compute_stage and ops & ggml.vulkan.common.vulkan_c.VK_SUBGROUP_FEATURE_ARITHMETIC_BIT != 0;
     // Workaround for subgroup arithmetic failing on MoltenVK with AMD GPUs (issue 15846)
     if (@import("builtin").os.tag.isDarwin() and device.vendor_id == ggml.vulkan.common.vendor_id.amd) device.subgroup_arithmetic = false;
-    device.subgroup_shuffle = compute_stage and ops & ggml.vulkan.common.vk.VK_SUBGROUP_FEATURE_SHUFFLE_BIT != 0;
+    device.subgroup_shuffle = compute_stage and ops & ggml.vulkan.common.vulkan_c.VK_SUBGROUP_FEATURE_SHUFFLE_BIT != 0;
     if (@import("builtin").os.tag.isDarwin() and device.vendor_id == ggml.vulkan.common.vendor_id.amd) device.subgroup_shuffle = false;
-    device.subgroup_clustered = compute_stage and ops & ggml.vulkan.common.vk.VK_SUBGROUP_FEATURE_CLUSTERED_BIT != 0;
-    device.subgroup_ballot = compute_stage and ops & ggml.vulkan.common.vk.VK_SUBGROUP_FEATURE_BALLOT_BIT != 0;
-    device.subgroup_vote = compute_stage and ops & ggml.vulkan.common.vk.VK_SUBGROUP_FEATURE_VOTE_BIT != 0;
+    device.subgroup_clustered = compute_stage and ops & ggml.vulkan.common.vulkan_c.VK_SUBGROUP_FEATURE_CLUSTERED_BIT != 0;
+    device.subgroup_ballot = compute_stage and ops & ggml.vulkan.common.vulkan_c.VK_SUBGROUP_FEATURE_BALLOT_BIT != 0;
+    device.subgroup_vote = compute_stage and ops & ggml.vulkan.common.vulkan_c.VK_SUBGROUP_FEATURE_VOTE_BIT != 0;
 
     // Submit at least every 100 nodes, in case there are workloads without as much matmul.
     device.max_nodes_per_submit = 100;
@@ -1087,20 +1087,20 @@ pub fn getDevice(idx: usize) *Device {
 
     var qf_count: u32 = 0;
     ggml.vulkan.common.dispatch.vkGetPhysicalDeviceQueueFamilyProperties.?(device.physical_device, &qf_count, null);
-    const queue_family_props = std.heap.c_allocator.alloc(ggml.vulkan.common.vk.VkQueueFamilyProperties, qf_count) catch ggml.impl.abort("ggml_vulkan: out of memory");
+    const queue_family_props = std.heap.c_allocator.alloc(ggml.vulkan.common.vulkan_c.VkQueueFamilyProperties, qf_count) catch ggml.impl.abort("ggml_vulkan: out of memory");
     defer std.heap.c_allocator.free(queue_family_props);
     ggml.vulkan.common.dispatch.vkGetPhysicalDeviceQueueFamilyProperties.?(device.physical_device, &qf_count, queue_family_props.ptr);
 
     // Try to find a non-graphics compute queue and transfer-focused queues
     const allow_graphics_queue = ggml.vulkan.common.envSet("GGML_VK_ALLOW_GRAPHICS_QUEUE");
-    const graphics_flag: ggml.vulkan.common.vk.VkQueueFlags = if (allow_graphics_queue) 0 else ggml.vulkan.common.vk.VK_QUEUE_GRAPHICS_BIT;
-    const compute_queue_family_index = findQueueFamilyIndex(queue_family_props[0..qf_count], ggml.vulkan.common.vk.VK_QUEUE_COMPUTE_BIT, graphics_flag, -1, 1);
-    const transfer_queue_family_index = findQueueFamilyIndex(queue_family_props[0..qf_count], ggml.vulkan.common.vk.VK_QUEUE_TRANSFER_BIT, @as(ggml.vulkan.common.vk.VkQueueFlags, ggml.vulkan.common.vk.VK_QUEUE_COMPUTE_BIT) | graphics_flag, @bitCast(compute_queue_family_index), 1);
+    const graphics_flag: ggml.vulkan.common.vulkan_c.VkQueueFlags = if (allow_graphics_queue) 0 else ggml.vulkan.common.vulkan_c.VK_QUEUE_GRAPHICS_BIT;
+    const compute_queue_family_index = findQueueFamilyIndex(queue_family_props[0..qf_count], ggml.vulkan.common.vulkan_c.VK_QUEUE_COMPUTE_BIT, graphics_flag, -1, 1);
+    const transfer_queue_family_index = findQueueFamilyIndex(queue_family_props[0..qf_count], ggml.vulkan.common.vulkan_c.VK_QUEUE_TRANSFER_BIT, @as(ggml.vulkan.common.vulkan_c.VkQueueFlags, ggml.vulkan.common.vulkan_c.VK_QUEUE_COMPUTE_BIT) | graphics_flag, @bitCast(compute_queue_family_index), 1);
 
     const priorities = [_]f32{ 1.0, 1.0 };
     device.single_queue = compute_queue_family_index == transfer_queue_family_index and queue_family_props[compute_queue_family_index].queueCount == 1;
 
-    var device_queue_create_infos: [2]ggml.vulkan.common.vk.VkDeviceQueueCreateInfo = undefined;
+    var device_queue_create_infos: [2]ggml.vulkan.common.vulkan_c.VkDeviceQueueCreateInfo = undefined;
     var n_queue_create_infos: u32 = 0;
     var device_extensions: std.ArrayList([*:0]const u8) = .empty;
     defer device_extensions.deinit(std.heap.c_allocator);
@@ -1109,99 +1109,99 @@ pub fn getDevice(idx: usize) *Device {
             list.append(std.heap.c_allocator, name) catch ggml.impl.abort("ggml_vulkan: out of memory");
         }
     }.f;
-    var device_features: ggml.vulkan.common.vk.VkPhysicalDeviceFeatures = undefined;
+    var device_features: ggml.vulkan.common.vulkan_c.VkPhysicalDeviceFeatures = undefined;
     ggml.vulkan.common.dispatch.vkGetPhysicalDeviceFeatures.?(device.physical_device, &device_features);
 
-    var device_features2: ggml.vulkan.common.vk.VkPhysicalDeviceFeatures2 = .{ .sType = ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = null, .features = device_features };
+    var device_features2: ggml.vulkan.common.vulkan_c.VkPhysicalDeviceFeatures2 = .{ .sType = ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = null, .features = device_features };
     // The C++ leaves the feature bits of these two uninitialised; the query
     // writes every one of them.
-    var vk11_features = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceVulkan11Features, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES);
+    var vk11_features = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceVulkan11Features, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES);
     device_features2.pNext = &vk11_features;
-    var vk12_features = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceVulkan12Features, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES);
+    var vk12_features = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceVulkan12Features, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES);
     vk11_features.pNext = &vk12_features;
 
     last_struct = @ptrCast(&vk12_features);
 
-    var internally_synchronized_queues_features = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceInternallySynchronizedQueuesFeaturesKHR, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INTERNALLY_SYNCHRONIZED_QUEUES_FEATURES_KHR);
+    var internally_synchronized_queues_features = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceInternallySynchronizedQueuesFeaturesKHR, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INTERNALLY_SYNCHRONIZED_QUEUES_FEATURES_KHR);
     if (internally_sync_support) {
         link(&last_struct, &internally_synchronized_queues_features);
-        addExt(&device_extensions, ggml.vulkan.common.vk.VK_KHR_INTERNALLY_SYNCHRONIZED_QUEUES_EXTENSION_NAME);
+        addExt(&device_extensions, ggml.vulkan.common.vulkan_c.VK_KHR_INTERNALLY_SYNCHRONIZED_QUEUES_EXTENSION_NAME);
     }
 
-    var pl_robustness_features = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDevicePipelineRobustnessFeaturesEXT, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES);
+    var pl_robustness_features = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDevicePipelineRobustnessFeaturesEXT, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES);
     if (pipeline_robustness) {
         link(&last_struct, &pl_robustness_features);
         addExt(&device_extensions, "VK_EXT_pipeline_robustness");
     }
 
-    var memory_priority_features = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceMemoryPriorityFeaturesEXT, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT);
+    var memory_priority_features = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceMemoryPriorityFeaturesEXT, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT);
     if (device.memory_priority) {
         link(&last_struct, &memory_priority_features);
         addExt(&device_extensions, "VK_EXT_memory_priority");
     }
 
-    var subgroup_size_control_features = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceSubgroupSizeControlFeaturesEXT, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES);
+    var subgroup_size_control_features = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceSubgroupSizeControlFeaturesEXT, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES);
     if (device.subgroup_size_control) link(&last_struct, &subgroup_size_control_features);
 
-    var coopmat_features = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceCooperativeMatrixFeaturesKHR, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR);
+    var coopmat_features = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceCooperativeMatrixFeaturesKHR, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR);
     if (device.coopmat_support) link(&last_struct, &coopmat_features);
 
-    var coopmat2_features = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceCooperativeMatrix2FeaturesNV, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_2_FEATURES_NV);
+    var coopmat2_features = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceCooperativeMatrix2FeaturesNV, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_2_FEATURES_NV);
     if (coopmat2_support) {
         link(&last_struct, &coopmat2_features);
         addExt(&device_extensions, "VK_NV_cooperative_matrix2");
     }
 
-    var coopmat2_decode_vector_features = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceCooperativeMatrixDecodeVectorFeaturesNV, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_DECODE_VECTOR_FEATURES_NV);
+    var coopmat2_decode_vector_features = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceCooperativeMatrixDecodeVectorFeaturesNV, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_DECODE_VECTOR_FEATURES_NV);
     if (coopmat2_decode_vector_support) {
         link(&last_struct, &coopmat2_decode_vector_features);
-        addExt(&device_extensions, ggml.vulkan.common.vk.VK_NV_COOPERATIVE_MATRIX_DECODE_VECTOR_EXTENSION_NAME);
+        addExt(&device_extensions, ggml.vulkan.common.vulkan_c.VK_NV_COOPERATIVE_MATRIX_DECODE_VECTOR_EXTENSION_NAME);
     }
 
-    var bfloat16_features = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceShaderBfloat16FeaturesKHR, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_BFLOAT16_FEATURES_KHR);
+    var bfloat16_features = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceShaderBfloat16FeaturesKHR, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_BFLOAT16_FEATURES_KHR);
     if (bfloat16_support) {
         link(&last_struct, &bfloat16_features);
         addExt(&device_extensions, "VK_KHR_shader_bfloat16");
     }
 
-    var ocp_microscaling_features = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceShaderOCPMicroscalingTypesFeaturesEXT, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OCP_MICROSCALING_TYPES_FEATURES_EXT);
+    var ocp_microscaling_features = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceShaderOCPMicroscalingTypesFeaturesEXT, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OCP_MICROSCALING_TYPES_FEATURES_EXT);
     if (ocp_microscaling_extension) {
         link(&last_struct, &ocp_microscaling_features);
-        addExt(&device_extensions, ggml.vulkan.common.vk.VK_EXT_SHADER_OCP_MICROSCALING_TYPES_EXTENSION_NAME);
+        addExt(&device_extensions, ggml.vulkan.common.vulkan_c.VK_EXT_SHADER_OCP_MICROSCALING_TYPES_EXTENSION_NAME);
     }
 
-    var shader_float8_features = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceShaderFloat8FeaturesEXT, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT);
+    var shader_float8_features = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceShaderFloat8FeaturesEXT, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT);
     if (shader_float8_extension) {
         link(&last_struct, &shader_float8_features);
-        addExt(&device_extensions, ggml.vulkan.common.vk.VK_EXT_SHADER_FLOAT8_EXTENSION_NAME);
+        addExt(&device_extensions, ggml.vulkan.common.vulkan_c.VK_EXT_SHADER_FLOAT8_EXTENSION_NAME);
     }
 
-    var maint4_features = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceMaintenance4Features, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES);
+    var maint4_features = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceMaintenance4Features, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES);
     if (maintenance4_support) {
         link(&last_struct, &maint4_features);
         addExt(&device_extensions, "VK_KHR_maintenance4");
     }
 
-    var shader_integer_dot_product_features = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceShaderIntegerDotProductFeaturesKHR, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES);
+    var shader_integer_dot_product_features = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceShaderIntegerDotProductFeaturesKHR, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES);
     if (device.integer_dot_product) {
         link(&last_struct, &shader_integer_dot_product_features);
         addExt(&device_extensions, "VK_KHR_shader_integer_dot_product");
     }
 
-    var dot2_features = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MIXED_FLOAT_DOT_PRODUCT_FEATURES_VALVE);
+    var dot2_features = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MIXED_FLOAT_DOT_PRODUCT_FEATURES_VALVE);
     if (dot2_f16_support) {
         link(&last_struct, &dot2_features);
         addExt(&device_extensions, "VK_VALVE_shader_mixed_float_dot_product");
     }
 
-    var pep_features = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR);
+    var pep_features = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR);
     if (pipeline_executable_properties_support) {
         link(&last_struct, &pep_features);
         addExt(&device_extensions, "VK_KHR_pipeline_executable_properties");
     }
 
-    var wg_explicit_layout_features = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR);
-    if (@hasDecl(ggml.vulkan.common.vk, "VK_KHR_workgroup_memory_explicit_layout") and workgroup_memory_explicit_layout_support) {
+    var wg_explicit_layout_features = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR);
+    if (@hasDecl(ggml.vulkan.common.vulkan_c, "VK_KHR_workgroup_memory_explicit_layout") and workgroup_memory_explicit_layout_support) {
         link(&last_struct, &wg_explicit_layout_features);
         addExt(&device_extensions, "VK_KHR_workgroup_memory_explicit_layout");
     }
@@ -1209,13 +1209,13 @@ pub fn getDevice(idx: usize) *Device {
     if (device.external_memory_host) addExt(&device_extensions, "VK_EXT_external_memory_host");
     if (device.external_semaphore) addExt(&device_extensions, "VK_KHR_external_semaphore_fd");
 
-    var shader_64bit_indexing_features = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceShader64BitIndexingFeaturesEXT, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_64_BIT_INDEXING_FEATURES_EXT);
+    var shader_64bit_indexing_features = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceShader64BitIndexingFeaturesEXT, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_64_BIT_INDEXING_FEATURES_EXT);
     if (device.shader_64b_indexing) {
         link(&last_struct, &shader_64bit_indexing_features);
         addExt(&device_extensions, "VK_EXT_shader_64bit_indexing");
     }
 
-    var fault_features = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkPhysicalDeviceFaultFeaturesEXT, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT);
+    var fault_features = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkPhysicalDeviceFaultFeaturesEXT, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT);
     if (device.device_fault) {
         link(&last_struct, &fault_features);
         addExt(&device_extensions, "VK_EXT_device_fault");
@@ -1227,10 +1227,10 @@ pub fn getDevice(idx: usize) *Device {
     device.has_internally_synchronized_queues = internally_synchronized_queues_features.internallySynchronizedQueues != 0;
 
     // Build queue create infos only after querying whether internally synchronized queues are enabled.
-    const queue_flags: ggml.vulkan.common.vk.VkDeviceQueueCreateFlags = if (device.has_internally_synchronized_queues) ggml.vulkan.common.vk.VK_DEVICE_QUEUE_CREATE_INTERNALLY_SYNCHRONIZED_BIT_KHR else 0;
+    const queue_flags: ggml.vulkan.common.vulkan_c.VkDeviceQueueCreateFlags = if (device.has_internally_synchronized_queues) ggml.vulkan.common.vulkan_c.VK_DEVICE_QUEUE_CREATE_INTERNALLY_SYNCHRONIZED_BIT_KHR else 0;
     const qci = struct {
-        fn f(flags: ggml.vulkan.common.vk.VkDeviceQueueCreateFlags, family: u32, count: u32, prio: [*]const f32) ggml.vulkan.common.vk.VkDeviceQueueCreateInfo {
-            var info = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkDeviceQueueCreateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO);
+        fn f(flags: ggml.vulkan.common.vulkan_c.VkDeviceQueueCreateFlags, family: u32, count: u32, prio: [*]const f32) ggml.vulkan.common.vulkan_c.VkDeviceQueueCreateInfo {
+            var info = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkDeviceQueueCreateInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO);
             info.flags = flags;
             info.queueFamilyIndex = family;
             info.queueCount = count;
@@ -1258,7 +1258,7 @@ pub fn getDevice(idx: usize) *Device {
         shader_float8_extension and shader_float8_features.shaderFloat8 != 0 and
         !ggml.vulkan.common.envSet("GGML_VK_DISABLE_OCP_FP4");
 
-    if (@hasDecl(ggml.vulkan.common.vk, "VK_KHR_workgroup_memory_explicit_layout")) {
+    if (@hasDecl(ggml.vulkan.common.vulkan_c, "VK_KHR_workgroup_memory_explicit_layout")) {
         device.workgroup_memory_explicit_layout = workgroup_memory_explicit_layout_support and
             wg_explicit_layout_features.workgroupMemoryExplicitLayout != 0;
         device.workgroup_memory_explicit_layout_16bit = device.workgroup_memory_explicit_layout and
@@ -1282,7 +1282,7 @@ pub fn getDevice(idx: usize) *Device {
         addExt(&device_extensions, "VK_EXT_subgroup_size_control");
     }
     device.subgroup_size_control = device.subgroup_size_control and
-        subgroup_size_control_props.requiredSubgroupSizeStages & ggml.vulkan.common.vk.VK_SHADER_STAGE_COMPUTE_BIT != 0 and
+        subgroup_size_control_props.requiredSubgroupSizeStages & ggml.vulkan.common.vulkan_c.VK_SHADER_STAGE_COMPUTE_BIT != 0 and
         subgroup_size_control_features.subgroupSizeControl != 0;
     device.subgroup_require_full_support = subgroup_size_control_features.computeFullSubgroups != 0;
 
@@ -1318,7 +1318,7 @@ pub fn getDevice(idx: usize) *Device {
 
     device.name = std.fmt.allocPrintSentinel(std.heap.c_allocator, ggml.vulkan.common.name ++ "{d}", .{idx}, 0) catch ggml.impl.abort("ggml_vulkan: out of memory");
 
-    var device_create_info = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkDeviceCreateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO);
+    var device_create_info = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkDeviceCreateInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO);
     device_create_info.queueCreateInfoCount = n_queue_create_infos;
     device_create_info.pQueueCreateInfos = &device_queue_create_infos;
     device_create_info.enabledExtensionCount = @intCast(device_extensions.items.len);
@@ -1331,7 +1331,7 @@ pub fn getDevice(idx: usize) *Device {
     }
 
     // Queues
-    device.compute_queue = createQueue(device, compute_queue_family_index, 0, ggml.vulkan.common.vk.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | ggml.vulkan.common.vk.VK_PIPELINE_STAGE_TRANSFER_BIT, false);
+    device.compute_queue = createQueue(device, compute_queue_family_index, 0, ggml.vulkan.common.vulkan_c.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | ggml.vulkan.common.vulkan_c.VK_PIPELINE_STAGE_TRANSFER_BIT, false);
 
     // Shaders
     // Disable matmul tile sizes early if performance low or not supported
@@ -1389,9 +1389,9 @@ pub fn getDevice(idx: usize) *Device {
             },
         }
 
-        if (comptime ggml.vulkan.common.vk.VK_HEADER_VERSION >= 287) {
+        if (comptime ggml.vulkan.common.vulkan_c.VK_HEADER_VERSION >= 287) {
             // Honeykrisp (Asahi Linux) doesn't report VK_VENDOR_ID_APPLE.
-            if (device.driver_id == ggml.vulkan.common.vk.VK_DRIVER_ID_MESA_HONEYKRISP) {
+            if (device.driver_id == ggml.vulkan.common.vulkan_c.VK_DRIVER_ID_MESA_HONEYKRISP) {
                 device.mul_mat_l[i] = false;
                 device.mul_mat_m[i] = true;
                 device.mul_mat_s[i] = false;
@@ -1409,15 +1409,15 @@ pub fn getDevice(idx: usize) *Device {
         device.mul_mat_id_s_int[i] = device.mul_mat_id_s[i];
     }
 
-    var dsl_binding: [ggml.vulkan.pipeline.max_parameter_count]ggml.vulkan.common.vk.VkDescriptorSetLayoutBinding = undefined;
-    var dsl_binding_flags: [ggml.vulkan.pipeline.max_parameter_count]ggml.vulkan.common.vk.VkDescriptorBindingFlags = @splat(0);
+    var dsl_binding: [ggml.vulkan.pipeline.max_parameter_count]ggml.vulkan.common.vulkan_c.VkDescriptorSetLayoutBinding = undefined;
+    var dsl_binding_flags: [ggml.vulkan.pipeline.max_parameter_count]ggml.vulkan.common.vulkan_c.VkDescriptorBindingFlags = @splat(0);
     for (&dsl_binding, 0..) |*b, i| {
-        b.* = .{ .binding = @intCast(i), .descriptorType = ggml.vulkan.common.vk.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 1, .stageFlags = ggml.vulkan.common.vk.VK_SHADER_STAGE_COMPUTE_BIT, .pImmutableSamplers = null };
+        b.* = .{ .binding = @intCast(i), .descriptorType = ggml.vulkan.common.vulkan_c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 1, .stageFlags = ggml.vulkan.common.vulkan_c.VK_SHADER_STAGE_COMPUTE_BIT, .pImmutableSamplers = null };
     }
-    var dslbfci = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkDescriptorSetLayoutBindingFlagsCreateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO);
+    var dslbfci = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkDescriptorSetLayoutBindingFlagsCreateInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO);
     dslbfci.bindingCount = dsl_binding_flags.len;
     dslbfci.pBindingFlags = &dsl_binding_flags;
-    var dslci = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkDescriptorSetLayoutCreateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO);
+    var dslci = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkDescriptorSetLayoutCreateInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO);
     dslci.bindingCount = dsl_binding.len;
     dslci.pBindings = &dsl_binding;
     dslci.pNext = &dslbfci;
@@ -1438,19 +1438,19 @@ pub fn getDevice(idx: usize) *Device {
 
     if (!device.single_queue) {
         const transfer_queue_index: u32 = if (compute_queue_family_index == transfer_queue_family_index) 1 else 0;
-        device.transfer_queue = createQueue(device, transfer_queue_family_index, transfer_queue_index, ggml.vulkan.common.vk.VK_PIPELINE_STAGE_TRANSFER_BIT, true);
+        device.transfer_queue = createQueue(device, transfer_queue_family_index, transfer_queue_index, ggml.vulkan.common.vulkan_c.VK_PIPELINE_STAGE_TRANSFER_BIT, true);
         device.async_use_transfer_queue = prefers_transfer_queue or ggml.vulkan.common.envSet("GGML_VK_ASYNC_USE_TRANSFER_QUEUE");
     } else {
         device.transfer_queue = createAliasedQueue(device, device.compute_queue.?);
         device.async_use_transfer_queue = false;
     }
 
-    var fence_info = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkFenceCreateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_FENCE_CREATE_INFO);
+    var fence_info = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkFenceCreateInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_FENCE_CREATE_INFO);
     ggml.vulkan.common.checkOrAbort(ggml.vulkan.common.dispatch.vkCreateFence.?(device.device, &fence_info, null, &device.fence), "vk::Device::createFence");
 
     device.buffer_type = .{
         .iface = ggml.vulkan.buffer.buffer_type_iface,
-        .device = ggml.impl.ggml_c.ggml_backend_reg_dev_get(ggml.vulkan.backend.reg(), idx),
+        .device = ggml.backend.ggml_backend_reg_dev_get(ggml.vulkan.backend.reg(), idx),
         .context = ggml.vulkan.buffer.BufferTypeCtx.create(device.name, device),
     };
 
@@ -1475,18 +1475,18 @@ pub fn getDevice(idx: usize) *Device {
     return device;
 }
 
-extern fn vkGetDeviceProcAddr(device: ggml.vulkan.common.vk.VkDevice, name: [*:0]const u8) ggml.vulkan.common.vk.PFN_vkVoidFunction;
+extern fn vkGetDeviceProcAddr(device: ggml.vulkan.common.vulkan_c.VkDevice, name: [*:0]const u8) ggml.vulkan.common.vulkan_c.PFN_vkVoidFunction;
 
 /// The coopmat2 flexible-dimension query inside `ggml_vk_get_device`: the
 /// device takes the coopmat2 path only if it supports fp16 with both
 /// accumulators at workgroup sizes 128 and 256.
-fn coopmat2Dimensions(device: *Device, coopmat2_props: *const ggml.vulkan.common.vk.VkPhysicalDeviceCooperativeMatrix2PropertiesNV, decode_vector_support: bool, decode_vector_features: *const ggml.vulkan.common.vk.VkPhysicalDeviceCooperativeMatrixDecodeVectorFeaturesNV, bfloat16_support: bool) void {
-    const pfn: ggml.vulkan.common.vk.PFN_vkGetPhysicalDeviceCooperativeMatrixFlexibleDimensionsPropertiesNV = @ptrCast(ggml.vulkan.common.vkGetInstanceProcAddr(ggml.vulkan.instance.instance.instance, "vkGetPhysicalDeviceCooperativeMatrixFlexibleDimensionsPropertiesNV"));
+fn coopmat2Dimensions(device: *Device, coopmat2_props: *const ggml.vulkan.common.vulkan_c.VkPhysicalDeviceCooperativeMatrix2PropertiesNV, decode_vector_support: bool, decode_vector_features: *const ggml.vulkan.common.vulkan_c.VkPhysicalDeviceCooperativeMatrixDecodeVectorFeaturesNV, bfloat16_support: bool) void {
+    const pfn: ggml.vulkan.common.vulkan_c.PFN_vkGetPhysicalDeviceCooperativeMatrixFlexibleDimensionsPropertiesNV = @ptrCast(ggml.vulkan.common.vkGetInstanceProcAddr(ggml.vulkan.instance.instance.instance, "vkGetPhysicalDeviceCooperativeMatrixFlexibleDimensionsPropertiesNV"));
     var count: u32 = 0;
     _ = pfn.?(device.physical_device, &count, null);
-    const flexible_dimensions = std.heap.c_allocator.alloc(ggml.vulkan.common.vk.VkCooperativeMatrixFlexibleDimensionsPropertiesNV, count) catch ggml.impl.abort("ggml_vulkan: out of memory");
+    const flexible_dimensions = std.heap.c_allocator.alloc(ggml.vulkan.common.vulkan_c.VkCooperativeMatrixFlexibleDimensionsPropertiesNV, count) catch ggml.impl.abort("ggml_vulkan: out of memory");
     defer std.heap.c_allocator.free(flexible_dimensions);
-    for (flexible_dimensions) |*p| p.* = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkCooperativeMatrixFlexibleDimensionsPropertiesNV, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_FLEXIBLE_DIMENSIONS_PROPERTIES_NV);
+    for (flexible_dimensions) |*p| p.* = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkCooperativeMatrixFlexibleDimensionsPropertiesNV, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_FLEXIBLE_DIMENSIONS_PROPERTIES_NV);
     _ = pfn.?(device.physical_device, &count, flexible_dimensions.ptr);
 
     var found_fp16_128 = false;
@@ -1498,19 +1498,19 @@ fn coopmat2Dimensions(device: *Device, coopmat2_props: *const ggml.vulkan.common
     // need to support fp16*fp16 with fp16/fp32 accumulator, for workgroupsize 128
     // with 32x16x16 and 256 with 32x32x16.
     for (flexible_dimensions) |prop| {
-        if (prop.saturatingAccumulation != ggml.vulkan.common.vk.VK_FALSE or prop.scope != ggml.vulkan.common.vk.VK_SCOPE_WORKGROUP_KHR) continue;
-        if (prop.AType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_FLOAT16_KHR and prop.BType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_FLOAT16_KHR) {
+        if (prop.saturatingAccumulation != ggml.vulkan.common.vulkan_c.VK_FALSE or prop.scope != ggml.vulkan.common.vulkan_c.VK_SCOPE_WORKGROUP_KHR) continue;
+        if (prop.AType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_FLOAT16_KHR and prop.BType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_FLOAT16_KHR) {
             if (prop.workgroupInvocations == 128 and prop.MGranularity <= 32 and prop.NGranularity <= 16 and prop.KGranularity <= 16) {
-                if (prop.CType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_FLOAT16_KHR and prop.ResultType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_FLOAT16_KHR) found_fp16_128 = true;
-                if (prop.CType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_FLOAT32_KHR and prop.ResultType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_FLOAT32_KHR) found_fp32_128 = true;
+                if (prop.CType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_FLOAT16_KHR and prop.ResultType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_FLOAT16_KHR) found_fp16_128 = true;
+                if (prop.CType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_FLOAT32_KHR and prop.ResultType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_FLOAT32_KHR) found_fp32_128 = true;
             }
             if (prop.workgroupInvocations == 256 and prop.MGranularity <= 32 and prop.NGranularity <= 32 and prop.KGranularity <= 16) {
-                if (prop.CType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_FLOAT16_KHR and prop.ResultType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_FLOAT16_KHR) found_fp16_256 = true;
-                if (prop.CType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_FLOAT32_KHR and prop.ResultType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_FLOAT32_KHR) found_fp32_256 = true;
+                if (prop.CType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_FLOAT16_KHR and prop.ResultType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_FLOAT16_KHR) found_fp16_256 = true;
+                if (prop.CType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_FLOAT32_KHR and prop.ResultType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_FLOAT32_KHR) found_fp32_256 = true;
             }
         }
-        if (ggml.vulkan.instance.glslc.bfloat16 and bfloat16_support and prop.AType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_BFLOAT16_KHR and prop.BType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_BFLOAT16_KHR and
-            prop.CType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_FLOAT32_KHR and prop.ResultType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_FLOAT32_KHR)
+        if (ggml.vulkan.instance.glslc.bfloat16 and bfloat16_support and prop.AType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_BFLOAT16_KHR and prop.BType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_BFLOAT16_KHR and
+            prop.CType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_FLOAT32_KHR and prop.ResultType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_FLOAT32_KHR)
         {
             if (prop.workgroupInvocations == 128 and prop.MGranularity <= 32 and prop.NGranularity <= 16 and prop.KGranularity <= 16) found_bf16_128 = true;
             if (prop.workgroupInvocations == 256 and prop.MGranularity <= 32 and prop.NGranularity <= 32 and prop.KGranularity <= 16) found_bf16_256 = true;
@@ -1528,18 +1528,18 @@ fn coopmat2Dimensions(device: *Device, coopmat2_props: *const ggml.vulkan.common
 /// The KHR coopmat shape query inside `ggml_vk_get_device`: picks the
 /// first fp16 subgroup shape and records which accumulators share it.
 fn coopmatShapes(device: *Device, bfloat16_support: bool) void {
-    const pfn: ggml.vulkan.common.vk.PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR = @ptrCast(ggml.vulkan.common.vkGetInstanceProcAddr(ggml.vulkan.instance.instance.instance, "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR"));
+    const pfn: ggml.vulkan.common.vulkan_c.PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR = @ptrCast(ggml.vulkan.common.vkGetInstanceProcAddr(ggml.vulkan.instance.instance.instance, "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR"));
     var cm_props_num: u32 = 0;
     _ = pfn.?(device.physical_device, &cm_props_num, null);
-    const cm_props = std.heap.c_allocator.alloc(ggml.vulkan.common.vk.VkCooperativeMatrixPropertiesKHR, cm_props_num) catch ggml.impl.abort("ggml_vulkan: out of memory");
+    const cm_props = std.heap.c_allocator.alloc(ggml.vulkan.common.vulkan_c.VkCooperativeMatrixPropertiesKHR, cm_props_num) catch ggml.impl.abort("ggml_vulkan: out of memory");
     defer std.heap.c_allocator.free(cm_props);
     // The C++ value-initialises the vector, then sets each `sType`.
-    for (cm_props) |*p| p.* = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkCooperativeMatrixPropertiesKHR, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR);
+    for (cm_props) |*p| p.* = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkCooperativeMatrixPropertiesKHR, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR);
     _ = pfn.?(device.physical_device, &cm_props_num, cm_props.ptr);
 
     for (cm_props) |prop| {
-        if (prop.AType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_FLOAT16_KHR and prop.BType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_FLOAT16_KHR and prop.scope == ggml.vulkan.common.vk.VK_SCOPE_SUBGROUP_KHR) {
-            if (prop.CType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_FLOAT32_KHR and prop.ResultType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_FLOAT32_KHR) {
+        if (prop.AType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_FLOAT16_KHR and prop.BType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_FLOAT16_KHR and prop.scope == ggml.vulkan.common.vulkan_c.VK_SCOPE_SUBGROUP_KHR) {
+            if (prop.CType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_FLOAT32_KHR and prop.ResultType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_FLOAT32_KHR) {
                 // coopmat sizes not set yet
                 if (device.coopmat_m == 0) {
                     device.coopmat_acc_f32_support = true;
@@ -1551,7 +1551,7 @@ fn coopmatShapes(device: *Device, bfloat16_support: bool) void {
                     device.coopmat_acc_f32_support = true;
                 }
                 if (prop.MSize == 16 and prop.NSize == 16 and prop.KSize == 16) device.coopmat_support_16x16x16_f32acc = true;
-            } else if (prop.CType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_FLOAT16_KHR and prop.ResultType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_FLOAT16_KHR) {
+            } else if (prop.CType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_FLOAT16_KHR and prop.ResultType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_FLOAT16_KHR) {
                 if (device.coopmat_m == 0) {
                     device.coopmat_acc_f16_support = true;
                     device.coopmat_m = prop.MSize;
@@ -1562,18 +1562,18 @@ fn coopmatShapes(device: *Device, bfloat16_support: bool) void {
                 }
                 if (prop.MSize == 16 and prop.NSize == 16 and prop.KSize == 16) device.coopmat_support_16x16x16_f16acc = true;
             }
-        } else if (prop.AType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_SINT8_KHR and prop.BType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_SINT8_KHR and
-            prop.CType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_SINT32_KHR and prop.ResultType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_SINT32_KHR and
-            prop.scope == ggml.vulkan.common.vk.VK_SCOPE_SUBGROUP_KHR and device.coopmat_int_m == 0)
+        } else if (prop.AType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_SINT8_KHR and prop.BType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_SINT8_KHR and
+            prop.CType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_SINT32_KHR and prop.ResultType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_SINT32_KHR and
+            prop.scope == ggml.vulkan.common.vulkan_c.VK_SCOPE_SUBGROUP_KHR and device.coopmat_int_m == 0)
         {
             device.coopmat_int_support = true;
             device.coopmat_int_m = prop.MSize;
             device.coopmat_int_n = prop.NSize;
             device.coopmat_int_k = prop.KSize;
         }
-        if (ggml.vulkan.instance.glslc.bfloat16 and bfloat16_support and prop.AType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_BFLOAT16_KHR and prop.BType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_BFLOAT16_KHR and
-            prop.CType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_FLOAT32_KHR and prop.ResultType == ggml.vulkan.common.vk.VK_COMPONENT_TYPE_FLOAT32_KHR and
-            prop.scope == ggml.vulkan.common.vk.VK_SCOPE_SUBGROUP_KHR)
+        if (ggml.vulkan.instance.glslc.bfloat16 and bfloat16_support and prop.AType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_BFLOAT16_KHR and prop.BType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_BFLOAT16_KHR and
+            prop.CType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_FLOAT32_KHR and prop.ResultType == ggml.vulkan.common.vulkan_c.VK_COMPONENT_TYPE_FLOAT32_KHR and
+            prop.scope == ggml.vulkan.common.vulkan_c.VK_SCOPE_SUBGROUP_KHR)
         {
             if (device.coopmat_m == 0) {
                 device.coopmat_bf16_support = true;
@@ -1601,12 +1601,12 @@ test {
 }
 
 test "findQueueFamilyIndex prefers a family without the avoided flags" {
-    const props = [_]ggml.vulkan.common.vk.VkQueueFamilyProperties{
-        .{ .queueFlags = ggml.vulkan.common.vk.VK_QUEUE_GRAPHICS_BIT | ggml.vulkan.common.vk.VK_QUEUE_COMPUTE_BIT | ggml.vulkan.common.vk.VK_QUEUE_TRANSFER_BIT, .queueCount = 16, .timestampValidBits = 0, .minImageTransferGranularity = .{ .width = 0, .height = 0, .depth = 0 } },
-        .{ .queueFlags = ggml.vulkan.common.vk.VK_QUEUE_COMPUTE_BIT | ggml.vulkan.common.vk.VK_QUEUE_TRANSFER_BIT, .queueCount = 8, .timestampValidBits = 0, .minImageTransferGranularity = .{ .width = 0, .height = 0, .depth = 0 } },
-        .{ .queueFlags = ggml.vulkan.common.vk.VK_QUEUE_TRANSFER_BIT, .queueCount = 2, .timestampValidBits = 0, .minImageTransferGranularity = .{ .width = 0, .height = 0, .depth = 0 } },
+    const props = [_]ggml.vulkan.common.vulkan_c.VkQueueFamilyProperties{
+        .{ .queueFlags = ggml.vulkan.common.vulkan_c.VK_QUEUE_GRAPHICS_BIT | ggml.vulkan.common.vulkan_c.VK_QUEUE_COMPUTE_BIT | ggml.vulkan.common.vulkan_c.VK_QUEUE_TRANSFER_BIT, .queueCount = 16, .timestampValidBits = 0, .minImageTransferGranularity = .{ .width = 0, .height = 0, .depth = 0 } },
+        .{ .queueFlags = ggml.vulkan.common.vulkan_c.VK_QUEUE_COMPUTE_BIT | ggml.vulkan.common.vulkan_c.VK_QUEUE_TRANSFER_BIT, .queueCount = 8, .timestampValidBits = 0, .minImageTransferGranularity = .{ .width = 0, .height = 0, .depth = 0 } },
+        .{ .queueFlags = ggml.vulkan.common.vulkan_c.VK_QUEUE_TRANSFER_BIT, .queueCount = 2, .timestampValidBits = 0, .minImageTransferGranularity = .{ .width = 0, .height = 0, .depth = 0 } },
     };
-    const compute = findQueueFamilyIndex(&props, ggml.vulkan.common.vk.VK_QUEUE_COMPUTE_BIT, ggml.vulkan.common.vk.VK_QUEUE_GRAPHICS_BIT, -1, 1);
+    const compute = findQueueFamilyIndex(&props, ggml.vulkan.common.vulkan_c.VK_QUEUE_COMPUTE_BIT, ggml.vulkan.common.vulkan_c.VK_QUEUE_GRAPHICS_BIT, -1, 1);
     try std.testing.expectEqual(@as(u32, 1), compute);
-    try std.testing.expectEqual(@as(u32, 2), findQueueFamilyIndex(&props, ggml.vulkan.common.vk.VK_QUEUE_TRANSFER_BIT, ggml.vulkan.common.vk.VK_QUEUE_COMPUTE_BIT | ggml.vulkan.common.vk.VK_QUEUE_GRAPHICS_BIT, @intCast(compute), 1));
+    try std.testing.expectEqual(@as(u32, 2), findQueueFamilyIndex(&props, ggml.vulkan.common.vulkan_c.VK_QUEUE_TRANSFER_BIT, ggml.vulkan.common.vulkan_c.VK_QUEUE_COMPUTE_BIT | ggml.vulkan.common.vulkan_c.VK_QUEUE_GRAPHICS_BIT, @intCast(compute), 1));
 }

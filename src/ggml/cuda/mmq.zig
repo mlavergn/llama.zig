@@ -571,13 +571,13 @@ pub fn mulMatQ(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.ggm
         for ([_]?*const ggml.impl.ggml_c.ggml_tensor{ f.x_scale, f.gate_scale }) |scale_opt| {
             if (scale_opt) |scale| {
                 const n: i64 = if (ids != null) src0.ne[2] else 1;
-                ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_NVFP4 and scale.type == ggml.impl.ggml_c.GGML_TYPE_F32 and ggml.impl.ggml_c.ggml_is_contiguous(scale) and
-                    ggml.impl.ggml_c.ggml_nelements(scale) == n, "!scale || (src0->type == GGML_TYPE_NVFP4 && scale->type == GGML_TYPE_F32 && ggml_is_contiguous(scale) && ggml_nelements(scale) == (ids ? src0->ne[2] : 1))");
+                ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_NVFP4 and scale.type == ggml.impl.ggml_c.GGML_TYPE_F32 and ggml.types.ggml_is_contiguous(scale) and
+                    ggml.types.ggml_nelements(scale) == n, "!scale || (src0->type == GGML_TYPE_NVFP4 && scale->type == GGML_TYPE_F32 && ggml_is_contiguous(scale) && ggml_nelements(scale) == (ids ? src0->ne[2] : 1))");
             }
         }
         if (gate) |g| {
             ggml.impl.assert((f.x_scale == null) == (f.gate_scale == null), "!fusion->x_scale == !fusion->gate_scale");
-            ggml.impl.assert(g.type == src0.type and ggml.impl.ggml_c.ggml_are_same_shape(g, src0) and ggml.impl.ggml_c.ggml_are_same_stride(g, src0), "gate->type == src0->type && ggml_are_same_shape(gate, src0) && ggml_are_same_stride(gate, src0)");
+            ggml.impl.assert(g.type == src0.type and ggml.types.ggml_are_same_shape(g, src0) and ggml.types.ggml_are_same_stride(g, src0), "gate->type == src0->type && ggml_are_same_shape(gate, src0) && ggml_are_same_stride(gate, src0)");
             fusion_device.gate = g.data;
             fusion_device.gate_scale = if (f.gate_scale) |sc| sc.data else null;
             fusion_device.glu_op = f.glu_op;
@@ -608,14 +608,14 @@ pub fn mulMatQ(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.ggm
     const x = ggml.cuda.common.info().devices[@intCast(id)].cc;
     const smpbo = ggml.cuda.common.info().devices[@intCast(id)].smpbo;
 
-    const ts_src0 = ggml.impl.ggml_c.ggml_type_size(src0.type);
-    const ts_src1 = ggml.impl.ggml_c.ggml_type_size(src1.type);
-    const ts_dst = ggml.impl.ggml_c.ggml_type_size(dst.type);
+    const ts_src0 = ggml.types.ggml_type_size(src0.type);
+    const ts_src1 = ggml.types.ggml_type_size(src1.type);
+    const ts_dst = ggml.types.ggml_type_size(dst.type);
 
     ggml.impl.assert(src0.nb[0] == ts_src0, "        nb00       == ts_src0");
     ggml.impl.assert(src1.nb[0] == ts_src1, "        nb10       == ts_src1");
     ggml.impl.assert(dst.nb[0] == ts_dst, "        nb0        == ts_dst");
-    ggml.impl.assert(ids == null or ids.?.nb[0] == ggml.impl.ggml_c.ggml_type_size(ids.?.type), "!ids || ids->nb[0] == ggml_type_size(ids->type)");
+    ggml.impl.assert(ids == null or ids.?.nb[0] == ggml.types.ggml_type_size(ids.?.type), "!ids || ids->nb[0] == ggml_type_size(ids->type)");
 
     const src0_d: ?*const anyopaque = src0.data;
     const src1_d: ?*const f32 = @ptrCast(@alignCast(src1.data));
@@ -624,11 +624,11 @@ pub fn mulMatQ(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.ggm
     // If src0 (or the fused gate weight) is a temporary compute buffer, clear any potential padding.
     for ([_]?*const ggml.impl.ggml_c.ggml_tensor{ src0, gate }) |t_opt| {
         const t = t_opt orelse continue;
-        if (ggml.impl.ggml_c.ggml_backend_buffer_get_usage(t.buffer) == ggml.impl.ggml_c.GGML_BACKEND_BUFFER_USAGE_COMPUTE) {
-            const size_data = ggml.impl.ggml_c.ggml_nbytes(t);
-            const size_alloc = ggml.impl.ggml_c.ggml_backend_buffer_get_alloc_size(t.buffer, t);
+        if (ggml.backend.ggml_backend_buffer_get_usage(t.buffer) == ggml.impl.ggml_c.GGML_BACKEND_BUFFER_USAGE_COMPUTE) {
+            const size_data = ggml.types.ggml_nbytes(t);
+            const size_alloc = ggml.backend.ggml_backend_buffer_get_alloc_size(t.buffer, t);
             if (size_alloc > size_data) {
-                ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguously_allocated(t), "ggml_is_contiguously_allocated(t)");
+                ggml.impl.assert(ggml.types.ggml_is_contiguously_allocated(t), "ggml_is_contiguously_allocated(t)");
                 ggml.impl.assert(t.view_src == null, "!t->view_src");
                 ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemsetAsync(@as([*]u8, @ptrCast(t.data.?)) + size_data, 0, size_alloc - size_data, stream), "cudaMemsetAsync((char *) t->data + size_data, 0, size_alloc - size_data, stream)", @src());
             }
@@ -647,7 +647,7 @@ pub fn mulMatQ(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.ggm
     const fallback = needsFallback(ne01);
 
     // With fusion dst is the GLU output or the scale node, not a MUL_MAT; the src1 precision requested by the fused MUL_MATs is in the fusion args.
-    const prec_src1: ggml.impl.ggml_c.enum_ggml_prec = getPrecSrc1(src0.type, if (fusion) |f| f.prec_src1 else ggml.impl.ggml_c.ggml_prec_get_src(dst, 1), x);
+    const prec_src1: ggml.impl.ggml_c.enum_ggml_prec = getPrecSrc1(src0.type, if (fusion) |f| f.prec_src1 else ggml.ops.ggml_prec_get_src(dst, 1), x);
 
     const use_native_fp4 = prec_src1 == ggml.impl.ggml_c.GGML_PREC_Q4;
     const y_block_size: i64 = if (use_native_fp4) sizeof_block_fp4_mmq else sizeof_block_q8_1_mmq;
@@ -763,8 +763,8 @@ pub fn mulMatQ(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.ggm
     const dedup_bcast = ne11 == 1 and n_expert_used > 1;
 
     {
-        ggml.impl.assert(id_t.nb[0] == ggml.impl.ggml_c.ggml_element_size(id_t), "ids->nb[0] == ggml_element_size(ids)");
-        const si1: c_int = @intCast(id_t.nb[1] / ggml.impl.ggml_c.ggml_element_size(id_t));
+        ggml.impl.assert(id_t.nb[0] == ggml.types.ggml_element_size(id_t), "ids->nb[0] == ggml_element_size(ids)");
+        const si1: c_int = @intCast(id_t.nb[1] / ggml.types.ggml_element_size(id_t));
         const sis1: c_int = @intCast(nb12 / nb11);
 
         ggml.cuda.mmid.launchMmIdsHelperDispatch(@ptrCast(@alignCast(id_t.data)), firstOf(i32, ids_src1.ptr), firstOf(i32, ids_dst.ptr), firstOf(ggml.cuda.mmid.TileSpec, tile_spec.ptr), i32Of(ne02), i32Of(ne12), i32Of(n_expert_used), i32Of(ne11), J_best, si1, sis1, dedup_bcast, stream);

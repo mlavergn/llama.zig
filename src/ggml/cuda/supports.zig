@@ -50,7 +50,7 @@ pub fn deviceSupportsOp(dev: ggml.impl.ggml_c.ggml_backend_dev_t, op: *const ggm
     }
 
     switch (op.op) {
-        ggml.impl.ggml_c.GGML_OP_UNARY => switch (ggml.impl.ggml_c.ggml_get_unary_op(op)) {
+        ggml.impl.ggml_c.GGML_OP_UNARY => switch (ggml.types.ggml_get_unary_op(op)) {
             ggml.impl.ggml_c.GGML_UNARY_OP_ABS,
             ggml.impl.ggml_c.GGML_UNARY_OP_SGN,
             ggml.impl.ggml_c.GGML_UNARY_OP_NEG,
@@ -74,12 +74,12 @@ pub fn deviceSupportsOp(dev: ggml.impl.ggml_c.ggml_backend_dev_t, op: *const ggm
             ggml.impl.ggml_c.GGML_UNARY_OP_ROUND,
             ggml.impl.ggml_c.GGML_UNARY_OP_TRUNC,
             => {
-                if (src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_BF16 and ggml.impl.ggml_c.ggml_get_unary_op(op) == ggml.impl.ggml_c.GGML_UNARY_OP_XIELU) return false;
+                if (src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_BF16 and ggml.types.ggml_get_unary_op(op) == ggml.impl.ggml_c.GGML_UNARY_OP_XIELU) return false;
                 return src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_F16 or src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_F32 or src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_BF16;
             },
             else => return false,
         },
-        ggml.impl.ggml_c.GGML_OP_GLU => switch (ggml.impl.ggml_c.ggml_get_glu_op(op)) {
+        ggml.impl.ggml_c.GGML_OP_GLU => switch (ggml.types.ggml_get_glu_op(op)) {
             ggml.impl.ggml_c.GGML_GLU_OP_REGLU,
             ggml.impl.ggml_c.GGML_GLU_OP_GEGLU,
             ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU,
@@ -89,23 +89,23 @@ pub fn deviceSupportsOp(dev: ggml.impl.ggml_c.ggml_backend_dev_t, op: *const ggm
             ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU_CLAMP,
             => {
                 if (src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_BF16 and
-                    (ggml.impl.ggml_c.ggml_get_glu_op(op) == ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU_OAI or ggml.impl.ggml_c.ggml_get_glu_op(op) == ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU_CLAMP))
+                    (ggml.types.ggml_get_glu_op(op) == ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU_OAI or ggml.types.ggml_get_glu_op(op) == ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU_CLAMP))
                 {
                     return false;
                 }
-                if (src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_F16 and ggml.impl.ggml_c.ggml_get_glu_op(op) == ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU_OAI) return false;
-                return ggml.impl.ggml_c.ggml_is_contiguous_1(src(op, 0));
+                if (src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_F16 and ggml.types.ggml_get_glu_op(op) == ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU_OAI) return false;
+                return ggml.types.ggml_is_contiguous_1(src(op, 0));
             },
             else => return false,
         },
         ggml.impl.ggml_c.GGML_OP_MUL_MAT, ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID => {
             const a = src(op, 0);
             const b = src(op, 1);
-            if (a.nb[0] != ggml.impl.ggml_c.ggml_element_size(a) or b.nb[0] != ggml.impl.ggml_c.ggml_element_size(b)) return false;
+            if (a.nb[0] != ggml.types.ggml_element_size(a) or b.nb[0] != ggml.types.ggml_element_size(b)) return false;
             if (b.type == ggml.impl.ggml_c.GGML_TYPE_F16 and a.type != ggml.impl.ggml_c.GGML_TYPE_F16 and !ggml.cuda.fwht.opMulMatUseFwht(op)) return false;
             const cc_dev = ggml.cuda.common.info().devices[@intCast(dev_ctx.device)].cc;
             const f32_src1_ok = ggml.cuda.common.cc.isNvidia(cc_dev) and cc_dev < ggml.cuda.common.cc.ampere;
-            const prec_src1 = ggml.impl.ggml_c.ggml_prec_get_src(op, 1);
+            const prec_src1 = ggml.ops.ggml_prec_get_src(op, 1);
             const fp8_id_mmvf = op.op == ggml.impl.ggml_c.GGML_OP_MUL_MAT_ID and
                 a.type == ggml.impl.ggml_c.GGML_TYPE_F8_E4M3 and b.type == ggml.impl.ggml_c.GGML_TYPE_F32 and op.type == ggml.impl.ggml_c.GGML_TYPE_F32 and
                 ggml.cuda.mmvf.shouldUseMmvf(a, cc_dev, ggml.cuda.common.info().devices[@intCast(dev_ctx.device)].warp_size, b.ne[2]);
@@ -218,7 +218,7 @@ pub fn deviceSupportsOp(dev: ggml.impl.ggml_c.ggml_backend_dev_t, op: *const ggm
             for (pairs) |p| {
                 if (s0 == p[0] and s1 == p[1]) return true;
             }
-            return s0 == s1 and ggml.impl.ggml_c.ggml_is_contiguous(src(op, 0)) and ggml.impl.ggml_c.ggml_is_contiguous(src(op, 1));
+            return s0 == s1 and ggml.types.ggml_is_contiguous(src(op, 0)) and ggml.types.ggml_is_contiguous(src(op, 1));
         },
         ggml.impl.ggml_c.GGML_OP_DUP => return true,
         ggml.impl.ggml_c.GGML_OP_ARGMAX, ggml.impl.ggml_c.GGML_OP_COUNT_EQUAL => return true,
@@ -234,25 +234,25 @@ pub fn deviceSupportsOp(dev: ggml.impl.ggml_c.ggml_backend_dev_t, op: *const ggm
             const t0 = s0.type;
             const dim = op.op_params[0];
             if (t0 != s1.type or t0 != op.type) return false;
-            if (ggml.impl.ggml_c.ggml_is_quantized(t0)) {
+            if (ggml.types.ggml_is_quantized(t0)) {
                 const layout_ok = if (dim == 3)
-                    ggml.impl.ggml_c.ggml_is_contiguous(s0) and ggml.impl.ggml_c.ggml_is_contiguous(s1)
+                    ggml.types.ggml_is_contiguous(s0) and ggml.types.ggml_is_contiguous(s1)
                 else
-                    ggml.impl.ggml_c.ggml_is_contiguous_to_3(s0) and ggml.impl.ggml_c.ggml_is_contiguous_to_3(s1);
-                return layout_ok and @mod(s0.ne[0], ggml.impl.ggml_c.ggml_blck_size(t0)) == 0 and @mod(s1.ne[0], ggml.impl.ggml_c.ggml_blck_size(t0)) == 0;
+                    ggml.types.ggml_is_contiguous_to_3(s0) and ggml.types.ggml_is_contiguous_to_3(s1);
+                return layout_ok and @mod(s0.ne[0], ggml.types.ggml_blck_size(t0)) == 0 and @mod(s1.ne[0], ggml.types.ggml_blck_size(t0)) == 0;
             }
-            const ts = ggml.impl.ggml_c.ggml_type_size(t0);
-            return ggml.impl.ggml_c.ggml_blck_size(t0) == 1 and (ts == 1 or ts == 2 or ts == 4 or ts == 8);
+            const ts = ggml.types.ggml_type_size(t0);
+            return ggml.types.ggml_blck_size(t0) == 1 and (ts == 1 or ts == 2 or ts == 4 or ts == 8);
         },
         ggml.impl.ggml_c.GGML_OP_CONV_TRANSPOSE_1D => return src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_F32 and src(op, 1).type == ggml.impl.ggml_c.GGML_TYPE_F32,
         ggml.impl.ggml_c.GGML_OP_COL2IM_1D => {
             const t0 = src(op, 0).type;
             return (t0 == ggml.impl.ggml_c.GGML_TYPE_F32 or t0 == ggml.impl.ggml_c.GGML_TYPE_F16 or t0 == ggml.impl.ggml_c.GGML_TYPE_BF16) and
-                op.type == t0 and ggml.impl.ggml_c.ggml_is_contiguous(src(op, 0)) and ggml.impl.ggml_c.ggml_is_contiguous(op);
+                op.type == t0 and ggml.types.ggml_is_contiguous(src(op, 0)) and ggml.types.ggml_is_contiguous(op);
         },
-        ggml.impl.ggml_c.GGML_OP_SILU_BACK => return ggml.impl.ggml_c.ggml_is_contiguous(src(op, 0)) and src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_F32,
-        ggml.impl.ggml_c.GGML_OP_NORM, ggml.impl.ggml_c.GGML_OP_RMS_NORM, ggml.impl.ggml_c.GGML_OP_L2_NORM => return ggml.impl.ggml_c.ggml_is_contiguous_rows(src(op, 0)),
-        ggml.impl.ggml_c.GGML_OP_RMS_NORM_BACK => return ggml.impl.ggml_c.ggml_is_contiguous(src(op, 0)),
+        ggml.impl.ggml_c.GGML_OP_SILU_BACK => return ggml.types.ggml_is_contiguous(src(op, 0)) and src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_F32,
+        ggml.impl.ggml_c.GGML_OP_NORM, ggml.impl.ggml_c.GGML_OP_RMS_NORM, ggml.impl.ggml_c.GGML_OP_L2_NORM => return ggml.types.ggml_is_contiguous_rows(src(op, 0)),
+        ggml.impl.ggml_c.GGML_OP_RMS_NORM_BACK => return ggml.types.ggml_is_contiguous(src(op, 0)),
         ggml.impl.ggml_c.GGML_OP_NONE,
         ggml.impl.ggml_c.GGML_OP_RESHAPE,
         ggml.impl.ggml_c.GGML_OP_VIEW,
@@ -266,8 +266,8 @@ pub fn deviceSupportsOp(dev: ggml.impl.ggml_c.ggml_backend_dev_t, op: *const ggm
         ggml.impl.ggml_c.GGML_OP_LOG,
         => return true,
         ggml.impl.ggml_c.GGML_OP_SCALE => return (src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_F32 or src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_BF16) and op.type == src(op, 0).type and
-            ggml.impl.ggml_c.ggml_is_contiguous_rows(src(op, 0)),
-        ggml.impl.ggml_c.GGML_OP_CLAMP => return ggml.impl.ggml_c.ggml_is_contiguous_rows(src(op, 0)),
+            ggml.types.ggml_is_contiguous_rows(src(op, 0)),
+        ggml.impl.ggml_c.GGML_OP_CLAMP => return ggml.types.ggml_is_contiguous_rows(src(op, 0)),
         ggml.impl.ggml_c.GGML_OP_ADD, ggml.impl.ggml_c.GGML_OP_SUB, ggml.impl.ggml_c.GGML_OP_MUL, ggml.impl.ggml_c.GGML_OP_DIV => {
             if (src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_BF16 or src(op, 1).type == ggml.impl.ggml_c.GGML_TYPE_BF16 or op.type == ggml.impl.ggml_c.GGML_TYPE_BF16) {
                 return src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_BF16 and op.type == ggml.impl.ggml_c.GGML_TYPE_BF16 and
@@ -297,20 +297,20 @@ pub fn deviceSupportsOp(dev: ggml.impl.ggml_c.ggml_backend_dev_t, op: *const ggm
         ggml.impl.ggml_c.GGML_OP_CONT, ggml.impl.ggml_c.GGML_OP_SOFT_MAX => return true,
         ggml.impl.ggml_c.GGML_OP_SOFT_MAX_BACK => return ggml.impl.getOpParamsF32(op, 1) == 0.0,
         ggml.impl.ggml_c.GGML_OP_ROLL => return src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_F32,
-        ggml.impl.ggml_c.GGML_OP_ROPE, ggml.impl.ggml_c.GGML_OP_ROPE_BACK => return src(op, 0).nb[0] == ggml.impl.ggml_c.ggml_type_size(src(op, 0).type) and ggml.impl.ggml_c.ggml_is_contiguous_2(src(op, 0)),
-        ggml.impl.ggml_c.GGML_OP_IM2COL, ggml.impl.ggml_c.GGML_OP_IM2COL_3D, ggml.impl.ggml_c.GGML_OP_CONV_2D => return ggml.impl.ggml_c.ggml_is_contiguous(src(op, 0)) and ggml.impl.ggml_c.ggml_is_contiguous(src(op, 1)),
+        ggml.impl.ggml_c.GGML_OP_ROPE, ggml.impl.ggml_c.GGML_OP_ROPE_BACK => return src(op, 0).nb[0] == ggml.types.ggml_type_size(src(op, 0).type) and ggml.types.ggml_is_contiguous_2(src(op, 0)),
+        ggml.impl.ggml_c.GGML_OP_IM2COL, ggml.impl.ggml_c.GGML_OP_IM2COL_3D, ggml.impl.ggml_c.GGML_OP_CONV_2D => return ggml.types.ggml_is_contiguous(src(op, 0)) and ggml.types.ggml_is_contiguous(src(op, 1)),
         ggml.impl.ggml_c.GGML_OP_CONV_3D => return (src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_F16 or src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_F32) and
             src(op, 1).type == ggml.impl.ggml_c.GGML_TYPE_F32 and op.type == ggml.impl.ggml_c.GGML_TYPE_F32 and
-            ggml.impl.ggml_c.ggml_is_contiguous(src(op, 0)) and ggml.impl.ggml_c.ggml_is_contiguous(src(op, 1)) and ggml.impl.ggml_c.ggml_is_contiguous(op),
+            ggml.types.ggml_is_contiguous(src(op, 0)) and ggml.types.ggml_is_contiguous(src(op, 1)) and ggml.types.ggml_is_contiguous(op),
         ggml.impl.ggml_c.GGML_OP_CONV_2D_DW => return (src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_F16 or src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_F32) and
             src(op, 1).type == ggml.impl.ggml_c.GGML_TYPE_F32 and op.type == ggml.impl.ggml_c.GGML_TYPE_F32,
         ggml.impl.ggml_c.GGML_OP_CONV_TRANSPOSE_2D, ggml.impl.ggml_c.GGML_OP_POOL_1D, ggml.impl.ggml_c.GGML_OP_POOL_2D => return true,
-        ggml.impl.ggml_c.GGML_OP_ACC => return ggml.impl.ggml_c.ggml_is_contiguous(src(op, 0)) and ggml.impl.ggml_c.ggml_is_contiguous(src(op, 1)),
-        ggml.impl.ggml_c.GGML_OP_SUM => return ggml.impl.ggml_c.ggml_is_contiguously_allocated(src(op, 0)),
+        ggml.impl.ggml_c.GGML_OP_ACC => return ggml.types.ggml_is_contiguous(src(op, 0)) and ggml.types.ggml_is_contiguous(src(op, 1)),
+        ggml.impl.ggml_c.GGML_OP_SUM => return ggml.types.ggml_is_contiguously_allocated(src(op, 0)),
         ggml.impl.ggml_c.GGML_OP_TOP_K, ggml.impl.ggml_c.GGML_OP_ARGSORT => return src(op, 0).ne[0] <= std.math.maxInt(c_int),
-        ggml.impl.ggml_c.GGML_OP_SUM_ROWS => return src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_F32 and op.type == ggml.impl.ggml_c.GGML_TYPE_F32 and ggml.impl.ggml_c.ggml_is_contiguous_rows(src(op, 0)),
-        ggml.impl.ggml_c.GGML_OP_MEAN => return src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_F32 and op.type == ggml.impl.ggml_c.GGML_TYPE_F32 and ggml.impl.ggml_c.ggml_is_contiguous_rows(src(op, 0)),
-        ggml.impl.ggml_c.GGML_OP_GROUP_NORM => return ggml.impl.ggml_c.ggml_is_contiguous(src(op, 0)),
+        ggml.impl.ggml_c.GGML_OP_SUM_ROWS => return src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_F32 and op.type == ggml.impl.ggml_c.GGML_TYPE_F32 and ggml.types.ggml_is_contiguous_rows(src(op, 0)),
+        ggml.impl.ggml_c.GGML_OP_MEAN => return src(op, 0).type == ggml.impl.ggml_c.GGML_TYPE_F32 and op.type == ggml.impl.ggml_c.GGML_TYPE_F32 and ggml.types.ggml_is_contiguous_rows(src(op, 0)),
+        ggml.impl.ggml_c.GGML_OP_GROUP_NORM => return ggml.types.ggml_is_contiguous(src(op, 0)),
         ggml.impl.ggml_c.GGML_OP_PAD => return true,
         ggml.impl.ggml_c.GGML_OP_UPSCALE,
         ggml.impl.ggml_c.GGML_OP_PAD_REFLECT_1D,

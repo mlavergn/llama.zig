@@ -167,7 +167,7 @@ pub fn opSoftMax(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_ten
 
     ggml.impl.assert(src1 == null or src1.?.type == ggml.impl.ggml_c.GGML_TYPE_F16 or src1.?.type == ggml.impl.ggml_c.GGML_TYPE_F32, "!src1 || src1->type == GGML_TYPE_F16 || src1->type == GGML_TYPE_F32"); // src1 contains mask and it is optional
 
-    const nrows_x = ggml.impl.ggml_c.ggml_nrows(src0);
+    const nrows_x = ggml.types.ggml_nrows(src0);
     const nrows_y = src0.ne[1];
 
     const ne00 = src0.ne[0];
@@ -229,7 +229,7 @@ pub fn opSoftMaxBack(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml
     ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F32");
 
     const ncols = src0.ne[0];
-    const nrows = ggml.impl.ggml_c.ggml_nrows(src0);
+    const nrows = ggml.types.ggml_nrows(src0);
 
     const scale = ggml.impl.getOpParamsF32(dst, 0);
     const max_bias = ggml.impl.getOpParamsF32(dst, 1);

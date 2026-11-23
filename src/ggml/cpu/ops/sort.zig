@@ -92,7 +92,7 @@ fn triF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggm
 
     const ttype = ggml.impl.getOpParamsI32(dst, 0);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
 
     const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
@@ -173,7 +173,7 @@ fn argsortF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src0));
+    const nr: i64 = @intCast(ggml.types.ggml_nrows(src0));
 
     const order = ggml.impl.getOpParamsI32(dst, 0);
 
@@ -235,7 +235,7 @@ fn topKF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.gg
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src0));
+    const nr: i64 = @intCast(ggml.types.ggml_nrows(src0));
 
     const top_k: usize = @intCast(l.ne0);
     const n: usize = @intCast(l.ne00);
@@ -382,18 +382,18 @@ pub fn ggml_compute_forward_top_k_mask(params: *const ggml.cpu.defs.ComputeParam
     const extra: ?*const ggml.impl.ggml_c.ggml_tensor = dst.src[4];
 
     ggml.impl.assert(dst.type == mask.type, "dst->type == mask->type");
-    ggml.impl.assert(dst.nb[0] == ggml.impl.ggml_c.ggml_type_size(dst.type), "dst->nb[0] == ggml_type_size(dst->type)");
+    ggml.impl.assert(dst.nb[0] == ggml.types.ggml_type_size(dst.type), "dst->nb[0] == ggml_type_size(dst->type)");
 
     const n_kv = mask.ne[0];
     const ne1 = dst.ne[1];
     const ne2 = dst.ne[2];
-    const n_rows: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(dst));
+    const n_rows: i64 = @intCast(ggml.types.ggml_nrows(dst));
     const n_top = top_k.ne[0];
     const n_blk: i64 = if (blocks) |bl| bl.ne[0] else 1;
     const n_pick: i64 = if (blocks) |bl| bl.ne[1] else if (score) |sc| sc.ne[0] else n_kv;
     const n_extra: i64 = if (extra) |ex| ex.ne[0] else 0;
 
-    const ts = ggml.impl.ggml_c.ggml_type_size(dst.type);
+    const ts = ggml.types.ggml_type_size(dst.type);
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;

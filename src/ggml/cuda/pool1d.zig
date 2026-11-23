@@ -43,7 +43,7 @@ pub fn opPool1d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tens
 
     const IW = src0.ne[0];
     const OW = dst.ne[0];
-    const nr = ggml.impl.ggml_c.ggml_nrows(src0);
+    const nr = ggml.types.ggml_nrows(src0);
 
     const parallel_elements = int(nr * OW);
 

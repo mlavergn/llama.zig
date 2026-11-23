@@ -104,7 +104,7 @@ fn isExtraBufferType(buft: ggml.impl.ggml_c.ggml_backend_buffer_type_t) bool {
 /// Ports `struct ggml_backend_cpu_context` (ggml-cpu.cpp:99 @b1b770d90).
 const Context = struct {
     n_threads: c_int,
-    threadpool: ggml.impl.ggml_c.ggml_threadpool_t,
+    threadpool: ?*ggml.cpu.defs.Threadpool,
     work_data: ?[*]u8,
     work_size: usize,
     abort_callback: ggml.impl.ggml_c.ggml_abort_callback,
@@ -141,7 +141,7 @@ fn graphPlanCreate(backend: ggml.impl.ggml_c.ggml_backend_t, cgraph: *const ggml
 
     const plan = std.heap.c_allocator.create(PlanCpu) catch return null;
 
-    plan.cplan = ggml.impl.ggml_c.ggml_graph_plan(@ptrCast(cgraph), ctx.n_threads, ctx.threadpool);
+    plan.cplan = ggml.cpu.plan.ggml_graph_plan(@ptrCast(cgraph), ctx.n_threads, ctx.threadpool);
     // The C's own comment: "FIXME: deep copy".
     plan.cgraph = cgraph.*;
 
@@ -172,7 +172,7 @@ fn graphPlanFree(backend: ggml.impl.ggml_c.ggml_backend_t, plan_in: ggml.impl.gg
 fn graphPlanCompute(backend: ggml.impl.ggml_c.ggml_backend_t, plan_in: ggml.impl.ggml_c.ggml_backend_graph_plan_t) callconv(.c) ggml.impl.ggml_c.enum_ggml_status {
     _ = backend;
     const plan: *PlanCpu = @ptrCast(@alignCast(plan_in.?));
-    return ggml.impl.ggml_c.ggml_graph_compute(@ptrCast(&plan.cgraph), &plan.cplan);
+    return ggml.cpu.threading.ggml_graph_compute(@ptrCast(&plan.cgraph), &plan.cplan);
 }
 
 /// Ports `ggml_backend_cpu_graph_compute` (ggml-cpu.cpp:170 @b1b770d90).
@@ -180,7 +180,7 @@ fn graphCompute(backend: ggml.impl.ggml_c.ggml_backend_t, cgraph: *ggml.impl.CGr
     const b = ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend, backend);
     const ctx: *Context = @ptrCast(@alignCast(b.context.?));
 
-    var cplan = ggml.impl.ggml_c.ggml_graph_plan(@ptrCast(cgraph), ctx.n_threads, ctx.threadpool);
+    var cplan = ggml.cpu.plan.ggml_graph_plan(@ptrCast(cgraph), ctx.n_threads, ctx.threadpool);
 
     if (ctx.work_size < cplan.work_size) {
         if (ctx.work_data) |w| std.heap.c_allocator.free(w[0..ctx.work_size]);
@@ -198,7 +198,7 @@ fn graphCompute(backend: ggml.impl.ggml_c.ggml_backend_t, cgraph: *ggml.impl.CGr
     cplan.abort_callback_data = ctx.abort_callback_data;
     cplan.use_ref = ctx.use_ref;
 
-    return ggml.impl.ggml_c.ggml_graph_compute(@ptrCast(cgraph), &cplan);
+    return ggml.cpu.threading.ggml_graph_compute(@ptrCast(cgraph), &cplan);
 }
 
 /// Ports `ggml_backend_cpu_i` (ggml-cpu.cpp:193 @b1b770d90).
@@ -254,7 +254,7 @@ pub fn ggml_backend_cpu_init() callconv(.c) ggml.impl.ggml_c.ggml_backend_t {
     backend.* = .{
         .guid = guid(),
         .iface = backend_i,
-        .device = ggml.impl.ggml_c.ggml_backend_reg_dev_get(ggml_backend_cpu_reg(), 0),
+        .device = ggml.backend.ggml_backend_reg_dev_get(ggml_backend_cpu_reg(), 0),
         .context = ctx,
     };
     return backend;
@@ -262,7 +262,7 @@ pub fn ggml_backend_cpu_init() callconv(.c) ggml.impl.ggml_c.ggml_backend_t {
 
 /// Ports `ggml_backend_is_cpu` (ggml-cpu.cpp:249 @b1b770d90).
 pub fn ggml_backend_is_cpu(backend: ggml.impl.ggml_c.ggml_backend_t) callconv(.c) bool {
-    return backend != null and ggml.impl.ggml_c.ggml_guid_matches(ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend, backend).guid, guid());
+    return backend != null and ggml.runtime.ggml_guid_matches(ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend, backend).guid, guid());
 }
 
 inline fn contextOf(backend_cpu: ggml.impl.ggml_c.ggml_backend_t) *Context {
@@ -278,11 +278,12 @@ pub fn ggml_backend_cpu_set_n_threads(backend_cpu: ggml.impl.ggml_c.ggml_backend
 /// Ports `ggml_backend_cpu_set_threadpool` (ggml-cpu.cpp:260 @b1b770d90).
 pub fn ggml_backend_cpu_set_threadpool(backend_cpu: ggml.impl.ggml_c.ggml_backend_t, threadpool: ggml.impl.ggml_c.ggml_threadpool_t) callconv(.c) void {
     const ctx = contextOf(backend_cpu);
-    if (ctx.threadpool != null and ctx.threadpool != threadpool) {
+    const tp: ?*ggml.cpu.defs.Threadpool = @ptrCast(@alignCast(threadpool));
+    if (ctx.threadpool != null and ctx.threadpool != tp) {
         // already had a different threadpool, pause/suspend it before switching
-        ggml.impl.ggml_c.ggml_threadpool_pause(ctx.threadpool);
+        ggml.cpu.threading.ggml_threadpool_pause(ctx.threadpool.?);
     }
-    ctx.threadpool = threadpool;
+    ctx.threadpool = tp;
 }
 
 /// Ports `ggml_backend_cpu_set_abort_callback` (ggml-cpu.cpp:272 @b1b770d90).
@@ -446,13 +447,13 @@ fn deviceInitBackend(dev: ggml.impl.ggml_c.ggml_backend_dev_t, params: [*c]const
 
 fn deviceGetBufferType(dev: ggml.impl.ggml_c.ggml_backend_dev_t) callconv(.c) ggml.impl.ggml_c.ggml_backend_buffer_type_t {
     _ = dev;
-    return ggml.impl.ggml_c.ggml_backend_cpu_buffer_type();
+    return ggml.backend.ggml_backend_cpu_buffer_type();
 }
 
 fn deviceBufferFromHostPtr(dev: ggml.impl.ggml_c.ggml_backend_dev_t, ptr: ?*anyopaque, size: usize, max_tensor_size: usize) callconv(.c) ggml.impl.ggml_c.ggml_backend_buffer_t {
     _ = dev;
     _ = max_tensor_size;
-    return ggml.impl.ggml_c.ggml_backend_cpu_buffer_from_ptr(ptr, size);
+    return ggml.backend.ggml_backend_cpu_buffer_from_ptr(ptr, size);
 }
 
 /// Ports `ggml_backend_cpu_device_supports_op` (ggml-cpu.cpp:424 @b1b770d90).
@@ -514,9 +515,9 @@ fn deviceSupportsOp(dev: ggml.impl.ggml_c.ggml_backend_dev_t, op: *const ggml.im
             }
             // F16 or BF16 in src1 is widened into the F32 work buffer
             return src1.?.type == ggml.impl.ggml_c.GGML_TYPE_F32 or
-                src1.?.type == ggml.impl.ggml_c.ggml_get_type_traits_cpu(src0.?.type).*.vec_dot_type or
+                src1.?.type == ggml.cpu.traits.ggml_get_type_traits_cpu(src0.?.type).*.vec_dot_type or
                 ((src1.?.type == ggml.impl.ggml_c.GGML_TYPE_F16 or src1.?.type == ggml.impl.ggml_c.GGML_TYPE_BF16) and
-                    ggml.impl.ggml_c.ggml_get_type_traits_cpu(src0.?.type).*.vec_dot_type == ggml.impl.ggml_c.GGML_TYPE_F32);
+                    ggml.cpu.traits.ggml_get_type_traits_cpu(src0.?.type).*.vec_dot_type == ggml.impl.ggml_c.GGML_TYPE_F32);
         },
         ggml.impl.ggml_c.GGML_OP_SOFT_MAX_BACK => {
             if (src0.?.type != ggml.impl.ggml_c.GGML_TYPE_F32 or src1.?.type != ggml.impl.ggml_c.GGML_TYPE_F32) return false;
@@ -534,11 +535,11 @@ fn deviceSupportsOp(dev: ggml.impl.ggml_c.ggml_backend_dev_t, op: *const ggml.im
         },
         ggml.impl.ggml_c.GGML_OP_OUT_PROD => {
             return (src0.?.type == ggml.impl.ggml_c.GGML_TYPE_F32 or
-                ((src0.?.type == ggml.impl.ggml_c.GGML_TYPE_F16 or ggml.impl.ggml_c.ggml_is_quantized(src0.?.type)) and
+                ((src0.?.type == ggml.impl.ggml_c.GGML_TYPE_F16 or ggml.types.ggml_is_quantized(src0.?.type)) and
                     src0.?.ne[2] == src1.?.ne[2] and src0.?.ne[3] == src1.?.ne[3])) and
                 src1.?.type == ggml.impl.ggml_c.GGML_TYPE_F32 and op.type == ggml.impl.ggml_c.GGML_TYPE_F32;
         },
-        ggml.impl.ggml_c.GGML_OP_CONV_2D => return ggml.impl.ggml_c.ggml_is_contiguous(src0.?),
+        ggml.impl.ggml_c.GGML_OP_CONV_2D => return ggml.types.ggml_is_contiguous(src0.?),
         ggml.impl.ggml_c.GGML_OP_SSM_SCAN => {
             return ggml.impl.getOpParamsI32(op, 0) == 1 or ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, op.src[3]).ne[0] == 1;
         },
@@ -550,7 +551,7 @@ fn deviceSupportsOp(dev: ggml.impl.ggml_c.ggml_backend_dev_t, op: *const ggml.im
 /// @b1b770d90).
 fn deviceSupportsBuft(dev: ggml.impl.ggml_c.ggml_backend_dev_t, buft: ggml.impl.ggml_c.ggml_backend_buffer_type_t) callconv(.c) bool {
     _ = dev;
-    return ggml.impl.ggml_c.ggml_backend_buft_is_host(buft) or isExtraBufferType(buft);
+    return ggml.backend.ggml_backend_buft_is_host(buft) or isExtraBufferType(buft);
 }
 
 /// Ports `ggml_backend_cpu_device_i` (ggml-cpu.cpp:495 @b1b770d90).
@@ -633,14 +634,14 @@ fn ensureFeatures() void {
     defer features_mutex.unlock();
     if (features_ready.load(.acquire)) return;
     ggml.cpu.features.ggml_cpu_init();
-    if (ggml.impl.ggml_c.ggml_cpu_has_neon() != 0) pushFeature("NEON", "1");
-    if (ggml.impl.ggml_c.ggml_cpu_has_arm_fma() != 0) pushFeature("ARM_FMA", "1");
-    if (ggml.impl.ggml_c.ggml_cpu_has_fp16_va() != 0) pushFeature("FP16_VA", "1");
-    if (ggml.impl.ggml_c.ggml_cpu_has_matmul_int8() != 0) pushFeature("MATMUL_INT8", "1");
-    if (ggml.impl.ggml_c.ggml_cpu_has_sve() != 0) pushFeature("SVE", "1");
-    if (ggml.impl.ggml_c.ggml_cpu_has_dotprod() != 0) pushFeature("DOTPROD", "1");
-    if (ggml.impl.ggml_c.ggml_cpu_has_sme() != 0) pushFeature("SME", "1");
-    if (ggml.impl.ggml_c.ggml_cpu_has_llamafile() != 0) pushFeature("LLAMAFILE", "1");
+    if (ggml.cpu.features.ggml_cpu_has_neon() != 0) pushFeature("NEON", "1");
+    if (ggml.cpu.features.ggml_cpu_has_arm_fma() != 0) pushFeature("ARM_FMA", "1");
+    if (ggml.cpu.features.ggml_cpu_has_fp16_va() != 0) pushFeature("FP16_VA", "1");
+    if (ggml.cpu.features.ggml_cpu_has_matmul_int8() != 0) pushFeature("MATMUL_INT8", "1");
+    if (ggml.cpu.features.ggml_cpu_has_sve() != 0) pushFeature("SVE", "1");
+    if (ggml.cpu.features.ggml_cpu_has_dotprod() != 0) pushFeature("DOTPROD", "1");
+    if (ggml.cpu.features.ggml_cpu_has_sme() != 0) pushFeature("SME", "1");
+    if (ggml.cpu.features.ggml_cpu_has_llamafile() != 0) pushFeature("LLAMAFILE", "1");
     pushFeature("ACCELERATE", "1");
     pushFeature("REPACK", "1");
     pushFeature(null, null);
@@ -662,12 +663,12 @@ fn regGetProcAddress(reg: ggml.impl.ggml_c.ggml_backend_reg_t, name: [*c]const u
         .{ "ggml_backend_dev_get_extra_bufts", @as(?*anyopaque, @ptrCast(@constCast(&deviceGetExtraBuffersType))) },
         .{ "ggml_backend_get_features", @as(?*anyopaque, @ptrCast(@constCast(&regGetFeatures))) },
         .{ "ggml_backend_set_abort_callback", @as(?*anyopaque, @ptrCast(@constCast(&ggml_backend_cpu_set_abort_callback))) },
-        .{ "ggml_backend_cpu_numa_init", @as(?*anyopaque, @ptrCast(@constCast(&ggml.impl.ggml_c.ggml_numa_init))) },
-        .{ "ggml_backend_cpu_is_numa", @as(?*anyopaque, @ptrCast(@constCast(&ggml.impl.ggml_c.ggml_is_numa))) },
+        .{ "ggml_backend_cpu_numa_init", @as(?*anyopaque, @ptrCast(@constCast(&ggml.cpu.threading.ggml_numa_init))) },
+        .{ "ggml_backend_cpu_is_numa", @as(?*anyopaque, @ptrCast(@constCast(&ggml.cpu.threading.ggml_is_numa))) },
         .{ "ggml_backend_cpu_set_use_ref", @as(?*anyopaque, @ptrCast(@constCast(&ggml_backend_cpu_set_use_ref))) },
         // threadpool - the C's own TODO: move to ggml-base
-        .{ "ggml_threadpool_new", @as(?*anyopaque, @ptrCast(@constCast(&ggml.impl.ggml_c.ggml_threadpool_new))) },
-        .{ "ggml_threadpool_free", @as(?*anyopaque, @ptrCast(@constCast(&ggml.impl.ggml_c.ggml_threadpool_free))) },
+        .{ "ggml_threadpool_new", @as(?*anyopaque, @ptrCast(@constCast(&ggml.cpu.threading.ggml_threadpool_new))) },
+        .{ "ggml_threadpool_free", @as(?*anyopaque, @ptrCast(@constCast(&ggml.cpu.threading.ggml_threadpool_free))) },
         .{ "ggml_backend_cpu_set_threadpool", @as(?*anyopaque, @ptrCast(@constCast(&ggml_backend_cpu_set_threadpool))) },
     };
     inline for (table) |entry| {

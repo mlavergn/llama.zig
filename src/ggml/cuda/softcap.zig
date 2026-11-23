@@ -35,5 +35,5 @@ pub fn opSoftcap(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_ten
     const scale: f32 = @bitCast(src.op_params[0]);
     const softcap: f32 = @bitCast(dst.op_params[0]);
 
-    softcapF32Cuda(src0_d, dst_d, scale, softcap, @truncate(ggml.impl.ggml_c.ggml_nelements(src0)), stream);
+    softcapF32Cuda(src0_d, dst_d, scale, softcap, @truncate(ggml.types.ggml_nelements(src0)), stream);
 }

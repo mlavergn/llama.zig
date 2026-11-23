@@ -121,8 +121,8 @@ pub fn opSolveTri(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_te
     const src0 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[0]); // A (n×n, lower triangular)
     const src1 = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst.src[1]); // B (n×k)
 
-    _ = ggml.impl.ggml_c.ggml_is_contiguous(src0);
-    _ = ggml.impl.ggml_c.ggml_is_contiguous(src1);
+    _ = ggml.types.ggml_is_contiguous(src0);
+    _ = ggml.types.ggml_is_contiguous(src1);
 
     const n = src0.ne[0];
     const k = src1.ne[0];

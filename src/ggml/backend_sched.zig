@@ -85,7 +85,7 @@ const Sched = extern struct {
 
     backends: [max_backends]mod.impl.ggml_c.ggml_backend_t,
     bufts: [max_backends]mod.impl.ggml_c.ggml_backend_buffer_type_t,
-    galloc: mod.impl.ggml_c.ggml_gallocr_t,
+    galloc: ?*mod.alloc.Gallocr,
 
     /// Hash map of the nodes in the graph.
     hash_set: mod.impl.HashSet,
@@ -123,7 +123,7 @@ const Sched = extern struct {
     n_graph_inputs: c_int,
     graph_inputs_capacity: c_int,
 
-    ctx: ?*mod.impl.ggml_c.ggml_context,
+    ctx: ?*mod.context.Context,
 
     callback_eval: mod.impl.ggml_c.ggml_backend_sched_eval_callback,
     callback_eval_user_data: ?*anyopaque,
@@ -305,7 +305,7 @@ fn backendFromBuffer(sched: *Sched, tensor: *const mod.impl.ggml_c.ggml_tensor, 
             "%s: warning: no backend supports op %s with a weight with buffer type %s used in tensor %s, the weight will need to be copied\n",
             .{
                 "ggml_backend_sched_backend_from_buffer",
-                mod.impl.ggml_c.ggml_op_desc(tensor),
+                mod.types.ggml_op_desc(tensor),
                 mod.backend.ggml_backend_buffer_name(buffer),
                 @as([*:0]const u8, @ptrCast(&tensor.name)),
             },
@@ -436,7 +436,7 @@ fn printAssignments(sched: *Sched, graph: *mod.impl.CGraph) void {
                 const in = split.inputs[@intCast(j)].?;
                 mod.impl.logDebug("[%s (%5.5s)] ", .{
                     @as([*:0]const u8, @ptrCast(&in.name)),
-                    fmtSize(mod.impl.ggml_c.ggml_nbytes(in)),
+                    fmtSize(mod.types.ggml_nbytes(in)),
                 });
             }
             mod.impl.logDebug("\n", .{});
@@ -450,9 +450,9 @@ fn printAssignments(sched: *Sched, graph: *mod.impl.CGraph) void {
             const tensor_backend = ggml_backend_sched_get_tensor_backend(@ptrCast(sched), node);
             mod.impl.logDebug("node #%3d (%10.10s): %20.20s (%5.5s) [%5.5s %8.8s] use=%d,c=%d:", .{
                 i,
-                mod.impl.ggml_c.ggml_op_desc(node),
+                mod.types.ggml_op_desc(node),
                 @as([*:0]const u8, @ptrCast(&node.name)),
-                fmtSize(mod.impl.ggml_c.ggml_nbytes(node)),
+                fmtSize(mod.types.ggml_nbytes(node)),
                 if (tensor_backend != null) mod.backend.ggml_backend_name(tensor_backend) else @as([*c]const u8, "NULL"),
                 getCause(node),
                 graph.use_counts[mod.impl.hashFind(&graph.visited_hash_set, node)],
@@ -467,7 +467,7 @@ fn printAssignments(sched: *Sched, graph: *mod.impl.CGraph) void {
                 const src_backend = ggml_backend_sched_get_tensor_backend(@ptrCast(sched), src);
                 mod.impl.logDebug(" %20.20s (%5.5s) [%5.5s %8.8s]", .{
                     @as([*:0]const u8, @ptrCast(&src.name)),
-                    fmtSize(mod.impl.ggml_c.ggml_nbytes(src)),
+                    fmtSize(mod.types.ggml_nbytes(src)),
                     if (src_backend != null) mod.backend.ggml_backend_name(src_backend) else @as([*c]const u8, "NULL"),
                     getCause(src),
                 });
@@ -561,9 +561,9 @@ pub fn ggml_backend_sched_split_graph(sched_: mod.impl.ggml_c.ggml_backend_sched
         .no_alloc = true,
     };
 
-    mod.impl.ggml_c.ggml_free(sched.ctx);
+    mod.context.ggml_free(sched.ctx);
 
-    sched.ctx = mod.impl.ggml_c.ggml_init(params);
+    sched.ctx = mod.context.ggml_init(params);
     if (sched.ctx == null) {
         mod.impl.abort("ggml_backend_sched_split_graph: failed to initialize context");
     }
@@ -895,11 +895,11 @@ pub fn ggml_backend_sched_split_graph(sched_: mod.impl.ggml_c.ggml_backend_sched
                         const b = sched.backends[@intCast(cur_backend_id)];
                         var cp: c_int = 0;
                         while (cp < sched.n_copies) : (cp += 1) {
-                            const tensor_copy = mod.impl.one(mod.impl.ggml_c.ggml_tensor, mod.backend.dupTensorLayout(sched.ctx, src));
+                            const tensor_copy = mod.impl.one(mod.impl.ggml_c.ggml_tensor, mod.backend.dupTensorLayout(sched.ctx.?, src));
                             _ = mod.impl.ggml_c.ggml_format_name(tensor_copy, "%s#%s#%d", mod.backend.ggml_backend_name(b), @as([*:0]const u8, @ptrCast(&src.name)), cp);
                             if (sched.n_copies > 1) {
-                                _ = mod.impl.ggml_c.ggml_set_input(tensor_copy);
-                                _ = mod.impl.ggml_c.ggml_set_output(tensor_copy); // prevent ggml-alloc from overwriting the tensor
+                                _ = mod.ops.ggml_set_input(tensor_copy);
+                                _ = mod.ops.ggml_set_output(tensor_copy); // prevent ggml-alloc from overwriting the tensor
                             }
                             tensorIdCopyPtr(sched, src_id, cur_backend_id, cp).* = tensor_copy;
                             setCause(tensor_copy, "4.cpy");
@@ -953,11 +953,11 @@ pub fn ggml_backend_sched_split_graph(sched_: mod.impl.ggml_c.ggml_backend_sched
                     if (cp == sched.cur_copy) {
                         tensor_copy = leaf; // use the original tensor as the current copy
                     } else {
-                        tensor_copy = mod.impl.one(mod.impl.ggml_c.ggml_tensor, mod.backend.dupTensorLayout(sched.ctx, leaf));
+                        tensor_copy = mod.impl.one(mod.impl.ggml_c.ggml_tensor, mod.backend.dupTensorLayout(sched.ctx.?, leaf));
                         _ = mod.impl.ggml_c.ggml_format_name(tensor_copy, "%s#%s#%d", mod.backend.ggml_backend_name(b), @as([*:0]const u8, @ptrCast(&leaf.name)), cp);
                     }
-                    _ = mod.impl.ggml_c.ggml_set_input(tensor_copy);
-                    _ = mod.impl.ggml_c.ggml_set_output(tensor_copy); // prevent ggml-alloc from overwriting the tensor
+                    _ = mod.ops.ggml_set_input(tensor_copy);
+                    _ = mod.ops.ggml_set_output(tensor_copy); // prevent ggml-alloc from overwriting the tensor
                     tensorIdCopyPtr(sched, leaf_id, leaf_backend_id, cp).* = tensor_copy;
                     setCause(tensor_copy, "6.cpy");
                 }
@@ -1060,7 +1060,7 @@ pub fn ggml_backend_sched_split_graph(sched_: mod.impl.ggml_c.ggml_backend_sched
                 const input_cpy = tensorIdCopyPtr(sched, input_id, split.backend_id, sched.cur_copy).*;
 
                 // add a dependency to the input source so that it is not freed before the copy is done
-                const input_dep = mod.impl.one(mod.impl.ggml_c.ggml_tensor, mod.impl.ggml_c.ggml_view_tensor(sched.ctx, input));
+                const input_dep = mod.impl.one(mod.impl.ggml_c.ggml_tensor, mod.context.ggml_view_tensor(sched.ctx.?, input));
                 input_dep.src[0] = input;
                 sched.node_backend_ids[@intCast(graph_copy.n_nodes)] = sched.hv_tensor_backend_ids[input_id];
                 graph_copy.nodes[@intCast(graph_copy.n_nodes)] = input_dep;
@@ -1087,7 +1087,7 @@ pub fn ggml_backend_sched_split_graph(sched_: mod.impl.ggml_c.ggml_backend_sched
                 if (alloc_deps.get(graph.nodes[@intCast(j)].?)) |keep| {
                     var k: usize = 0;
                     while (k < keep.items.len) : (k += max_src) {
-                        const dep = mod.impl.one(mod.impl.ggml_c.ggml_tensor, mod.impl.ggml_c.ggml_view_tensor(sched.ctx, keep.items[k]));
+                        const dep = mod.impl.one(mod.impl.ggml_c.ggml_tensor, mod.context.ggml_view_tensor(sched.ctx.?, keep.items[k]));
                         var s: usize = 0;
                         while (s < max_src and k + s < keep.items.len) : (s += 1) {
                             dep.src[s] = keep.items[k + s];
@@ -1195,7 +1195,7 @@ fn allocSplits(sched: *Sched) bool {
     }
 
     // allocate graph
-    if (backend_ids_changed or !mod.impl.ggml_c.ggml_gallocr_alloc_graph(sched.galloc, @ptrCast(&sched.graph))) {
+    if (backend_ids_changed or !mod.alloc.ggml_gallocr_alloc_graph(sched.galloc.?, @ptrCast(&sched.graph))) {
         if (!debug_off) {
             mod.impl.logDebug(
                 "%s: failed to allocate graph, reserving (backend_ids_changed = %d)\n",
@@ -1227,11 +1227,11 @@ fn allocSplits(sched: *Sched) bool {
             mod.backend.ggml_backend_synchronize(sched.backends[@intCast(i)]);
         }
 
-        if (!mod.impl.ggml_c.ggml_gallocr_reserve_n(sched.galloc, @ptrCast(&sched.graph), sched.node_backend_ids, sched.leaf_backend_ids)) {
+        if (!mod.alloc.ggml_gallocr_reserve_n(sched.galloc.?, @ptrCast(&sched.graph), sched.node_backend_ids, sched.leaf_backend_ids)) {
             mod.impl.logError("%s: failed to reserve graph buffers\n", .{"ggml_backend_sched_alloc_splits"});
             return false;
         }
-        if (!mod.impl.ggml_c.ggml_gallocr_alloc_graph(sched.galloc, @ptrCast(&sched.graph))) {
+        if (!mod.alloc.ggml_gallocr_alloc_graph(sched.galloc.?, @ptrCast(&sched.graph))) {
             mod.impl.logError("%s: failed to allocate graph\n", .{"ggml_backend_sched_alloc_splits"});
             return false;
         }
@@ -1378,7 +1378,7 @@ fn prefetchInputs(sched: *Sched, split_id: c_int) void {
             return;
         }
 
-        mod.backend.ggml_backend_tensor_get_async(be, input, input_cpy.data, 0, mod.impl.ggml_c.ggml_nbytes(input));
+        mod.backend.ggml_backend_tensor_get_async(be, input, input_cpy.data, 0, mod.types.ggml_nbytes(input));
         sched.prefetched[@intCast(sched.n_prefetched)] = input;
         sched.n_prefetched += 1;
     }
@@ -1563,7 +1563,7 @@ pub fn ggml_backend_sched_new(
     sched.prev_graph_size = 0;
 
     sched.context_buffer_size = ggml_sched_max_splits * max_split_inputs * 2 * @sizeOf(mod.impl.ggml_c.ggml_tensor) +
-        mod.impl.ggml_c.ggml_graph_overhead_custom(graph_size, false);
+        mod.graph.ggml_graph_overhead_custom(graph_size, false);
     sched.context_buffer = @ptrCast(@alignCast(std.c.malloc(sched.context_buffer_size)));
 
     const initial_splits_capacity: c_int = 16;
@@ -1593,7 +1593,7 @@ pub fn ggml_backend_sched_new(
         }
     }
 
-    sched.galloc = mod.impl.ggml_c.ggml_gallocr_new_n(&sched.bufts, n_backends);
+    sched.galloc = mod.alloc.ggml_gallocr_new_n(&sched.bufts, n_backends);
     sched.op_offload = op_offload;
 
     ggml_backend_sched_reset(@ptrCast(sched));
@@ -1624,8 +1624,8 @@ pub fn ggml_backend_sched_free(sched_: mod.impl.ggml_c.ggml_backend_sched_t) cal
         }
         mod.backend.ggml_backend_event_free(sched.prefetch_events[@intCast(b)]);
     }
-    mod.impl.ggml_c.ggml_gallocr_free(sched.galloc);
-    mod.impl.ggml_c.ggml_free(sched.ctx);
+    mod.alloc.ggml_gallocr_free(sched.galloc);
+    mod.context.ggml_free(sched.ctx);
     mod.graph.ggml_hash_set_free(&sched.hash_set);
     var i: c_int = 0;
     while (i < sched.splits_capacity) : (i += 1) {
@@ -1678,7 +1678,7 @@ pub fn ggml_backend_sched_reserve_size(sched_: mod.impl.ggml_c.ggml_backend_sche
 
     ggml_backend_sched_split_graph(sched_, measure_graph);
 
-    mod.impl.ggml_c.ggml_gallocr_reserve_n_size(sched.galloc, @ptrCast(&sched.graph), sched.node_backend_ids, sched.leaf_backend_ids, sizes);
+    mod.alloc.ggml_gallocr_reserve_n_size(sched.galloc.?, @ptrCast(&sched.graph), sched.node_backend_ids, sched.leaf_backend_ids, sizes);
 }
 
 /// Ports `ggml_backend_sched_reserve` (src/ggml-backend.cpp:2430 @b1b770d90).
@@ -1693,7 +1693,7 @@ pub fn ggml_backend_sched_reserve(sched_: mod.impl.ggml_c.ggml_backend_sched_t, 
 
     ggml_backend_sched_split_graph(sched_, measure_graph);
 
-    if (!mod.impl.ggml_c.ggml_gallocr_reserve_n(sched.galloc, @ptrCast(&sched.graph), sched.node_backend_ids, sched.leaf_backend_ids)) {
+    if (!mod.alloc.ggml_gallocr_reserve_n(sched.galloc.?, @ptrCast(&sched.graph), sched.node_backend_ids, sched.leaf_backend_ids)) {
         return false;
     }
 
@@ -1849,7 +1849,7 @@ pub fn ggml_backend_sched_get_buffer_size(sched_: mod.impl.ggml_c.ggml_backend_s
     const backend_index = backendId(sched, b);
     mod.impl.assert(backend_index >= 0 and backend_index < sched.n_backends, "backend_index in range");
 
-    return mod.impl.ggml_c.ggml_gallocr_get_buffer_size(sched.galloc, backend_index);
+    return mod.alloc.ggml_gallocr_get_buffer_size(sched.galloc.?, backend_index);
 }
 
 /// Ports `ggml_backend_sched_set_tensor_backend` (src/ggml-backend.cpp:2555 @b1b770d90).

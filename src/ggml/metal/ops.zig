@@ -162,8 +162,8 @@ pub const Op = struct {
         //       https://github.com/ggml-org/llama.cpp/pull/16130#issuecomment-3327905830
         var i = idx_start;
         while (i < idx_end) : (i += 1) {
-            const n = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, ggml.impl.ggml_c.ggml_graph_node(@ptrCast(gf), i));
-            if (!ggml.impl.opIsEmpty(n.op) and !ggml.impl.ggml_c.ggml_is_empty(n)) {
+            const n = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, ggml.graph.ggml_graph_node(@ptrCast(gf), i));
+            if (!ggml.impl.opIsEmpty(n.op) and !ggml.types.ggml_is_empty(n)) {
                 self.idxs[self.n_idxs] = i;
                 self.n_idxs += 1;
             }
@@ -190,7 +190,7 @@ pub const Op = struct {
     /// Ports `node` (ggml-metal-ops.cpp:79 @b1b770d90).
     fn node(self: *const Op, i: c_int) *ggml.impl.ggml_c.ggml_tensor {
         ggml.impl.assert(i >= 0 and i < self.nNodes(), "i >= 0 && i < (int) idxs.size()");
-        return ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, ggml.impl.ggml_c.ggml_graph_node(@ptrCast(self.gf), self.idxs[@intCast(i)]));
+        return ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, ggml.graph.ggml_graph_node(@ptrCast(self.gf), self.idxs[@intCast(i)]));
     }
 
     /// Ports `can_fuse` (ggml-metal-ops.cpp:86 @b1b770d90): the
@@ -292,7 +292,7 @@ fn concurrencyCheck(ctx: *Op, node: *const ggml.impl.ggml_c.ggml_tensor) bool {
 /// fused a run of them.
 pub fn ggml_metal_op_encode(ctx: *Op, idx: c_int) callconv(.c) c_int {
     if (ctx.use_capture) {
-        ggml.metal.device_c.ggml_metal_encoder_debug_group_push(ctx.enc, ggml.impl.ggml_c.ggml_op_desc(ctx.node(idx)));
+        ggml.metal.device_c.ggml_metal_encoder_debug_group_push(ctx.enc, ggml.types.ggml_op_desc(ctx.node(idx)));
     }
 
     const res = encodeImpl(ctx, idx);
@@ -394,7 +394,7 @@ fn dispatch(ctx: *Op, node: *const ggml.impl.ggml_c.ggml_tensor, idx: c_int) c_i
         ggml.impl.ggml_c.GGML_OP_COUNT_EQUAL => ggml_metal_op_count_equal(ctx, idx),
         else => {
             ggml.impl.logError("%s: error: node %3d, op = %8s not implemented\n", .{
-                "ggml_metal_op_encode_impl", idx, ggml.impl.ggml_c.ggml_op_name(node.op),
+                "ggml_metal_op_encode_impl", idx, ggml.types.ggml_op_name(node.op),
             });
             ggml.impl.abort("metal: op not implemented");
         },
@@ -405,7 +405,7 @@ fn dispatch(ctx: *Op, node: *const ggml.impl.ggml_c.ggml_tensor, idx: c_int) c_i
 fn encodeImpl(ctx: *Op, idx: c_int) c_int {
     const node = ctx.node(idx);
 
-    if (ggml.impl.ggml_c.ggml_is_empty(node)) {
+    if (ggml.types.ggml_is_empty(node)) {
         return 1;
     }
 
@@ -419,7 +419,7 @@ fn encodeImpl(ctx: *Op, idx: c_int) c_int {
             // noop -> next node
             if (ctx.debug_graph > 0) {
                 ggml.impl.logDebug("%s: node[%5d] - %-12s %s\n", .{
-                    "ggml_metal_op_encode_impl", idx, ggml.impl.ggml_c.ggml_op_name(node.op), "(noop)",
+                    "ggml_metal_op_encode_impl", idx, ggml.types.ggml_op_name(node.op), "(noop)",
                 });
             }
             return 1;
@@ -429,7 +429,7 @@ fn encodeImpl(ctx: *Op, idx: c_int) c_int {
 
     if (!ggml.metal.device_c.ggml_metal_device_supports_op(ctx.dev, node)) {
         ggml.impl.logError("%s: error: unsupported op '%s'\n", .{
-            "ggml_metal_op_encode_impl", ggml.impl.ggml_c.ggml_op_desc(node),
+            "ggml_metal_op_encode_impl", ggml.types.ggml_op_desc(node),
         });
         ggml.impl.abort("unsupported op");
     }
@@ -465,8 +465,8 @@ fn encodeImpl(ctx: *Op, idx: c_int) c_int {
             ggml.impl.logDebug("%s: node[%5d] - %-12s %-12s %s\n", .{
                 "ggml_metal_op_encode_impl",
                 idx,
-                ggml.impl.ggml_c.ggml_op_name(node.op),
-                ggml.impl.ggml_c.ggml_get_name(node),
+                ggml.types.ggml_op_name(node.op),
+                ggml.context.ggml_get_name(node),
                 @as([*:0]const u8, if (is_concurrent) "(concurrent)" else ""),
             });
         }
@@ -506,10 +506,10 @@ fn debugLogShapes(node: *const ggml.impl.ggml_c.ggml_tensor) void {
         ggml.impl.logDebug(
             "%s: src%d - %4s [%5lld, %5lld, %5lld, %5lld] [%5lld, %5lld, %5lld, %5lld], %d, %s\n",
             .{
-                "ggml_metal_op_encode_impl", @as(c_int, @intCast(j)), ggml.impl.ggml_c.ggml_type_name(s.type),
+                "ggml_metal_op_encode_impl", @as(c_int, @intCast(j)), ggml.types.ggml_type_name(s.type),
                 s.ne[0],                     s.ne[1],                 s.ne[2],
                 s.ne[3],                     s.nb[0],                 s.nb[1],
-                s.nb[2],                     s.nb[3],                 @as(c_int, if (ggml.impl.ggml_c.ggml_is_contiguous(s)) 1 else 0),
+                s.nb[2],                     s.nb[3],                 @as(c_int, if (ggml.types.ggml_is_contiguous(s)) 1 else 0),
                 &s.name,
             },
         );
@@ -518,9 +518,9 @@ fn debugLogShapes(node: *const ggml.impl.ggml_c.ggml_tensor) void {
     ggml.impl.logDebug(
         "%s: node - %4s [%5lld, %5lld, %5lld, %5lld] [%5lld, %5lld, %5lld, %5lld], 1, %s\n",
         .{
-            "ggml_metal_op_encode_impl", ggml.impl.ggml_c.ggml_type_name(node.type), node.ne[0],
-            node.ne[1],                  node.ne[2],                                 node.ne[3],
-            node.nb[0],                  node.nb[1],                                 node.nb[2],
+            "ggml_metal_op_encode_impl", ggml.types.ggml_type_name(node.type), node.ne[0],
+            node.ne[1],                  node.ne[2],                           node.ne[3],
+            node.nb[0],                  node.nb[1],                           node.nb[2],
             node.nb[3],                  &node.name,
         },
     );
@@ -565,14 +565,14 @@ pub fn ggml_metal_op_concat(ctx: *Op, idx: c_int) callconv(.c) c_int {
 
     const dim = ggml.impl.getOpParamsI32(op, 0);
 
-    const is_q = ggml.impl.ggml_c.ggml_is_quantized(op.type);
+    const is_q = ggml.types.ggml_is_quantized(op.type);
 
     // for quantized types, concat is done at the block level (nb0 == type_size == block size)
     var ne00_arg: i32 = @intCast(s0.ne[0]);
     var ne10_arg: i32 = @intCast(s1.ne[0]);
     var ne0_arg: i32 = @intCast(op.ne[0]);
     if (is_q) {
-        const blck: i32 = @intCast(ggml.impl.ggml_c.ggml_blck_size(op.type));
+        const blck: i32 = @intCast(ggml.types.ggml_blck_size(op.type));
         ggml.impl.assert(@rem(ne00_arg, blck) == 0, "ne00 % blck == 0");
         ggml.impl.assert(@rem(ne10_arg, blck) == 0, "ne10 % blck == 0");
         ggml.impl.assert(@rem(ne0_arg, blck) == 0, "ne0  % blck == 0");
@@ -693,8 +693,8 @@ pub fn ggml_metal_op_bin(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const s0 = src(op, 0);
     const s1 = src(op, 1);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(s0), "ggml_is_contiguous_rows(op->src[0])");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(s1), "ggml_is_contiguous_rows(op->src[1])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(s0), "ggml_is_contiguous_rows(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(s1), "ggml_is_contiguous_rows(op->src[1])");
 
     const bid_src0 = getBufferId(s0);
     var bid_src1 = getBufferId(s1);
@@ -789,7 +789,7 @@ pub fn ggml_metal_op_bin(ctx: *Op, idx: c_int) callconv(.c) c_int {
         ggml.metal.device_c.ggml_metal_encoder_dispatch_threadgroups(
             enc,
             @divTrunc(args.ne0 + nth - 1, nth),
-            @intCast(ggml.impl.ggml_c.ggml_nrows(op)),
+            @intCast(ggml.types.ggml_nrows(op)),
             1,
             nth,
             1,
@@ -837,7 +837,7 @@ pub fn ggml_metal_op_add_id(ctx: *Op, idx: c_int) callconv(.c) c_int {
     ggml.impl.assert(s2.type == ggml.impl.ggml_c.GGML_TYPE_I32, "op->src[2]->type == GGML_TYPE_I32");
     ggml.impl.assert(op.type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->type == GGML_TYPE_F32");
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(s0), "ggml_is_contiguous_rows(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(s0), "ggml_is_contiguous_rows(op->src[0])");
 
     var args: ggml.metal.kargs.add_id = .{
         .ne0 = @intCast(op.ne[0]),
@@ -941,8 +941,8 @@ pub fn ggml_metal_op_acc(ctx: *Op, idx: c_int) callconv(.c) c_int {
     ggml.impl.assert(s1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->src[1]->type == GGML_TYPE_F32");
     ggml.impl.assert(op.type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->type == GGML_TYPE_F32");
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(s0), "ggml_is_contiguous_rows(op->src[0])");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(s1), "ggml_is_contiguous_rows(op->src[1])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(s0), "ggml_is_contiguous_rows(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(s1), "ggml_is_contiguous_rows(op->src[1])");
 
     const pnb1: usize = @intCast(ggml.impl.getOpParamsI32(op, 0));
     const pnb2: usize = @intCast(ggml.impl.getOpParamsI32(op, 1));
@@ -1069,7 +1069,7 @@ pub fn ggml_metal_op_unary(ctx: *Op, idx: c_int) callconv(.c) c_int {
 
     // the sigmoid and sqrt(softplus) TOPK_MOE fusions anchor at the gating unary node
     if (op.op == ggml.impl.ggml_c.GGML_OP_UNARY and ctx.useFusion() and
-        (ggml.impl.ggml_c.ggml_get_unary_op(op) == ggml.impl.ggml_c.GGML_UNARY_OP_SOFTPLUS or ggml.impl.ggml_c.ggml_get_unary_op(op) == ggml.impl.ggml_c.GGML_UNARY_OP_SIGMOID))
+        (ggml.types.ggml_get_unary_op(op) == ggml.impl.ggml_c.GGML_UNARY_OP_SOFTPLUS or ggml.types.ggml_get_unary_op(op) == ggml.impl.ggml_c.GGML_UNARY_OP_SIGMOID))
     {
         var n: c_int = 1;
         if (ctx.canFuse(idx, .full, &n)) |f| {
@@ -1084,7 +1084,7 @@ pub fn ggml_metal_op_unary(ctx: *Op, idx: c_int) callconv(.c) c_int {
 
     const s0 = src(op, 0);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(s0), "ggml_is_contiguous_rows(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(s0), "ggml_is_contiguous_rows(op->src[0])");
 
     const bid_src0 = getBufferId(s0);
     const bid_dst = getBufferId(op);
@@ -1135,7 +1135,7 @@ pub fn ggml_metal_op_unary(ctx: *Op, idx: c_int) callconv(.c) c_int {
         args.max = ggml.impl.getOpParamsF32(op, 1);
     }
 
-    if (op.op == ggml.impl.ggml_c.GGML_OP_UNARY and ggml.impl.ggml_c.ggml_get_unary_op(op) == ggml.impl.ggml_c.GGML_UNARY_OP_XIELU) {
+    if (op.op == ggml.impl.ggml_c.GGML_OP_UNARY and ggml.types.ggml_get_unary_op(op) == ggml.impl.ggml_c.GGML_UNARY_OP_XIELU) {
         args.slope = ggml.impl.getOpParamsF32(op, 1); // alpha_n
         args.scale = ggml.impl.getOpParamsF32(op, 2); // alpha_p
         args.bias = ggml.impl.getOpParamsF32(op, 3); // beta
@@ -1156,9 +1156,9 @@ pub fn ggml_metal_op_unary(ctx: *Op, idx: c_int) callconv(.c) c_int {
 
     if (pipeline.cnt) {
         const n: c_int = @intCast(if (pipeline.c4)
-            @divTrunc(ggml.impl.ggml_c.ggml_nelements(op), 4)
+            @divTrunc(ggml.types.ggml_nelements(op), 4)
         else
-            ggml.impl.ggml_c.ggml_nelements(op));
+            ggml.types.ggml_nelements(op));
 
         // A threadgroup holds up to 256 threads.
         const nth: c_int = @min(@as(c_int, 256), n);
@@ -1192,7 +1192,7 @@ pub fn ggml_metal_op_silu_back(ctx: *Op, idx: c_int) callconv(.c) c_int {
 
     const pipeline = ggml.metal.library.ggml_metal_library_get_pipeline_silu_back(lib, op);
 
-    const ne: i64 = ggml.impl.ggml_c.ggml_nelements(op);
+    const ne: i64 = ggml.types.ggml_nelements(op);
 
     var args: ggml.metal.kargs.silu_back = .{
         .ne = ne,
@@ -1233,7 +1233,7 @@ pub fn ggml_metal_op_glu(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const src1 = srcOpt(op, 1);
 
     if (src1) |s1| {
-        ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, s1), "ggml_are_same_shape(op->src[0], op->src[1])");
+        ggml.impl.assert(ggml.types.ggml_are_same_shape(src0, s1), "ggml_are_same_shape(op->src[0], op->src[1])");
     }
 
     const pipeline = ggml.metal.library.ggml_metal_library_get_pipeline_glu(lib, op);
@@ -1264,7 +1264,7 @@ pub fn ggml_metal_op_glu(ctx: *Op, idx: c_int) callconv(.c) c_int {
         .limit = limit,
     };
 
-    const nrows: i64 = ggml.impl.ggml_c.ggml_nrows(src0);
+    const nrows: i64 = ggml.types.ggml_nrows(src0);
 
     // split each row over several threadgroups: with a single row (decode) one threadgroup would run on one GPU core
     const nth: i32 = @max(1, @min(maxThreads(pipeline), @min(@as(i32, 256), ne0)));
@@ -1294,7 +1294,7 @@ pub fn ggml_metal_op_sum(ctx: *Op, idx: c_int) callconv(.c) c_int {
 
     const s0 = src(op, 0);
 
-    const n: u64 = @intCast(ggml.impl.ggml_c.ggml_nelements(s0));
+    const n: u64 = @intCast(ggml.types.ggml_nelements(s0));
 
     var args: ggml.metal.kargs.sum = .{
         .np = n,
@@ -1334,7 +1334,7 @@ pub fn ggml_metal_op_sum_rows(ctx: *Op, idx: c_int) callconv(.c) c_int {
 
     const s0 = src(op, 0);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(s0), "ggml_is_contiguous_rows(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(s0), "ggml_is_contiguous_rows(op->src[0])");
 
     const bid_src0 = getBufferId(s0);
     const bid_dst = getBufferId(op);
@@ -1414,7 +1414,7 @@ pub fn ggml_metal_op_cumsum(ctx: *Op, idx: c_int) callconv(.c) c_int {
 
     const s0 = src(op, 0);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(s0), "ggml_is_contiguous_rows(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(s0), "ggml_is_contiguous_rows(op->src[0])");
 
     const ne00: c_int = @intCast(s0.ne[0]);
     const ne01: c_int = @intCast(s0.ne[1]);
@@ -1446,7 +1446,7 @@ pub fn ggml_metal_op_cumsum(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const bid_dst = getBufferId(op);
 
     var bid_tmp = bid_dst;
-    bid_tmp.offs += @intCast(ggml.impl.ggml_c.ggml_nbytes(op));
+    bid_tmp.offs += @intCast(ggml.types.ggml_nbytes(op));
 
     {
         var args: ggml.metal.kargs.cumsum_blk = .{
@@ -1694,8 +1694,8 @@ pub fn ggml_metal_op_top_k_mask(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const bid = getBufferId(op);
 
     // the vector fill stores 4 elements at a time
-    const ts: i32 = @intCast(ggml.impl.ggml_c.ggml_type_size(op.type));
-    const n_elems: i64 = ggml.impl.ggml_c.ggml_nelements(op);
+    const ts: i32 = @intCast(ggml.types.ggml_type_size(op.type));
+    const n_elems: i64 = ggml.types.ggml_nelements(op);
 
     const has_score = score != null;
     const has_blocks = blocks != null;
@@ -2195,7 +2195,7 @@ pub fn ggml_metal_op_ssm_scan(ctx: *Op, idx: c_int) callconv(.c) c_int {
 
     ggml.impl.assert(K >= 1, "K >= 1");
     ggml.impl.assert(
-        ggml.impl.ggml_c.ggml_nelements(s1) + K * d_state * d_inner * n_head * n_seqs == ggml.impl.ggml_c.ggml_nelements(op),
+        ggml.types.ggml_nelements(s1) + K * d_state * d_inner * n_head * n_seqs == ggml.types.ggml_nelements(op),
         "ggml_nelements(op->src[1]) + K*d_state*d_inner*n_head*n_seqs == ggml_nelements(op)",
     );
 
@@ -2209,7 +2209,7 @@ pub fn ggml_metal_op_ssm_scan(ctx: *Op, idx: c_int) callconv(.c) c_int {
         .token_offset = 0,
         .n_seqs = @intCast(n_seqs),
         .K = @intCast(K),
-        .s_off = @intCast(@as(usize, @intCast(ggml.impl.ggml_c.ggml_nelements(s1))) * @sizeOf(f32)),
+        .s_off = @intCast(@as(usize, @intCast(ggml.types.ggml_nelements(s1))) * @sizeOf(f32)),
         .nb00 = s0.nb[0],
         .nb01 = s0.nb[1],
         .nb02 = s0.nb[2],
@@ -2537,8 +2537,8 @@ fn tryFusion(ctx: *Op, idx: c_int, id: ggml.metal.fusion.Id) c_int {
     if (ctx.debugFusion() > 1) {
         ggml.impl.logDebug("%s: fuse: %s to %s, %d nodes\n", .{
             "ggml_metal_op_try_fusion",
-            ggml.impl.ggml_c.ggml_op_name(ctx.node(idx).op),
-            ggml.impl.ggml_c.ggml_op_name(ctx.node(idx + n - 1).op),
+            ggml.types.ggml_op_name(ctx.node(idx).op),
+            ggml.types.ggml_op_name(ctx.node(idx + n - 1).op),
             n,
         });
     }
@@ -2964,8 +2964,8 @@ pub fn ggml_metal_op_mul_mat_id(ctx: *Op, idx: c_int) callconv(.c) c_int {
     // src2 = ids
     ggml.impl.assert(s2.type == ggml.impl.ggml_c.GGML_TYPE_I32, "op->src[2]->type == GGML_TYPE_I32");
 
-    ggml.impl.assert(!ggml.impl.ggml_c.ggml_is_transposed(s0), "!ggml_is_transposed(op->src[0])");
-    ggml.impl.assert(!ggml.impl.ggml_c.ggml_is_transposed(s1), "!ggml_is_transposed(op->src[1])");
+    ggml.impl.assert(!ggml.types.ggml_is_transposed(s0), "!ggml_is_transposed(op->src[0])");
+    ggml.impl.assert(!ggml.types.ggml_is_transposed(s1), "!ggml_is_transposed(op->src[1])");
 
     ggml.impl.assert(ne03 == 1, "ne03 == 1");
     ggml.impl.assert(ne13 == 1, "ne13 == 1");
@@ -2985,7 +2985,7 @@ pub fn ggml_metal_op_mul_mat_id(ctx: *Op, idx: c_int) callconv(.c) c_int {
 
         // extra buffers for intermediate id mapping
         var bid_tpe = bid_dst;
-        bid_tpe.offs += @intCast(ggml.impl.ggml_c.ggml_nbytes(op));
+        bid_tpe.offs += @intCast(ggml.types.ggml_nbytes(op));
 
         var bid_ids = bid_tpe;
         bid_ids.offs += ggml_metal_op_mul_mat_id_extra_tpe(op);
@@ -3115,7 +3115,7 @@ pub fn ggml_metal_op_mul_mat_id(ctx: *Op, idx: c_int) callconv(.c) c_int {
             .nr0 = nr0,
         };
 
-        if (ggml.impl.ggml_c.ggml_is_quantized(s0.type)) {
+        if (ggml.types.ggml_is_quantized(s0.type)) {
             ggml.impl.assert(ne00 >= nsg * nr0, "ne00 >= nsg*nr0");
         }
 
@@ -3176,7 +3176,7 @@ pub fn ggml_metal_op_get_rows(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const ne00: i32 = @intCast(s0.ne[0]);
 
     var args: ggml.metal.kargs.get_rows = .{
-        .ne00t = if (ggml.impl.ggml_c.ggml_is_quantized(s0.type)) @divTrunc(ne00, 16) else ne00,
+        .ne00t = if (ggml.types.ggml_is_quantized(s0.type)) @divTrunc(ne00, 16) else ne00,
         .ne00 = ne00,
         .nb01 = s0.nb[1],
         .nb02 = s0.nb[2],
@@ -3225,7 +3225,7 @@ pub fn ggml_metal_op_set_rows(ctx: *Op, idx: c_int) callconv(.c) c_int {
 
     const pipeline = ggml.metal.library.ggml_metal_library_get_pipeline_set_rows(lib, op);
 
-    const nk0: i32 = @intCast(@divTrunc(op.ne[0], ggml.impl.ggml_c.ggml_blck_size(op.type)));
+    const nk0: i32 = @intCast(@divTrunc(op.ne[0], ggml.types.ggml_blck_size(op.type)));
 
     var nth: c_int = 32; // SIMD width
 
@@ -3339,7 +3339,7 @@ pub fn ggml_metal_op_l2_norm(ctx: *Op, idx: c_int) callconv(.c) c_int {
 
     const s0 = src(op, 0);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(s0), "ggml_is_contiguous_rows(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(s0), "ggml_is_contiguous_rows(op->src[0])");
 
     const bid_src0 = getBufferId(s0);
     const bid_dst = getBufferId(op);
@@ -3537,10 +3537,10 @@ pub fn ggml_metal_op_norm(ctx: *Op, idx: c_int) callconv(.c) c_int {
 
             if (debug_fusion > 1) {
                 if (n_fuse == 2) {
-                    ggml.impl.logDebug("%s: fuse: %s + MUL\n", .{ "ggml_metal_op_norm", ggml.impl.ggml_c.ggml_op_name(op.op) });
+                    ggml.impl.logDebug("%s: fuse: %s + MUL\n", .{ "ggml_metal_op_norm", ggml.types.ggml_op_name(op.op) });
                 }
                 if (n_fuse == 3) {
-                    ggml.impl.logDebug("%s: fuse: %s + MUL + ADD\n", .{ "ggml_metal_op_norm", ggml.impl.ggml_c.ggml_op_name(op.op) });
+                    ggml.impl.logDebug("%s: fuse: %s + MUL + ADD\n", .{ "ggml_metal_op_norm", ggml.types.ggml_op_name(op.op) });
                 }
             }
         }
@@ -3555,7 +3555,7 @@ pub fn ggml_metal_op_norm(ctx: *Op, idx: c_int) callconv(.c) c_int {
             args.scale = ggml.impl.getOpParamsF32(scale_node, 0);
 
             if (debug_fusion > 1) {
-                ggml.impl.logDebug("%s: fuse: %s + SCALE\n", .{ "ggml_metal_op_norm", ggml.impl.ggml_c.ggml_op_name(op.op) });
+                ggml.impl.logDebug("%s: fuse: %s + SCALE\n", .{ "ggml_metal_op_norm", ggml.types.ggml_op_name(op.op) });
             }
         }
     }
@@ -3818,7 +3818,7 @@ pub fn ggml_metal_op_conv_2d(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const src0 = src(op, 0);
     const src1 = src(op, 1);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0), "ggml_is_contiguous(op->src[0])");
     ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->src[1]->type == GGML_TYPE_F32");
     ggml.impl.assert(op.type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->type == GGML_TYPE_F32");
     ggml.impl.assert(
@@ -3869,7 +3869,7 @@ pub fn ggml_metal_op_conv_2d(ctx: *Op, idx: c_int) callconv(.c) c_int {
     nth = @min(nth, 256);
     nth = @max(nth, 1);
 
-    const n_out: u64 = @intCast(ggml.impl.ggml_c.ggml_nelements(op));
+    const n_out: u64 = @intCast(ggml.types.ggml_nelements(op));
 
     var tg: u64 = @divTrunc(n_out + @as(u64, @intCast(nth)) - 1, @as(u64, @intCast(nth)));
     tg = @max(tg, 1);
@@ -4552,7 +4552,7 @@ pub fn ggml_metal_op_argsort(ctx: *Op, idx: c_int) callconv(.c) c_int {
 
     const s0 = src(op, 0);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(s0), "ggml_is_contiguous_rows(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(s0), "ggml_is_contiguous_rows(op->src[0])");
 
     const ne00: c_int = @intCast(s0.ne[0]);
     const ne01: c_int = @intCast(s0.ne[1]);
@@ -4577,7 +4577,7 @@ pub fn ggml_metal_op_argsort(ctx: *Op, idx: c_int) callconv(.c) c_int {
     var bid_dst = getBufferId(op);
 
     var bid_tmp = bid_dst;
-    bid_tmp.offs += @intCast(ggml.impl.ggml_c.ggml_nbytes(op));
+    bid_tmp.offs += @intCast(ggml.types.ggml_nbytes(op));
 
     if (@rem(@as(c_int, @intFromFloat(@ceil(@log(@as(f64, @floatFromInt(npr))) / @log(@as(f64, 2))))), 2) == 1) {
         std.mem.swap(ggml.metal.device_c.BufferId, &bid_dst, &bid_tmp);
@@ -4684,7 +4684,7 @@ pub fn ggml_metal_op_topk_moe(ctx: *Op, idx: c_int) callconv(.c) c_int {
 
     // the unary chains score with sigmoid or sqrt(softplus) and rank biased scores
     const with_unary = first.op == ggml.impl.ggml_c.GGML_OP_UNARY;
-    const gating: i32 = if (!with_unary) 0 else if (ggml.impl.ggml_c.ggml_get_unary_op(first) == ggml.impl.ggml_c.GGML_UNARY_OP_SOFTPLUS) 1 else 2;
+    const gating: i32 = if (!with_unary) 0 else if (ggml.types.ggml_get_unary_op(first) == ggml.impl.ggml_c.GGML_UNARY_OP_SOFTPLUS) 1 else 2;
 
     var get_rows: ?*ggml.impl.ggml_c.ggml_tensor = null;
     var sum_rows: ?*ggml.impl.ggml_c.ggml_tensor = null;
@@ -4818,7 +4818,7 @@ pub fn ggml_metal_op_top_k(ctx: *Op, idx: c_int) callconv(.c) c_int {
     // amortized for long rows, many rows, or a large k; otherwise the bitonic path wins
     const ncols: c_int = @intCast(src(op, 0).ne[0]);
     const k: c_int = @intCast(op.ne[0]);
-    const nrows: c_int = @intCast(ggml.impl.ggml_c.ggml_nrows(src(op, 0)));
+    const nrows: c_int = @intCast(ggml.types.ggml_nrows(src(op, 0)));
 
     const use_radix =
         ncols > 2048 and (k > 64 or (nrows > 4 and ncols >= 8192));
@@ -4845,7 +4845,7 @@ fn topKRadix(ctx: *Op, idx: c_int) void {
 
     const s0 = src(op, 0);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(s0), "ggml_is_contiguous_rows(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(s0), "ggml_is_contiguous_rows(op->src[0])");
 
     const pipeline = ggml.metal.library.ggml_metal_library_get_pipeline_top_k_radix(lib, op);
 
@@ -4896,7 +4896,7 @@ fn topKBitonic(ctx: *Op, idx: c_int) void {
 
     const s0 = src(op, 0);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(s0), "ggml_is_contiguous_rows(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(s0), "ggml_is_contiguous_rows(op->src[0])");
 
     const ne00: c_int = @intCast(s0.ne[0]);
     const ne01: c_int = @intCast(s0.ne[1]);
@@ -4923,7 +4923,7 @@ fn topKBitonic(ctx: *Op, idx: c_int) void {
     var bid_dst = getBufferId(op);
 
     var bid_tmp = bid_dst;
-    bid_tmp.offs += @sizeOf(i32) * @as(usize, @intCast(ggml.impl.ggml_c.ggml_nelements(s0)));
+    bid_tmp.offs += @sizeOf(i32) * @as(usize, @intCast(ggml.types.ggml_nelements(s0)));
 
     if (@rem(@as(c_int, @intFromFloat(@ceil(@log(@as(f64, @floatFromInt(npr))) / @log(@as(f64, 2))))), 2) == 1) {
         std.mem.swap(ggml.metal.device_c.BufferId, &bid_dst, &bid_tmp);
@@ -5145,7 +5145,7 @@ pub fn ggml_metal_op_flash_attn_ext(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const kv_rows_opt = srcOpt(op, 5);
     const has_rows = kv_rows_opt != null;
 
-    ggml.impl.assert(!has_rows or (kv_rows_opt.?.type == ggml.impl.ggml_c.GGML_TYPE_I32 and ggml.impl.ggml_c.ggml_is_contiguous(kv_rows_opt.?)), "!has_rows || (kv_rows->type == GGML_TYPE_I32 && ggml_is_contiguous(kv_rows))");
+    ggml.impl.assert(!has_rows or (kv_rows_opt.?.type == ggml.impl.ggml_c.GGML_TYPE_I32 and ggml.types.ggml_is_contiguous(kv_rows_opt.?)), "!has_rows || (kv_rows->type == GGML_TYPE_I32 && ggml_is_contiguous(kv_rows))");
     ggml.impl.assert(!has_rows or (kv_rows_opt.?.ne[1] == ne03 and kv_rows_opt.?.ne[2] == 1 and kv_rows_opt.?.ne[3] == 1), "!has_rows || (kv_rows->ne[1] == ne03 && kv_rows->ne[2] == 1 && kv_rows->ne[3] == 1)");
     ggml.impl.assert(!has_rows or op.src[3] != null, "!has_rows || op->src[3]");
 
@@ -5188,7 +5188,7 @@ pub fn ggml_metal_op_flash_attn_ext(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const bid_dst = getBufferId(op);
 
     var bid_pad = bid_dst;
-    bid_pad.offs += @intCast(ggml.impl.ggml_c.ggml_nbytes(op));
+    bid_pad.offs += @intCast(ggml.types.ggml_nbytes(op));
 
     var bid_blk = bid_pad;
     bid_blk.offs += ggml_metal_op_flash_attn_ext_extra_pad(op);
@@ -5212,7 +5212,7 @@ pub fn ggml_metal_op_flash_attn_ext(ctx: *Op, idx: c_int) callconv(.c) c_int {
 
     // the vec kernels dequantize the KV inline; no need for the F16 dequant pass in the sparse path
     const dequant_kv = !use_sparse and (if (rows_gather)
-        ggml.impl.ggml_c.ggml_is_quantized(s1.type)
+        ggml.types.ggml_is_quantized(s1.type)
     else
         useKvF16(op));
 
@@ -5243,7 +5243,7 @@ pub fn ggml_metal_op_flash_attn_ext(ctx: *Op, idx: c_int) callconv(.c) c_int {
 
         const v_is_view_of_k = vIsViewOfK(op);
 
-        const nblocks1_64: i64 = @divTrunc(s1.ne[0], ggml.impl.ggml_c.ggml_blck_size(s1.type)) * s1.ne[1] * s1.ne[2] * s1.ne[3];
+        const nblocks1_64: i64 = @divTrunc(s1.ne[0], ggml.types.ggml_blck_size(s1.type)) * s1.ne[1] * s1.ne[2] * s1.ne[3];
         ggml.impl.assert(nblocks1_64 <= std.math.maxInt(i32), "nblocks1_64 <= INT32_MAX");
         const nblocks1: i32 = @intCast(nblocks1_64);
 
@@ -5275,7 +5275,7 @@ pub fn ggml_metal_op_flash_attn_ext(ctx: *Op, idx: c_int) callconv(.c) c_int {
 
         // V (skip when V is a view of K: the dequantized V is a view of the dequantized K)
         if (!v_is_view_of_k) {
-            const nblocks2_64: i64 = @divTrunc(s2.ne[0], ggml.impl.ggml_c.ggml_blck_size(s2.type)) * s2.ne[1] * s2.ne[2] * s2.ne[3];
+            const nblocks2_64: i64 = @divTrunc(s2.ne[0], ggml.types.ggml_blck_size(s2.type)) * s2.ne[1] * s2.ne[2] * s2.ne[3];
             ggml.impl.assert(nblocks2_64 <= std.math.maxInt(i32), "nblocks2_64 <= INT32_MAX");
             const nblocks2: i32 = @intCast(nblocks2_64);
 
@@ -5580,7 +5580,7 @@ pub fn ggml_metal_op_flash_attn_ext(ctx: *Op, idx: c_int) callconv(.c) c_int {
             _ = concurrencyReset(ctx);
         }
 
-        const is_q: c_int = if (!use_kv_f16 and ggml.impl.ggml_c.ggml_is_quantized(s1.type)) 1 else 0;
+        const is_q: c_int = if (!use_kv_f16 and ggml.types.ggml_is_quantized(s1.type)) 1 else 0;
 
         // shared memory layout (halfs unless noted):
         //   queries/attn/result: Q*(DK + 2*PAD2(DV,64) + 4*C)
@@ -6062,15 +6062,15 @@ pub fn ggml_metal_op_set(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const ne10: i64 = s1.ne[0];
 
     ggml.impl.assert(
-        @rem(ne10, ggml.impl.ggml_c.ggml_blck_size(s1.type)) == 0,
+        @rem(ne10, ggml.types.ggml_blck_size(s1.type)) == 0,
         "ne10 % ggml_blck_size(op->src[1]->type) == 0",
     );
 
     var nk0: i64 = ne10;
-    if (ggml.impl.ggml_c.ggml_is_quantized(s1.type)) {
+    if (ggml.types.ggml_is_quantized(s1.type)) {
         nk0 = @divTrunc(ne10, 16);
-    } else if (ggml.impl.ggml_c.ggml_is_quantized(op.type)) {
-        nk0 = @divTrunc(ne10, ggml.impl.ggml_c.ggml_blck_size(op.type));
+    } else if (ggml.types.ggml_is_quantized(op.type)) {
+        nk0 = @divTrunc(ne10, ggml.types.ggml_blck_size(op.type));
     }
 
     var nth: c_int = @intCast(@min(nk0 * s1.ne[1], 256));
@@ -6079,7 +6079,7 @@ pub fn ggml_metal_op_set(ctx: *Op, idx: c_int) callconv(.c) c_int {
     var nrptg: c_int = 1;
 
     // TODO: relax this constraint in the future
-    if (ggml.impl.ggml_c.ggml_blck_size(s1.type) == 1 and ggml.impl.ggml_c.ggml_blck_size(op.type) == 1) {
+    if (ggml.types.ggml_blck_size(s1.type) == 1 and ggml.types.ggml_blck_size(op.type) == 1) {
         if (nth > @as(c_int, @intCast(nk0))) {
             nrptg = @divTrunc(nth + @as(c_int, @intCast(nk0)) - 1, @as(c_int, @intCast(nk0)));
             nth = @intCast(nk0);
@@ -6106,7 +6106,7 @@ pub fn ggml_metal_op_set(ctx: *Op, idx: c_int) callconv(.c) c_int {
         .ne1 = s1.ne[1],
         .ne2 = s1.ne[2],
         .ne3 = s1.ne[3],
-        .nb0 = @intCast(ggml.impl.ggml_c.ggml_element_size(op)),
+        .nb0 = @intCast(ggml.types.ggml_element_size(op)),
         .nb1 = pnb1,
         .nb2 = pnb2,
         .nb3 = pnb3,
@@ -6153,15 +6153,15 @@ pub fn ggml_metal_op_cpy(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const ne00: i64 = s0.ne[0];
 
     ggml.impl.assert(
-        @rem(ne00, ggml.impl.ggml_c.ggml_blck_size(s0.type)) == 0,
+        @rem(ne00, ggml.types.ggml_blck_size(s0.type)) == 0,
         "ne00 % ggml_blck_size(op->src[0]->type) == 0",
     );
 
     var nk0: i64 = ne00;
-    if (ggml.impl.ggml_c.ggml_is_quantized(s0.type)) {
+    if (ggml.types.ggml_is_quantized(s0.type)) {
         nk0 = @divTrunc(ne00, 16);
-    } else if (ggml.impl.ggml_c.ggml_is_quantized(op.type)) {
-        nk0 = @divTrunc(ne00, ggml.impl.ggml_c.ggml_blck_size(op.type));
+    } else if (ggml.types.ggml_is_quantized(op.type)) {
+        nk0 = @divTrunc(ne00, ggml.types.ggml_blck_size(op.type));
     }
 
     var nth: c_int = @intCast(@min(nk0 * s0.ne[1], 256));
@@ -6170,7 +6170,7 @@ pub fn ggml_metal_op_cpy(ctx: *Op, idx: c_int) callconv(.c) c_int {
     var nrptg: c_int = 1;
 
     // TODO: relax this constraint in the future
-    if (ggml.impl.ggml_c.ggml_blck_size(s0.type) == 1 and ggml.impl.ggml_c.ggml_blck_size(op.type) == 1) {
+    if (ggml.types.ggml_blck_size(s0.type) == 1 and ggml.types.ggml_blck_size(op.type) == 1) {
         if (nth > @as(c_int, @intCast(nk0))) {
             nrptg = @divTrunc(nth + @as(c_int, @intCast(nk0)) - 1, @as(c_int, @intCast(nk0)));
             nth = @intCast(nk0);
@@ -6250,7 +6250,7 @@ pub fn ggml_metal_op_pool_1d(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const IW: i64 = src0.ne[0];
     const OW: i64 = op.ne[0];
 
-    const np: i64 = ggml.impl.ggml_c.ggml_nelements(op);
+    const np: i64 = ggml.types.ggml_nelements(op);
 
     var args_pool_1d: ggml.metal.kargs.pool_1d = .{
         .k0 = k0,
@@ -6387,7 +6387,7 @@ pub fn ggml_metal_op_argmax(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const ne02: i32 = @intCast(s0.ne[2]);
     const ne03: i32 = @intCast(s0.ne[3]);
 
-    const nrows: i64 = ggml.impl.ggml_c.ggml_nrows(s0);
+    const nrows: i64 = ggml.types.ggml_nrows(s0);
 
     const npart = argmaxNpart(ne00);
 
@@ -6406,7 +6406,7 @@ pub fn ggml_metal_op_argmax(ctx: *Op, idx: c_int) callconv(.c) c_int {
 
         const bid_dst = getBufferId(op);
         var bid_tmp = bid_dst;
-        bid_tmp.offs += @intCast(ggml.impl.ggml_c.ggml_nbytes(op));
+        bid_tmp.offs += @intCast(ggml.types.ggml_nbytes(op));
 
         ggml.metal.device_c.ggml_metal_encoder_set_pipeline(enc, pipeline_part);
         setBytes(enc, &args, 0);
@@ -6463,7 +6463,7 @@ pub fn ggml_metal_op_opt_step_adamw(ctx: *Op, idx: c_int) callconv(.c) c_int {
 
     const pipeline = ggml.metal.library.ggml_metal_library_get_pipeline_opt_step_adamw(lib, op);
 
-    const np: i64 = ggml.impl.ggml_c.ggml_nelements(s0);
+    const np: i64 = ggml.types.ggml_nelements(s0);
     var args: ggml.metal.kargs.opt_step_adamw = .{
         .np = np,
     };
@@ -6498,7 +6498,7 @@ pub fn ggml_metal_op_opt_step_sgd(ctx: *Op, idx: c_int) callconv(.c) c_int {
 
     const pipeline = ggml.metal.library.ggml_metal_library_get_pipeline_opt_step_sgd(lib, op);
 
-    const np: i64 = ggml.impl.ggml_c.ggml_nelements(s0);
+    const np: i64 = ggml.types.ggml_nelements(s0);
     var args: ggml.metal.kargs.opt_step_sgd = .{
         .np = np,
     };
@@ -6613,7 +6613,7 @@ pub fn ggml_metal_op_fwht(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const src1 = src(op, 1);
 
     const n: i64 = src1.ne[0];
-    const nrows: i64 = ggml.impl.ggml_c.ggml_nrows(src1);
+    const nrows: i64 = ggml.types.ggml_nrows(src1);
 
     var args: ggml.metal.kargs.fwht = .{
         .nrows = @intCast(nrows),
@@ -6660,7 +6660,7 @@ pub fn ggml_metal_op_snake_fused(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const mul1 = ctx.node(idx + 3);
     const add = ctx.node(idx + 4);
 
-    const x = if (ggml.impl.ggml_c.ggml_are_same_shape(mul0, src(mul0, 0))) src(mul0, 0) else src(mul0, 1);
+    const x = if (ggml.types.ggml_are_same_shape(mul0, src(mul0, 0))) src(mul0, 0) else src(mul0, 1);
     const a = if (x == src(mul0, 0)) src(mul0, 1) else src(mul0, 0);
     const inv_b = if (src(mul1, 0) == sqr) src(mul1, 1) else src(mul1, 0);
 
@@ -6728,7 +6728,7 @@ pub fn ggml_metal_op_mul_mat_id_extra_tpe(op: *const ggml.impl.ggml_c.ggml_tenso
     const max_tiles = mulMatIdMaxTiles(op);
 
     // size_t * int64_t: the C converts the signed operand to unsigned
-    return ggml.impl.ggml_c.ggml_type_size(ggml.impl.ggml_c.GGML_TYPE_I32) *% @as(usize, @bitCast(1 + 3 * max_tiles));
+    return ggml.types.ggml_type_size(ggml.impl.ggml_c.GGML_TYPE_I32) *% @as(usize, @bitCast(1 + 3 * max_tiles));
 }
 
 /// Ports `ggml_metal_op_mul_mat_id_extra_ids` (ggml-metal-ops.cpp:2939
@@ -6742,7 +6742,7 @@ pub fn ggml_metal_op_mul_mat_id_extra_ids(op: *const ggml.impl.ggml_c.ggml_tenso
     const ne20: i64 = src(op, 2).ne[0]; // n_expert_used
     const ne21: i64 = src(op, 2).ne[1]; // n_token
 
-    return ggml.impl.ggml_c.ggml_type_size(ggml.impl.ggml_c.GGML_TYPE_I32) *% @as(usize, @bitCast(ne20 * ne21 + ne02));
+    return ggml.types.ggml_type_size(ggml.impl.ggml_c.GGML_TYPE_I32) *% @as(usize, @bitCast(ne20 * ne21 + ne02));
 }
 
 /// Ports `ggml_metal_op_flash_attn_ext_use_vec` (ggml-metal-ops.cpp:3200
@@ -6982,7 +6982,7 @@ pub fn ggml_metal_op_flash_attn_ext_extra_pad(op: *const ggml.impl.ggml_c.ggml_t
     {
         const mask_term: u64 = if (has_mask) blk: {
             const m = s3.?;
-            break :blk @as(u64, @intCast(ggml.impl.ggml_c.ggml_type_size(ggml.impl.ggml_c.GGML_TYPE_F16))) *
+            break :blk @as(u64, @intCast(ggml.types.ggml_type_size(ggml.impl.ggml_c.GGML_TYPE_F16))) *
                 @as(u64, @intCast(m.ne[1] * m.ne[2] * m.ne[3]));
         } else 0;
 
@@ -7024,7 +7024,7 @@ pub fn ggml_metal_op_flash_attn_ext_extra_blk(op: *const ggml.impl.ggml_c.ggml_t
     const ne1: i64 = @divTrunc(s0.ne[1] + nqptg - 1, nqptg);
     const ne0: i64 = @divTrunc(s3.ne[0] + ncpsg - 1, ncpsg);
 
-    res += stdlib.num.pad(usize, @as(usize, @intCast(ggml.impl.ggml_c.ggml_type_size(ggml.impl.ggml_c.GGML_TYPE_I8))) *
+    res += stdlib.num.pad(usize, @as(usize, @intCast(ggml.types.ggml_type_size(ggml.impl.ggml_c.GGML_TYPE_I8))) *
         @as(usize, @intCast(ne0 * ne1 * s3.ne[2] * s3.ne[3])), 32);
 
     return res;
@@ -7049,7 +7049,7 @@ pub fn ggml_metal_op_flash_attn_ext_extra_tmp(op: *const ggml.impl.ggml_c.ggml_t
         // temp buffer for writing the results from each workgroup
         // - ne20: the size of the Value head
         // -  + 2: the S and M values for each intermediate result
-        res += @as(usize, @intCast(ggml.impl.ggml_c.ggml_type_size(ggml.impl.ggml_c.GGML_TYPE_F32))) *
+        res += @as(usize, @intCast(ggml.types.ggml_type_size(ggml.impl.ggml_c.GGML_TYPE_F32))) *
             @as(usize, @intCast(ne01_max * s0.ne[2] * s0.ne[3] * nwg * (s2.ne[0] + 2)));
     }
 

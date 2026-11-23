@@ -85,7 +85,7 @@ fn quantizerFor(t: mod.impl.ggml_c.enum_ggml_type) ?QuantizeFn {
 /// Builds the shared codebook the i-quants index into. Idempotent, and a
 /// no-op for every other format.
 pub fn ggml_quantize_init(t: mod.impl.ggml_c.enum_ggml_type) callconv(.c) void {
-    mod.impl.ggml_c.ggml_critical_section_start();
+    mod.threading.ggml_critical_section_start();
 
     switch (t) {
         mod.impl.ggml_c.GGML_TYPE_IQ2_XXS,
@@ -99,7 +99,7 @@ pub fn ggml_quantize_init(t: mod.impl.ggml_c.enum_ggml_type) callconv(.c) void {
         else => {}, // nothing
     }
 
-    mod.impl.ggml_c.ggml_critical_section_end();
+    mod.threading.ggml_critical_section_end();
 }
 
 /// Ports `ggml_quantize_free` (ggml.c:7982 @b1b770d90).
@@ -107,7 +107,7 @@ pub fn ggml_quantize_init(t: mod.impl.ggml_c.enum_ggml_type) callconv(.c) void {
 /// Releases every codebook unconditionally rather than tracking which were
 /// built; the free routines tolerate a table that was never allocated.
 pub fn ggml_quantize_free() callconv(.c) void {
-    mod.impl.ggml_c.ggml_critical_section_start();
+    mod.threading.ggml_critical_section_start();
 
     mod.quants.codebook.iq2xs_free_impl(mod.impl.ggml_c.GGML_TYPE_IQ2_XXS);
     mod.quants.codebook.iq2xs_free_impl(mod.impl.ggml_c.GGML_TYPE_IQ2_XS);
@@ -117,7 +117,7 @@ pub fn ggml_quantize_free() callconv(.c) void {
     mod.quants.codebook.iq3xs_free_impl(256);
     mod.quants.codebook.iq3xs_free_impl(512);
 
-    mod.impl.ggml_c.ggml_critical_section_end();
+    mod.threading.ggml_critical_section_end();
 }
 
 /// Ports `ggml_quantize_requires_imatrix` (ggml.c:7996 @b1b770d90).
@@ -178,12 +178,12 @@ pub fn ggml_quantize_chunk(
         // three index `dst` by element rather than by row.
         mod.impl.ggml_c.GGML_TYPE_F16 => {
             const elemsize = @sizeOf(mod.impl.ggml_c.ggml_fp16_t);
-            mod.impl.ggml_c.ggml_fp32_to_fp16_row(src + @as(usize, @intCast(start)), @as([*c]mod.impl.ggml_c.ggml_fp16_t, @ptrCast(@alignCast(dst))) + @as(usize, @intCast(start)), n);
+            mod.runtime.ggml_fp32_to_fp16_row(src + @as(usize, @intCast(start)), @as([*c]mod.impl.ggml_c.ggml_fp16_t, @ptrCast(@alignCast(dst))) + @as(usize, @intCast(start)), n);
             result = @as(usize, @intCast(n)) * elemsize;
         },
         mod.impl.ggml_c.GGML_TYPE_BF16 => {
             const elemsize = @sizeOf(mod.impl.ggml_c.ggml_bf16_t);
-            mod.impl.ggml_c.ggml_fp32_to_bf16_row_ref(src + @as(usize, @intCast(start)), @as([*c]mod.impl.ggml_c.ggml_bf16_t, @ptrCast(@alignCast(dst))) + @as(usize, @intCast(start)), n);
+            mod.runtime.ggml_fp32_to_bf16_row_ref(src + @as(usize, @intCast(start)), @as([*c]mod.impl.ggml_c.ggml_bf16_t, @ptrCast(@alignCast(dst))) + @as(usize, @intCast(start)), n);
             result = @as(usize, @intCast(n)) * elemsize;
         },
         mod.impl.ggml_c.GGML_TYPE_F32 => {

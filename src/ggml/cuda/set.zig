@@ -23,9 +23,9 @@ pub fn opSet(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor)
     ggml.impl.assert(src1.type == src0.type, "src1->type == src0->type");
     ggml.impl.assert(dst.type == src0.type, "dst ->type == src0->type");
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src1), "ggml_is_contiguous(src1)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src1), "ggml_is_contiguous(src1)");
 
     const nb1 = opParamSize(dst, 0);
     const nb2 = opParamSize(dst, 1);
@@ -44,7 +44,7 @@ pub fn opSet(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor)
     dst_view.ne[2] = src1.ne[2];
     dst_view.ne[3] = src1.ne[3];
 
-    dst_view.nb[0] = ggml.impl.ggml_c.ggml_element_size(dst);
+    dst_view.nb[0] = ggml.types.ggml_element_size(dst);
     dst_view.nb[1] = nb1;
     dst_view.nb[2] = nb2;
     dst_view.nb[3] = nb3;

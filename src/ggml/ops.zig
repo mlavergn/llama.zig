@@ -3912,7 +3912,7 @@ pub fn ggml_set_zero(tensor: *mod.impl.ggml_c.ggml_tensor) callconv(.c) *mod.imp
 
     const nbytes = mod.types.ggml_nbytes(tensor);
     if (tensor.buffer != null) {
-        mod.impl.ggml_c.ggml_backend_tensor_memset(tensor, 0, 0, nbytes);
+        mod.backend.ggml_backend_tensor_memset(tensor, 0, 0, nbytes);
     } else {
         mod.impl.assert(tensor.data != null, "tensor->data");
         @memset(@as([*]u8, @ptrCast(tensor.data.?))[0..nbytes], 0);

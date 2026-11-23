@@ -384,7 +384,7 @@ fn loraInitImpl(model: *mod.model.Model, file: *mod.impl.llama_c.FILE, adapter: 
             const ty = mod.impl.llama_c.gguf_get_kv_type(ctx_gguf, i);
             var type_name: [128]u8 = undefined;
             const tn: [*:0]const u8 = if (ty == mod.impl.llama_c.GGUF_TYPE_ARRAY) blk: {
-                _ = mod.impl.llama_c.snprintf(&type_name, type_name.len, "%s[%s,%zu]", mod.impl.llama_c.gguf_type_name(ty), mod.impl.llama_c.gguf_type_name(mod.impl.llama_c.gguf_get_arr_type(ctx_gguf, i)), mod.impl.llama_c.gguf_get_arr_n(ctx_gguf, i));
+                _ = stdlib.libc.snprintf(&type_name, type_name.len, "%s[%s,%zu]", mod.impl.llama_c.gguf_type_name(ty), mod.impl.llama_c.gguf_type_name(mod.impl.llama_c.gguf_get_arr_type(ctx_gguf, i)), mod.impl.llama_c.gguf_get_arr_n(ctx_gguf, i));
                 break :blk @ptrCast(&type_name);
             } else mod.impl.llama_c.gguf_type_name(ty);
             const name = mod.impl.llama_c.gguf_get_key(ctx_gguf, i);
@@ -593,7 +593,7 @@ fn loraInitImpl(model: *mod.model.Model, file: *mod.impl.llama_c.FILE, adapter: 
                     return e.throw(.runtime_error, "LoRA tensor '{s}' data is not within the file bounds, file is corrupted or incomplete", .{std.mem.sliceTo(&orig.name, 0)});
                 }
                 buf.resize(std.heap.c_allocator, size) catch oom();
-                try gf.seek(offs, mod.impl.llama_c.SEEK_SET, e);
+                try gf.seek(offs, std.c.SEEK.SET, e);
                 try gf.readRaw(buf.items.ptr, size, e);
                 mod.impl.llama_c.ggml_backend_tensor_set(dev, buf.items.ptr, 0, size);
             }
@@ -631,7 +631,7 @@ pub fn loraInit(model: *mod.model.Model, path_lora: [*:0]const u8) ?*Lora {
     };
 
     const adapter = loraInitFromFilePtr(model, file);
-    _ = mod.impl.llama_c.fclose(file);
+    _ = stdlib.libc.fclose(file);
 
     return adapter;
 }

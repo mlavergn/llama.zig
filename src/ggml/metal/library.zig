@@ -86,7 +86,7 @@ fn getOrCompile(lib: *ggml.metal.device_c.Library, base: *const Name, name: *con
 
 /// `ggml_type_name`, as a Zig slice.
 fn typeName(t: ggml.impl.ggml_c.enum_ggml_type) []const u8 {
-    return std.mem.span(ggml.impl.ggml_c.ggml_type_name(t));
+    return std.mem.span(ggml.types.ggml_type_name(t));
 }
 
 /// `op->src[i]`, **narrowed**.
@@ -237,7 +237,7 @@ pub fn ggml_metal_library_get_pipeline_cpy(lib: *ggml.metal.device_c.Library, ts
 /// twice, differing only in the `1d` or `2d` in the kernel name.
 fn poolPipeline(comptime dim: []const u8, lib: *ggml.metal.device_c.Library, op: *const ggml.impl.ggml_c.ggml_tensor, op_pool: ggml.impl.ggml_c.enum_ggml_op_pool) ggml.metal.device_c.PipelineWithParams {
     const src0 = src(op, 0);
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0), "ggml_is_contiguous(op->src[0])");
     ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32 and src0.type == op.type, "src0 and dst are f32");
 
     const pool_str = switch (op_pool) {
@@ -349,7 +349,7 @@ pub fn ggml_metal_library_get_pipeline_unary(lib: *ggml.metal.device_c.Library, 
         ggml.impl.ggml_c.GGML_OP_COS => ggml.metal.impl_c.OP_UNARY_NUM_COS,
         ggml.impl.ggml_c.GGML_OP_LOG => ggml.metal.impl_c.OP_UNARY_NUM_LOG,
         ggml.impl.ggml_c.GGML_OP_LEAKY_RELU => ggml.metal.impl_c.OP_UNARY_NUM_LEAKY_RELU,
-        ggml.impl.ggml_c.GGML_OP_UNARY => switch (ggml.impl.ggml_c.ggml_get_unary_op(op)) {
+        ggml.impl.ggml_c.GGML_OP_UNARY => switch (ggml.types.ggml_get_unary_op(op)) {
             ggml.impl.ggml_c.GGML_UNARY_OP_TANH => ggml.metal.impl_c.OP_UNARY_NUM_TANH,
             ggml.impl.ggml_c.GGML_UNARY_OP_RELU => ggml.metal.impl_c.OP_UNARY_NUM_RELU,
             ggml.impl.ggml_c.GGML_UNARY_OP_SIGMOID => ggml.metal.impl_c.OP_UNARY_NUM_SIGMOID,
@@ -382,7 +382,7 @@ pub fn ggml_metal_library_get_pipeline_unary(lib: *ggml.metal.device_c.Library, 
     const t_str = typeName(op.type);
 
     const is_c4 = @rem(src0.ne[0], 4) == 0;
-    const is_cnt = ggml.impl.ggml_c.ggml_is_contiguous(src0) and ggml.impl.ggml_c.ggml_nelements(op) < 32768;
+    const is_cnt = ggml.types.ggml_is_contiguous(src0) and ggml.types.ggml_nelements(op) < 32768;
 
     var base: Name = .{};
     var name: Name = .{};
@@ -410,10 +410,10 @@ pub fn ggml_metal_library_get_pipeline_unary(lib: *ggml.metal.device_c.Library, 
 /// (ggml-metal-device.cpp:306 @b1b770d90).
 pub fn ggml_metal_library_get_pipeline_glu(lib: *ggml.metal.device_c.Library, op: *const ggml.impl.ggml_c.ggml_tensor) callconv(.c) ggml.metal.device_c.PipelineWithParams {
     const src0 = src(op, 0);
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_1(src0), "ggml_is_contiguous_1(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_1(src0), "ggml_is_contiguous_1(op->src[0])");
 
     const op_str = switch (op.op) {
-        ggml.impl.ggml_c.GGML_OP_GLU => switch (ggml.impl.ggml_c.ggml_get_glu_op(op)) {
+        ggml.impl.ggml_c.GGML_OP_GLU => switch (ggml.types.ggml_get_glu_op(op)) {
             ggml.impl.ggml_c.GGML_GLU_OP_REGLU => "reglu",
             ggml.impl.ggml_c.GGML_GLU_OP_GEGLU => "geglu",
             ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU => "swiglu",
@@ -451,7 +451,7 @@ pub fn ggml_metal_library_get_pipeline_sum(lib: *ggml.metal.device_c.Library, op
 /// (ggml-metal-device.cpp:356 @b1b770d90).
 pub fn ggml_metal_library_get_pipeline_sum_rows(lib: *ggml.metal.device_c.Library, op: *const ggml.impl.ggml_c.ggml_tensor) callconv(.c) ggml.metal.device_c.PipelineWithParams {
     const src0 = src(op, 0);
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(src0), "ggml_is_contiguous_rows(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(src0), "ggml_is_contiguous_rows(op->src[0])");
 
     const op_num: c_int = switch (op.op) {
         ggml.impl.ggml_c.GGML_OP_SUM_ROWS => ggml.metal.impl_c.OP_SUM_ROWS_NUM_SUM_ROWS,
@@ -521,7 +521,7 @@ pub fn ggml_metal_library_get_pipeline_cumsum_add(lib: *ggml.metal.device_c.Libr
 pub fn ggml_metal_library_get_pipeline_tri(lib: *ggml.metal.device_c.Library, op: *const ggml.impl.ggml_c.ggml_tensor) callconv(.c) ggml.metal.device_c.PipelineWithParams {
     const src0 = src(op, 0);
     ggml.impl.assert(op.op == ggml.impl.ggml_c.GGML_OP_TRI, "op->op == GGML_OP_TRI");
-    ggml.impl.assert(src0.nb[0] == ggml.impl.ggml_c.ggml_type_size(src0.type), "src0 is contiguous in its rows");
+    ggml.impl.assert(src0.nb[0] == ggml.types.ggml_type_size(src0.type), "src0 is contiguous in its rows");
 
     const op_str = "tri";
     const ttype = op.op_params[0];
@@ -689,8 +689,8 @@ pub fn ggml_metal_library_get_pipeline_ssm_conv(lib: *ggml.metal.device_c.Librar
     const src1 = src(op, 1);
     ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->src[0]->type == GGML_TYPE_F32");
     ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->src[1]->type == GGML_TYPE_F32");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(op->src[0])");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src1), "ggml_is_contiguous(op->src[1])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0), "ggml_is_contiguous(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src1), "ggml_is_contiguous(op->src[1])");
 
     const suffix: []const u8 = if (@rem(src1.ne[0], 4) == 0) "_4" else "";
 
@@ -720,8 +720,8 @@ pub fn ggml_metal_library_get_pipeline_ssm_conv_batched(lib: *ggml.metal.device_
     const src1 = src(op, 1);
     ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->src[0]->type == GGML_TYPE_F32");
     ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->src[1]->type == GGML_TYPE_F32");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(op->src[0])");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src1), "ggml_is_contiguous(op->src[1])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0), "ggml_is_contiguous(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src1), "ggml_is_contiguous(op->src[1])");
 
     const suffix: []const u8 = if (@rem(src1.ne[0], 4) == 0) "_4" else "";
 
@@ -1500,8 +1500,8 @@ pub fn ggml_metal_library_get_pipeline_mul_mv_id(lib: *ggml.metal.device_c.Libra
 pub fn ggml_metal_library_get_pipeline_argmax(lib: *ggml.metal.device_c.Library, op: *const ggml.impl.ggml_c.ggml_tensor) callconv(.c) ggml.metal.device_c.PipelineWithParams {
     const src0 = src(op, 0);
     ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->src[0]->type == GGML_TYPE_F32");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_1(src0), "ggml_is_contiguous_1(op->src[0])");
-    ggml.impl.assert(src0.nb[0] == ggml.impl.ggml_c.ggml_type_size(src0.type), "src0 is contiguous in its rows");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_1(src0), "ggml_is_contiguous_1(op->src[0])");
+    ggml.impl.assert(src0.nb[0] == ggml.types.ggml_type_size(src0.type), "src0 is contiguous in its rows");
 
     var base: Name = .{};
     var name: Name = .{};
@@ -2068,8 +2068,8 @@ pub fn ggml_metal_library_get_pipeline_bin(lib: *ggml.metal.device_c.Library, op
     const is_c4 = (@rem(src0.ne[0], 4) == 0) and (@rem(src1.ne[0], 4) == 0);
 
     const is_cb = src0.ne[0] != src1.ne[0];
-    const is_rb = ggml.impl.ggml_c.ggml_is_contiguous(src0) and ggml.impl.ggml_c.ggml_is_contiguous(src1) and
-        (ggml.impl.ggml_c.ggml_nrows(src1) == 1) and ggml.impl.ggml_c.ggml_nelements(op) < 65536;
+    const is_rb = ggml.types.ggml_is_contiguous(src0) and ggml.types.ggml_is_contiguous(src1) and
+        (ggml.types.ggml_nrows(src1) == 1) and ggml.types.ggml_nelements(op) < 65536;
 
     var base: Name = .{};
     var name: Name = .{};
@@ -2161,7 +2161,7 @@ pub fn ggml_metal_library_get_pipeline_l2_norm(lib: *ggml.metal.device_c.Library
 /// `_strided` variant (`FC_GROUP_NORM + 0` false).
 pub fn ggml_metal_library_get_pipeline_group_norm(lib: *ggml.metal.device_c.Library, op: *const ggml.impl.ggml_c.ggml_tensor) callconv(.c) ggml.metal.device_c.PipelineWithParams {
     ggml.impl.assert(op.op == ggml.impl.ggml_c.GGML_OP_GROUP_NORM, "op->op == GGML_OP_GROUP_NORM");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(src(op, 0)), "ggml_is_contiguous_rows(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(src(op, 0)), "ggml_is_contiguous_rows(op->src[0])");
 
     var base: Name = .{};
     var name: Name = .{};
@@ -2200,7 +2200,7 @@ pub fn ggml_metal_library_get_pipeline_group_norm(lib: *ggml.metal.device_c.Libr
 /// kernel is compiled with `FC_NORM + 0` (use the fused scale) false.
 pub fn ggml_metal_library_get_pipeline_norm(lib: *ggml.metal.device_c.Library, op: *const ggml.impl.ggml_c.ggml_tensor, n_fuse: c_int) callconv(.c) ggml.metal.device_c.PipelineWithParams {
     ggml.impl.assert(op.op == ggml.impl.ggml_c.GGML_OP_NORM or op.op == ggml.impl.ggml_c.GGML_OP_RMS_NORM, "op->op is NORM or RMS_NORM");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(src(op, 0)), "ggml_is_contiguous_rows(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(src(op, 0)), "ggml_is_contiguous_rows(op->src[0])");
 
     const suffix: []const u8 = if (@rem(op.ne[0], 4) == 0) "_4" else "";
 
@@ -2248,7 +2248,7 @@ pub fn ggml_metal_library_get_pipeline_norm(lib: *ggml.metal.device_c.Library, o
 pub fn ggml_metal_library_get_pipeline_norm_scale(lib: *ggml.metal.device_c.Library, op: *const ggml.impl.ggml_c.ggml_tensor) callconv(.c) ggml.metal.device_c.PipelineWithParams {
     // the C's `assert(op->op == NORM || op->op == RMS_NORM)` compiles out
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous_rows(src(op, 0)), "ggml_is_contiguous_rows(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous_rows(src(op, 0)), "ggml_is_contiguous_rows(op->src[0])");
 
     const suffix: []const u8 = if (@rem(op.ne[0], 4) == 0) "_4" else "";
 
@@ -2339,7 +2339,7 @@ pub fn ggml_metal_library_get_pipeline_im2col(lib: *ggml.metal.device_c.Library,
     const ne00 = src0.ne[0];
     const ne01 = src0.ne[1];
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src(op, 1)), "ggml_is_contiguous(op->src[1])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src(op, 1)), "ggml_is_contiguous(op->src[1])");
     ggml.impl.assert(src(op, 1).type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->src[1]->type == GGML_TYPE_F32");
     ggml.impl.assert(op.type == ggml.impl.ggml_c.GGML_TYPE_F16 or op.type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->type is f16 or f32");
 
@@ -2367,8 +2367,8 @@ pub fn ggml_metal_library_get_pipeline_conv_transpose_1d(lib: *ggml.metal.device
     const src0 = src(op, 0);
     const src1 = src(op, 1);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(op->src[0])");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src1), "ggml_is_contiguous(op->src[1])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0), "ggml_is_contiguous(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src1), "ggml_is_contiguous(op->src[1])");
     ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F16 or src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->src[0]->type is f16 or f32");
     ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->src[1]->type == GGML_TYPE_F32");
     ggml.impl.assert(op.type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->type == GGML_TYPE_F32");
@@ -2387,7 +2387,7 @@ pub fn ggml_metal_library_get_pipeline_col2im_1d(lib: *ggml.metal.device_c.Libra
     ggml.impl.assert(op.op == ggml.impl.ggml_c.GGML_OP_COL2IM_1D, "op->op == GGML_OP_COL2IM_1D");
 
     const src0 = src(op, 0);
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0), "ggml_is_contiguous(op->src[0])");
     ggml.impl.assert(
         src0.type == ggml.impl.ggml_c.GGML_TYPE_F32 or src0.type == ggml.impl.ggml_c.GGML_TYPE_F16 or src0.type == ggml.impl.ggml_c.GGML_TYPE_BF16,
         "op->src[0]->type is f32, f16 or bf16",
@@ -2425,8 +2425,8 @@ pub fn ggml_metal_library_get_pipeline_conv_transpose_2d(lib: *ggml.metal.device
     const src0 = src(op, 0);
     const src1 = src(op, 1);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(op->src[0])");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src1), "ggml_is_contiguous(op->src[1])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0), "ggml_is_contiguous(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src1), "ggml_is_contiguous(op->src[1])");
     ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F16 or src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->src[0]->type is f16 or f32");
     ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->src[1]->type == GGML_TYPE_F32");
     ggml.impl.assert(op.type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->type == GGML_TYPE_F32");
@@ -2447,7 +2447,7 @@ pub fn ggml_metal_library_get_pipeline_conv_2d(lib: *ggml.metal.device_c.Library
     const src0 = src(op, 0);
     const src1 = src(op, 1);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0), "ggml_is_contiguous(op->src[0])");
     ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F16 or src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->src[0]->type is f16 or f32");
     ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->src[1]->type == GGML_TYPE_F32");
     ggml.impl.assert(op.type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->type == GGML_TYPE_F32");
@@ -2492,7 +2492,7 @@ pub fn ggml_metal_library_get_pipeline_conv_3d(lib: *ggml.metal.device_c.Library
     const src0 = src(op, 0);
     const src1 = src(op, 1);
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(op->src[0])");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0), "ggml_is_contiguous(op->src[0])");
     ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F16 or src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->src[0]->type is f16 or f32");
     ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->src[1]->type == GGML_TYPE_F32");
     ggml.impl.assert(op.type == ggml.impl.ggml_c.GGML_TYPE_F32, "op->type == GGML_TYPE_F32");
@@ -2691,7 +2691,7 @@ pub fn ggml_metal_library_get_pipeline_count_equal(lib: *ggml.metal.device_c.Lib
     ggml.impl.assert(op.type == ggml.impl.ggml_c.GGML_TYPE_I64, "op->type == GGML_TYPE_I64");
 
     // note: the kernel only supports i32 output due to metal atomic add only supporting atomic_int
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_nelements(src0) < (@as(i64, 1) << 31), "ggml_nelements(op->src[0]) < (1LL << 31)");
+    ggml.impl.assert(ggml.types.ggml_nelements(src0) < (@as(i64, 1) << 31), "ggml_nelements(op->src[0]) < (1LL << 31)");
 
     var nsg: c_int = 1;
     while (32 * nsg < ne00 and nsg < 32) {

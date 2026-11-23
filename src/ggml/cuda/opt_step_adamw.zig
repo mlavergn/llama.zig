@@ -35,19 +35,19 @@ pub fn opOptStepAdamw(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggm
     ggml.impl.assert(src0_grad_m.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0_grad_m->type  == GGML_TYPE_F32");
     ggml.impl.assert(src0_grad_v.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0_grad_v->type  == GGML_TYPE_F32");
     ggml.impl.assert(adamw_params.type == ggml.impl.ggml_c.GGML_TYPE_F32, "adamw_params->type == GGML_TYPE_F32");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0_grad), "ggml_is_contiguous(src0_grad)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0_grad_m), "ggml_is_contiguous(src0_grad_m)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0_grad_v), "ggml_is_contiguous(src0_grad_v)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(adamw_params), "ggml_is_contiguous(adamw_params)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, src0_grad), "ggml_are_same_shape(src0, src0_grad)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, src0_grad_m), "ggml_are_same_shape(src0, src0_grad_m)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, src0_grad_v), "ggml_are_same_shape(src0, src0_grad_v)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_nelements(adamw_params) == 7, "ggml_nelements(adamw_params) == 7");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0_grad), "ggml_is_contiguous(src0_grad)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0_grad_m), "ggml_is_contiguous(src0_grad_m)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0_grad_v), "ggml_is_contiguous(src0_grad_v)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(adamw_params), "ggml_is_contiguous(adamw_params)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src0, src0_grad), "ggml_are_same_shape(src0, src0_grad)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src0, src0_grad_m), "ggml_are_same_shape(src0, src0_grad_m)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src0, src0_grad_v), "ggml_are_same_shape(src0, src0_grad_v)");
+    ggml.impl.assert(ggml.types.ggml_nelements(adamw_params) == 7, "ggml_nelements(adamw_params) == 7");
 
     const stream = ctx.stream();
 
-    const ne = ggml.impl.ggml_c.ggml_nelements(src0);
+    const ne = ggml.types.ggml_nelements(src0);
 
     optStepAdamwF32Cuda(src0.data, src0_grad.data, src0_grad_m.data, src0_grad_v.data, adamw_params.data, ne, stream);
 }

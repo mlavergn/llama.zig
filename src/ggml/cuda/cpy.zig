@@ -187,12 +187,12 @@ const Memcpy2d = struct {
 fn cpyAsMemcpy2d(src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, m: *Memcpy2d) bool {
     // require matching shape: a reshaped copy maps elements by flat order,
     // which the prefix walk below does not handle
-    if (src0.type != src1.type or !ggml.impl.ggml_c.ggml_are_same_shape(src0, src1)) {
+    if (src0.type != src1.type or !ggml.types.ggml_are_same_shape(src0, src1)) {
         return false;
     }
 
     // grow the contiguous prefix block shared by both tensors
-    var block_nb: usize = ggml.impl.ggml_c.ggml_element_size(src0);
+    var block_nb: usize = ggml.types.ggml_element_size(src0);
     var d: usize = 0;
     while (d < max_dims) : (d += 1) {
         if (src0.nb[d] != block_nb or src1.nb[d] != block_nb) {
@@ -229,8 +229,8 @@ fn cpyAsMemcpy2d(src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.im
 /// - `src0`: the tensor copied from.
 /// - `src1`: the tensor copied into; same element count as `src0`.
 pub fn cpy(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *ggml.impl.ggml_c.ggml_tensor) void {
-    const ne = ggml.impl.ggml_c.ggml_nelements(src0);
-    ggml.impl.assert(ne == ggml.impl.ggml_c.ggml_nelements(src1), "ne == ggml_nelements(src1)");
+    const ne = ggml.types.ggml_nelements(src0);
+    ggml.impl.assert(ne == ggml.types.ggml_nelements(src1), "ne == ggml_nelements(src1)");
 
     const ne00 = src0.ne[0];
     const ne01 = src0.ne[1];
@@ -255,10 +255,10 @@ pub fn cpy(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.ggml_te
     const src0_ddc: ?*const anyopaque = src0.data;
     const src1_ddc: ?*anyopaque = src1.data;
 
-    const contiguous_srcs = ggml.impl.ggml_c.ggml_is_contiguous(src0) and ggml.impl.ggml_c.ggml_is_contiguous(src1);
-    const esize: i64 = @intCast(ggml.impl.ggml_c.ggml_element_size(src0));
+    const contiguous_srcs = ggml.types.ggml_is_contiguous(src0) and ggml.types.ggml_is_contiguous(src1);
+    const esize: i64 = @intCast(ggml.types.ggml_element_size(src0));
     const can_be_transposed = nb01 == esize and src0.ne[3] == 1 and nb02 == ne00 * ne01 * esize and
-        ggml.impl.ggml_c.ggml_is_contiguous(src1);
+        ggml.types.ggml_is_contiguous(src1);
 
     var mc: Memcpy2d = .{};
 
@@ -290,8 +290,8 @@ pub fn cpy(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.ggml_te
     const F8 = ggml.impl.ggml_c.GGML_TYPE_F8_E4M3;
 
     if (t0 == t1 and contiguous_srcs) {
-        ggml.impl.assert(ggml.impl.ggml_c.ggml_nbytes(src0) == ggml.impl.ggml_c.ggml_nbytes(src1), "ggml_nbytes(src0) == ggml_nbytes(src1)");
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(src1_ddc, src0_ddc, ggml.impl.ggml_c.ggml_nbytes(src0), ggml.cuda.common.cu.cudaMemcpyDeviceToDevice, main_stream), "cudaMemcpyAsync(src1_ddc, src0_ddc, ggml_nbytes(src0), cudaMemcpyDeviceToDevice, main_stream)", @src());
+        ggml.impl.assert(ggml.types.ggml_nbytes(src0) == ggml.types.ggml_nbytes(src1), "ggml_nbytes(src0) == ggml_nbytes(src1)");
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(src1_ddc, src0_ddc, ggml.types.ggml_nbytes(src0), ggml.cuda.common.cu.cudaMemcpyDeviceToDevice, main_stream), "cudaMemcpyAsync(src1_ddc, src0_ddc, ggml_nbytes(src0), cudaMemcpyDeviceToDevice, main_stream)", @src());
     } else if (cpyAsMemcpy2d(src0, src1, &mc)) {
         ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpy2DAsync(src1_ddc, mc.dpitch, src0_ddc, mc.spitch, mc.width, mc.height, ggml.cuda.common.cu.cudaMemcpyDeviceToDevice, main_stream), "cudaMemcpy2DAsync(src1_ddc, mc_dpitch, src0_ddc, mc_spitch, mc_width, mc_height, cudaMemcpyDeviceToDevice, main_stream)", @src());
     } else if (t0 == F8 and t1 == F8) {
@@ -421,7 +421,7 @@ pub fn cpy(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.ggml_te
             cpyScalarCuda(i32, f32, false, src0_ddc, src1_ddc, a, main_stream);
         }
     } else {
-        ggml.impl.ggml_c.ggml_abort(@src().file.ptr, @intCast(@src().line), "%s: unsupported type combination (%s to %s)\n", "ggml_cuda_cpy", ggml.impl.ggml_c.ggml_type_name(t0), ggml.impl.ggml_c.ggml_type_name(t1));
+        ggml.impl.ggml_c.ggml_abort(@src().file.ptr, @intCast(@src().line), "%s: unsupported type combination (%s to %s)\n", "ggml_cuda_cpy", ggml.types.ggml_type_name(t0), ggml.types.ggml_type_name(t1));
     }
 }
 

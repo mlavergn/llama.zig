@@ -22,12 +22,12 @@ fn oom() noreturn {
 
 /// Ports `vk_buffer_struct` (ggml-vulkan-types.h:1073 @b1b770d90).
 pub const Buffer = struct {
-    buffer: ggml.vulkan.common.vk.VkBuffer = null,
-    device_memory: ggml.vulkan.common.vk.VkDeviceMemory = null,
-    memory_property_flags: ggml.vulkan.common.vk.VkMemoryPropertyFlags = 0,
+    buffer: ggml.vulkan.common.vulkan_c.VkBuffer = null,
+    device_memory: ggml.vulkan.common.vulkan_c.VkDeviceMemory = null,
+    memory_property_flags: ggml.vulkan.common.vulkan_c.VkMemoryPropertyFlags = 0,
     ptr: ?*anyopaque = null,
     size: usize = 0,
-    bda_addr: ggml.vulkan.common.vk.VkDeviceAddress = 0,
+    bda_addr: ggml.vulkan.common.vulkan_c.VkDeviceAddress = 0,
     device: *ggml.vulkan.device.Device,
     refs: u32 = 1,
 
@@ -60,7 +60,7 @@ pub const Subbuffer = struct {
     size: u64 = 0,
 
     /// `operator vk::DescriptorBufferInfo`.
-    pub fn info(self: Subbuffer) ggml.vulkan.common.vk.VkDescriptorBufferInfo {
+    pub fn info(self: Subbuffer) ggml.vulkan.common.vulkan_c.VkDescriptorBufferInfo {
         return .{ .buffer = self.buffer.?.buffer, .offset = self.offset, .range = self.size };
     }
 };
@@ -95,7 +95,7 @@ fn formatSize(size: usize, buf: []u8) [:0]const u8 {
 /// device in the C++, so they are keyed by device.
 const memory_logger = struct {
     var mutex: stdlib.sync.Mutex = .{};
-    var allocations: std.AutoHashMapUnmanaged(ggml.vulkan.common.vk.VkBuffer, usize) = .empty;
+    var allocations: std.AutoHashMapUnmanaged(ggml.vulkan.common.vulkan_c.VkBuffer, usize) = .empty;
     var totals: std.AutoHashMapUnmanaged(*ggml.vulkan.device.Device, [2]usize) = .empty;
 
     /// Ports `vk_memory_logger`'s `log_allocation` (ggml-vulkan-debug.cpp:67 @b1b770d90).
@@ -103,7 +103,7 @@ const memory_logger = struct {
         if (!ggml.vulkan.instance.loggers.memory_logger_enabled) return;
         mutex.lock();
         defer mutex.unlock();
-        const device = buf.memory_property_flags & ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT != 0;
+        const device = buf.memory_property_flags & ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT != 0;
         allocations.put(std.heap.c_allocator, buf.buffer, size) catch oom();
         const t = totals.getOrPutValue(std.heap.c_allocator, buf.device, .{ 0, 0 }) catch oom();
         if (device) t.value_ptr[0] += size else t.value_ptr[1] += size;
@@ -118,7 +118,7 @@ const memory_logger = struct {
         if (buf.size == 0 or !ggml.vulkan.instance.loggers.memory_logger_enabled) return;
         mutex.lock();
         defer mutex.unlock();
-        const device = buf.memory_property_flags & ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT != 0;
+        const device = buf.memory_property_flags & ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT != 0;
         const kind: [*:0]const u8 = if (device) "device" else "host";
         if (allocations.fetchRemove(buf.buffer)) |kv| {
             const t = totals.getOrPutValue(std.heap.c_allocator, buf.device, .{ 0, 0 }) catch oom();
@@ -142,7 +142,7 @@ pub fn logMemory(comptime fmt: []const u8, args: anytype) void {
 // Creation
 
 /// Ports `ggml_vk_find_memory_properties` (ggml-vulkan-buffers.cpp:39 @b1b770d90).
-fn findMemoryProperties(mem_props: *const ggml.vulkan.common.vk.VkPhysicalDeviceMemoryProperties, mem_req: *const ggml.vulkan.common.vk.VkMemoryRequirements, flags: ggml.vulkan.common.vk.VkMemoryPropertyFlags, out: *[ggml.vulkan.common.vk.VK_MAX_MEMORY_TYPES]u32) usize {
+fn findMemoryProperties(mem_props: *const ggml.vulkan.common.vulkan_c.VkPhysicalDeviceMemoryProperties, mem_req: *const ggml.vulkan.common.vulkan_c.VkMemoryRequirements, flags: ggml.vulkan.common.vulkan_c.VkMemoryPropertyFlags, out: *[ggml.vulkan.common.vulkan_c.VK_MAX_MEMORY_TYPES]u32) usize {
     var n: usize = 0;
     for (0..mem_props.memoryTypeCount) |i| {
         const memory_type = mem_props.memoryTypes[i];
@@ -160,13 +160,13 @@ fn findMemoryProperties(mem_props: *const ggml.vulkan.common.vk.VkPhysicalDevice
 /// `throw vk::OutOfDeviceMemoryError(message)`: records the message the
 /// exception's `what()` carries.
 fn throwOutOfDeviceMemory(comptime message: [*:0]const u8) ggml.vulkan.common.VkError {
-    ggml.vulkan.common.last_error = .{ .result = ggml.vulkan.common.vk.VK_ERROR_OUT_OF_DEVICE_MEMORY, .what = message };
+    ggml.vulkan.common.last_error = .{ .result = ggml.vulkan.common.vulkan_c.VK_ERROR_OUT_OF_DEVICE_MEMORY, .what = message };
     return error.VulkanError;
 }
 
 /// `vk::PhysicalDevice::getMemoryProperties`.
-fn getMemoryProperties(device: *ggml.vulkan.device.Device) ggml.vulkan.common.vk.VkPhysicalDeviceMemoryProperties {
-    var props: ggml.vulkan.common.vk.VkPhysicalDeviceMemoryProperties = undefined;
+fn getMemoryProperties(device: *ggml.vulkan.device.Device) ggml.vulkan.common.vulkan_c.VkPhysicalDeviceMemoryProperties {
+    var props: ggml.vulkan.common.vulkan_c.VkPhysicalDeviceMemoryProperties = undefined;
     ggml.vulkan.common.dispatch.vkGetPhysicalDeviceMemoryProperties.?(device.physical_device, &props);
     return props;
 }
@@ -177,7 +177,7 @@ fn getMemoryProperties(device: *ggml.vulkan.device.Device) ggml.vulkan.common.vk
 ///
 /// Return: the buffer; null where the C++ returns an empty pointer (an
 /// import that fails); `error.VulkanError` where it throws.
-pub fn createBuffer(device: *ggml.vulkan.device.Device, size: usize, req_flags_list: []const ggml.vulkan.common.vk.VkMemoryPropertyFlags, import_ptr: ?*anyopaque) ggml.vulkan.common.VkError!?*Buffer {
+pub fn createBuffer(device: *ggml.vulkan.device.Device, size: usize, req_flags_list: []const ggml.vulkan.common.vulkan_c.VkMemoryPropertyFlags, import_ptr: ?*anyopaque) ggml.vulkan.common.VkError!?*Buffer {
     if (size > device.max_buffer_size) {
         return throwOutOfDeviceMemory("Requested buffer size exceeds device buffer size limit");
     }
@@ -190,20 +190,20 @@ pub fn createBuffer(device: *ggml.vulkan.device.Device, size: usize, req_flags_l
         return buf;
     }
 
-    var usage_flags: ggml.vulkan.common.vk.VkBufferUsageFlags = ggml.vulkan.common.vk.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | ggml.vulkan.common.vk.VK_BUFFER_USAGE_TRANSFER_SRC_BIT | ggml.vulkan.common.vk.VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    var mem_flags: ggml.vulkan.common.vk.VkMemoryAllocateFlags = 0;
+    var usage_flags: ggml.vulkan.common.vulkan_c.VkBufferUsageFlags = ggml.vulkan.common.vulkan_c.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | ggml.vulkan.common.vulkan_c.VK_BUFFER_USAGE_TRANSFER_SRC_BIT | ggml.vulkan.common.vulkan_c.VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    var mem_flags: ggml.vulkan.common.vulkan_c.VkMemoryAllocateFlags = 0;
     if (device.buffer_device_address) {
-        usage_flags |= ggml.vulkan.common.vk.VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-        mem_flags |= ggml.vulkan.common.vk.VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+        usage_flags |= ggml.vulkan.common.vulkan_c.VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+        mem_flags |= ggml.vulkan.common.vulkan_c.VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
     }
 
-    var bci = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkBufferCreateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO);
+    var bci = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkBufferCreateInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO);
     bci.size = size;
     bci.usage = usage_flags;
-    bci.sharingMode = ggml.vulkan.common.vk.VK_SHARING_MODE_EXCLUSIVE;
-    var external_memory_bci = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkExternalMemoryBufferCreateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO);
+    bci.sharingMode = ggml.vulkan.common.vulkan_c.VK_SHARING_MODE_EXCLUSIVE;
+    var external_memory_bci = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkExternalMemoryBufferCreateInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO);
     if (import_ptr != null) {
-        external_memory_bci.handleTypes = ggml.vulkan.common.vk.VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
+        external_memory_bci.handleTypes = ggml.vulkan.common.vulkan_c.VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
         bci.pNext = &external_memory_bci;
     }
 
@@ -212,20 +212,20 @@ pub fn createBuffer(device: *ggml.vulkan.device.Device, size: usize, req_flags_l
         return err;
     };
 
-    var mem_req: ggml.vulkan.common.vk.VkMemoryRequirements = undefined;
+    var mem_req: ggml.vulkan.common.vulkan_c.VkMemoryRequirements = undefined;
     ggml.vulkan.common.dispatch.vkGetBufferMemoryRequirements.?(device.device, buf.buffer, &mem_req);
     const mem_props = getMemoryProperties(device);
 
-    var mem_priority_info = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkMemoryPriorityAllocateInfoEXT, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_MEMORY_PRIORITY_ALLOCATE_INFO_EXT);
+    var mem_priority_info = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkMemoryPriorityAllocateInfoEXT, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_MEMORY_PRIORITY_ALLOCATE_INFO_EXT);
     mem_priority_info.priority = 1.0;
-    var mem_flags_info = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkMemoryAllocateFlagsInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO);
+    var mem_flags_info = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkMemoryAllocateFlagsInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO);
     mem_flags_info.flags = mem_flags;
     if (device.memory_priority) mem_flags_info.pNext = &mem_priority_info;
 
     if (import_ptr) |ptr| {
-        var host_pointer_props = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkMemoryHostPointerPropertiesEXT, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT);
-        const r = ggml.vulkan.common.dispatch.vkGetMemoryHostPointerPropertiesEXT.?(device.device, ggml.vulkan.common.vk.VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, ptr, &host_pointer_props);
-        if (r != ggml.vulkan.common.vk.VK_SUCCESS) {
+        var host_pointer_props = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkMemoryHostPointerPropertiesEXT, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT);
+        const r = ggml.vulkan.common.dispatch.vkGetMemoryHostPointerPropertiesEXT.?(device.device, ggml.vulkan.common.vulkan_c.VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, ptr, &host_pointer_props);
+        if (r != ggml.vulkan.common.vulkan_c.VK_SUCCESS) {
             ggml.impl.logWarn("ggml_vulkan: Failed getMemoryHostPointerPropertiesEXT (%s: %s)\n", .{ @as([*:0]const u8, "vk::Device::getMemoryHostPointerPropertiesEXT"), ggml.vulkan.common.resultString(r).ptr });
             ggml.vulkan.common.dispatch.vkDestroyBuffer.?(device.device, buf.buffer, null);
             std.heap.c_allocator.destroy(buf);
@@ -254,30 +254,30 @@ pub fn createBuffer(device: *ggml.vulkan.device.Device, size: usize, req_flags_l
         }
 
         buf.memory_property_flags = import_props.memoryTypes[memory_type_idx].propertyFlags;
-        var import_info = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkImportMemoryHostPointerInfoEXT, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT);
-        import_info.handleType = ggml.vulkan.common.vk.VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
+        var import_info = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkImportMemoryHostPointerInfoEXT, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT);
+        import_info.handleType = ggml.vulkan.common.vulkan_c.VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
         import_info.pHostPointer = ptr;
         import_info.pNext = &mem_flags_info;
-        var mai = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkMemoryAllocateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO);
+        var mai = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkMemoryAllocateInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO);
         mai.allocationSize = size;
         mai.memoryTypeIndex = memory_type_idx;
         mai.pNext = &import_info;
         // A failed import is swallowed; the null memory is caught below.
-        if (ggml.vulkan.common.dispatch.vkAllocateMemory.?(device.device, &mai, null, &buf.device_memory) != ggml.vulkan.common.vk.VK_SUCCESS) buf.device_memory = null;
+        if (ggml.vulkan.common.dispatch.vkAllocateMemory.?(device.device, &mai, null, &buf.device_memory) != ggml.vulkan.common.vulkan_c.VK_SUCCESS) buf.device_memory = null;
     } else {
         for (req_flags_list, 0..) |req_flags, it| {
-            var indices: [ggml.vulkan.common.vk.VK_MAX_MEMORY_TYPES]u32 = undefined;
+            var indices: [ggml.vulkan.common.vulkan_c.VK_MAX_MEMORY_TYPES]u32 = undefined;
             const n = findMemoryProperties(&mem_props, &mem_req, req_flags, &indices);
             if (n == 0) continue;
 
             var done = false;
             for (indices[0..n], 0..) |mtype, mi| {
-                var mai = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkMemoryAllocateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO);
+                var mai = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkMemoryAllocateInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO);
                 mai.allocationSize = mem_req.size;
                 mai.memoryTypeIndex = mtype;
                 mai.pNext = &mem_flags_info;
                 const r = ggml.vulkan.common.dispatch.vkAllocateMemory.?(device.device, &mai, null, &buf.device_memory);
-                if (r == ggml.vulkan.common.vk.VK_SUCCESS) {
+                if (r == ggml.vulkan.common.vulkan_c.VK_SUCCESS) {
                     buf.memory_property_flags = mem_props.memoryTypes[mtype].propertyFlags;
                     done = true;
                     break;
@@ -303,8 +303,8 @@ pub fn createBuffer(device: *ggml.vulkan.device.Device, size: usize, req_flags_l
     buf.ptr = null;
     if (import_ptr != null) {
         buf.ptr = import_ptr;
-    } else if (buf.memory_property_flags & ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT != 0) {
-        ggml.vulkan.common.checkOrAbort(ggml.vulkan.common.dispatch.vkMapMemory.?(device.device, buf.device_memory, 0, ggml.vulkan.common.vk.VK_WHOLE_SIZE, 0, &buf.ptr), "vk::Device::mapMemory");
+    } else if (buf.memory_property_flags & ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT != 0) {
+        ggml.vulkan.common.checkOrAbort(ggml.vulkan.common.dispatch.vkMapMemory.?(device.device, buf.device_memory, 0, ggml.vulkan.common.vulkan_c.VK_WHOLE_SIZE, 0, &buf.ptr), "vk::Device::mapMemory");
     }
 
     ggml.vulkan.common.checkOrAbort(ggml.vulkan.common.dispatch.vkBindBufferMemory.?(device.device, buf.buffer, buf.device_memory, 0), "vk::Device::bindBufferMemory");
@@ -312,7 +312,7 @@ pub fn createBuffer(device: *ggml.vulkan.device.Device, size: usize, req_flags_l
     buf.size = size;
 
     if (device.buffer_device_address) {
-        var address_info = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkBufferDeviceAddressInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO);
+        var address_info = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkBufferDeviceAddressInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO);
         address_info.buffer = buf.buffer;
         buf.bda_addr = ggml.vulkan.common.dispatch.vkGetBufferDeviceAddress.?(device.device, &address_info);
     }
@@ -323,7 +323,7 @@ pub fn createBuffer(device: *ggml.vulkan.device.Device, size: usize, req_flags_l
 
 /// Ports `ggml_vk_create_buffer_check` (ggml-vulkan-buffers.cpp:210 @b1b770d90): a
 /// failure prints the size and rethrows, and nothing catches it.
-pub fn createBufferCheck(device: *ggml.vulkan.device.Device, size: usize, req_flags: ggml.vulkan.common.vk.VkMemoryPropertyFlags, fallback_flags: ggml.vulkan.common.vk.VkMemoryPropertyFlags) *Buffer {
+pub fn createBufferCheck(device: *ggml.vulkan.device.Device, size: usize, req_flags: ggml.vulkan.common.vulkan_c.VkMemoryPropertyFlags, fallback_flags: ggml.vulkan.common.vulkan_c.VkMemoryPropertyFlags) *Buffer {
     return (createBuffer(device, size, &.{ req_flags, fallback_flags }, null) catch {
         ggml.impl.fprintfStderr("ggml_vulkan: Memory allocation of size %zu failed.\n", .{size});
         ggml.impl.fprintfStderr("ggml_vulkan: %s: %s\n", .{ ggml.vulkan.common.last_error.what, ggml.vulkan.common.resultString(ggml.vulkan.common.last_error.result).ptr });
@@ -338,9 +338,9 @@ pub fn createBufferCheck(device: *ggml.vulkan.device.Device, size: usize, req_fl
 /// Return: the buffer, or `error.VulkanError` after printing why -- the
 /// C++ rethrows to `alloc_buffer`, which returns null.
 pub fn createBufferDevice(device: *ggml.vulkan.device.Device, size: usize) ggml.vulkan.common.VkError!*Buffer {
-    const hv = ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
-    const hc = ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-    const dl = ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    const hv = ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+    const hc = ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    const dl = ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     const result = if (device.prefer_host_memory)
         createBuffer(device, size, &.{ hv | hc, dl }, null)
     else if (device.uma)
@@ -444,11 +444,11 @@ pub fn hostMalloc(size: usize) ?*anyopaque {
 
     const dev0 = ggml.vulkan.device.getDevice(0);
     var buf: ?*Buffer = (createBuffer(dev0, size, &.{
-        ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
-        ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
+        ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
     }, null) catch return null).?;
 
-    if (buf.?.memory_property_flags & ggml.vulkan.common.vk.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT == 0) {
+    if (buf.?.memory_property_flags & ggml.vulkan.common.vulkan_c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT == 0) {
         ggml.impl.fprintfStderr("WARNING: failed to allocate %.2f MB of pinned memory\n", .{@as(f64, @floatFromInt(size)) / 1024.0 / 1024.0});
         destroyBuffer(&buf);
         return null;
@@ -637,13 +637,13 @@ fn bufferGetTensor2d(buffer: ggml.impl.ggml_c.ggml_backend_buffer_t, tensor: [*c
 
 /// Ports `ggml_backend_vk_buffer_cpy_tensor` (ggml-vulkan.cpp:13517 @b1b770d90).
 fn bufferCpyTensor(_: ggml.impl.ggml_c.ggml_backend_buffer_t, src: [*c]const ggml.impl.ggml_c.ggml_tensor, dst: [*c]ggml.impl.ggml_c.ggml_tensor) callconv(.c) bool {
-    if (ggml.impl.ggml_c.ggml_nbytes(src) == 0) return true;
+    if (ggml.types.ggml_nbytes(src) == 0) return true;
     const s = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, @constCast(src));
     const t = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dst);
     if (bufferIsVk(s.buffer)) {
         const src_buf = bufCtx(s.buffer).dev_buffer.?;
         const dst_buf = bufCtx(t.buffer).dev_buffer.?;
-        ggml.vulkan.submit.bufferCopy(dst_buf, tensorOffset(t) + t.view_offs, src_buf, tensorOffset(s) + s.view_offs, ggml.impl.ggml_c.ggml_nbytes(src));
+        ggml.vulkan.submit.bufferCopy(dst_buf, tensorOffset(t) + t.view_offs, src_buf, tensorOffset(s) + s.view_offs, ggml.types.ggml_nbytes(src));
         return true;
     }
     return false;
@@ -696,7 +696,7 @@ fn bufferCpyTensorN(_: ggml.impl.ggml_c.ggml_backend_buffer_t, srcs: [*c]const [
     for (regions, 0..) |*r, i| {
         const s = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, @constCast(srcs[i]));
         const t = ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, dsts[i]);
-        r.* = .{ .dst = tensorDevBuffer(t), .dst_offset = tensorOffset(t) + t.view_offs, .src = tensorDevBuffer(s), .src_offset = tensorOffset(s) + s.view_offs, .size = ggml.impl.ggml_c.ggml_nbytes(s) };
+        r.* = .{ .dst = tensorDevBuffer(t), .dst_offset = tensorOffset(t) + t.view_offs, .src = tensorDevBuffer(s), .src_offset = tensorOffset(s) + s.view_offs, .size = ggml.types.ggml_nbytes(s) };
     }
     ggml.vulkan.submit.bufferCopyN(regions);
     return true;
@@ -742,7 +742,7 @@ fn bufferTypeAllocBuffer(buft: ggml.impl.ggml_c.ggml_backend_buffer_type_t, size
 pub fn wrapBuffer(buft: ggml.impl.ggml_c.ggml_backend_buffer_type_t, device: *ggml.vulkan.device.Device, dev_buffer: *Buffer, name: [:0]const u8, size: usize) ggml.impl.ggml_c.ggml_backend_buffer_t {
     const bufctx = std.heap.c_allocator.create(BufferCtx) catch oom();
     bufctx.* = .{ .device = device, .dev_buffer = dev_buffer, .name = name };
-    return ggml.impl.ggml_c.ggml_backend_buffer_init(buft, buffer_iface, bufctx, size);
+    return ggml.backend.ggml_backend_buffer_init(buft, buffer_iface, bufctx, size);
 }
 
 /// Ports `ggml_backend_vk_buffer_type_get_alignment` (ggml-vulkan.cpp:13614 @b1b770d90).
@@ -757,7 +757,7 @@ fn bufferTypeGetMaxSize(buft: ggml.impl.ggml_c.ggml_backend_buffer_type_t) callc
 
 /// Ports `ggml_backend_vk_buffer_type_get_alloc_size` (ggml-vulkan.cpp:13624 @b1b770d90).
 fn bufferTypeGetAllocSize(_: ggml.impl.ggml_c.ggml_backend_buffer_type_t, tensor: [*c]const ggml.impl.ggml_c.ggml_tensor) callconv(.c) usize {
-    return ggml.impl.ggml_c.ggml_nbytes(tensor);
+    return ggml.types.ggml_nbytes(tensor);
 }
 
 /// Ports `ggml_backend_vk_buffer_type_interface` (ggml-vulkan-buffers.cpp:28 @b1b770d90).
@@ -800,9 +800,9 @@ fn hostBufferTypeAllocBuffer(buft: ggml.impl.ggml_c.ggml_backend_buffer_type_t, 
     const ptr = hostMalloc(size) orelse {
         ggml.impl.logWarn("ggml_vulkan: Failed to allocate pinned memory\n", .{});
         // fallback to cpu buffer
-        return ggml.impl.ggml_c.ggml_backend_buft_alloc_buffer(ggml.impl.ggml_c.ggml_backend_cpu_buffer_type(), size);
+        return ggml.backend.ggml_backend_buft_alloc_buffer(ggml.backend.ggml_backend_cpu_buffer_type(), size);
     };
-    const buffer = ggml.impl.ggml_c.ggml_backend_cpu_buffer_from_ptr(ptr, size);
+    const buffer = ggml.backend.ggml_backend_cpu_buffer_from_ptr(ptr, size);
     buffer.*.buft = buft;
     buffer.*.iface.free_buffer = &hostBufferFreeBuffer;
     return buffer;
@@ -830,11 +830,11 @@ fn initHostBufferType() void {
             .alloc_buffer_n = null,
             .get_alignment = &hostBufferTypeGetAlignment,
             .get_max_size = &hostBufferTypeGetMaxSize,
-            .get_alloc_size = ggml.impl.ggml_c.ggml_backend_cpu_buffer_type().*.iface.get_alloc_size,
+            .get_alloc_size = ggml.backend.ggml_backend_cpu_buffer_type().*.iface.get_alloc_size,
             .get_alloc_size_n = null,
-            .is_host = ggml.impl.ggml_c.ggml_backend_cpu_buffer_type().*.iface.is_host,
+            .is_host = ggml.backend.ggml_backend_cpu_buffer_type().*.iface.is_host,
         },
-        .device = ggml.impl.ggml_c.ggml_backend_reg_dev_get(ggml.vulkan.backend.reg(), 0),
+        .device = ggml.backend.ggml_backend_reg_dev_get(ggml.vulkan.backend.reg(), 0),
         .context = null,
     };
 }

@@ -52,7 +52,7 @@ fn topKMaskCuda(comptime T: type, ctx: *ggml.cuda.common.Context, dst: *ggml.imp
     const sf = @sizeOf(f32);
 
     ggml.cuda.kernels.launchPdl(ggml.cuda.kernels.get("top-k-mask", ggml.cuda.kernels.tmpl("top_k_mask_kernel", &.{ggml.cuda.kernels.typeName(T)})), .{
-        .grid = .{ .x = @truncate(@as(u64, @bitCast(ggml.impl.ggml_c.ggml_nrows(dst)))) },
+        .grid = .{ .x = @truncate(@as(u64, @bitCast(ggml.types.ggml_nrows(dst)))) },
         .block = .{ .x = block_size },
         .shmem = 0,
         .stream = ctx.stream(),

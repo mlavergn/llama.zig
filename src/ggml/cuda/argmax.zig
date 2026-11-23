@@ -14,10 +14,10 @@ pub fn opArgmax(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tens
     ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
     ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_I32, " dst->type == GGML_TYPE_I32");
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
+    ggml.impl.assert(ggml.types.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
 
     const ne00: i64 = src0.ne[0];
-    const nrows: i64 = ggml.impl.ggml_c.ggml_nrows(src0);
+    const nrows: i64 = ggml.types.ggml_nrows(src0);
 
     const src0_d: ?*const anyopaque = src0.data;
     const dst_d: ?*anyopaque = dst.data;

@@ -72,7 +72,7 @@ pub fn opPad(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor)
     const rp3: i32 = dst.op_params[7];
     const circular: i32 = dst.op_params[8];
 
-    const ts = ggml.impl.ggml_c.ggml_type_size(src0.type);
+    const ts = ggml.types.ggml_type_size(src0.type);
     const s00: usize = nb00 / ts;
     const s01: usize = nb01 / ts;
     const s02: usize = nb02 / ts;

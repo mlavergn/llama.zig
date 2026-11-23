@@ -156,7 +156,7 @@ fn gqaOpt(base: bool, Q: *const ggml.impl.ggml_c.ggml_tensor, K: *const ggml.imp
     var use_gqa_opt = base;
     for ([_]?*const ggml.impl.ggml_c.ggml_tensor{ Q, K, V, mask }) |t_opt| {
         const t = t_opt orelse continue;
-        if (ggml.impl.ggml_c.ggml_is_quantized(t.type)) {
+        if (ggml.types.ggml_is_quantized(t.type)) {
             continue;
         }
         for (1..ggml.impl.ggml_c.GGML_MAX_DIMS) |i| {
@@ -490,7 +490,7 @@ fn vec(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor) void 
     if (vec_case == null) {
         if (!vec_warned) {
             ggml.impl.logWarn("%s: no FlashAttention vector kernel compiled for K/V types %s-%s, converting K and V to f16 instead (slow). " ++
-                "Add \"%s-%s\" to GGML_CUDA_FA_QUANTS to compile it.\n", .{ "ggml_cuda_flash_attn_ext_vec", ggml.impl.ggml_c.ggml_type_name(K.type), ggml.impl.ggml_c.ggml_type_name(V.type), ggml.impl.ggml_c.ggml_type_name(K.type), ggml.impl.ggml_c.ggml_type_name(V.type) });
+                "Add \"%s-%s\" to GGML_CUDA_FA_QUANTS to compile it.\n", .{ "ggml_cuda_flash_attn_ext_vec", ggml.types.ggml_type_name(K.type), ggml.types.ggml_type_name(V.type), ggml.types.ggml_type_name(K.type), ggml.types.ggml_type_name(V.type) });
             vec_warned = true;
         }
         vec_case = getFattnVecCase(Q.ne[0], ggml.impl.ggml_c.GGML_TYPE_F16, ggml.impl.ggml_c.GGML_TYPE_F16);
@@ -616,7 +616,7 @@ fn getBestKernel(device: c_int, dst: *const ggml.impl.ggml_c.ggml_tensor) BestKe
     // If Turing tensor cores are available, use them (for head sizes 40 and 72 too):
     if (ggml.cuda.common.turingMmaAvailable(cc)) {
         if (can_use_vector_kernel) {
-            if (!ggml.impl.ggml_c.ggml_is_quantized(K.type) and !ggml.impl.ggml_c.ggml_is_quantized(V.type)) {
+            if (!ggml.types.ggml_is_quantized(K.type) and !ggml.types.ggml_is_quantized(V.type)) {
                 // the sparse gather exists only in the MMA kernel: (DKQ, DV, 1, 8) with GQA > 4
                 const sparse_decode = gqa_opt_applies and gqa_ratio > 4 and
                     ggml.cuda.fattn_mma.mayUseSparse(@truncate(K.ne[0]), @truncate(V.ne[0]), 1, 8) and
@@ -690,7 +690,7 @@ fn getBestKernel(device: c_int, dst: *const ggml.impl.ggml_c.ggml_tensor) BestKe
 
     // If there are no tensor cores available, use the generic tile kernel:
     if (can_use_vector_kernel) {
-        if (!ggml.impl.ggml_c.ggml_is_quantized(K.type) and !ggml.impl.ggml_c.ggml_is_quantized(V.type)) {
+        if (!ggml.types.ggml_is_quantized(K.type) and !ggml.types.ggml_is_quantized(V.type)) {
             if (Q.ne[1] == 1) {
                 if (!gqa_opt_applies) {
                     return .vec;

@@ -420,9 +420,9 @@ fn opSsmScanImpl(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_ten
     const K_param = ggml.impl.getOpParamsI32(dst, 0);
     const K: i64 = if (K_param > 0) K_param else 1;
 
-    const s_off: i64 = @bitCast(@as(usize, @bitCast(ggml.impl.ggml_c.ggml_nelements(src1))) * @sizeOf(f32));
+    const s_off: i64 = @bitCast(@as(usize, @bitCast(ggml.types.ggml_nelements(src1))) * @sizeOf(f32));
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_nelements(src1) + K * nc * nr * nh * n_s == ggml.impl.ggml_c.ggml_nelements(dst), "ggml_nelements(src1) + K*nc*nr*nh*n_s == ggml_nelements(dst)");
+    ggml.impl.assert(ggml.types.ggml_nelements(src1) + K * nc * nr * nh * n_s == ggml.types.ggml_nelements(dst), "ggml_nelements(src1) + K*nc*nr*nh*n_s == ggml_nelements(dst)");
     ggml.impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
     ggml.impl.assert(src1.nb[0] == @sizeOf(f32), "src1->nb[0] == sizeof(float)");
     ggml.impl.assert(src2.nb[0] == @sizeOf(f32), "src2->nb[0] == sizeof(float)");

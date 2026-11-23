@@ -28,7 +28,7 @@ pub fn ceilDiv(a: anytype, b: anytype) @TypeOf(a, b) {
 }
 
 pub fn typeSize(t: *const ggml.impl.ggml_c.ggml_tensor) u32 {
-    return @intCast(ggml.impl.ggml_c.ggml_type_size(t.type));
+    return @intCast(ggml.types.ggml_type_size(t.type));
 }
 
 // -----------------------------------------------------------------------------
@@ -92,13 +92,13 @@ pub fn initPushconstFastdiv(p: anytype) void {
 /// Ports `vk_op_unary_push_constants_init` (ggml-vulkan-push-constants.h:279 @b1b770d90).
 /// `ne` 0 means the destination's element count.
 pub fn unaryPushConstantsInit(src0: *const ggml.impl.ggml_c.ggml_tensor, dst: *const ggml.impl.ggml_c.ggml_tensor, ne_in: i64) ggml.vulkan.push.Unary {
-    ggml.impl.assert(ne_in != 0 or ggml.impl.ggml_c.ggml_nelements(src0) == ggml.impl.ggml_c.ggml_nelements(dst), "ne != 0 || (ggml_nelements(src0) == ggml_nelements(dst))");
-    const ne = if (ne_in != 0) ne_in else ggml.impl.ggml_c.ggml_nelements(dst);
+    ggml.impl.assert(ne_in != 0 or ggml.types.ggml_nelements(src0) == ggml.types.ggml_nelements(dst), "ne != 0 || (ggml_nelements(src0) == ggml_nelements(dst))");
+    const ne = if (ne_in != 0) ne_in else ggml.types.ggml_nelements(dst);
     ggml.impl.assert(ne <= std.math.maxInt(u32), "ne <= (int64_t)std::numeric_limits<uint32_t>::max()");
 
     var p: ggml.vulkan.push.Unary = .{};
     p.ne = @intCast(ne);
-    const ts0 = ggml.impl.ggml_c.ggml_type_size(src0.type);
+    const ts0 = ggml.types.ggml_type_size(src0.type);
     p.ne00 = u32Of(src0.ne[0]);
     p.ne01 = u32Of(src0.ne[1]);
     p.ne02 = u32Of(src0.ne[2]);
@@ -107,7 +107,7 @@ pub fn unaryPushConstantsInit(src0: *const ggml.impl.ggml_c.ggml_tensor, dst: *c
     p.nb01 = @truncate(src0.nb[1] / ts0);
     p.nb02 = @truncate(src0.nb[2] / ts0);
     p.nb03 = @truncate(src0.nb[3] / ts0);
-    const tsd = ggml.impl.ggml_c.ggml_type_size(dst.type);
+    const tsd = ggml.types.ggml_type_size(dst.type);
     p.ne10 = u32Of(dst.ne[0]);
     p.ne11 = u32Of(dst.ne[1]);
     p.ne12 = u32Of(dst.ne[2]);
@@ -121,11 +121,11 @@ pub fn unaryPushConstantsInit(src0: *const ggml.impl.ggml_c.ggml_tensor, dst: *c
 
 /// Ports `vk_op_pad_push_constants_init` (ggml-vulkan-push-constants.h:323 @b1b770d90).
 pub fn padPushConstantsInit(src0: *const ggml.impl.ggml_c.ggml_tensor, dst: *const ggml.impl.ggml_c.ggml_tensor) ggml.vulkan.push.Pad {
-    const ne = ggml.impl.ggml_c.ggml_nelements(dst);
+    const ne = ggml.types.ggml_nelements(dst);
     ggml.impl.assert(ne <= std.math.maxInt(u32), "ne <= (int64_t)std::numeric_limits<uint32_t>::max()");
     var p: ggml.vulkan.push.Pad = .{};
     p.ne = @intCast(ne);
-    const ts0 = ggml.impl.ggml_c.ggml_type_size(src0.type);
+    const ts0 = ggml.types.ggml_type_size(src0.type);
     p.ne00 = u32Of(src0.ne[0]);
     p.ne01 = u32Of(src0.ne[1]);
     p.ne02 = u32Of(src0.ne[2]);
@@ -134,7 +134,7 @@ pub fn padPushConstantsInit(src0: *const ggml.impl.ggml_c.ggml_tensor, dst: *con
     p.nb01 = @truncate(src0.nb[1] / ts0);
     p.nb02 = @truncate(src0.nb[2] / ts0);
     p.nb03 = @truncate(src0.nb[3] / ts0);
-    const tsd = ggml.impl.ggml_c.ggml_type_size(dst.type);
+    const tsd = ggml.types.ggml_type_size(dst.type);
     p.ne10 = u32Of(dst.ne[0]);
     p.ne11 = u32Of(dst.ne[1]);
     p.ne12 = u32Of(dst.ne[2]);
@@ -326,7 +326,7 @@ pub fn opF32Override(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.
     var pc = pc_in;
     const PC = @TypeOf(pc);
     const s0 = src0.?;
-    ggml.impl.assert(op == ggml.impl.ggml_c.GGML_OP_GET_ROWS or op == ggml.impl.ggml_c.GGML_OP_CPY or op == ggml.impl.ggml_c.GGML_OP_CONCAT or (!ggml.impl.ggml_c.ggml_is_quantized(s0.type) and (src1 == null or !ggml.impl.ggml_c.ggml_is_quantized(src1.?.type))), "op == GGML_OP_GET_ROWS || op == GGML_OP_CPY || op == GGML_OP_CONCAT || (!ggml_is_quantized(src0->type) && (src1 == nullptr || !ggml_is_quantized(src1->type)))");
+    ggml.impl.assert(op == ggml.impl.ggml_c.GGML_OP_GET_ROWS or op == ggml.impl.ggml_c.GGML_OP_CPY or op == ggml.impl.ggml_c.GGML_OP_CONCAT or (!ggml.types.ggml_is_quantized(s0.type) and (src1 == null or !ggml.types.ggml_is_quantized(src1.?.type))), "op == GGML_OP_GET_ROWS || op == GGML_OP_CPY || op == GGML_OP_CONCAT || (!ggml_is_quantized(src0->type) && (src1 == nullptr || !ggml_is_quantized(src1->type)))");
     ggml.impl.assert(dst.buffer != null, "dst->buffer != nullptr");
     const ne00: u64 = @bitCast(s0.ne[0]);
     const ne01: u64 = @bitCast(s0.ne[1]);
@@ -344,9 +344,9 @@ pub fn opF32Override(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.
     initPushconstFastdiv(&pc);
 
     const pipeline = pipeline_override orelse ggml.vulkan.op_pipeline.getPipeline(ctx, s0, src1, src2, dst, op) orelse {
-        ggml.impl.fprintfStderr("ggml_vulkan: Error: Missing op: %s for %s", .{ ggml.impl.ggml_c.ggml_op_name(op), ggml.impl.ggml_c.ggml_type_name(s0.type) });
-        if (src1) |s1| ggml.impl.fprintfStderr(" and %s", .{ggml.impl.ggml_c.ggml_type_name(s1.type)});
-        ggml.impl.fprintfStderr(" to %s\n", .{ggml.impl.ggml_c.ggml_type_name(dst.type)});
+        ggml.impl.fprintfStderr("ggml_vulkan: Error: Missing op: %s for %s", .{ ggml.types.ggml_op_name(op), ggml.types.ggml_type_name(s0.type) });
+        if (src1) |s1| ggml.impl.fprintfStderr(" and %s", .{ggml.types.ggml_type_name(s1.type)});
+        ggml.impl.fprintfStderr(" to %s\n", .{ggml.types.ggml_type_name(dst.type)});
         ggml.impl.abort("fatal error");
     };
 
@@ -365,7 +365,7 @@ pub fn opF32Override(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.
     var elements: [3]u32 = undefined;
     switch (op) {
         ggml.impl.ggml_c.GGML_OP_NORM, ggml.impl.ggml_c.GGML_OP_RMS_NORM_BACK, ggml.impl.ggml_c.GGML_OP_L2_NORM, ggml.impl.ggml_c.GGML_OP_SOFT_MAX, ggml.impl.ggml_c.GGML_OP_SOFT_MAX_BACK, ggml.impl.ggml_c.GGML_OP_SUM_ROWS, ggml.impl.ggml_c.GGML_OP_CUMSUM, ggml.impl.ggml_c.GGML_OP_MEAN, ggml.impl.ggml_c.GGML_OP_ARGMAX => {
-            elements = split512(u32Of(ggml.impl.ggml_c.ggml_nrows(s0)));
+            elements = split512(u32Of(ggml.types.ggml_nrows(s0)));
         },
         ggml.impl.ggml_c.GGML_OP_SOLVE_TRI => elements = split512(@truncate(ne02 *% ne03)),
         ggml.impl.ggml_c.GGML_OP_RMS_NORM => {
@@ -390,7 +390,7 @@ pub fn opF32Override(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.
             ggml.impl.assert(elements[2] <= limits.maxComputeWorkGroupCount[2], "elements[2] <= ctx->device->properties.limits.maxComputeWorkGroupCount[2]");
         },
         ggml.impl.ggml_c.GGML_OP_ROPE, ggml.impl.ggml_c.GGML_OP_ROPE_BACK => {
-            var nrows = u32Of(ggml.impl.ggml_c.ggml_nrows(s0));
+            var nrows = u32Of(ggml.types.ggml_nrows(s0));
             var z: u32 = 1;
             if (nrows > limits.maxComputeWorkGroupCount[0]) {
                 z = ceilDiv(nrows, 32768);
@@ -449,7 +449,7 @@ pub fn opF32Override(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.
             elements = .{ N *% u32Of(dst.ne[1]) *% u32Of(dst.ne[0]), 1, 1 };
         },
         ggml.impl.ggml_c.GGML_OP_POOL_2D => {
-            const outputs: u32 = @truncate(@as(u64, @bitCast(ggml.impl.ggml_c.ggml_nelements(dst))));
+            const outputs: u32 = @truncate(@as(u64, @bitCast(ggml.types.ggml_nelements(dst))));
             const outputs_per_workgroup: u32 = if (pipeline == ctx.device.pipeline_pool2d_subgroup_f32) 128 / ctx.device.subgroup_size else 512;
             const workgroups = ceilDiv(outputs, outputs_per_workgroup);
             const groups_y = ceilDiv(workgroups, limits.maxComputeWorkGroupCount[0]);
@@ -490,19 +490,19 @@ pub fn opF32Override(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.
                 elements = .{ u32Of(src1.?.ne[1]), groups_y * 32, ceilDiv(tiles_y, groups_y) };
                 break :blk;
             }
-            var ne = u32Of(ggml.impl.ggml_c.ggml_nelements(dst));
-            if (op == ggml.impl.ggml_c.GGML_OP_CPY and ggml.impl.ggml_c.ggml_is_quantized(s0.type) and ggml.impl.ggml_c.ggml_is_quantized(dst.type)) {
+            var ne = u32Of(ggml.types.ggml_nelements(dst));
+            if (op == ggml.impl.ggml_c.GGML_OP_CPY and ggml.types.ggml_is_quantized(s0.type) and ggml.types.ggml_is_quantized(dst.type)) {
                 // Convert from number of logical elements to 2- or 4-byte units.
-                ne /= u32Of(ggml.impl.ggml_c.ggml_blck_size(s0.type));
+                ne /= u32Of(ggml.types.ggml_blck_size(s0.type));
                 const ts = typeSize(s0);
                 if (ts % 4 == 0) ne *%= ts / 4 else ne *%= ts / 2;
             }
-            if (op == ggml.impl.ggml_c.GGML_OP_CONCAT and ggml.impl.ggml_c.ggml_is_quantized(dst.type)) {
-                ne = ne / u32Of(ggml.impl.ggml_c.ggml_blck_size(dst.type)) *% typeSize(dst) / ggml.vulkan.op_pipeline.concatUnitSize(dst.type);
+            if (op == ggml.impl.ggml_c.GGML_OP_CONCAT and ggml.types.ggml_is_quantized(dst.type)) {
+                ne = ne / u32Of(ggml.types.ggml_blck_size(dst.type)) *% typeSize(dst) / ggml.vulkan.op_pipeline.concatUnitSize(dst.type);
             }
             // copy_to_quant has block size of 32, and each thread does QUANT_K elements.
-            if (op == ggml.impl.ggml_c.GGML_OP_CPY and !ggml.impl.ggml_c.ggml_is_quantized(s0.type) and ggml.impl.ggml_c.ggml_is_quantized(dst.type)) {
-                ne = ceilDiv(ne, u32Of(ggml.impl.ggml_c.ggml_blck_size(dst.type)));
+            if (op == ggml.impl.ggml_c.GGML_OP_CPY and !ggml.types.ggml_is_quantized(s0.type) and ggml.types.ggml_is_quantized(dst.type)) {
+                ne = ceilDiv(ne, u32Of(ggml.types.ggml_blck_size(dst.type)));
             }
             elements = split512(ne);
 
@@ -527,10 +527,10 @@ pub fn opF32Override(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.
         },
         ggml.impl.ggml_c.GGML_OP_ADD_ID => elements = .{ @truncate(ne01), @truncate(ne02), 1 },
         ggml.impl.ggml_c.GGML_OP_SET_ROWS => {
-            var ne = u32Of(ggml.impl.ggml_c.ggml_nelements(s0));
-            if (ggml.impl.ggml_c.ggml_is_quantized(dst.type)) {
+            var ne = u32Of(ggml.types.ggml_nelements(s0));
+            if (ggml.types.ggml_is_quantized(dst.type)) {
                 // quants run 32 threads each doing QUANT_K elements
-                ne = ceilDiv(ne, 32 *% u32Of(ggml.impl.ggml_c.ggml_blck_size(dst.type)));
+                ne = ceilDiv(ne, 32 *% u32Of(ggml.types.ggml_blck_size(dst.type)));
             } else {
                 // scalar types do one element per thread, running 512 threads
                 ne = ceilDiv(ne, 512);
@@ -538,7 +538,7 @@ pub fn opF32Override(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.
             elements = split512(ne);
         },
         ggml.impl.ggml_c.GGML_OP_SSM_CONV => elements = .{ u32Of(s0.ne[1]), u32Of(dst.ne[1]), u32Of(dst.ne[2]) },
-        else => elements = .{ u32Of(ggml.impl.ggml_c.ggml_nelements(s0)), 1, 1 },
+        else => elements = .{ u32Of(ggml.types.ggml_nelements(s0)), 1, 1 },
     }
 
     const pcb = std.mem.asBytes(&pc);
@@ -587,7 +587,7 @@ pub fn opF32Override(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.
 pub fn useMulMatVecIdTensor(dst: *const ggml.impl.ggml_c.ggml_tensor) bool {
     const src0 = dst.src[0].*;
     const ids = dst.src[2].*;
-    return ids.ne[1] <= 8 and (src0.type == ggml.impl.ggml_c.GGML_TYPE_F32 or src0.type == ggml.impl.ggml_c.GGML_TYPE_F16 or ggml.impl.ggml_c.ggml_is_quantized(src0.type));
+    return ids.ne[1] <= 8 and (src0.type == ggml.impl.ggml_c.GGML_TYPE_F32 or src0.type == ggml.impl.ggml_c.GGML_TYPE_F16 or ggml.types.ggml_is_quantized(src0.type));
 }
 
 /// Ports `ggml_vk_use_mul_mat_vec_id` (ggml-vulkan.cpp:8296 @b1b770d90).
@@ -664,7 +664,7 @@ pub fn dispatchNode(ctx: *ggml.vulkan.context.BackendCtx, compute_ctx: *ggml.vul
                 B.unaryMul(ctx, compute_ctx, cgraph, node_idx);
                 return true;
             }
-            switch (ggml.impl.ggml_c.ggml_get_unary_op(node)) {
+            switch (ggml.types.ggml_get_unary_op(node)) {
                 ggml.impl.ggml_c.GGML_UNARY_OP_ELU,
                 ggml.impl.ggml_c.GGML_UNARY_OP_EXP,
                 ggml.impl.ggml_c.GGML_UNARY_OP_EXPM1,
@@ -691,7 +691,7 @@ pub fn dispatchNode(ctx: *ggml.vulkan.context.BackendCtx, compute_ctx: *ggml.vul
                 else => return false,
             }
         },
-        ggml.impl.ggml_c.GGML_OP_GLU => switch (ggml.impl.ggml_c.ggml_get_glu_op(node)) {
+        ggml.impl.ggml_c.GGML_OP_GLU => switch (ggml.types.ggml_get_glu_op(node)) {
             ggml.impl.ggml_c.GGML_GLU_OP_GEGLU, ggml.impl.ggml_c.GGML_GLU_OP_REGLU, ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU, ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU_OAI, ggml.impl.ggml_c.GGML_GLU_OP_GEGLU_ERF, ggml.impl.ggml_c.GGML_GLU_OP_GEGLU_QUICK, ggml.impl.ggml_c.GGML_GLU_OP_SWIGLU_CLAMP => B.glu(ctx, compute_ctx, src0.?, src1, node),
             else => return false,
         },

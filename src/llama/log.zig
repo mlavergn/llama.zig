@@ -73,8 +73,8 @@ pub fn logInternal(level: mod.impl.llama_c.enum_ggml_log_level, comptime format:
 pub fn callbackDefault(level: mod.impl.llama_c.enum_ggml_log_level, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
     _ = level;
     _ = user_data;
-    _ = mod.impl.llama_c.fputs(text, mod.impl.cStderr());
-    _ = mod.impl.llama_c.fflush(mod.impl.cStderr());
+    _ = stdlib.libc.fputs(text, mod.impl.cStderr());
+    _ = stdlib.libc.fflush(mod.impl.cStderr());
 }
 
 // -----------------------------------------------------------------------------

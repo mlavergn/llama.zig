@@ -25,7 +25,7 @@ fn sumF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c.ggm
 
     if (params.ith != 0) return;
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_scalar(dst), "ggml_is_scalar(dst)");
+    ggml.impl.assert(ggml.types.ggml_is_scalar(dst), "ggml_is_scalar(dst)");
 
     const ne00 = src0.ne[0];
     const ne01 = src0.ne[1];
@@ -86,7 +86,7 @@ fn sumNarrow(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: 
 
     if (params.ith != 0) return;
 
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_scalar(dst), "ggml_is_scalar(dst)");
+    ggml.impl.assert(ggml.types.ggml_is_scalar(dst), "ggml_is_scalar(dst)");
     ggml.impl.assert(src0.nb[0] == @sizeOf(T), "src0->nb[0] == sizeof(T)");
 
     const ne00 = src0.ne[0];
@@ -311,11 +311,11 @@ fn countEqualI32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggm
 
     ggml.impl.assert(src0.type == ggml.impl.ggml_c.GGML_TYPE_I32, "src0->type == GGML_TYPE_I32");
     ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_I32, "src1->type == GGML_TYPE_I32");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_are_same_shape(src0, src1), "ggml_are_same_shape(src0, src1)");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_is_scalar(dst), "ggml_is_scalar(dst)");
+    ggml.impl.assert(ggml.types.ggml_are_same_shape(src0, src1), "ggml_are_same_shape(src0, src1)");
+    ggml.impl.assert(ggml.types.ggml_is_scalar(dst), "ggml_is_scalar(dst)");
     ggml.impl.assert(dst.type == ggml.impl.ggml_c.GGML_TYPE_I64, "dst->type == GGML_TYPE_I64");
 
-    const nr: i64 = @intCast(ggml.impl.ggml_c.ggml_nrows(src0));
+    const nr: i64 = @intCast(ggml.types.ggml_nrows(src0));
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;

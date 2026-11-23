@@ -70,7 +70,7 @@ const Mapping = struct {
 
 /// A `ggml_backend_buffer_ptr`: frees its buffer at the end of its scope.
 fn freeBuffer(buf: ggml.impl.ggml_c.ggml_backend_buffer_t) void {
-    if (buf != null) ggml.impl.ggml_c.ggml_backend_buffer_free(buf);
+    if (buf != null) ggml.backend.ggml_backend_buffer_free(buf);
 }
 
 const Range = struct { first: usize, second: usize };
@@ -146,20 +146,20 @@ pub fn getTensorN(device: c_int, tensors: [*c]const [*c]const ggml.impl.ggml_c.g
     // Keep descriptor storage alive until the final stream synchronization.
     const max_batch_descriptors: usize = 128 * 1024;
     const bytes: usize = @as(usize, @min(n_reads_gather, max_batch_descriptors)) * @sizeOf(Descriptor);
-    const descriptors: ggml.impl.ggml_c.ggml_backend_buffer_t = if (n_reads_gather != 0) ggml.impl.ggml_c.ggml_backend_buft_alloc_buffer(ggml.cuda.backend.bufferType(device), bytes) else null;
+    const descriptors: ggml.impl.ggml_c.ggml_backend_buffer_t = if (n_reads_gather != 0) ggml.backend.ggml_backend_buft_alloc_buffer(ggml.cuda.backend.bufferType(device), bytes) else null;
     defer freeBuffer(descriptors);
     if (descriptors == null) {
         n_reads_gather = 0;
     }
     const host_type = ggml.cuda.backend.hostBufferType();
-    const host_descriptors: ggml.impl.ggml_c.ggml_backend_buffer_t = if (n_reads_gather != 0) ggml.impl.ggml_c.ggml_backend_buft_alloc_buffer(host_type, bytes) else null;
+    const host_descriptors: ggml.impl.ggml_c.ggml_backend_buffer_t = if (n_reads_gather != 0) ggml.backend.ggml_backend_buft_alloc_buffer(host_type, bytes) else null;
     defer freeBuffer(host_descriptors);
-    if (host_descriptors == null or ggml.impl.ggml_c.ggml_backend_buffer_get_type(host_descriptors) != host_type) {
+    if (host_descriptors == null or ggml.backend.ggml_backend_buffer_get_type(host_descriptors) != host_type) {
         n_reads_gather = 0;
     }
     if (n_reads_gather != 0) {
-        const copies: [*]Descriptor = @ptrCast(@alignCast(ggml.impl.ggml_c.ggml_backend_buffer_get_base(host_descriptors)));
-        const device_copies: [*]Descriptor = @ptrCast(@alignCast(ggml.impl.ggml_c.ggml_backend_buffer_get_base(descriptors)));
+        const copies: [*]Descriptor = @ptrCast(@alignCast(ggml.backend.ggml_backend_buffer_get_base(host_descriptors)));
+        const device_copies: [*]Descriptor = @ptrCast(@alignCast(ggml.backend.ggml_backend_buffer_get_base(descriptors)));
         const threads = 256;
         const nsm: usize = @intCast(ggml.cuda.common.info().devices[@intCast(device)].nsm);
         var i: usize = 0;

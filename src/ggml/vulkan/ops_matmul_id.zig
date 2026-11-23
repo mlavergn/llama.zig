@@ -19,11 +19,11 @@ fn at(cg: *const ggml.impl.CGraph, i: c_int) *ggml.impl.ggml_c.ggml_tensor {
 }
 
 fn typeSizeOf(t: ggml.impl.ggml_c.ggml_type) u64 {
-    return ggml.impl.ggml_c.ggml_type_size(t);
+    return ggml.types.ggml_type_size(t);
 }
 
 fn blck(t: ggml.impl.ggml_c.ggml_type) u64 {
-    return @intCast(ggml.impl.ggml_c.ggml_blck_size(t));
+    return @intCast(ggml.types.ggml_blck_size(t));
 }
 
 /// `make_y_staged_dst`: src1's shape with the f16 type and the K-padded
@@ -31,7 +31,7 @@ fn blck(t: ggml.impl.ggml_c.ggml_type) u64 {
 fn yStagedDst(src1: *const ggml.impl.ggml_c.ggml_tensor, f16_type: ggml.impl.ggml_c.ggml_type, row_stride: u32, ne11: u64) ggml.impl.ggml_c.ggml_tensor {
     var t = src1.*;
     t.type = f16_type;
-    t.nb[0] = ggml.impl.ggml_c.ggml_type_size(f16_type);
+    t.nb[0] = ggml.types.ggml_type_size(f16_type);
     t.nb[1] = t.nb[0] * row_stride;
     t.nb[2] = t.nb[1] * ne11;
     t.nb[3] = t.nb[2] * @as(usize, @intCast(t.ne[2]));
@@ -64,7 +64,7 @@ pub fn mulMatIdQF16(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.s
     const ne20: u64 = @intCast(dst.ne[0]);
     const ne21: u64 = @intCast(dst.ne[1]);
     const n_as = ne02;
-    const prec: ggml.impl.ggml_c.ggml_prec = ggml.impl.ggml_c.ggml_prec_get_acc(dst);
+    const prec: ggml.impl.ggml_c.ggml_prec = ggml.ops.ggml_prec_get_acc(dst);
 
     var qx = ggml.vulkan.ops_matmul.Source.pinned(ctx, src0);
     var qy = ggml.vulkan.ops_matmul.Source.pinned(ctx, src1);
@@ -91,11 +91,11 @@ pub fn mulMatIdQF16(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.s
     }
 
     const can_quantize_y = dev.integer_dot_product and src1.type == ggml.impl.ggml_c.GGML_TYPE_F32 and
-        ggml.impl.ggml_c.ggml_is_contiguous(src1) and (ne11 *% ne10) % 4 == 0 and ggml.vulkan.ops_matmul.src1PrecAllowsQ8(dst);
+        ggml.types.ggml_is_contiguous(src1) and (ne11 *% ne10) % 4 == 0 and ggml.vulkan.ops_matmul.src1PrecAllowsQ8(dst);
     // Intel coopmat1 matrix cores prefer f16 activations for quantized weights
     const prefer_f16_b = dev.coopmat_support and !dev.coopmat2 and
         dev.vendor_id == ggml.vulkan.common.vendor_id.intel and
-        ggml.impl.ggml_c.ggml_is_quantized(src0.type) and src1.type == ggml.impl.ggml_c.GGML_TYPE_F32;
+        ggml.types.ggml_is_quantized(src0.type) and src1.type == ggml.impl.ggml_c.GGML_TYPE_F32;
 
     const y_kernel_type = ggml.vulkan.ops_matmul.mulMatBType(ctx, src0.type, src1, f16_type, prec, true, can_quantize_y, prefer_f16_b);
 
@@ -132,14 +132,14 @@ pub fn mulMatIdQF16(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.s
     const row_ids_offset: u64 = 1 +% 2 *% max_tiles;
     const row_map_words: u64 = row_ids_offset +% max_tiles *% bn;
 
-    if (ggml.impl.ggml_c.ggml_nbytes(src0) > limits.maxStorageBufferRange) pipeline = ggml.vulkan.ops_matmul.get64bIndexingPipeline(pipeline);
+    if (ggml.types.ggml_nbytes(src0) > limits.maxStorageBufferRange) pipeline = ggml.vulkan.ops_matmul.get64bIndexingPipeline(pipeline);
 
-    const x_ne: u64 = @intCast(ggml.impl.ggml_c.ggml_nelements(src0));
+    const x_ne: u64 = @intCast(ggml.types.ggml_nelements(src0));
     const y_ne: u64 = @as(u64, y_staged_row_stride) *% ne11 *% ne12 *% ne13;
-    const d_ne: u64 = @intCast(ggml.impl.ggml_c.ggml_nelements(dst));
+    const d_ne: u64 = @intCast(ggml.types.ggml_nelements(dst));
 
     const qx_sz = typeSizeOf(src0.type) * x_ne / blck(src0.type);
-    const qy_sz = typeSizeOf(src1.type) * @as(u64, @intCast(ggml.impl.ggml_c.ggml_nelements(src1))) / blck(src1.type);
+    const qy_sz = typeSizeOf(src1.type) * @as(u64, @intCast(ggml.types.ggml_nelements(src1))) / blck(src1.type);
     const x_sz = if (!qx_needs_dequant) qx_sz else @sizeOf(ggml.impl.ggml_c.ggml_fp16_t) * x_ne;
     const y_sz: u64 = if (quantize_y)
         ggml.vulkan.ops_matmul.alignSize(y_ne, 128) * typeSizeOf(ggml.impl.ggml_c.GGML_TYPE_Q8_1) / blck(ggml.impl.ggml_c.GGML_TYPE_Q8_1)
@@ -256,7 +256,7 @@ pub fn mulMatIdQF16(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.s
     if (x_non_contig) {
         ggml.vulkan.ops_matmul.cpyToContiguous(ctx, subctx, to_fp16_vk_0.?, src0, ggml.vulkan.context.subbuffer(ctx, qx.buf.?, qx.offset), ggml.vulkan.context.subbuffer(ctx, d_X, 0));
     } else if (qx_needs_dequant) {
-        const pc = [5]u32{ @truncate(ne01), @truncate(ne10), @truncate(ne10), @truncate(ne10), ggml.vulkan.ops.u32Of(ggml.impl.ggml_c.ggml_nelements(src0)) };
+        const pc = [5]u32{ @truncate(ne01), @truncate(ne10), @truncate(ne10), @truncate(ne10), ggml.vulkan.ops.u32Of(ggml.types.ggml_nelements(src0)) };
         ggml.vulkan.context.dispatch(ctx, subctx, to_fp16_vk_0.?, &.{ ggml.vulkan.ops_matmul.sub(qx.buf, qx.offset, qx_sz), ggml.vulkan.ops_matmul.sub(d_X, 0, x_sz) }, &pc, .{ @truncate(x_ne), 1, 1 });
     }
     if (y_needs_reformat) {
@@ -271,7 +271,7 @@ pub fn mulMatIdQF16(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.s
                 ggml.vulkan.common.dispatch.vkCmdFillBuffer.?(subctx.cmd(), d_Y.buffer, 0, y_sz, 0);
                 ggml.vulkan.context.syncBuffers(ctx, subctx);
                 const staged = yStagedDst(src1, f16_type, y_staged_row_stride, ne11);
-                const ts = ggml.impl.ggml_c.ggml_type_size(staged.type);
+                const ts = ggml.types.ggml_type_size(staged.type);
                 ggml.vulkan.ops_matmul.cpyToStrided(ctx, subctx, to_fp16_vk_1.?, src1, ggml.vulkan.context.subbuffer(ctx, qy.buf.?, qy.offset), ggml.vulkan.context.subbuffer(ctx, d_Y, 0), @truncate(staged.nb[0] / ts), @truncate(staged.nb[1] / ts), @truncate(staged.nb[2] / ts), @truncate(staged.nb[3] / ts));
             } else {
                 ggml.vulkan.ops_matmul.cpyToContiguous(ctx, subctx, to_fp16_vk_1.?, src1, ggml.vulkan.context.subbuffer(ctx, qy.buf.?, qy.offset), ggml.vulkan.context.subbuffer(ctx, d_Y, 0));
@@ -295,8 +295,8 @@ pub fn mulMatIdQF16(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.s
     }
     ggml.vulkan.context.syncBuffers(ctx, subctx);
 
-    const x_range: u64 = if (qx_needs_dequant) x_sz else ggml.impl.ggml_c.ggml_nbytes(src0);
-    const y_range: u64 = if (qy_needs_dequant or quantize_y) y_sz else ggml.impl.ggml_c.ggml_nbytes(src1);
+    const x_range: u64 = if (qx_needs_dequant) x_sz else ggml.types.ggml_nbytes(src0);
+    const y_range: u64 = if (qy_needs_dequant or quantize_y) y_sz else ggml.types.ggml_nbytes(src1);
 
     var stride_batch_x: u32 = if (qx_needs_dequant) @truncate(ne00 *% ne01) else ggml.vulkan.ops_matmul.batchStride(src0);
     const stride_b_y: u32 = if (y_needs_k_padding) y_staged_row_stride else @truncate(ne10);
@@ -372,7 +372,7 @@ pub fn mulMatVecIdQF16(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulka
     const y_non_contig = !dim01(src1);
 
     const f16_f32_kernel = src1.type == ggml.impl.ggml_c.GGML_TYPE_F32;
-    var quantize_y = dev.integer_dot_product and src1.type == ggml.impl.ggml_c.GGML_TYPE_F32 and ggml.impl.ggml_c.ggml_is_contiguous(src1) and !y_non_contig and (ne11 *% ne10) % 4 == 0 and
+    var quantize_y = dev.integer_dot_product and src1.type == ggml.impl.ggml_c.GGML_TYPE_F32 and ggml.types.ggml_is_contiguous(src1) and !y_non_contig and (ne11 *% ne10) % 4 == 0 and
         ggml.vulkan.ops_matmul.src1PrecAllowsQ8(dst) and ggml.vulkan.ops_matmul.shouldUseMmvq(dev, @truncate(ne01), @truncate(ne12), @truncate(ne10), src0.type);
 
     const to_fp16_vk_0: ?*ggml.vulkan.pipeline.Pipeline = if (x_non_contig) ggml.vulkan.op_pipeline.getCpyPipeline(ctx, src0, null, src0.type) else null;
@@ -390,7 +390,7 @@ pub fn mulMatVecIdQF16(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulka
     const qx_needs_dequant = x_non_contig;
     const qy_needs_dequant = !quantize_y and ((src1.type != ggml.impl.ggml_c.GGML_TYPE_F16 and !f16_f32_kernel) or y_non_contig);
 
-    if (ggml.impl.ggml_c.ggml_nbytes(src0) > limits.maxStorageBufferRange) dmmv = ggml.vulkan.ops_matmul.get64bIndexingPipeline(dmmv.?);
+    if (ggml.types.ggml_nbytes(src0) > limits.maxStorageBufferRange) dmmv = ggml.vulkan.ops_matmul.get64bIndexingPipeline(dmmv.?);
 
     // Not implemented
     ggml.impl.assert(y_non_contig or !qy_needs_dequant, "y_non_contig || !qy_needs_dequant");
@@ -398,8 +398,8 @@ pub fn mulMatVecIdQF16(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulka
     ggml.impl.assert(!qy_needs_dequant or to_fp16_vk_1 != null, "!qy_needs_dequant || to_fp16_vk_1 != nullptr");
     const pipeline = dmmv orelse ggml.impl.abort("GGML_ASSERT(dmmv != nullptr) failed");
 
-    const x_ne: u64 = @intCast(ggml.impl.ggml_c.ggml_nelements(src0));
-    const y_ne: u64 = @intCast(ggml.impl.ggml_c.ggml_nelements(src1));
+    const x_ne: u64 = @intCast(ggml.types.ggml_nelements(src0));
+    const y_ne: u64 = @intCast(ggml.types.ggml_nelements(src1));
     const min_align: u64 = limits.minStorageBufferOffsetAlignment;
 
     const qx_sz = ggml.vulkan.ops_matmul.alignSize(typeSizeOf(src0.type) * x_ne / blck(src0.type), min_align);

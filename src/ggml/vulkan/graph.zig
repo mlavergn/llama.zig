@@ -61,9 +61,9 @@ pub fn printNodeList(cgraph: *const ggml.impl.CGraph, start: c_int, end: c_int) 
         total_flops +%= flops;
         n_ops += 1;
         if (flops > 0) {
-            ggml.impl.logCont("  node %d: %s (%s) [%.2f GFLOP]\n", .{ j, @as([*:0]const u8, @ptrCast(&node.name)), ggml.impl.ggml_c.ggml_op_name(node.op), @as(f64, @floatFromInt(flops)) / 1e9 });
+            ggml.impl.logCont("  node %d: %s (%s) [%.2f GFLOP]\n", .{ j, @as([*:0]const u8, @ptrCast(&node.name)), ggml.types.ggml_op_name(node.op), @as(f64, @floatFromInt(flops)) / 1e9 });
         } else {
-            ggml.impl.logCont("  node %d: %s (%s)\n", .{ j, @as([*:0]const u8, @ptrCast(&node.name)), ggml.impl.ggml_c.ggml_op_name(node.op) });
+            ggml.impl.logCont("  node %d: %s (%s)\n", .{ j, @as([*:0]const u8, @ptrCast(&node.name)), ggml.types.ggml_op_name(node.op) });
         }
     }
     ggml.impl.logCont("  total: %d ops, %.2f GFLOP\n", .{ n_ops, @as(f64, @floatFromInt(total_flops)) / 1e9 });
@@ -155,7 +155,7 @@ const rms_norm_view_set_rows_edges = [_][3]c_int{
 
 /// Ports `ggml_vk_is_empty` (ggml-vulkan.cpp:13998 @b1b770d90).
 pub fn isEmpty(node: *const ggml.impl.ggml_c.ggml_tensor) bool {
-    return ggml.impl.ggml_c.ggml_is_empty(node) or node.op == ggml.impl.ggml_c.GGML_OP_NONE or node.op == ggml.impl.ggml_c.GGML_OP_RESHAPE or node.op == ggml.impl.ggml_c.GGML_OP_TRANSPOSE or node.op == ggml.impl.ggml_c.GGML_OP_VIEW or node.op == ggml.impl.ggml_c.GGML_OP_PERMUTE;
+    return ggml.types.ggml_is_empty(node) or node.op == ggml.impl.ggml_c.GGML_OP_NONE or node.op == ggml.impl.ggml_c.GGML_OP_RESHAPE or node.op == ggml.impl.ggml_c.GGML_OP_TRANSPOSE or node.op == ggml.impl.ggml_c.GGML_OP_VIEW or node.op == ggml.impl.ggml_c.GGML_OP_PERMUTE;
 }
 
 fn opsAre(ops: []const ggml.impl.ggml_c.enum_ggml_op, want: []const ggml.impl.ggml_c.enum_ggml_op) bool {
@@ -169,17 +169,17 @@ pub fn canFuseUnaryMul(cgraph: *const ggml.impl.CGraph, unary_idx: c_int, mul_id
     const unary = nodeAt(cgraph, unary_idx);
     const mul = nodeAt(cgraph, mul_idx);
 
-    if (ggml.vulkan.ops_basic.unaryMulOpIndex(ggml.impl.ggml_c.ggml_get_unary_op(unary)) < 0) return false;
+    if (ggml.vulkan.ops_basic.unaryMulOpIndex(ggml.types.ggml_get_unary_op(unary)) < 0) return false;
     if (unary.type != ggml.impl.ggml_c.GGML_TYPE_F32 and unary.type != ggml.impl.ggml_c.GGML_TYPE_F16) return false;
     if (unary.type != mul.type) return false;
     if (mul.src[0] != unary and mul.src[1] != unary) return false;
     const other_opt = if (mul.src[0] == unary) mul.src[1] else mul.src[0];
     const other = other_opt orelse return false;
     if (other.*.type != unary.type) return false;
-    if (!ggml.impl.ggml_c.ggml_is_contiguous_1(other) or !ggml.impl.ggml_c.ggml_is_contiguous_1(unary.src[0])) return false;
+    if (!ggml.types.ggml_is_contiguous_1(other) or !ggml.types.ggml_is_contiguous_1(unary.src[0])) return false;
     // fastmod needs src to tile into dst
-    if (mul.src[0] == unary) return ggml.impl.ggml_c.ggml_can_repeat(other, unary);
-    return ggml.impl.ggml_c.ggml_can_repeat(unary, mul.src[0]);
+    if (mul.src[0] == unary) return ggml.types.ggml_can_repeat(other, unary);
+    return ggml.types.ggml_can_repeat(unary, mul.src[0]);
 }
 
 /// Ports `ggml_vk_can_fuse_unary_mul_pair` (ggml-vulkan.cpp:14032 @b1b770d90).
@@ -198,11 +198,11 @@ fn canFuseHcPostGate(cgraph: *const ggml.impl.CGraph, node_idx: c_int) bool {
 
     const scale_in_bias: f32 = @bitCast(scale_in.op_params[1]);
     const scale_out_bias: f32 = @bitCast(scale_out.op_params[1]);
-    return ggml.impl.ggml_c.ggml_get_unary_op(sigmoid) == ggml.impl.ggml_c.GGML_UNARY_OP_SIGMOID and
+    return ggml.types.ggml_get_unary_op(sigmoid) == ggml.impl.ggml_c.GGML_UNARY_OP_SIGMOID and
         scale_in_bias == 0.0 and
         scale_out_bias == 0.0 and
         scale_in.src[0].*.type == ggml.impl.ggml_c.GGML_TYPE_F32 and
-        ggml.impl.ggml_c.ggml_are_same_shape(scale_in.src[0], scale_out);
+        ggml.types.ggml_are_same_shape(scale_in.src[0], scale_out);
 }
 
 /// Ports `ggml_vk_can_fuse` (ggml-vulkan.cpp:14052 @b1b770d90): ggml's
@@ -222,17 +222,17 @@ pub fn canFuse(ctx: *const ggml.vulkan.context.BackendCtx, cgraph: *const ggml.i
         // rms_norm only supports f32
         if (srcOf(mul, 0).type != ggml.impl.ggml_c.GGML_TYPE_F32 or srcOf(mul, 1).type != ggml.impl.ggml_c.GGML_TYPE_F32 or mul.type != ggml.impl.ggml_c.GGML_TYPE_F32) return false;
         // if rms_norm is the B operand, then we don't handle broadcast
-        if (rms_norm == srcOf(mul, 1) and !ggml.impl.ggml_c.ggml_are_same_shape(srcOf(mul, 0), rms_norm)) return false;
+        if (rms_norm == srcOf(mul, 1) and !ggml.types.ggml_are_same_shape(srcOf(mul, 0), rms_norm)) return false;
         // rms_norm shader assumes contiguous rows
-        if (!ggml.impl.ggml_c.ggml_is_contiguous_rows(srcOf(mul, 0)) or !ggml.impl.ggml_c.ggml_is_contiguous_rows(srcOf(mul, 1))) return false;
+        if (!ggml.types.ggml_is_contiguous_rows(srcOf(mul, 0)) or !ggml.types.ggml_is_contiguous_rows(srcOf(mul, 1))) return false;
 
         if (ops.len >= 3 and ops[2] == ggml.impl.ggml_c.GGML_OP_ADD) {
             const add = nodeAt(cgraph, node_idx + 2);
             const residual = if (srcOf(add, 0) == mul) srcOf(add, 1) else srcOf(add, 0);
             if (srcOf(add, 0) != mul and srcOf(add, 1) != mul) return false;
             if (residual.type != ggml.impl.ggml_c.GGML_TYPE_F32 or add.type != ggml.impl.ggml_c.GGML_TYPE_F32 or
-                !ggml.impl.ggml_c.ggml_are_same_shape(add, residual) or !ggml.impl.ggml_c.ggml_is_contiguous(residual) or
-                !ggml.impl.ggml_c.ggml_is_contiguous(add) or ggml.vulkan.context.getMisalignBytes(ctx, residual) != 0) return false;
+                !ggml.types.ggml_are_same_shape(add, residual) or !ggml.types.ggml_is_contiguous(residual) or
+                !ggml.types.ggml_is_contiguous(add) or ggml.vulkan.context.getMisalignBytes(ctx, residual) != 0) return false;
 
             var dst: *const ggml.impl.ggml_c.ggml_tensor = add;
             if (ops.len == 4) {
@@ -242,7 +242,7 @@ pub fn canFuse(ctx: *const ggml.vulkan.context.BackendCtx, cgraph: *const ggml.i
                 if (srcOf(post_mul, 0) != add and srcOf(post_mul, 1) != add) return false;
                 // The shader reads data_e[0], so the final multiply must use a scalar.
                 if (scale.type != ggml.impl.ggml_c.GGML_TYPE_F32 or post_mul.type != ggml.impl.ggml_c.GGML_TYPE_F32 or
-                    ggml.impl.ggml_c.ggml_nelements(scale) != 1 or !ggml.impl.ggml_c.ggml_is_contiguous(post_mul) or
+                    ggml.types.ggml_nelements(scale) != 1 or !ggml.types.ggml_is_contiguous(post_mul) or
                     ggml.vulkan.context.getMisalignBytes(ctx, scale) != 0) return false;
                 dst = post_mul;
             }
@@ -255,11 +255,11 @@ pub fn canFuse(ctx: *const ggml.vulkan.context.BackendCtx, cgraph: *const ggml.i
         fn f(cx: *const ggml.vulkan.context.BackendCtx, mul: *const ggml.impl.ggml_c.ggml_tensor, add: *const ggml.impl.ggml_c.ggml_tensor) bool {
             const bias = if (srcOf(add, 0) == mul) srcOf(add, 1) else srcOf(add, 0);
             // mat-vec only
-            if (ggml.impl.ggml_c.ggml_nrows(mul) != 1) return false;
+            if (ggml.types.ggml_nrows(mul) != 1) return false;
             // shaders assume the types match
             if (mul.type != bias.type) return false;
             // shaders reuse the D shape for bias
-            if (!ggml.impl.ggml_c.ggml_are_same_shape(mul, bias) or !ggml.impl.ggml_c.ggml_are_same_stride(mul, bias)) return false;
+            if (!ggml.types.ggml_are_same_shape(mul, bias) or !ggml.types.ggml_are_same_stride(mul, bias)) return false;
             // unaligned bias isn't handled
             if (ggml.vulkan.context.getMisalignBytes(cx, bias) != 0) return false;
             return true;
@@ -285,7 +285,7 @@ pub fn canFuse(ctx: *const ggml.vulkan.context.BackendCtx, cgraph: *const ggml.i
             // shaders assume the types match
             if (mmid.type != scale.type) return false;
             // shaders assume the bias is contiguous
-            if (!ggml.impl.ggml_c.ggml_is_contiguous(scale)) return false;
+            if (!ggml.types.ggml_is_contiguous(scale)) return false;
             // unaligned bias isn't handled
             if (ggml.vulkan.context.getMisalignBytes(cx, scale) != 0) return false;
             // shader only indexes by expert index
@@ -304,7 +304,7 @@ pub fn canFuse(ctx: *const ggml.vulkan.context.BackendCtx, cgraph: *const ggml.i
         // shaders assume the types match
         if (mul.type != bias.type) return false;
         // shaders assume the bias is contiguous
-        if (!ggml.impl.ggml_c.ggml_is_contiguous(bias)) return false;
+        if (!ggml.types.ggml_is_contiguous(bias)) return false;
         // the ID tensor must be the same for mul_mat_id and add_id
         if (mul.src[2] != add.src[2]) return false;
         // unaligned bias isn't handled
@@ -336,9 +336,9 @@ fn canFuseSsmConv(ctx: *const ggml.vulkan.context.BackendCtx, cgraph: *const ggm
         const add = nodeAt(cgraph, node_idx + 1);
         silu = nodeAt(cgraph, node_idx + 2);
         const bias = if (srcOf(add, 0) == conv) srcOf(add, 1) else srcOf(add, 0);
-        if (bias.type != ggml.impl.ggml_c.GGML_TYPE_F32 or !ggml.impl.ggml_c.ggml_is_contiguous(bias)) return false;
+        if (bias.type != ggml.impl.ggml_c.GGML_TYPE_F32 or !ggml.types.ggml_is_contiguous(bias)) return false;
         // bias must be channel-wise (one element per channel of the conv output)
-        if (ggml.impl.ggml_c.ggml_nelements(bias) != conv.ne[0] or bias.ne[0] != conv.ne[0]) return false;
+        if (ggml.types.ggml_nelements(bias) != conv.ne[0] or bias.ne[0] != conv.ne[0]) return false;
         if (add.type != ggml.impl.ggml_c.GGML_TYPE_F32) return false;
         // The shader doesn't apply per-tensor offsets, so reject misaligned bias.
         if (ggml.vulkan.context.getMisalignBytes(ctx, bias) != 0) return false;
@@ -346,7 +346,7 @@ fn canFuseSsmConv(ctx: *const ggml.vulkan.context.BackendCtx, cgraph: *const ggm
         return false;
     }
 
-    if (ggml.impl.ggml_c.ggml_get_unary_op(silu) != ggml.impl.ggml_c.GGML_UNARY_OP_SILU) return false;
+    if (ggml.types.ggml_get_unary_op(silu) != ggml.impl.ggml_c.GGML_UNARY_OP_SILU) return false;
     if (conv.type != ggml.impl.ggml_c.GGML_TYPE_F32 or silu.type != ggml.impl.ggml_c.GGML_TYPE_F32) return false;
     // The binding must be naturally aligned.
     if (ggml.vulkan.context.getMisalignBytes(ctx, silu) != 0) return false;
@@ -372,22 +372,22 @@ fn canFuseTopkMoe(ctx: *const ggml.vulkan.context.BackendCtx, cgraph: *const ggm
             weights = nodeAt(cgraph, node_idx + 10);
             get_rows = nodeAt(cgraph, node_idx + 5);
             argsort = nodeAt(cgraph, node_idx + 3);
-            if (ggml.impl.ggml_c.ggml_get_unary_op(softmax) != ggml.impl.ggml_c.GGML_UNARY_OP_SIGMOID) return false;
+            if (ggml.types.ggml_get_unary_op(softmax) != ggml.impl.ggml_c.GGML_UNARY_OP_SIGMOID) return false;
             // bias is expected to be 1D
             const bias = srcOf(nodeAt(cgraph, node_idx + 2), 1);
-            if (ggml.impl.ggml_c.ggml_nrows(bias) != 1 or !ggml.impl.ggml_c.ggml_is_contiguous(bias)) return false;
+            if (ggml.types.ggml_nrows(bias) != 1 or !ggml.types.ggml_is_contiguous(bias)) return false;
             // sigmoid fusion seems to generate infinities on moltenvk
-            if (ctx.device.driver_id == ggml.vulkan.common.vk.VK_DRIVER_ID_MOLTENVK) return false;
+            if (ctx.device.driver_id == ggml.vulkan.common.vulkan_c.VK_DRIVER_ID_MOLTENVK) return false;
         },
         .sqrt_softplus_norm_bias => {
             softmax = nodeAt(cgraph, node_idx + 0); // really softplus
             weights = nodeAt(cgraph, node_idx + 11);
             get_rows = nodeAt(cgraph, node_idx + 6);
             argsort = nodeAt(cgraph, node_idx + 4);
-            if (ggml.impl.ggml_c.ggml_get_unary_op(softmax) != ggml.impl.ggml_c.GGML_UNARY_OP_SOFTPLUS) return false;
+            if (ggml.types.ggml_get_unary_op(softmax) != ggml.impl.ggml_c.GGML_UNARY_OP_SOFTPLUS) return false;
             // bias is expected to be 1D
             const bias = srcOf(nodeAt(cgraph, node_idx + 3), 1);
-            if (ggml.impl.ggml_c.ggml_nrows(bias) != 1 or !ggml.impl.ggml_c.ggml_is_contiguous(bias)) return false;
+            if (ggml.types.ggml_nrows(bias) != 1 or !ggml.types.ggml_is_contiguous(bias)) return false;
         },
         .early_softmax => {
             softmax = nodeAt(cgraph, node_idx + 0);
@@ -410,7 +410,7 @@ fn canFuseTopkMoe(ctx: *const ggml.vulkan.context.BackendCtx, cgraph: *const ggm
     const selection_probs = srcOf(argsort, 0);
 
     if (probs != selection_probs and mode != .sigmoid_norm_bias and mode != .sqrt_softplus_norm_bias) return false;
-    if (!ggml.impl.ggml_c.ggml_is_contiguous(srcOf(softmax, 0)) or !ggml.impl.ggml_c.ggml_is_contiguous(weights)) return false;
+    if (!ggml.types.ggml_is_contiguous(srcOf(softmax, 0)) or !ggml.types.ggml_is_contiguous(weights)) return false;
 
     if (softmax.op == ggml.impl.ggml_c.GGML_OP_SOFT_MAX) {
         const op_params: [*]const f32 = @ptrCast(&softmax.op_params);
@@ -486,8 +486,8 @@ fn canFuseTopkQsa(ctx: *const ggml.vulkan.context.BackendCtx, cgraph: *const ggm
     if (mask.type != ggml.impl.ggml_c.GGML_TYPE_F16) return false;
 
     if (scores.type != ggml.impl.ggml_c.GGML_TYPE_F32 or cell_blk.type != ggml.impl.ggml_c.GGML_TYPE_I32 or top_k.type != ggml.impl.ggml_c.GGML_TYPE_I32) return false;
-    if (!ggml.impl.ggml_c.ggml_is_contiguous(scores) or !ggml.impl.ggml_c.ggml_is_contiguous(cell_blk) or !ggml.impl.ggml_c.ggml_is_contiguous(mask) or
-        !ggml.impl.ggml_c.ggml_is_contiguous(expanded) or !ggml.impl.ggml_c.ggml_is_contiguous(top_k))
+    if (!ggml.types.ggml_is_contiguous(scores) or !ggml.types.ggml_is_contiguous(cell_blk) or !ggml.types.ggml_is_contiguous(mask) or
+        !ggml.types.ggml_is_contiguous(expanded) or !ggml.types.ggml_is_contiguous(top_k))
     {
         return false;
     }
@@ -499,8 +499,8 @@ fn canFuseTopkQsa(ctx: *const ggml.vulkan.context.BackendCtx, cgraph: *const ggm
     const width = top_k.ne[0];
 
     // pin the indexer layout the shader's addressing assumes
-    if (scores.ne[3] != 1 or cell_blk.ne[1] != n_stream or ggml.impl.ggml_c.ggml_nrows(cell_blk) != n_stream or
-        ggml.impl.ggml_c.ggml_nelements(mask) != n_kv *% n_tps *% n_stream or
+    if (scores.ne[3] != 1 or cell_blk.ne[1] != n_stream or ggml.types.ggml_nrows(cell_blk) != n_stream or
+        ggml.types.ggml_nelements(mask) != n_kv *% n_tps *% n_stream or
         expanded.ne[0] != n_kv or expanded.ne[1] != n_tps or expanded.ne[2] != n_stream or
         top_k.ne[1] != n_tps or top_k.ne[2] != n_stream or top_k.ne[3] != 1 or
         n_blocks <= 0 or n_kv <= 0 or width <= 0 or width > n_kv)
@@ -522,13 +522,13 @@ fn canFuseRopeSetRows(ctx: *const ggml.vulkan.context.BackendCtx, cgraph: *const
     if (srcOf(rope, 0).ne[3] != 1) return false;
     if (set_rows.type != ggml.impl.ggml_c.GGML_TYPE_F32 and set_rows.type != ggml.impl.ggml_c.GGML_TYPE_F16) return false;
     // The shader reads each aligned I64 index as a uvec2 and uses its low 32 bits.
-    if (srcOf(set_rows, 1).type != ggml.impl.ggml_c.GGML_TYPE_I64 or !ggml.impl.ggml_c.ggml_is_contiguous(srcOf(set_rows, 1)) or
-        set_rows.nb[0] != ggml.impl.ggml_c.ggml_type_size(set_rows.type) or ggml.vulkan.context.getMisalignBytes(ctx, srcOf(set_rows, 1)) != 0) return false;
+    if (srcOf(set_rows, 1).type != ggml.impl.ggml_c.GGML_TYPE_I64 or !ggml.types.ggml_is_contiguous(srcOf(set_rows, 1)) or
+        set_rows.nb[0] != ggml.types.ggml_type_size(set_rows.type) or ggml.vulkan.context.getMisalignBytes(ctx, srcOf(set_rows, 1)) != 0) return false;
     // SET_ROWS consumes one flattened [ne0*ne1] row for each ne2 slice.
-    if (!ggml.impl.ggml_c.ggml_is_contiguous(view) or
+    if (!ggml.types.ggml_is_contiguous(view) or
         view.ne[0] != rope.ne[0] *% rope.ne[1] or view.ne[1] != rope.ne[2] or
         view.ne[2] != 1 or view.ne[3] != 1 or
-        ggml.impl.ggml_c.ggml_nelements(srcOf(set_rows, 1)) != rope.ne[2]) return false;
+        ggml.types.ggml_nelements(srcOf(set_rows, 1)) != rope.ne[2]) return false;
     // Only norm/neox/mrope/imrope shaders have the fusion code
     const mode = rope.op_params[2];
     if (mode != ggml.impl.ggml_c.GGML_ROPE_TYPE_NORMAL and mode != ggml.impl.ggml_c.GGML_ROPE_TYPE_NEOX and
@@ -544,13 +544,13 @@ fn canFuseRmsNormSetRows(ctx: *const ggml.vulkan.context.BackendCtx, cgraph: *co
     // The RMS kernel reads F32 and writes directly to the F32 or F16 SET_ROWS destination.
     if (srcOf(rms, 0).type != ggml.impl.ggml_c.GGML_TYPE_F32 or rms.type != ggml.impl.ggml_c.GGML_TYPE_F32 or
         (set_rows.type != ggml.impl.ggml_c.GGML_TYPE_F32 and set_rows.type != ggml.impl.ggml_c.GGML_TYPE_F16) or
-        srcOf(set_rows, 1).type != ggml.impl.ggml_c.GGML_TYPE_I64 or !ggml.impl.ggml_c.ggml_is_contiguous(srcOf(set_rows, 1)) or
-        set_rows.nb[0] != ggml.impl.ggml_c.ggml_type_size(set_rows.type) or ggml.vulkan.context.getMisalignBytes(ctx, srcOf(set_rows, 1)) != 0) return false;
+        srcOf(set_rows, 1).type != ggml.impl.ggml_c.GGML_TYPE_I64 or !ggml.types.ggml_is_contiguous(srcOf(set_rows, 1)) or
+        set_rows.nb[0] != ggml.types.ggml_type_size(set_rows.type) or ggml.vulkan.context.getMisalignBytes(ctx, srcOf(set_rows, 1)) != 0) return false;
     // As with the ROPE epilogue, each ne2 slice supplies one flattened row and ne3 is not encoded.
-    if (rms.ne[3] != 1 or !ggml.impl.ggml_c.ggml_is_contiguous(srcOf(rms, 0)) or !ggml.impl.ggml_c.ggml_is_contiguous(view)) return false;
+    if (rms.ne[3] != 1 or !ggml.types.ggml_is_contiguous(srcOf(rms, 0)) or !ggml.types.ggml_is_contiguous(view)) return false;
     if (view.ne[0] != rms.ne[0] *% rms.ne[1] or view.ne[1] != rms.ne[2] or
         view.ne[2] != 1 or view.ne[3] != 1 or
-        ggml.impl.ggml_c.ggml_nelements(srcOf(set_rows, 1)) != rms.ne[2]) return false;
+        ggml.types.ggml_nelements(srcOf(set_rows, 1)) != rms.ne[2]) return false;
     return true;
 }
 
@@ -565,7 +565,7 @@ fn canFuseSnake(cgraph: *const ggml.impl.CGraph, node_idx: c_int) bool {
     const mul1 = nodeAt(cgraph, node_idx + 3);
     const add = nodeAt(cgraph, node_idx + 4);
 
-    const x = if (ggml.impl.ggml_c.ggml_are_same_shape(mul0, srcOf(mul0, 0))) srcOf(mul0, 0) else srcOf(mul0, 1);
+    const x = if (ggml.types.ggml_are_same_shape(mul0, srcOf(mul0, 0))) srcOf(mul0, 0) else srcOf(mul0, 1);
     const a = if (x == srcOf(mul0, 0)) srcOf(mul0, 1) else srcOf(mul0, 0);
     const inv_b = if (srcOf(mul1, 0) == sqr) srcOf(mul1, 1) else srcOf(mul1, 0);
     const x_in_add = if (srcOf(add, 0) == mul1) srcOf(add, 1) else srcOf(add, 0);
@@ -577,7 +577,7 @@ fn canFuseSnake(cgraph: *const ggml.impl.CGraph, node_idx: c_int) bool {
     if (inv_b.type != ggml.impl.ggml_c.GGML_TYPE_F32) return false;
     // Chain intermediates and output share x's precision.
     if (mul0.type != x.type or sin_node.type != x.type or sqr.type != x.type or mul1.type != x.type or add.type != x.type) return false;
-    if (!ggml.impl.ggml_c.ggml_are_same_shape(a, inv_b)) return false;
+    if (!ggml.types.ggml_are_same_shape(a, inv_b)) return false;
     if (a.ne[0] != 1 or a.ne[1] != x.ne[1]) return false;
     // Dispatch is 2D over (ne0, ne1).
     if (x.ne[2] != 1 or x.ne[3] != 1) return false;
@@ -585,7 +585,7 @@ fn canFuseSnake(cgraph: *const ggml.impl.CGraph, node_idx: c_int) bool {
     if (a.ne[2] != 1 or a.ne[3] != 1) return false;
     if (inv_b.ne[2] != 1 or inv_b.ne[3] != 1) return false;
     // Every operand must be contiguous.
-    if (!ggml.impl.ggml_c.ggml_is_contiguous(x) or !ggml.impl.ggml_c.ggml_is_contiguous(add) or !ggml.impl.ggml_c.ggml_is_contiguous(a) or !ggml.impl.ggml_c.ggml_is_contiguous(inv_b)) return false;
+    if (!ggml.types.ggml_is_contiguous(x) or !ggml.types.ggml_is_contiguous(add) or !ggml.types.ggml_is_contiguous(a) or !ggml.types.ggml_is_contiguous(inv_b)) return false;
     return true;
 }
 
@@ -595,9 +595,9 @@ fn canFuseSnake(cgraph: *const ggml.impl.CGraph, node_idx: c_int) bool {
 fn tensorsOverlap(a: *const ggml.impl.ggml_c.ggml_tensor, b: *const ggml.impl.ggml_c.ggml_tensor, elementwise: bool) bool {
     if (ggml.vulkan.buffer.tensorBuffer(a) != ggml.vulkan.buffer.tensorBuffer(b)) return false;
     const a_base = ggml.vulkan.buffer.tensorOffset(a) + a.view_offs;
-    const a_size = ggml.impl.ggml_c.ggml_nbytes(a);
+    const a_size = ggml.types.ggml_nbytes(a);
     const b_base = ggml.vulkan.buffer.tensorOffset(b) + b.view_offs;
-    const b_size = ggml.impl.ggml_c.ggml_nbytes(b);
+    const b_size = ggml.types.ggml_nbytes(b);
     if (elementwise and a_base == b_base and a_size == b_size) return false;
     return (b_base <= a_base and a_base < b_base + b_size) or (a_base <= b_base and b_base < a_base + a_size);
 }
@@ -609,7 +609,7 @@ fn canFuseRmsNormMulRope(ctx: *const ggml.vulkan.context.BackendCtx, cgraph: *co
     const rope = nodeAt(cgraph, node_idx + 2);
     const mode = rope.op_params[2];
     // noncontig tensors aren't tested, and don't seem common in practice
-    if (!ggml.impl.ggml_c.ggml_is_contiguous(rms) or !ggml.impl.ggml_c.ggml_is_contiguous(mul) or !ggml.impl.ggml_c.ggml_is_contiguous(rope)) return false;
+    if (!ggml.types.ggml_is_contiguous(rms) or !ggml.types.ggml_is_contiguous(mul) or !ggml.types.ggml_is_contiguous(rope)) return false;
     // only norm/neox are handled in the shader
     if (mode != ggml.impl.ggml_c.GGML_ROPE_TYPE_NEOX and mode != ggml.impl.ggml_c.GGML_ROPE_TYPE_NORMAL) return false;
     // shared memory size for passing data from mul->rope
@@ -635,8 +635,8 @@ fn fuseMultiAdd(ctx: *const ggml.vulkan.context.BackendCtx, cgraph: *const ggml.
     var i: c_int = 0;
     while (i < num_adds) : (i += 1) {
         const next_node = nodeAt(cgraph, node_idx + i);
-        if (!ggml.impl.ggml_c.ggml_are_same_shape(first_node, srcOf(next_node, 0)) or
-            !ggml.impl.ggml_c.ggml_are_same_shape(first_node, srcOf(next_node, 1)) or
+        if (!ggml.types.ggml_are_same_shape(first_node, srcOf(next_node, 0)) or
+            !ggml.types.ggml_are_same_shape(first_node, srcOf(next_node, 1)) or
             next_node.type != ggml.impl.ggml_c.GGML_TYPE_F32 or
             srcOf(next_node, 0).type != ggml.impl.ggml_c.GGML_TYPE_F32 or
             srcOf(next_node, 1).type != ggml.impl.ggml_c.GGML_TYPE_F32 or
@@ -754,7 +754,7 @@ fn chooseFusion(ctx: *ggml.vulkan.context.BackendCtx, cgraph: *const ggml.impl.C
         set(ew, &.{ true, true });
     } else if (canFuse(ctx, cgraph, i, &.{ ggml.impl.ggml_c.GGML_OP_UNARY, ggml.impl.ggml_c.GGML_OP_MUL })) {
         ctx.num_additional_fused_ops = 1;
-        f.name = switch (ggml.impl.ggml_c.ggml_get_unary_op(nodeAt(cgraph, i))) {
+        f.name = switch (ggml.types.ggml_get_unary_op(nodeAt(cgraph, i))) {
             ggml.impl.ggml_c.GGML_UNARY_OP_GELU => "GELU_MUL",
             ggml.impl.ggml_c.GGML_UNARY_OP_SIGMOID => "SIGMOID_MUL",
             ggml.impl.ggml_c.GGML_UNARY_OP_SILU => "SILU_MUL",
@@ -918,14 +918,14 @@ pub fn graphCompute(backend: ggml.impl.ggml_c.ggml_backend_t, cgraph_c: ?*ggml.i
             const cx = s.ctx;
             const dv = cx.device;
             if (dv.serialize_submissions) {
-                const res = ggml.vulkan.common.dispatch.vkWaitForFences.?(dv.device, 1, &cx.fence, ggml.vulkan.common.vk.VK_TRUE, std.math.maxInt(u64));
-                if (res == ggml.vulkan.common.vk.VK_ERROR_DEVICE_LOST) {
+                const res = ggml.vulkan.common.dispatch.vkWaitForFences.?(dv.device, 1, &cx.fence, ggml.vulkan.common.vulkan_c.VK_TRUE, std.math.maxInt(u64));
+                if (res == ggml.vulkan.common.vulkan_c.VK_ERROR_DEVICE_LOST) {
                     ggml.vulkan.submit.printDeviceFaultInfo(dv);
                     ggml.impl.logError("ggml_vulkan: device lost on %s waiting for submission (nodes %d to %d):\n", .{ dv.name.ptr, start, end });
                     printNodeList(s.cgraph, start, end);
                     ggml.impl.abort("ggml_vulkan: device lost");
                 }
-                if (res != ggml.vulkan.common.vk.VK_SUCCESS) {
+                if (res != ggml.vulkan.common.vulkan_c.VK_SUCCESS) {
                     ggml.impl.logError("ggml_vulkan: waitForFences error during serialized submission\n", .{});
                     ggml.impl.abort("ggml_vulkan: waitForFences during serialized submission");
                 }
@@ -1093,7 +1093,7 @@ fn disableUnsafeFusion(ctx: *ggml.vulkan.context.BackendCtx, cgraph: *const ggml
 
 /// `writeTimestamp` into the perf query pool, advancing the query index.
 pub fn writeTimestamp(ctx: *ggml.vulkan.context.BackendCtx, compute_ctx: *ggml.vulkan.submit.Context) void {
-    ggml.vulkan.common.dispatch.vkCmdWriteTimestamp.?(compute_ctx.cmd(), ggml.vulkan.common.vk.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, ctx.query_pool, @intCast(ctx.query_idx));
+    ggml.vulkan.common.dispatch.vkCmdWriteTimestamp.?(compute_ctx.cmd(), ggml.vulkan.common.vulkan_c.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, ctx.query_pool, @intCast(ctx.query_idx));
     ctx.query_idx += 1;
 }
 
@@ -1103,8 +1103,8 @@ fn perfBegin(ctx: *ggml.vulkan.context.BackendCtx, cgraph: *const ggml.impl.CGra
     const dev = ctx.device;
     if (ctx.num_queries < cgraph.n_nodes + 1) {
         if (ctx.query_pool != null) ggml.vulkan.common.dispatch.vkDestroyQueryPool.?(dev.device, ctx.query_pool, null);
-        var qci = ggml.vulkan.common.structure(ggml.vulkan.common.vk.VkQueryPoolCreateInfo, ggml.vulkan.common.vk.VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO);
-        qci.queryType = ggml.vulkan.common.vk.VK_QUERY_TYPE_TIMESTAMP;
+        var qci = ggml.vulkan.common.structure(ggml.vulkan.common.vulkan_c.VkQueryPoolCreateInfo, ggml.vulkan.common.vulkan_c.VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO);
+        qci.queryType = ggml.vulkan.common.vulkan_c.VK_QUERY_TYPE_TIMESTAMP;
         qci.queryCount = @intCast(cgraph.n_nodes + 100);
         ggml.vulkan.common.checkOrAbort(ggml.vulkan.common.dispatch.vkCreateQueryPool.?(dev.device, &qci, null, &ctx.query_pool), "vk::Device::createQueryPool");
         ctx.num_queries = @intCast(qci.queryCount);
@@ -1141,7 +1141,7 @@ fn perfEnd(ctx: *ggml.vulkan.context.BackendCtx, cgraph: *const ggml.impl.CGraph
     // Get the results and pass them to the logger
     const timestamps = std.heap.c_allocator.alloc(u64, @intCast(cgraph.n_nodes + 1)) catch oom();
     defer std.heap.c_allocator.free(timestamps);
-    ggml.vulkan.submit.vkCheck(ggml.vulkan.common.dispatch.vkGetQueryPoolResults.?(dev.device, ctx.query_pool, 0, @intCast(ctx.query_idx), timestamps.len * @sizeOf(u64), timestamps.ptr, @sizeOf(u64), ggml.vulkan.common.vk.VK_QUERY_RESULT_64_BIT | ggml.vulkan.common.vk.VK_QUERY_RESULT_WAIT_BIT), "get timestamp results", dev);
+    ggml.vulkan.submit.vkCheck(ggml.vulkan.common.dispatch.vkGetQueryPoolResults.?(dev.device, ctx.query_pool, 0, @intCast(ctx.query_idx), timestamps.len * @sizeOf(u64), timestamps.ptr, @sizeOf(u64), ggml.vulkan.common.vulkan_c.VK_QUERY_RESULT_64_BIT | ggml.vulkan.common.vulkan_c.VK_QUERY_RESULT_WAIT_BIT), "get timestamp results", dev);
     const period = dev.properties.limits.timestampPeriod;
     const logger = ctx.perf_logger.?;
     if (!ggml.vulkan.instance.loggers.perf_logger_concurrent) {

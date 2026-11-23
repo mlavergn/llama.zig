@@ -143,10 +143,10 @@ fn ssmScanF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.ggml_c
     const K: i64 = ggml.impl.getOpParamsI32(dst, 0);
 
     // can't use ggml_nbytes because src1 is not necessarily contiguous
-    const s_off: usize = @as(usize, @intCast(ggml.impl.ggml_c.ggml_nelements(src1))) * ggml.impl.ggml_c.ggml_element_size(src1);
+    const s_off: usize = @as(usize, @intCast(ggml.types.ggml_nelements(src1))) * ggml.types.ggml_element_size(src1);
 
     ggml.impl.assert(K >= 1, "K >= 1");
-    ggml.impl.assert(ggml.impl.ggml_c.ggml_nelements(src1) + K * nc * nr * nh * ns == ggml.impl.ggml_c.ggml_nelements(dst), "ggml_nelements(src1) + K*nc*nr*nh*ns == ggml_nelements(dst)");
+    ggml.impl.assert(ggml.types.ggml_nelements(src1) + K * nc * nr * nh * ns == ggml.types.ggml_nelements(dst), "ggml_nelements(src1) + K*nc*nr*nh*ns == ggml_nelements(dst)");
     ggml.impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
     ggml.impl.assert(src1.nb[0] == @sizeOf(f32), "src1->nb[0] == sizeof(float)");
     ggml.impl.assert(src2.nb[0] == @sizeOf(f32), "src2->nb[0] == sizeof(float)");

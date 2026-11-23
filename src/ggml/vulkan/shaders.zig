@@ -80,7 +80,7 @@ pub fn matmulShmemSupport(device: *const ggml.vulkan.device.Device, warptile: Ti
 
     // Needs to be kept up to date on shader changes
     const intel_shmem_stride_pad_zero = device.vendor_id == ggml.vulkan.common.vendor_id.intel and device.coopmat_support and
-        device.driver_id == ggml.vulkan.common.vk.VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS;
+        device.driver_id == ggml.vulkan.common.vulkan_c.VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS;
     const bank_conflict_offset: u32 = if (intel_shmem_stride_pad_zero) 0 else if (device.coopmat_support) 8 else 1;
     const type_size: u32 = if (device.fp16) @sizeOf(ggml.impl.ggml_c.ggml_fp16_t) else @sizeOf(f32);
     const warps = warptile.at(0) / warptile.at(10);
@@ -210,7 +210,7 @@ pub fn matmulCm1IntShmemSupport(device: *const ggml.vulkan.device.Device, warpti
 /// vec4 "block" of 4 floats, everything else uses its ggml block size.
 fn faBlockBytes(t: ggml.impl.ggml_c.ggml_type) u32 {
     if (t == ggml.impl.ggml_c.GGML_TYPE_F32) return 16;
-    return @intCast(ggml.impl.ggml_c.ggml_type_size(t));
+    return @intCast(ggml.types.ggml_type_size(t));
 }
 
 /// Ports `get_fa_spec_constants` (ggml-vulkan.cpp:1416 @b1b770d90).
@@ -282,7 +282,7 @@ const Walk = struct {
             required_subgroup_size = ggml.vulkan.instance.getSubgroupSize(name, device.architecture);
         }
 
-        const num_pipelines: usize = if (comptime @hasDecl(ggml.vulkan.common.vk, "VK_EXT_shader_64bit_indexing")) (if (device.shader_64b_indexing) 2 else 1) else 1;
+        const num_pipelines: usize = if (comptime @hasDecl(ggml.vulkan.common.vulkan_c, "VK_EXT_shader_64bit_indexing")) (if (device.shader_64b_indexing) 2 else 1) else 1;
         var ptr = base;
         for (0..num_pipelines) |i| {
             if (ptr.* == null) ptr.* = ggml.vulkan.pipeline.Pipeline.create();
@@ -394,7 +394,7 @@ fn mulMmSpec(device: *const ggml.vulkan.device.Device, spec_in: Tile, aligned: b
     var spec = spec_in;
     spec.push_(@intFromBool(aligned)); // constantID=11: ALIGNED
     if (device.vendor_id == ggml.vulkan.common.vendor_id.intel and device.coopmat_support and
-        device.driver_id == ggml.vulkan.common.vk.VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS)
+        device.driver_id == ggml.vulkan.common.vulkan_c.VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS)
     {
         spec.push_(0); // constantID=12: SHMEM_STRIDE_PAD = 0
         spec.push_(1); // constantID=13: APPLY_SLM_A_RESHAPE = true
@@ -409,7 +409,7 @@ fn mulMmSpecQuant(device: *const ggml.vulkan.device.Device, spec_in: Tile, align
     spec.push_(@intFromBool(aligned)); // constantID=11: ALIGNED
     spec.push_(@intCast(ty)); // constantID=12: MmTypeA
     if (device.vendor_id == ggml.vulkan.common.vendor_id.intel and device.coopmat_support and
-        device.driver_id == ggml.vulkan.common.vk.VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS)
+        device.driver_id == ggml.vulkan.common.vulkan_c.VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS)
     {
         spec.push_(0); // constantID=13: SHMEM_STRIDE_PAD = 0
         spec.push_(1); // constantID=14: APPLY_SLM_A_RESHAPE = true
@@ -426,7 +426,7 @@ fn mulMmCm2Spec(device: *const ggml.vulkan.device.Device, spec_in: Tile, aligned
     spec.push_(device.subgroup_size); // subgroup_size
     if (ty) |t| {
         spec.push_(@intCast(t)); // MmTypeA
-        spec.push_(@intCast(ggml.impl.ggml_c.ggml_type_size(t))); // MmABlockBytes
+        spec.push_(@intCast(ggml.types.ggml_type_size(t))); // MmABlockBytes
     }
     return spec;
 }
@@ -626,7 +626,7 @@ fn ocp(device: *const ggml.vulkan.device.Device) bool {
 /// AMD proprietary drivers before 2.0.416 (Adrenalin 26.10.1) run the large
 /// coopmat matmul tile much slower than the medium one.
 pub fn amdLargeTileSupported(device: *const ggml.vulkan.device.Device) bool {
-    if (device.driver_id != ggml.vulkan.common.vk.VK_DRIVER_ID_AMD_PROPRIETARY) return true;
+    if (device.driver_id != ggml.vulkan.common.vulkan_c.VK_DRIVER_ID_AMD_PROPRIETARY) return true;
     // AMD encodes driverVersion as major [31:22], build [21:0], not VK_MAKE_API_VERSION.
     const major = device.properties.driverVersion >> 22;
     const build = device.properties.driverVersion & 0x3fffff;
@@ -786,7 +786,7 @@ pub fn loadShaders(device: *ggml.vulkan.device.Device, requested: ?*ggml.vulkan.
         t.s_warptile_mmqid_int_k = .of(.{ mul_mat_subgroup_size_32, 32, 32, 32, mul_mat_s_warptile_wm_16, 32, 1, 2, 1, 1, mul_mat_subgroup_size_16 });
 
         // chip specific tuning
-        if (device.architecture == .amd_gcn and device.driver_id != ggml.vulkan.common.vk.VK_DRIVER_ID_AMD_PROPRIETARY) {
+        if (device.architecture == .amd_gcn and device.driver_id != ggml.vulkan.common.vulkan_c.VK_DRIVER_ID_AMD_PROPRIETARY) {
             t.m_warptile_mmq = .of(.{ 256, 64, 64, 32, 16, 16, 2, 2, 2, 1, 16 });
             t.m_warptile_mmq_int = t.m_warptile_mmq;
             t.m_warptile_mmqid = .of(.{ 256, 64, 64, 32, 16, 16, 2, 2, 2, 1, 16 });
@@ -1628,7 +1628,7 @@ fn walkMulMatVec(w: *Walk, subgroup_min_size_16: bool) void {
     const use_subgroups = device.subgroup_arithmetic;
     // The Imagination proprietary compiler rejects the subgroup-only dequant mul_mat_vec
     // shaders that require a subgroup size >= 16; fall back to shared-memory reduction.
-    const is_imagination_proprietary = device.driver_id == ggml.vulkan.common.vk.VK_DRIVER_ID_IMAGINATION_PROPRIETARY;
+    const is_imagination_proprietary = device.driver_id == ggml.vulkan.common.vulkan_c.VK_DRIVER_ID_IMAGINATION_PROPRIETARY;
     // Ensure a subgroup size >= 16 is available
     const use_subgroups16 = use_subgroups and subgroup_min_size_16 and !is_imagination_proprietary;
 
@@ -1988,7 +1988,7 @@ fn walkRest(w: *Walk, subgroup_min_size_16: bool, subgroup_size_16: u32, subgrou
 
     inline for (.{ .{ ggml.impl.ggml_c.GGML_TYPE_Q1_0, "q1_0" }, .{ ggml.impl.ggml_c.GGML_TYPE_Q2_0, "q2_0" }, .{ ggml.impl.ggml_c.GGML_TYPE_Q4_0, "q4_0" }, .{ ggml.impl.ggml_c.GGML_TYPE_Q4_1, "q4_1" }, .{ ggml.impl.ggml_c.GGML_TYPE_Q5_0, "q5_0" }, .{ ggml.impl.ggml_c.GGML_TYPE_Q5_1, "q5_1" }, .{ ggml.impl.ggml_c.GGML_TYPE_Q8_0, "q8_0" }, .{ ggml.impl.ggml_c.GGML_TYPE_IQ4_NL, "iq4_nl" } }) |q| {
         const name = "cpy_" ++ q[1] ++ "_f32";
-        cp(w, &device.pipeline_cpy_quant_f32[q[0]], name, @field(vulkan_shaders, name ++ "_data"), 2, pcu, .{ @intCast(ggml.impl.ggml_c.ggml_blck_size(q[0])), 1, 1 }, &.{}, 1, false);
+        cp(w, &device.pipeline_cpy_quant_f32[q[0]], name, @field(vulkan_shaders, name ++ "_data"), 2, pcu, .{ @intCast(ggml.types.ggml_blck_size(q[0])), 1, 1 }, &.{}, 1, false);
     }
 
     // CREATE_BINARY(name, namemod, spec, bindings)
@@ -2155,7 +2155,7 @@ fn walkRest(w: *Walk, subgroup_min_size_16: bool, subgroup_size_16: u32, subgrou
     cp(w, &device.pipeline_cross_entropy_loss_back_f32_wg512, "cross_entropy_loss_back_f32_wg512", vulkan_shaders.cross_entropy_loss_back_f32_data, 4, pco, .{ 1, 1, 1 }, &.{512}, 1, false);
     // Intel Windows driver in range [32.0.101.8509, 32.0.101.8860) will
     // crash when using fwht kernels so we gate that here
-    const can_use_fwht = device.driver_id != ggml.vulkan.common.vk.VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS or
+    const can_use_fwht = device.driver_id != ggml.vulkan.common.vulkan_c.VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS or
         !intelWindowsDriverInRange(device.properties.driverVersion, 101, 8509, 101, 8860);
     if (can_use_fwht) {
         const D = ggml.vulkan.device;
@@ -2256,7 +2256,7 @@ fn walkRest(w: *Walk, subgroup_min_size_16: bool, subgroup_size_16: u32, subgrou
 
     for (ggml.vulkan.device.lightning_indexer_k_types) |k_type| {
         const spec = [_]u32{ @intCast(k_type), faBlockBytes(k_type) };
-        w.createFmt(&device.pipeline_lightning_indexer_f32[@intCast(k_type)], "lightning_indexer_{s}_k_f32", .{std.mem.span(ggml.impl.ggml_c.ggml_type_name(k_type))}, .{ .spv = vulkan_shaders.lightning_indexer_f32_data, .parameter_count = 5, .push_constant_size = @sizeOf(ggml.vulkan.push.LightningIndexer), .wg_denoms = .{ 1, 1, 1 }, .spec = &spec, .disable_robustness = true });
+        w.createFmt(&device.pipeline_lightning_indexer_f32[@intCast(k_type)], "lightning_indexer_{s}_k_f32", .{std.mem.span(ggml.types.ggml_type_name(k_type))}, .{ .spv = vulkan_shaders.lightning_indexer_f32_data, .parameter_count = 5, .push_constant_size = @sizeOf(ggml.vulkan.push.LightningIndexer), .wg_denoms = .{ 1, 1, 1 }, .spec = &spec, .disable_robustness = true });
     }
 
     walkGatedDeltaNet(w);

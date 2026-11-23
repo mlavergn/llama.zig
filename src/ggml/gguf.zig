@@ -982,7 +982,7 @@ fn initFromReader(gr: *Reader, params: mod.impl.ggml_c.gguf_init_params) ?*Conte
                     ok = false;
                     break;
                 }
-                _ = mod.impl.ggml_c.ggml_set_name(&info.t, name.ptr);
+                _ = mod.context.ggml_set_name(&info.t, name.ptr);
 
                 // make sure there are no duplicate tensor names; the set holds
                 // the read `std::string`, not the NUL-terminated copy in
@@ -1085,8 +1085,8 @@ fn initFromReader(gr: *Reader, params: mod.impl.ggml_c.gguf_init_params) ?*Conte
                     ok = false;
                     break;
                 }
-                const type_size = mod.impl.ggml_c.ggml_type_size(info.t.type);
-                const blck_size = mod.impl.ggml_c.ggml_blck_size(info.t.type);
+                const type_size = mod.types.ggml_type_size(info.t.type);
+                const blck_size = mod.types.ggml_blck_size(info.t.type);
 
                 // check that row size is divisible by block size
                 if (blck_size == 0 or @rem(info.t.ne[0], blck_size) != 0) {
@@ -1096,7 +1096,7 @@ fn initFromReader(gr: *Reader, params: mod.impl.ggml_c.gguf_init_params) ?*Conte
                             "gguf_init_from_reader",
                             @as([*:0]const u8, @ptrCast(&info.t.name)),
                             @as(c_int, @bitCast(info.t.type)),
-                            mod.impl.ggml_c.ggml_type_name(info.t.type),
+                            mod.types.ggml_type_name(info.t.type),
                             info.t.ne[0],
                             blck_size,
                         },
@@ -1106,8 +1106,8 @@ fn initFromReader(gr: *Reader, params: mod.impl.ggml_c.gguf_init_params) ?*Conte
                 }
 
                 // check that the size of the tensor in bytes is representable
-                if (ok and @as(u64, @intCast(@divTrunc(mod.impl.ggml_c.ggml_nelements(&info.t), mod.impl.ggml_c.ggml_blck_size(info.t.type)))) >
-                    std.math.maxInt(usize) / mod.impl.ggml_c.ggml_type_size(info.t.type))
+                if (ok and @as(u64, @intCast(@divTrunc(mod.types.ggml_nelements(&info.t), mod.types.ggml_blck_size(info.t.type)))) >
+                    std.math.maxInt(usize) / mod.types.ggml_type_size(info.t.type))
                 {
                     mod.impl.logError(
                         "%s: tensor '%s' with shape (%lld, %lld, %lld, %lld) has a size in bytes > %zu\n",
@@ -1171,7 +1171,7 @@ fn initFromReader(gr: *Reader, params: mod.impl.ggml_c.gguf_init_params) ?*Conte
                 ctx.destroy();
                 return null;
             }
-            const nbytes = mod.impl.ggml_c.ggml_nbytes(&ti.t);
+            const nbytes = mod.types.ggml_nbytes(&ti.t);
             // GGML_PAD adds (alignment - 1) to nbytes. when nbytes is near
             // SIZE_MAX this wraps to 0 and makes the check below dead.
             if (nbytes > std.math.maxInt(usize) - (ctx.alignment - 1)) {
@@ -1206,21 +1206,21 @@ fn initFromReader(gr: *Reader, params: mod.impl.ggml_c.gguf_init_params) ?*Conte
         var mem_size: usize = 0;
         const n_tensors_u: usize = @intCast(n_tensors);
         if (params.no_alloc) {
-            if (n_tensors != 0 and std.math.maxInt(usize) / n_tensors_u < mod.impl.ggml_c.ggml_tensor_overhead()) {
+            if (n_tensors != 0 and std.math.maxInt(usize) / n_tensors_u < mod.types.ggml_tensor_overhead()) {
                 mod.impl.logError("%s: memory size overflow while allocating ggml context\n", .{"gguf_init_from_reader"});
                 ctx.destroy();
                 return null;
             }
 
-            mem_size = n_tensors_u * mod.impl.ggml_c.ggml_tensor_overhead();
+            mem_size = n_tensors_u * mod.types.ggml_tensor_overhead();
         } else {
-            if ((n_tensors + 1) != 0 and std.math.maxInt(usize) / (n_tensors_u + 1) < mod.impl.ggml_c.ggml_tensor_overhead()) {
+            if ((n_tensors + 1) != 0 and std.math.maxInt(usize) / (n_tensors_u + 1) < mod.types.ggml_tensor_overhead()) {
                 mod.impl.logError("%s: memory size overflow while allocating ggml context\n", .{"gguf_init_from_reader"});
                 ctx.destroy();
                 return null;
             }
 
-            const overhead = (n_tensors_u + 1) * mod.impl.ggml_c.ggml_tensor_overhead();
+            const overhead = (n_tensors_u + 1) * mod.types.ggml_tensor_overhead();
 
             if (std.math.maxInt(usize) - overhead < ctx.size) {
                 mod.impl.logError("%s: memory size overflow while allocating ggml context\n", .{"gguf_init_from_reader"});
@@ -1237,24 +1237,24 @@ fn initFromReader(gr: *Reader, params: mod.impl.ggml_c.gguf_init_params) ?*Conte
             .no_alloc = params.no_alloc,
         };
 
-        params.ctx.* = mod.impl.ggml_c.ggml_init(pdata);
+        params.ctx.* = @ptrCast(mod.context.ggml_init(pdata));
         if (params.ctx.* == null) {
             mod.impl.logError("%s: failed to initialize ggml context for storing tensors\n", .{"gguf_init_from_reader"});
             ctx.destroy();
             return null;
         }
 
-        const ctx_data = params.ctx.*;
+        const ctx_data: *mod.context.Context = @ptrCast(@alignCast(params.ctx.*.?));
 
         var data: ?*mod.impl.ggml_c.ggml_tensor = null;
 
         if (!params.no_alloc) {
-            data = mod.impl.ggml_c.ggml_new_tensor_1d(ctx_data, mod.impl.ggml_c.GGML_TYPE_I8, @intCast(ctx.size));
+            data = mod.context.ggml_new_tensor_1d(ctx_data, mod.impl.ggml_c.GGML_TYPE_I8, @intCast(ctx.size));
 
             ok = ok and data != null;
 
             if (ok) {
-                _ = mod.impl.ggml_c.ggml_set_name(data, "GGUF tensor data binary blob");
+                _ = mod.context.ggml_set_name(data.?, "GGUF tensor data binary blob");
             }
 
             // read the binary blob with the tensor data
@@ -1262,7 +1262,7 @@ fn initFromReader(gr: *Reader, params: mod.impl.ggml_c.gguf_init_params) ?*Conte
 
             if (!ok) {
                 mod.impl.logError("%s: failed to read tensor data binary blob\n", .{"gguf_init_from_reader"});
-                mod.impl.ggml_c.ggml_free(ctx_data);
+                mod.context.ggml_free(ctx_data);
                 params.ctx.* = null;
                 ctx.destroy();
                 return null;
@@ -1271,34 +1271,34 @@ fn initFromReader(gr: *Reader, params: mod.impl.ggml_c.gguf_init_params) ?*Conte
             ctx.data = data.?.data;
         }
 
-        mod.impl.ggml_c.ggml_set_no_alloc(ctx_data, true);
+        mod.context.ggml_set_no_alloc(ctx_data, true);
 
         // create the tensors
         for (ctx.info.items) |*info| {
-            const cur = mod.impl.ggml_c.ggml_new_tensor(ctx_data, info.t.type, mod.impl.ggml_c.GGML_MAX_DIMS, &info.t.ne);
+            const cur: ?*mod.impl.ggml_c.ggml_tensor = mod.context.ggml_new_tensor(ctx_data, info.t.type, mod.impl.ggml_c.GGML_MAX_DIMS, &info.t.ne);
 
             ok = ok and cur != null;
 
             if (!ok) break;
 
-            _ = mod.impl.ggml_c.ggml_set_name(cur, @ptrCast(&info.t.name));
+            _ = mod.context.ggml_set_name(cur.?, @ptrCast(&info.t.name));
 
             // point the data member to the appropriate location in the binary
             // blob using the tensor info
             if (!params.no_alloc) {
-                cur.*.data = @as([*]u8, @ptrCast(data.?.data)) + info.offset;
+                cur.?.data = @as([*]u8, @ptrCast(data.?.data)) + info.offset;
             }
         }
 
         if (!ok) {
             mod.impl.logError("%s: failed to create tensors\n", .{"gguf_init_from_reader"});
-            mod.impl.ggml_c.ggml_free(ctx_data);
+            mod.context.ggml_free(ctx_data);
             params.ctx.* = null;
             ctx.destroy();
             return null;
         }
 
-        mod.impl.ggml_c.ggml_set_no_alloc(ctx_data, params.no_alloc);
+        mod.context.ggml_set_no_alloc(ctx_data, params.no_alloc);
     }
 
     return ctx;
@@ -1433,7 +1433,7 @@ pub fn gguf_init_from_buffer(data: ?*const anyopaque, size: usize, params: mod.i
 /// Return: the parsed context, or null. The file is closed before returning
 /// either way.
 pub fn gguf_init_from_file(fname: [*:0]const u8, params: mod.impl.ggml_c.gguf_init_params) callconv(.c) ?*mod.impl.ggml_c.struct_gguf_context {
-    const file = mod.impl.ggml_c.ggml_fopen(fname, "rb") orelse {
+    const file = mod.runtime.ggml_fopen(fname, "rb") orelse {
         mod.impl.logError(
             "%s: failed to open GGUF file '%s' (%s)\n",
             .{ "gguf_init_from_file", fname, stdlib.errno.strerror(std.c._errno().*) },
@@ -1441,7 +1441,7 @@ pub fn gguf_init_from_file(fname: [*:0]const u8, params: mod.impl.ggml_c.gguf_in
         return null;
     };
 
-    const result = gguf_init_from_file_ptr(file, params);
+    const result = gguf_init_from_file_ptr(@ptrCast(@alignCast(file)), params);
     _ = stdlib.libc.fclose(file);
     return result;
 }
@@ -1716,7 +1716,7 @@ pub fn gguf_get_tensor_type(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, te
 /// Ports `gguf_get_tensor_size` (gguf.cpp:1233 @b1b770d90).
 pub fn gguf_get_tensor_size(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, tensor_id: i64) callconv(.c) usize {
     mod.impl.assert(tensor_id >= 0 and tensor_id < gguf_get_n_tensors(ctx), "tensor_id >= 0 && tensor_id < gguf_get_n_tensors(ctx)");
-    return mod.impl.ggml_c.ggml_nbytes(&ctxOfConst(ctx).info.items[@intCast(tensor_id)].t);
+    return mod.types.ggml_nbytes(&ctxOfConst(ctx).info.items[@intCast(tensor_id)].t);
 }
 
 // -----------------------------------------------------------------------------
@@ -1948,7 +1948,7 @@ pub fn gguf_add_tensor(ctx: ?*mod.impl.ggml_c.struct_gguf_context, tensor: ?*con
     var ti: TensorInfo = .{ .t = tensor.?.*, .offset = 0 };
     ti.offset = if (self.info.items.len == 0) 0 else blk: {
         const back = &self.info.items[self.info.items.len - 1];
-        break :blk back.offset + stdlib.num.pad(usize, mod.impl.ggml_c.ggml_nbytes(&back.t), self.alignment);
+        break :blk back.offset + stdlib.num.pad(usize, mod.types.ggml_nbytes(&back.t), self.alignment);
     };
     self.info.append(std.heap.c_allocator, ti) catch oom();
 }
@@ -1964,8 +1964,8 @@ pub fn gguf_set_tensor_type(ctx: ?*mod.impl.ggml_c.struct_gguf_context, name: [*
     }
     const self = ctxOf(ctx);
     const tensor = &self.info.items[@intCast(tensor_id)].t;
-    const type_size = mod.impl.ggml_c.ggml_type_size(t);
-    const blck_size = mod.impl.ggml_c.ggml_blck_size(t);
+    const type_size = mod.types.ggml_type_size(t);
+    const blck_size = mod.types.ggml_blck_size(t);
 
     tensor.type = t;
     mod.impl.assert(@rem(tensor.ne[0], blck_size) == 0, "tensor row size not divisible by block size of new type");
@@ -1981,7 +1981,7 @@ pub fn gguf_set_tensor_type(ctx: ?*mod.impl.ggml_c.struct_gguf_context, name: [*
     var i: i64 = tensor_id + 1;
     while (i < n_tensors) : (i += 1) {
         const prev = &self.info.items[@intCast(i - 1)];
-        self.info.items[@intCast(i)].offset = prev.offset + stdlib.num.pad(usize, mod.impl.ggml_c.ggml_nbytes(&prev.t), self.alignment);
+        self.info.items[@intCast(i)].offset = prev.offset + stdlib.num.pad(usize, mod.types.ggml_nbytes(&prev.t), self.alignment);
     }
 }
 
@@ -2127,7 +2127,7 @@ fn Writer(comptime Impl: type) type {
             const name: [*:0]const u8 = @ptrCast(&info.t.name);
             try self.writeStr(std.mem.span(name));
 
-            const n_dims: u32 = @intCast(mod.impl.ggml_c.ggml_n_dims(&info.t));
+            const n_dims: u32 = @intCast(mod.types.ggml_n_dims(&info.t));
             try self.write(n_dims);
 
             for (0..n_dims) |j| {
@@ -2194,17 +2194,17 @@ const BufWriter = struct {
         _ = alignment;
         mod.impl.assert(self.buf.items.len - offset_data == info.offset, "buf.size() - offset_data == info.offset");
 
-        mod.impl.assert(mod.impl.ggml_c.ggml_is_contiguous(&info.t), "ggml_is_contiguous(&info.t)");
-        const nbytes = mod.impl.ggml_c.ggml_nbytes(&info.t);
+        mod.impl.assert(mod.types.ggml_is_contiguous(&info.t), "ggml_is_contiguous(&info.t)");
+        const nbytes = mod.types.ggml_nbytes(&info.t);
 
-        if (info.t.buffer != null and mod.impl.ggml_c.ggml_backend_buffer_is_host(info.t.buffer)) {
+        if (info.t.buffer != null and mod.backend.ggml_backend_buffer_is_host(info.t.buffer)) {
             mod.impl.assert(info.t.data != null, "info.t.data != NULL && \"tensor not allocated\"");
             try w.writeData(@ptrCast(info.t.data), nbytes);
         } else {
             const offset = self.buf.items.len;
             self.buf.resize(std.heap.c_allocator, offset + nbytes) catch oom();
             if (info.t.buffer != null) {
-                mod.impl.ggml_c.ggml_backend_tensor_get(&info.t, @ptrCast(self.buf.items[offset..].ptr), 0, nbytes);
+                mod.backend.ggml_backend_tensor_get(&info.t, @ptrCast(self.buf.items[offset..].ptr), 0, nbytes);
             } else {
                 mod.impl.assert(info.t.data != null, "info.t.data");
                 @memcpy(self.buf.items[offset..][0..nbytes], @as([*]const u8, @ptrCast(info.t.data))[0..nbytes]);
@@ -2277,10 +2277,10 @@ const FileWriter = struct {
         _ = alignment;
         mod.impl.assert(w.written_bytes - offset_data == info.offset, "written_bytes - offset_data == info.offset");
 
-        mod.impl.assert(mod.impl.ggml_c.ggml_is_contiguous(&info.t), "ggml_is_contiguous(&info.t)");
-        const nbytes = mod.impl.ggml_c.ggml_nbytes(&info.t);
+        mod.impl.assert(mod.types.ggml_is_contiguous(&info.t), "ggml_is_contiguous(&info.t)");
+        const nbytes = mod.types.ggml_nbytes(&info.t);
 
-        if (info.t.buffer != null and mod.impl.ggml_c.ggml_backend_buffer_is_host(info.t.buffer)) {
+        if (info.t.buffer != null and mod.backend.ggml_backend_buffer_is_host(info.t.buffer)) {
             mod.impl.assert(info.t.data != null, "info.t.data != NULL && \"tensor not allocated\"");
             try w.writeData(@ptrCast(info.t.data), nbytes);
         } else {
@@ -2288,7 +2288,7 @@ const FileWriter = struct {
             defer buf.deinit(std.heap.c_allocator);
             buf.resize(std.heap.c_allocator, nbytes) catch oom();
             if (info.t.buffer != null) {
-                mod.impl.ggml_c.ggml_backend_tensor_get(&info.t, @ptrCast(buf.items.ptr), 0, nbytes);
+                mod.backend.ggml_backend_tensor_get(&info.t, @ptrCast(buf.items.ptr), 0, nbytes);
             } else {
                 mod.impl.assert(info.t.data != null, "info.t.data");
                 @memcpy(buf.items, @as([*]const u8, @ptrCast(info.t.data))[0..nbytes]);
@@ -2369,7 +2369,7 @@ pub fn gguf_write_to_file_ptr(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, 
 ///
 /// Return: true on success. The file is closed either way.
 pub fn gguf_write_to_file(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, fname: [*:0]const u8, only_meta: bool) callconv(.c) bool {
-    const file = mod.impl.ggml_c.ggml_fopen(fname, "wb") orelse {
+    const file = mod.runtime.ggml_fopen(fname, "wb") orelse {
         mod.impl.logError(
             "%s: failed to open file '%s' for writing GGUF data\n",
             .{ "gguf_write_to_file", fname },
@@ -2377,7 +2377,7 @@ pub fn gguf_write_to_file(ctx: ?*const mod.impl.ggml_c.struct_gguf_context, fnam
         return false;
     };
 
-    const success = gguf_write_to_file_ptr(ctx, file, only_meta);
+    const success = gguf_write_to_file_ptr(ctx, @ptrCast(@alignCast(file)), only_meta);
     if (!success) {
         mod.impl.logError("%s: failed to write GGUF data into '%s'\n", .{ "gguf_write_to_file", fname });
     }
@@ -2561,17 +2561,17 @@ test "arrays round-trip, and a bool array stays one byte per element" {
 }
 
 test "tensor metadata round-trips with shape, type and offset" {
-    const gctx = mod.impl.ggml_c.ggml_init(.{ .mem_size = 16 * 1024 * 1024, .mem_buffer = null, .no_alloc = true });
-    defer mod.impl.ggml_c.ggml_free(gctx);
+    const gctx = mod.context.ggml_init(.{ .mem_size = 16 * 1024 * 1024, .mem_buffer = null, .no_alloc = true }).?;
+    defer mod.context.ggml_free(gctx);
 
     // 5 f32 is 20 bytes, which the default 32-byte alignment has to round up.
     // A shape whose size is already a multiple of the alignment would let an
     // unpadded offset calculation pass -- measured: with 8x4 f32 (128 bytes,
     // pad(128, 32) == 128) dropping the `GGML_PAD` here changes nothing.
-    const a = mod.impl.ggml_c.ggml_new_tensor_1d(gctx, mod.impl.ggml_c.GGML_TYPE_F32, 5);
-    _ = mod.impl.ggml_c.ggml_set_name(a, "weight.a");
-    const b = mod.impl.ggml_c.ggml_new_tensor_1d(gctx, mod.impl.ggml_c.GGML_TYPE_F16, 16);
-    _ = mod.impl.ggml_c.ggml_set_name(b, "bias.b");
+    const a = mod.context.ggml_new_tensor_1d(gctx, mod.impl.ggml_c.GGML_TYPE_F32, 5);
+    _ = mod.context.ggml_set_name(a, "weight.a");
+    const b = mod.context.ggml_new_tensor_1d(gctx, mod.impl.ggml_c.GGML_TYPE_F16, 16);
+    _ = mod.context.ggml_set_name(b, "bias.b");
 
     const ctx = gguf_init_empty().?;
     defer gguf_free(ctx);
@@ -2580,10 +2580,10 @@ test "tensor metadata round-trips with shape, type and offset" {
 
     // The second tensor starts after the first, padded to the alignment.
     try std.testing.expectEqual(@as(usize, 0), gguf_get_tensor_offset(ctx, 0));
-    try std.testing.expectEqual(@as(usize, 20), mod.impl.ggml_c.ggml_nbytes(a));
+    try std.testing.expectEqual(@as(usize, 20), mod.types.ggml_nbytes(a));
     try std.testing.expectEqual(@as(usize, 32), gguf_get_tensor_offset(ctx, 1));
     try std.testing.expectEqual(
-        stdlib.num.pad(usize, mod.impl.ggml_c.ggml_nbytes(a), gguf_get_alignment(ctx)),
+        stdlib.num.pad(usize, mod.types.ggml_nbytes(a), gguf_get_alignment(ctx)),
         gguf_get_tensor_offset(ctx, 1),
     );
 
@@ -2605,7 +2605,7 @@ test "tensor metadata round-trips with shape, type and offset" {
     try std.testing.expectEqual(@as(i64, 1), ne[1]);
     try std.testing.expectEqual(@as(i64, 1), ne[2]);
     try std.testing.expectEqual(@as(i64, 1), ne[3]);
-    try std.testing.expectEqual(mod.impl.ggml_c.ggml_nbytes(a), gguf_get_tensor_size(back, ia));
+    try std.testing.expectEqual(mod.types.ggml_nbytes(a), gguf_get_tensor_size(back, ia));
 
     const ib = gguf_find_tensor(back, "bias.b");
     try std.testing.expectEqual(@as(c_uint, mod.impl.ggml_c.GGML_TYPE_F16), gguf_get_tensor_type(back, ib));
@@ -2619,10 +2619,10 @@ test "a GGUF that starts mid-file aligns its data section to its own start" {
     // `gguf_init_from_reader` pads the data section relative to that
     // start, not to the file; a prefix whose length is not a multiple of the
     // alignment is what tells the two apart.
-    const gctx = mod.impl.ggml_c.ggml_init(.{ .mem_size = 1024 * 1024, .mem_buffer = null, .no_alloc = true });
-    defer mod.impl.ggml_c.ggml_free(gctx);
-    const a = mod.impl.ggml_c.ggml_new_tensor_1d(gctx, mod.impl.ggml_c.GGML_TYPE_F32, 5);
-    _ = mod.impl.ggml_c.ggml_set_name(a, "weight.a");
+    const gctx = mod.context.ggml_init(.{ .mem_size = 1024 * 1024, .mem_buffer = null, .no_alloc = true }).?;
+    defer mod.context.ggml_free(gctx);
+    const a = mod.context.ggml_new_tensor_1d(gctx, mod.impl.ggml_c.GGML_TYPE_F32, 5);
+    _ = mod.context.ggml_set_name(a, "weight.a");
 
     const ctx = gguf_init_empty().?;
     defer gguf_free(ctx);
@@ -2881,8 +2881,8 @@ fn captureLog(level: mod.impl.ggml_c.enum_ggml_log_level, text: [*c]const u8, us
 
 fn expectRejected(raw: *RawGguf, message: []const u8) !void {
     captured_len = 0;
-    mod.impl.ggml_c.ggml_log_set(captureLog, null);
-    defer mod.impl.ggml_c.ggml_log_set(null, null);
+    mod.runtime.ggml_log_set(captureLog, null);
+    defer mod.runtime.ggml_log_set(null, null);
     try std.testing.expect(!raw.parses());
     try std.testing.expectEqualStrings(message, captured_log[0..captured_len]);
 }
