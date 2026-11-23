@@ -406,7 +406,7 @@ pub fn ggml_commit() callconv(.c) [*:0]const u8 {
 /// `ggml-version.h` CMake configures from its template: ggml's own
 /// version, not llama.cpp's, and the pin's short commit. They must equal
 /// `build/upstream.zig`'s `ggml_version` and `commit`, which
-/// `scripts/check-reference-pin` asserts.
+/// `testing/scripts/check-reference-pin` asserts.
 const build_version: [*:0]const u8 = "1.0.0";
 const build_commit: [*:0]const u8 = "b1b770d90";
 
@@ -441,7 +441,7 @@ pub fn ggml_fp32_to_fp16(x: f32) callconv(.c) mod.impl.ggml_c.ggml_fp16_t {
 /// bits; }` — two bytes — and an `extern struct` that size received by
 /// value across the C ABI arrives as **zeros** on aarch64-macos. This
 /// function returned 0.0 for every input from the day `ggml.c` was
-/// ported, and no gate saw it; `harness/abi_structs.zig` is the gate that
+/// ported, and no gate saw it; `testing/harness/abi_structs.zig` is the gate that
 /// does now. `u16` has the same size and is passed correctly, and the C
 /// caller is unaffected: `ggml_bf16_t` is a one-field struct over exactly
 /// those bits.

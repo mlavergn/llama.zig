@@ -1303,7 +1303,7 @@ fn fillEntries(mels: []const Mel, shape_only: bool, entries: *std.ArrayList(mod.
 /// The sixteen subclasses of `mtmd_audio_preprocessor`
 /// (mtmd-audio.h:87 @b1b770d90), in the header's order -- later ones
 /// (`d1omni`, `nemotron_transcribe` and `chatterbox_ref`)
-/// last, so the earlier kinds keep the ordinals `harness/mtmd_audio_ref.cpp`
+/// last, so the earlier kinds keep the ordinals `testing/harness/mtmd_audio_ref.cpp`
 /// switches on.
 pub const Kind = enum {
     whisper,
@@ -2348,8 +2348,8 @@ pub const StreamingIstft = struct {
     }
 };
 
-/// The files beside this one, for `harness/mtmd_audio_diff.zig`, which
-/// builds this file as its own module root (`build/mtmd_audio_diff.zig`).
+/// The files beside this one, for `testing/harness/mtmd_audio_diff.zig`, which
+/// builds this file as its own module root (`testing/build/mtmd_audio_diff.zig`).
 pub const deps = struct {
     pub const impl = @import("impl.zig");
     pub const model = @import("model.zig");

@@ -13,8 +13,6 @@
 //! - `k.zig`       — the K-quant super-block dot products
 //! - `ternary.zig` — tq1_0 and tq2_0
 //! - `iq.zig`      — the codebook formats
-//! - `golden.zig`  — values captured from the C, generated
-//! - `testing.zig` — the fixture the dot products are checked through
 //! - `arm/`        — a second translation unit,
 //!                   `ggml-cpu/arch/arm/quants.c`, which supplies the *real*
 //!                   entry points these `_generic` ones stand behind
@@ -25,7 +23,8 @@
 //!
 //! `arch-fallback.h` renames nothing from `quants.c` on ARM, and
 //! `arch/arm/quants.c` supplies every real entry point, so the 25 `_generic`
-//! names are exported and never called. `golden.zig` is their only gate. The
+//! names are exported and never called. `testing/golden/cpu_quants_golden.zig`
+//! is their only gate. The
 //! 21 row quantizers are live: 18 are what the traits table calls, and three
 //! are `_generic` fallbacks the NEON file replaces.
 
@@ -37,7 +36,6 @@ pub const legacy = @import("legacy.zig");
 pub const k = @import("k.zig");
 pub const ternary = @import("ternary.zig");
 pub const iq = @import("iq.zig");
-pub const testing = @import("testing.zig");
 
 /// The architecture's kernels, as `arch/arm/quants.c` or `arch/x86/quants.c`
 /// supplies them.
@@ -46,8 +44,6 @@ pub const arch = switch (@import("builtin").cpu.arch) {
     .x86_64 => @import("x86/module.zig"),
     else => @compileError("no quants kernels for " ++ @tagName(@import("builtin").cpu.arch)),
 };
-
-pub const golden = @import("golden.zig");
 
 comptime {
     _ = rows;
@@ -75,5 +71,4 @@ test {
         .x86_64 => _ = @import("x86/module.zig"),
         else => {},
     }
-    _ = testing;
 }

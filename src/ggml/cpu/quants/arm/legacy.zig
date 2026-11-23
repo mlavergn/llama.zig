@@ -888,7 +888,7 @@ pub fn ggml_vec_dot_iq4_nl_q8_0(
     // roundings become one in each place, and the answers differ in the last
     // bit.
     //
-    // **Determined against an oracle, not guessed.** `scripts/vecdot-prefix`
+    // **Determined against an oracle, not guessed.** `testing/scripts/vecdot-prefix`
     // asks the shipped kernel for every row prefix from one block to sixteen;
     // eight candidate orderings were tried and exactly one reproduces all
     // sixteen values. The plain reading, `sumf += SA*PA + SB*PB`, misses eleven
@@ -946,48 +946,6 @@ pub fn ggml_vec_dot_iq4_nl_q8_0(
 
 test {
     std.testing.refAllDecls(@This());
-}
-
-const golden = if (ggml.cpu.features.golden_generic) ggml.cpu.quants.arch.golden_generic else ggml.cpu.quants.arch.golden;
-
-test "q1_0 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q1_0_q8_0, ggml.impl.ggml_c.GGML_TYPE_Q1_0, ggml.impl.ggml_c.GGML_TYPE_Q8_0, golden.q1_0);
-}
-
-test "q2_0 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q2_0_q8_0, ggml.impl.ggml_c.GGML_TYPE_Q2_0, ggml.impl.ggml_c.GGML_TYPE_Q8_0, golden.q2_0);
-}
-
-test "q4_0 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q4_0_q8_0, ggml.impl.ggml_c.GGML_TYPE_Q4_0, ggml.impl.ggml_c.GGML_TYPE_Q8_0, golden.q4_0);
-}
-
-test "q4_1 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q4_1_q8_1, ggml.impl.ggml_c.GGML_TYPE_Q4_1, ggml.impl.ggml_c.GGML_TYPE_Q8_1, golden.q4_1);
-}
-
-test "mxfp4 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_mxfp4_q8_0, ggml.impl.ggml_c.GGML_TYPE_MXFP4, ggml.impl.ggml_c.GGML_TYPE_Q8_0, golden.mxfp4);
-}
-
-test "nvfp4 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_nvfp4_q8_0, ggml.impl.ggml_c.GGML_TYPE_NVFP4, ggml.impl.ggml_c.GGML_TYPE_Q8_0, golden.nvfp4);
-}
-
-test "q5_0 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q5_0_q8_0, ggml.impl.ggml_c.GGML_TYPE_Q5_0, ggml.impl.ggml_c.GGML_TYPE_Q8_0, golden.q5_0);
-}
-
-test "q5_1 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q5_1_q8_1, ggml.impl.ggml_c.GGML_TYPE_Q5_1, ggml.impl.ggml_c.GGML_TYPE_Q8_1, golden.q5_1);
-}
-
-test "q8_0 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q8_0_q8_0, ggml.impl.ggml_c.GGML_TYPE_Q8_0, ggml.impl.ggml_c.GGML_TYPE_Q8_0, golden.q8_0);
-}
-
-test "iq4_nl dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq4_nl_q8_0, ggml.impl.ggml_c.GGML_TYPE_IQ4_NL, ggml.impl.ggml_c.GGML_TYPE_Q8_0, golden.iq4_nl);
 }
 
 test "the two bit-expansion tables are complements" {

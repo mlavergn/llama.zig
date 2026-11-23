@@ -15,8 +15,7 @@
 //! the path. Line numbers are as of each citation's commit and move when a
 //! sync re-reads the definition.
 //!
-//! This file is the exception: it is a barrel, not a port of anything, and
-//! `ported.zig` is likewise scaffolding.
+//! This file is the exception: it is a barrel, not a port of anything.
 //!
 //! # How the swap works
 //!

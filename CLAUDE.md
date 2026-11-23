@@ -7,7 +7,7 @@ Guidance for agents working in this repository.
 - **A Zig port of llama.cpp**: ggml, libllama, libmtmd, `llama-cli`, `llama-server` and upstream's smaller tools, pure Zig apart from GPU kernels and the two Metal Objective-C files.
 - **Kept in sync with upstream one release at a time** (`SYNC.md`) until a working `../zigggml` can be swapped in.
 - **No idiomatic rewrite here.** That is `../zigggml` (began as `src/ggml/`, must stay a drop-in: same C symbols). The pre-move rewrite is on branch `ggml-rework` (`d4d1922`).
-- **zigggml's A/B gates run this repository's harnesses** (`harness/`, `llama.cpp.zmake`, `cuda-ref`, `vk-ref`, `scripts/win-run`, `harness/port_links.zig`). After changing any of them, run zigggml's matching `make ab-*` group.
+- **zigggml's A/B gates run this repository's harnesses** (`testing/harness/`, `llama.cpp.zmake`, `cuda-ref`, `vk-ref`, `testing/scripts/win-run`, `testing/harness/port_links.zig`). After changing any of them, run zigggml's matching `make ab-*` group.
 
 ## Root files
 
@@ -27,28 +27,34 @@ Exactly four markdown files. Never add another.
 
 | Path | What |
 |---|---|
-| `src/ggml/` | ggml. Root `module.zig` is the **only** import list (`ported.zig` re-exports it) |
+| `src/ggml/` | ggml. Root `module.zig` is the **only** import list |
 | `src/ggml/{cpu,metal,cuda,vulkan}/` | CPU backend and GPU host layers |
-| `src/llama/` | libllama. `api/` holds every `llama.h` function (unexported); `exports.zig` exports them; `harness_root.zig` re-exports without exports |
-| `src/mtmd/` | libmtmd; same wiring (`exports.zig`, `harness_root.zig`) |
+| `src/llama/` | libllama. `api/` holds every `llama.h` function (unexported); `lib.zig` exports them (with `exports.zig`) only as the compilation root or under test, so harnesses import `module.zig` |
+| `src/mtmd/` | libmtmd; same wiring (`lib.zig`, `exports.zig`) |
 | `stdlib/` | The platform layer every module shares: locks (`sync/`), standard streams, files, the file system and paths, clocks, the environment, `errno`, C number parsing and `GGML_PAD`, strings, libm (`libm.zig`), every C library function still called (`libc.zig`, the ledger), the libc++ reproductions (`libcxx.zig`), CPU count, tty, subprocesses. Its own module (`build/llamacpp.zig`'s `stdlibModule`) |
 | `cli/` | `llama-cli`: `args.zig`, `fit.zig`, `session.zig`, `conversation.zig`, `common_chat/`, `json/`, `peg/` |
 | `tools/` | `llama-server` (`tools/server/`), the ten tools, `llama-tts`, `llama-mtmd-cli`, shared `tools/common/` |
-| `harness/` | Gate drivers and reference-side code |
-| `scripts/` | Gate scripts, generators, sync tooling |
-| `build/` | Build sources (not output): `llamacpp.zig` (reference build graph), `upstream.zig` (the pin), `metal_embed.zig` |
+| `testing/` | **Everything that exists only to port or to check the port**; nothing under it ships |
+| `testing/harness/` | Gate drivers and reference-side code (`*_ref.cpp` wrap upstream's C++ in a C ABI) |
+| `testing/scripts/` | Gate scripts, generators, sync tooling |
+| `testing/golden/` | ggml's goldens: C-captured bits, their fixtures and the tests that check them; `test-port` runs it as its own test root importing `ggml` |
+| `testing/build/` | Build-graph code for gates only (`mtmd-*-diff`, `mmproj-fixtures`, `http-diff`) |
+| `testing/metrics/` | Performance of the stock C against the port; not a gate |
+| `testing/Makefile` | Gate and oracle targets, included by the root `Makefile` |
+| `build/` | Build sources (not output): `llamacpp.zig` (release and reference build graph), `upstream.zig` (the pin), `metal_embed.zig` |
 | `xcframework/` | `llama.xcframework`, drop-in for upstream's |
 | `llama.cpp/` | Upstream at the pin. **Read-only** |
 | `llama.cpp.zmake/` | Separate repo: Zig build of stock upstream, the reference. Gitignored here |
 
 ## Hard rules
 
+- **Test, oracle and porting code lives under `testing/`, never in `src/`, `cli/`, `tools/` or `stdlib/`.** Unit tests of a file's own behaviour stay at its bottom; anything compared against bits captured from C (goldens, checksums, fixtures) goes to `testing/golden/`. No test hooks in library code.
 - **Never edit `llama.cpp/`** (or `llama.cpp.zmake/llama.cpp/`). No fixes, no workarounds, no commits, no PRs. Its `CLAUDE.md`, `AGENTS.md`, skills and CI do not apply here. Moved only by `SYNC.md`.
 - **`llama.cpp.zmake`** is modified only under a grant: Zig 0.17, `arch/x86`, Vulkan, Windows, and the standing sync grant (its `build.zig`, `build.zig.zon`, `Makefile`, for that release only).
 - **No dependencies.** One exception: `mlavergn/zigjinja` (`../zigjinja`, path dependency), confined to `cli/` and the server's `cli/common_chat`. Pin an exact commit.
 - **`LICENSE` carries both copyrights** (this project, the ggml authors). Every file under `src/` is a translation of MIT C; keep the provenance headers.
 - **Out of scope, by decision:** `llama-server`'s executable and HTTP front on Windows; any BLAS but Accelerate (zDNN, ZenDNN, OpenBLAS... are vendor libraries); x86 below `x86_64_v3`; Apple OS below 26.0 on any platform.
-- **`llama-server-core` is in scope on Windows** (zigllm drives it in-process): `ServerContext`, its queues and the data layer build there. MCP, the server-side tools, `subproc`'s waiter and `oaicompat`'s media loading (`download.zig`, httplib's client) are POSIX only until their `_WIN32` arms are ported; `harness/server_core_test.zig` lists both sets.
+- **`llama-server-core` is in scope on Windows** (zigllm drives it in-process): `ServerContext`, its queues and the data layer build there. MCP, the server-side tools, `subproc`'s waiter and `oaicompat`'s media loading (`download.zig`, httplib's client) are POSIX only until their `_WIN32` arms are ported; `testing/harness/server_core_test.zig` lists both sets.
 - **`llama-cli` refuses what it does not support** (non-zero exit, clear error), never ignores it; flags keep upstream's names and defaults.
 - **Library logs go through upstream's callbacks** (`llama_log_set`, `ggml_log_set`): never `std.debug.print` or `std.log` in library code, which write to stderr past them. Never `@panic` either; abort with `impl.abort`. A `@panic` pulls in `compiler_rt`, whose `expf`/`logf` shadow libm's.
 - **Library code that needs an `Io` takes `std.Io.Threaded.global_single_threaded`**: the C API hands it none. No worker threads or signal handlers; `concurrent` fails and `async` runs inline; it sees no environment on POSIX (`getenv` stays). Never `Threaded.init` in a library: it installs `SIGIO` and `SIGPIPE` handlers in the host. It builds and links in every Apple slice.
@@ -57,9 +63,9 @@ Exactly four markdown files. Never add another.
 ### Porting
 
 - **A translation unit is ported whole, then swapped.** Missing-symbol link errors are the completeness check. Develop beside the C, unwired.
-- **Contract of a C++ TU = its unmangled exports** (`scripts/port-coverage LANG_=cxx`) -- but not always the whole contract: `repack.cpp`'s buffer type and traits are C++-linkage. Measure before estimating; survey counts were low twice.
+- **Contract of a C++ TU = its unmangled exports** (`testing/scripts/port-coverage LANG_=cxx`) -- but not always the whole contract: `repack.cpp`'s buffer type and traits are C++-linkage. Measure before estimating; survey counts were low twice.
 - **ggml swaps file by file; libllama swapped once at `llama.h`** (one strongly connected component of C++); CUDA once at `ggml-cuda.h`.
-- **Never import `exports.zig` from a `harness_root.zig`**: two definitions in one link, one picked silently.
+- **Never import `exports.zig` or `lib.zig` from anything a harness compiles**: two definitions in one link, one picked silently. A harness that links upstream's libllama builds as an executable (`zig build-exe`), never `zig test`, which would force them.
 - **libmtmd calls libllama through the port's `api`, never `c.llama_*`** (in a harness that symbol is the reference's).
 - **A C++ throw is `error.Thrown`** with an `impl.Exception`; a `llama.h` entry terminates on it. Callers whose upstream catches it use `api/vocab.zig`'s unexported `tokenize`/`tokenToPiece`/`detokenize`.
 - **One `@cImport` per header** (`cli/c.zig`, `impl.zig`): two give incompatible `*llama_model`.
@@ -85,7 +91,7 @@ Exactly four markdown files. Never add another.
 |---|---|---|
 | Mac (M5 Max) | Metal, Apple CPU, macOS-only gates, the xcframework | CUDA, Vulkan |
 | GB10 (`spark-dbff`, Linux aarch64, compute 12.1, CUDA 13.0) | CUDA, Vulkan (SDK 1.4.363 in `.tools/vulkan/`), Linux arm64 CPU | Metal |
-| DESKTOP-BR7J5S9 (Windows, Haswell) | x86 AVX2 gates via `scripts/win-run` | everything else |
+| DESKTOP-BR7J5S9 (Windows, Haswell) | x86 AVX2 gates via `testing/scripts/win-run` | everything else |
 | JWHLPTOP (Windows, Tiger Lake) | AVX-512; **excluded** (no access) | |
 
 - Reached through `../zigupdater` (`SYNC.md`, Step 8). Work a machine cannot finish goes on `SYNC.md`'s open pickups, never skipped silently.
@@ -93,7 +99,7 @@ Exactly four markdown files. Never add another.
 
 ## Backends in brief
 
-- **Metal:** all host C++ is Zig (`src/ggml/metal/`). Kernels embedded as flattened MSL (`build/metal_embed.zig`), compiled by the driver; never `xcrun metal`. `impl_c.zig`'s constants and `kargs.zig` (generated, `scripts/gen-kargs`) are checked by `make struct-layout`. `tuning.zig` exports C++-mangled names via `@export` (take them from `nm`).
+- **Metal:** all host C++ is Zig (`src/ggml/metal/`). Kernels embedded as flattened MSL (`build/metal_embed.zig`), compiled by the driver; never `xcrun metal`. `impl_c.zig`'s constants and `kargs.zig` (generated, `testing/scripts/gen-kargs`) are checked by `make struct-layout`. `tuning.zig` exports C++-mangled names via `@export` (take them from `nm`).
 - **CUDA**: 278 files; unmodified `.cu` compiled to embedded fatbins loaded with `cuLibraryLoadData`, each kernel named by its demangled template spelling from a generated table, every launch's argument sizes checked against `cuKernelGetParamInfo` in every build mode, CUB behind `cub_shim.cu`; launches go through `cuLaunchKernelEx` from `src/ggml/cuda/`. Env flags `GGML_CUDA_ENABLE_UNIFIED_MEMORY`, `_NO_PINNED`, `_REGISTER_HOST` are `atoi != 0`. A CUDA build links `libstdc++.so`, whose personality aborts every C++ throw in that process: gates that catch reference throws build `-Dcuda=false`.
 - **Vulkan**: host in `src/ggml/vulkan/`; embeds the reference build's SPIR-V (`build/vulkan_shaders.zig`), never regenerates (`glslc -O` is not reproducible on `tri_f16`). Four GB10 arms: coopmat2, KHR coopmat, none, none without integer dot. Vulkan gates build `-Dcuda=false`.
 - **`supports_op`** on CUDA and Vulkan is the C's predicate alone. `-D<backend>-port=false` builds upstream's host layer for the gates.
@@ -105,7 +111,7 @@ Exactly four markdown files. Never add another.
 - Compare on **bits**, never a tolerance. Bit-exact gates build `--release=fast` on both sides; optimization level and compiler move bits.
 - **A gate's input distribution is part of the gate**: amplitudes, tie cases, thread counts, shapes straddling thresholds.
 - **A gate's optimization level is part of what it sees**: only safe builds (`parity-cli`, `FIT_DIFF_O=ReleaseSafe`, `chat-parse-diff`) catch UB.
-- `scripts/check-reference-pin` aborts every bit-exact gate unless zmake's checkout and tarball match the pin.
+- `testing/scripts/check-reference-pin` aborts every bit-exact gate unless zmake's checkout and tarball match the pin.
 - `make validate` = format, scaffold, unit tests, ported tests (debug and release), `port-coverage`, `port-links`, `graph-diff`. Consistency, not correctness.
 - `zig build test -Dtest-filter=...` skips non-matching codegen and a filter matching nothing looks green: check the count, run unfiltered.
 
@@ -113,7 +119,6 @@ Exactly four markdown files. Never add another.
 |---|---|
 | `graph-diff` | Constructor output (op, shape, strides, `op_params`, `src`); a halved softmax scale |
 | `backend-ops` (`--diff`) | 26,751 op configs, Metal vs CPU at a tolerance; crashes and missing kernels, not values |
-| `probe` | Ported code on the execution path (two runs: `-Dprobe-ported`, `-Dprobe-cpu`) |
 | goldens (`vecdot-`, `vec-`, `quants-golden`) | Unreachable `_generic` dot products and float reductions, exact bits; `generic` siblings |
 | `ops-diff` | Every CPU op on bits, 1 and 3 threads, amplitudes 1 and 30; reference writes quantized blocks, port replays |
 | `repack-diff` | The 36 repack kernels and 12 converters, 4 and 20 rows |
@@ -148,14 +153,14 @@ Exactly four markdown files. Never add another.
 | `port-links`, `port-coverage` | Citations; symbol contracts (maintenance, not correctness) |
 | `xcframework-check` | Drop-in compatibility with upstream's xcframework |
 
-Diagnostic, not a gate: `scripts/vecdot-prefix` finds the first diverging row prefix of a dot product.
+Diagnostic, not a gate: `testing/scripts/vecdot-prefix` finds the first diverging row prefix of a dot product.
 
 ## Toolchain traps
 
 Zig **0.17.0**, 0.16-style std (`std.process.Init`, explicit `std.Io`, `std.Io.Writer`).
 
 - **`p.*.arr[i]` through `[*c]T` miscompiles** (indexes by the whole array). Narrow with `impl.one` first.
-- **A small `extern struct` received by value across the C ABI reads zeros** unless its size is a multiple of 4 with no padding. Take an integer of the same size and `@bitCast`; add it to `harness/abi_structs.c`.
+- **A small `extern struct` received by value across the C ABI reads zeros** unless its size is a multiple of 4 with no padding. Take an integer of the same size and `@bitCast`; add it to `testing/harness/abi_structs.c`.
 - **`compiler_rt` shadows libm's `expf`/`logf`**: no `@panic` in libraries; native Linux executables link gcc's `libgcc.a` first (`llamacpp.addLibgcc`); `libm_check` guards it.
 - **`std.c.LC` is glibc's numbering on every OS** (Darwin and Windows: `LC_ALL` 0, `LC_CTYPE` 2, `LC_NUMERIC` 4): use `libc.LC`. **`std.c.mlock` demands a page-aligned address**; C's takes any.
 - **`std.c.Stat` is `void` on Linux and Windows** (`stdlib/fs.zig`); `std.c.clock_gettime` on Windows (`stdlib/clock.zig`); `std.c.write` takes a `HANDLE` on Windows (use `_write`).
@@ -184,7 +189,7 @@ Zig **0.17.0**, 0.16-style std (`std.process.Init`, explicit `std.Io`, `std.Io.W
 - NEON integer arithmetic wraps (`+%`, `*%`); `vaddvq_f32` is pairwise, not `@reduce(.Add)`; `vshlq_u8` shifts right on negative counts; `vmaxq_f32` is `FMAX` (NaN-propagating), not `@max`.
 - `neon.dotq_s32`/`mmlaq_s32` call `sdot`/`smmla` by LLVM intrinsic name when available; portable forms otherwise. **`neon.ggml_vdotq_s32` is not `neon.dotq_s32`** without dotprod: call the one the C spells.
 - Write kernels against `simd.F32`/`simd.F16` (`simd-mappings.h`), never hard-coded lane counts.
-- **Gate `src/ggml/cpu/` changes at `GATE_CPU` default, `apple_m3` (i8mm: two rows per call, different repack shapes), `generic` (Linux arm64 baseline), `apple_a7`, `apple_a12`.** `scripts/gate-cpu` checks both libraries were really built for that CPU. `generic` gives Linux's CPU, not its OS defaults.
+- **Gate `src/ggml/cpu/` changes at `GATE_CPU` default, `apple_m3` (i8mm: two rows per call, different repack shapes), `generic` (Linux arm64 baseline), `apple_a7`, `apple_a12`.** `testing/scripts/gate-cpu` checks both libraries were really built for that CPU. `generic` gives Linux's CPU, not its OS defaults.
 - x86: load vectors through a vector pointer, never an array `@bitCast`; run-time shift counts via `psrli`/`pslli`; v3 has F16C and BMI2 (port that arm); a harness without `ggml_cpu_init` reads an all-zero fp16 table. AVX-512 is the AVX2 code at twice the width (`repack/x86/wide.zig`); confirm 512-bit code by disassembly. AVX512-BF16/FP16 are a compile error until gated.
 - Windows: `std::random_device`, `wchar_t` and the C ctype table differ (the clock seed, 16-bit `wregex`, `[[:blank:]]` misses `\t`).
 
@@ -208,7 +213,7 @@ Excluded from goldens, not matched:
 ## CLI and chat
 
 - **The CLI compiles libllama's module into itself** (`@import("llama")`); `fit.zig` calls `llama-ext.h` functions as Zig. Output limit `n_outputs_max = 1`.
-- **Chat renders through `cli/common_chat`**; `cli/chat.zig` remains for `jinja-diff`. Templating is opt-in (raw completion is what `make port`/`make ref` diff); any chat flag turns it on, `--no-jinja` vetoes.
+- **Chat renders through `cli/common_chat`**; `cli/chat.zig` keeps the CLI's `Segment` type and the renderer `jinja-diff` gates. Templating is opt-in (raw completion is what `make port`/`make ref` diff); any chat flag turns it on, `--no-jinja` vetoes.
 - **Input is marked as upstream marks it**; zigjinja's provenance carries marks through what upstream carries them through. `bos_token`/`eos_token` are template text. Empty parts are parts.
 - **Marks survive only on the AST path**: `Compiler.compile(template, false)`, never the bytecode VM.
 - A render that produced nothing from a non-empty conversation is rejected (`{% bogus %}` renders empty).

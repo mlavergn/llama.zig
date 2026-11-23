@@ -29,7 +29,7 @@
 //!
 //! As in `k.zig` and `legacy.zig`: `-ffp-contract=on` turns every
 //! `sumf += d * x` into one `fmla`. Each is `@mulAdd` here, and
-//! `scripts/vecdot-prefix` is what settles the shape when it is ambiguous.
+//! `testing/scripts/vecdot-prefix` is what settles the shape when it is ambiguous.
 
 const std = @import("std");
 const ggml = @import("../../../module.zig");
@@ -797,40 +797,6 @@ pub fn ggml_vec_dot_iq4_xs_q8_K(
 
 test {
     std.testing.refAllDecls(@This());
-}
-
-const golden = if (ggml.cpu.features.golden_generic) ggml.cpu.quants.arch.golden_generic else ggml.cpu.quants.arch.golden;
-
-test "iq2_xxs dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq2_xxs_q8_K, ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.iq2_xxs);
-}
-
-test "iq2_xs dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq2_xs_q8_K, ggml.impl.ggml_c.GGML_TYPE_IQ2_XS, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.iq2_xs);
-}
-
-test "iq2_s dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq2_s_q8_K, ggml.impl.ggml_c.GGML_TYPE_IQ2_S, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.iq2_s);
-}
-
-test "iq3_xxs dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq3_xxs_q8_K, ggml.impl.ggml_c.GGML_TYPE_IQ3_XXS, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.iq3_xxs);
-}
-
-test "iq3_s dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq3_s_q8_K, ggml.impl.ggml_c.GGML_TYPE_IQ3_S, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.iq3_s);
-}
-
-test "iq1_s dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq1_s_q8_K, ggml.impl.ggml_c.GGML_TYPE_IQ1_S, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.iq1_s);
-}
-
-test "iq1_m dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq1_m_q8_K, ggml.impl.ggml_c.GGML_TYPE_IQ1_M, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.iq1_m);
-}
-
-test "iq4_xs dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq4_xs_q8_K, ggml.impl.ggml_c.GGML_TYPE_IQ4_XS, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.iq4_xs);
 }
 
 test "the even-signs table matches the C's literal" {

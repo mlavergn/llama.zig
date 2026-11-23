@@ -225,47 +225,6 @@ test {
     std.testing.refAllDecls(@This());
 }
 
-fn checkTernary(
-    comptime name: []const u8,
-    comptime Block: type,
-    quant: *const fn ([*c]const f32, [*c]Block, i64) callconv(.c) void,
-    dequant: *const fn ([*c]const Block, [*c]f32, i64) callconv(.c) void,
-) !void {
-    for (ggml.quants.testing.all_patterns) |pattern| {
-        const g = ggml.quants.testing.find(name, pattern);
-
-        var src: [ggml.quants.testing.n_elem]f32 = undefined;
-        ggml.quants.testing.fillSrc(pattern, &src);
-
-        var buf: [ggml.quants.testing.n_elem * 4]u8 align(16) = undefined;
-        @memset(&buf, 0);
-
-        quant(&src, @ptrCast(@alignCast(&buf)), @intCast(ggml.quants.testing.n_elem));
-
-        const used = g.row_size * ggml.quants.golden.n_rows;
-        std.testing.expectEqual(g.ref.?, std.hash.Fnv1a_64.hash(buf[0..used])) catch |e| {
-            std.debug.print("{s}: quantize differs on pattern '{s}'\n", .{ name, pattern.name() });
-            return e;
-        };
-
-        var out: [ggml.quants.testing.n_elem]f32 = undefined;
-        @memset(&out, 0);
-        dequant(@ptrCast(@alignCast(&buf)), &out, @intCast(ggml.quants.testing.n_elem));
-        std.testing.expectEqual(g.deq.?, std.hash.Fnv1a_64.hash(std.mem.sliceAsBytes(out[0..]))) catch |e| {
-            std.debug.print("{s}: dequantize differs on pattern '{s}'\n", .{ name, pattern.name() });
-            return e;
-        };
-    }
-}
-
-test "tq1_0 matches the C on every pattern" {
-    try checkTernary("TQ1_0", ggml.quants.blocks.TQ1_0, quantize_row_tq1_0_ref, dequantize_row_tq1_0);
-}
-
-test "tq2_0 matches the C on every pattern" {
-    try checkTernary("TQ2_0", ggml.quants.blocks.TQ2_0, quantize_row_tq2_0_ref, dequantize_row_tq2_0);
-}
-
 test "a ternary round trip yields only -d, 0 and +d" {
     // Independent of the checksums: whatever the packing does, the values that
     // come back must be exactly three, or the format is not ternary.

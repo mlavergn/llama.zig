@@ -130,7 +130,7 @@ const Xielu = struct {
     eps: f32,
 
     /// **Both branches name an FMA, and that is measured rather than
-    /// guessed.** `scripts/ops-diff` caught this: the C compiles at
+    /// guessed.** `testing/scripts/ops-diff` caught this: the C compiles at
     /// `-ffp-contract=on` and fuses, strict Zig did not, and the result was
     /// 1 ULP out. The gate that passed it — `backend-ops`, at NMSE 1e-7 —
     /// cannot see a last-bit difference.

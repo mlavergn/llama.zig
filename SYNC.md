@@ -27,7 +27,7 @@ SYNC.md". Re-runnable: it reads its state from "Current state" below.
 
 ## Current state
 
-- **Pin:** `build/upstream.zig` -- `v1.0.0`, `b1b770d90`, build `b12359`. `scripts/check-reference-pin` holds the submodule, zmake's checkout, its tarball URL and the version literals to it.
+- **Pin:** `build/upstream.zig` -- `v1.0.0`, `b1b770d90`, build `b12359`. `testing/scripts/check-reference-pin` holds the submodule, zmake's checkout, its tarball URL and the version literals to it.
 - **zigjinja:** `6efb5e4` (v3.1.11, on its `main`), a path dependency at `../zigjinja`.
 
 ### Open pickups (v1.0.0)
@@ -43,6 +43,8 @@ The v1.0.0 sync ran on the GB10, so the Mac is the machine that has not seen it.
   5. Models and libmtmd on Metal: `context-diff --gpu`, `arch-model-diff`, `mtp-diff`, `gemma4-assistant-diff`, `mtmd-gates`, `mtmd-audio-diff`.
   6. The rest: `vocab-diff`, `loader-diff`, `arch-diff`, `quant-diff`, `unicode-diff`, `xcframework-check` (after `make -C xcframework upstream`), `blas-diff`, `blas-node-diff`, `cnv-diff`, `parity-cli`.
 - **DESKTOP-BR7J5S9: open.** `make x86-gates` at `x86_64_v3`, `win-host-diffs`; new: the AVX/F16C `ggml_vec_dot_f16_f32` and F16×F32 tinyBLAS rows, the unbuffered `llama_file` arm via a `--direct-io` load. Check `llama-cli.exe` and the tools build.
+- **GB10, since v1.0.0+14: open.** Compile CUDA (`-Dcuda=true`): ggml's 568 CUDA calls now go to the ported Zig functions rather than through `ggml_c`, never compiled. Vulkan against the real `libvulkan` (the host layer type-checks on the Mac against a stub).
+- **zigggml: open.** Its A/B gates run this repository's harnesses by path, and those moved under `testing/` (`testing/harness/`, `testing/scripts/`, `testing/harness/port_links.zig`); harnesses import libllama as `llama` from `src/llama/module.zig` (no `harness_root.zig`). Update its references, then run its `make ab-*` groups.
 - **JWHLPTOP: excluded** (no access). Carries every AVX-512 item since v0.4.0, now including `ggml_vec_dot_f16_f32`.
 
 ### Known not to reproduce against itself
@@ -79,7 +81,7 @@ Not port bugs; run `--self` before reading a failure here.
 
 ### 3. Work list
 
-- `scripts/upstream-map A B` > scratchpad. Three kinds: touched Zig functions; unmapped hunks (new definitions, uncited files, headers, structs, macros); deletions.
+- `testing/scripts/upstream-map A B` > scratchpad. Three kinds: touched Zig functions; unmapped hunks (new definitions, uncited files, headers, structs, macros); deletions.
 - Each item ends ported, deferred (with a reason, in "Deferred"), or out of scope (per "Scope").
 
 ### 4. Regenerate
@@ -88,7 +90,7 @@ Never hand-edit generated files. `build/upstream.zig` must already be at B.
 
 - Scripts: `gen-arch`, `gen-kargs` (then `zig fmt`, `make struct-layout`), `gen-hparams`, `gen-model-tables`, `gen-layer`, `gen-unicode-data`, `gen-mtmd-names`, `gen-vk-push`, `gen-tuning-table` (then `make tuning-diff`), `gen-upstream-flags`, `iq-grids`.
 - A generator that stops on new C++: extend the generator, never the output.
-- Hand-kept lists they feed: `impl_c.zig`'s `count`, `harness/struct_layout.cpp`'s constants.
+- Hand-kept lists they feed: `impl_c.zig`'s `count`, `testing/harness/struct_layout.cpp`'s constants.
 - Goldens: `make buildmacos` first (they link upstream's CMake build), then `vecdot-golden`, `vec-golden`, `quants-golden`, each also with `GOLDEN_CPU=generic`.
   - Delete the untracked `src/ggml/cpu/quants/golden_generic.zig` it writes.
   - Restore `quants-golden`'s `IQ4_NL` `zeros` line (uninitialized read upstream; differs every capture).
@@ -100,12 +102,12 @@ Never hand-edit generated files. `build/upstream.zig` must already be at B.
 
 Mechanical moves first:
 
-- `scripts/upstream-map --repin A B`: moves every citation whose definition is unchanged; refuses changed ones.
-- `scripts/upstream-relines --write A B`: moves the `"<file>.cpp", <LINE>` literals passed to `impl.assert`/`impl.abort`.
+- `testing/scripts/upstream-map --repin A B`: moves every citation whose definition is unchanged; refuses changed ones.
+- `testing/scripts/upstream-relines --write A B`: moves the `"<file>.cpp", <LINE>` literals passed to `impl.assert`/`impl.abort`.
   - **Run once**; it is not idempotent.
   - `--keep <zig>:<file>:<N>` for literals already set by hand; `--skip <prefix>` for files another agent is editing.
   - Its "changed at B" list is hand work.
-- After everything else: read `scripts/upstream-literals` (catches literals behind a name). A report, not a gate: check each before fixing.
+- After everything else: read `testing/scripts/upstream-literals` (catches literals behind a name). A report, not a gate: check each before fixing.
 
 Then by hand, in dependency order: ggml core, CPU kernels, backends, libllama, libmtmd, `cli/`, `tools/`.
 
@@ -128,7 +130,7 @@ Then by hand, in dependency order: ggml core, CPU kernels, backends, libllama, l
 
 ### 6. Mac gates (block the sync)
 
-1. `make validate`, then `make probe` (both runs). With `../styleguide/Makefile.in`, `validate` runs `clean` and `zig fmt`: generate fixtures **after** it.
+1. `make validate`. With `../styleguide/Makefile.in`, `validate` runs `clean` and `zig fmt`: generate fixtures **after** it.
 2. Bit-exact CPU set -- `ops-diff`, `repack-diff`, `node-diff`, `parity-port`, `parity-port-cpu` -- at default `GATE_CPU`, `apple_m3`, `generic`; plus `apple_a7`, `apple_a12` if `src/ggml/cpu/` changed.
 3. `node-diff ARGS=--gpu`.
 4. Every other Mac gate:
@@ -161,7 +163,7 @@ Reaching the machines: `../zigupdater`'s `zigupdater`.
 
 - `tty <agent>` for a shell; it needs a terminal, so script it as `script -q /dev/null zigupdater tty <agent>`, one command line per session, long jobs under `nohup`.
 - `push <agent> <exe> --run` for programs. Executables only: ship files as a tar inside a carrier program (rebuild it with a changing `-D`; `zig cc` does not track an `.incbin`'d file).
-- One updater host on the Mac: concurrent pushes refuse each other (`scripts/win-run` retries).
+- One updater host on the Mac: concurrent pushes refuse each other (`testing/scripts/win-run` retries).
 
 Per machine:
 

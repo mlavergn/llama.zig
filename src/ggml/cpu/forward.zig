@@ -21,23 +21,6 @@
 
 const std = @import("std");
 const ggml = @import("../module.zig");
-const config = @import("config");
-
-/// Build-time switch that makes this file abort on a hot path.
-///
-/// Off by default and compiled out entirely. Separate from `alloc.zig`'s
-/// `probe_ported` because a single flag would only ever prove whichever site
-/// runs first, and these two run in different phases: allocation while the
-/// graph is being planned, dispatch while it is being computed.
-/// Aborts if the probe is enabled, proving the CPU dispatch is reached.
-///
-/// It is reached: with Metal carrying the model, most ops never touch this
-/// file, but some do fall back and the probe fires on the first of them. That
-/// is exactly what makes it worth having -- "the port links" and "the port
-/// runs" are different claims.
-inline fn probe() void {
-    if (config.probe_cpu) @panic(ggml.alloc.probe_marker);
-}
 
 /// `ggml-cpu/traits.cpp`'s entry point, ported.
 ///
@@ -49,8 +32,6 @@ inline fn probe() void {
 /// - `params`: this thread's index, count, and slice of the work buffer.
 /// - `tensor`: the node to compute, in place, into its own `data`.
 pub fn computeForward(params: *const ggml.cpu.defs.ComputeParams, tensor: *ggml.impl.ggml_c.ggml_tensor) void {
-    probe();
-
     if (tensor.op == ggml.impl.ggml_c.GGML_OP_NONE or ggml.types.ggml_is_empty(tensor)) return;
 
     // An extra-buffer op, handled by an accelerator rather than by us.

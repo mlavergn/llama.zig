@@ -13,7 +13,7 @@
 //! `regex_traits<char>::lookup_classname` and `lookup_collatename`. A probe
 //! instantiated `[[:name:]]`, `[[.name.]]` and `[[=name=]]` for every
 //! POSIX name and tested each against all 256 bytes; the tables below are
-//! its output. `scripts/regex-diff` keeps them honest.
+//! its output. `testing/scripts/regex-diff` keeps them honest.
 //!
 //! **Not upstream llama.cpp code**, so citations name the libc++ template
 //! rather than a file and line, as in `libcxx.zig`.
@@ -67,7 +67,7 @@ const m_graph: Mask = m_alnum | m_punct;
 /// `ctype<wchar_t>::do_is` reads that same table for ASCII (line 694 of
 /// `src/locale.cpp` in the libc++ the reference links -- libc++'s, not a
 /// citation of upstream). On Windows the table is the UCRT's,
-/// whose `_BLANK` marks the space alone -- measured by `scripts/regex-diff`
+/// whose `_BLANK` marks the space alone -- measured by `testing/scripts/regex-diff`
 /// built for Windows, which answered the open question: `[[:blank:]]`
 /// misses `\t` there in `std::regex` and `std::wregex` alike, and no other
 /// byte, code point or class differs.
@@ -76,7 +76,7 @@ const tab_is_blank = @import("builtin").os.tag != .windows;
 /// The `"C"` locale's `ctype` classification of a character. Apple's
 /// `ctype<char>::is` answers false for every byte above 0x7f, and
 /// `ctype<wchar_t>::is` for every code point above it -- measured over all
-/// 0x110000 by `scripts/regex-diff`, on Windows too.
+/// 0x110000 by `testing/scripts/regex-diff`, on Windows too.
 fn ctypeOf(ch: u32) Mask {
     if (ch >= 0x80) return 0;
     var m: Mask = 0;
@@ -229,7 +229,7 @@ pub const Error = error{
 };
 
 /// The `std::regex_constants::error_type` value libc++ gives each error,
-/// for `scripts/regex-diff` to compare against `regex_error::code()`.
+/// for `testing/scripts/regex-diff` to compare against `regex_error::code()`.
 ///
 /// Parameters:
 /// - `err`: the error.
@@ -563,7 +563,7 @@ pub fn BasicRegex(comptime CharT: type) type {
         }
 
         /// `search`, returning the `regex_error` a match can throw instead of
-        /// terminating. For `scripts/regex-diff`.
+        /// terminating. For `testing/scripts/regex-diff`.
         ///
         /// Return: whether a match was found, or `error.Complexity`.
         pub fn trySearch(self: *const Self, input: []const CharT, m: *Match) Error!bool {

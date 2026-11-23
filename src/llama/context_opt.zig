@@ -21,7 +21,7 @@
 //! `param_filter`, walking `llama_layer` as an array of pointers, so the
 //! order of those calls is the order of the C++ struct's members, its
 //! nested structs' included. The port's `Layer` is generated from
-//! `llama_layer` in that order (`scripts/gen-layer`), so `setLayerParams`
+//! `llama_layer` in that order (`testing/scripts/gen-layer`), so `setLayerParams`
 //! walks its fields as declared and recurses into the nested ones. The
 //! model-level tensors are offered in the C++'s order too.
 

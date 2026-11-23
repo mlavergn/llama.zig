@@ -31,7 +31,7 @@
 //! # Ungated on this machine (one GPU)
 //!
 //! The reference accepts the same device more than once, which is what lets
-//! `scripts/meta-diff` run this with two, three and four Metal backends on one
+//! `testing/scripts/meta-diff` run this with two, three and four Metal backends on one
 //! GPU, and with Metal beside the CPU. That reaches the butterfly all-reduce,
 //! the non-power-of-two fold, the segmented Qwen3.5 weights and the zero-slice
 //! paths. What it cannot reach is marked "ungated on this machine (one GPU)"
@@ -356,7 +356,7 @@ const device_iface: mod.impl.ggml_c.struct_ggml_backend_device_i = .{
 /// Ports `ggml_backend_dev_is_meta` (ggml-backend-meta.cpp:198 @b1b770d90).
 ///
 /// Identity is the `get_name` function's address, so a device made by another
-/// implementation of this file (the reference, in `scripts/meta-diff`) is not
+/// implementation of this file (the reference, in `testing/scripts/meta-diff`) is not
 /// one of ours.
 fn devIsMeta(dev: mod.impl.ggml_c.ggml_backend_dev_t) bool {
     return dev != null and dev.*.iface.get_name == device_iface.get_name;

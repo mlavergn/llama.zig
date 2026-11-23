@@ -1,3 +1,0 @@
-#!/bin/sh
-# See scripts/zigcc. Same reason, C++ driver.
-exec zig c++ -mcpu=baseline "$@"

@@ -5,7 +5,7 @@ const zon = @import("build.zig.zon");
 const llamacpp = @import("build/llamacpp.zig");
 const tools_build = @import("build/tools.zig");
 const mtmd_build = @import("build/mtmd.zig");
-const server_http_build = @import("build/server_http.zig");
+const server_http_build = @import("testing/build/server_http.zig");
 const server_task_build = @import("build/server_task.zig");
 const ui_build = @import("build/ui.zig");
 
@@ -241,7 +241,7 @@ fn cudaOptions(b: *std.Build, target: std.Build.ResolvedTarget) ?llamacpp.Cuda {
     const libstdcxx = std.mem.trim(u8, b.run(&.{ "g++", "-print-file-name=libstdc++.so" }), " \r\n\t");
     // The swap: the Zig host layer is the CUDA
     // backend. `-Dcuda-port=false` builds upstream's instead, which only the
-    // gates want -- `scripts/cuda-node-diff` diffs the two.
+    // gates want -- `testing/scripts/cuda-node-diff` diffs the two.
     const port = b.option(bool, "cuda-port", "Use the Zig CUDA host layer (default: true; false builds upstream's, for the gates)") orelse true;
     // Upstream's `GGML_CUDA_FA_QUANTS`. "all" is every K/V pair
     // (`GGML_CUDA_FA_ALL_QUANTS`); a shorter list is how the
@@ -278,7 +278,7 @@ fn blasOptions(b: *std.Build, target: std.Build.ResolvedTarget) ?llamacpp.Blas {
 /// `configureVulkan` do.
 ///
 /// Off unless `-Dvulkan`. The toolchain defaults to the pinned one in
-/// `.tools/vulkan/` (`scripts/vk-toolchain`) where it
+/// `.tools/vulkan/` (`testing/scripts/vk-toolchain`) where it
 /// exists, else `glslc` on PATH and `/usr/include`: which `glslc` and which
 /// headers decide which C++ compiles, so the gates pass the same ones to both
 /// sides. A probe counts as supported unless `glslc`'s diagnostics say
@@ -297,7 +297,7 @@ fn vulkanOptions(b: *std.Build) ?llamacpp.Vulkan {
     // The swap: the Zig host layer is the
     // Vulkan backend. `-Dvulkan-port=false` builds upstream's
     // `ggml-vulkan.cpp` instead, which only the gates want --
-    // `scripts/vk-node-diff` and `scripts/vk-parity-cli` diff the two.
+    // `testing/scripts/vk-node-diff` and `testing/scripts/vk-parity-cli` diff the two.
     const port = b.option(bool, "vulkan-port", "Use the Zig Vulkan host layer (default: true; false builds upstream's, for the gates)") orelse true;
     if (!enabled) return null;
 
@@ -420,10 +420,6 @@ pub fn build(b: *std.Build) !void {
         else
             null;
 
-    // Proves ported code is on the execution path. See scripts/probe-ported.
-    const probe_ported = b.option(bool, "probe-ported", "Abort from ported code on a hot path, to prove it runs") orelse false;
-    const probe_cpu = b.option(bool, "probe-cpu", "Abort from the ported CPU backend, to prove it runs") orelse false;
-
     const cuda = cudaOptions(b, cfg.target);
     const vulkan = vulkanOptions(b);
     const blas = blasOptions(b, cfg.target);
@@ -432,8 +428,6 @@ pub fn build(b: *std.Build) !void {
         .optimize = cfg.optimize,
         .sdk = sdk,
         .libc_file = libc_file,
-        .probe_ported = probe_ported,
-        .probe_cpu = probe_cpu,
         .cuda = cuda,
         .vulkan = vulkan,
         .blas = blas,
@@ -443,8 +437,8 @@ pub fn build(b: *std.Build) !void {
     const llama_install = b.addInstallArtifact(reference.llama, .{});
     const llama_ref_install = b.addInstallArtifact(reference.llama_ref, .{});
 
-    // Tests for ported ggml code that has not been swapped into the library
-    // yet. See src/ggml/ported.zig for why this cannot live in `test`.
+    // ggml's unit tests, rooted at src/ggml/module.zig with the C-free
+    // configuration (no Metal, CUDA, Vulkan or BLAS).
     const ported_tests = b.addTest(.{
         .root_module = llamacpp.portedTestModule(b, .{
             .target = cfg.target,
@@ -457,8 +451,26 @@ pub fn build(b: *std.Build) !void {
     const ported_tests_run = b.addRunArtifact(ported_tests);
     ported_tests_run.has_side_effects = true;
 
-    const ported_step = b.step("test-port", "Test ported ggml code not yet swapped in");
+    // ggml's goldens (testing/golden/): the bits the C reference computes for
+    // kernels no other gate reaches, held against the port imported as the
+    // module `ggml`.
+    const golden_mod = b.createModule(.{
+        .root_source_file = b.path("testing/golden/module.zig"),
+        .target = cfg.target,
+        .optimize = cfg.optimize,
+    });
+    golden_mod.addImport("ggml", ported_tests.root_module);
+    const golden_tests = b.addTest(.{
+        .root_module = golden_mod,
+        .use_llvm = true,
+        .filters = test_filters,
+    });
+    const golden_tests_run = b.addRunArtifact(golden_tests);
+    golden_tests_run.has_side_effects = true;
+
+    const ported_step = b.step("test-port", "Run ggml's unit tests and goldens");
     ported_step.dependOn(&ported_tests_run.step);
+    ported_step.dependOn(&golden_tests_run.step);
 
     // The ported libllama's unit tests. They compile with the library's own
     // module -- rooted at src/llama/module.zig, with the C++ that is still
@@ -478,8 +490,6 @@ pub fn build(b: *std.Build) !void {
         .target = cfg.target,
         .optimize = cfg.optimize,
         .sdk = sdk,
-        .probe_ported = probe_ported,
-        .probe_cpu = probe_cpu,
     });
     const ported_lib_step = b.step("ported-lib", "Build a library from the ported Zig alone");
     ported_lib_step.dependOn(&b.addInstallArtifact(ported_lib, .{}).step);
@@ -526,7 +536,7 @@ pub fn build(b: *std.Build) !void {
     const llama_h_module = llama_h.createModule();
 
     const smoke_module = b.createModule(.{
-        .root_source_file = b.path("harness/smoke.zig"),
+        .root_source_file = b.path("testing/harness/smoke.zig"),
         .target = cfg.target,
         .optimize = cfg.optimize,
         .link_libc = true,
@@ -670,7 +680,7 @@ pub fn build(b: *std.Build) !void {
         .ui = ui,
     });
 
-    // The http-diff harnesses (build/server_http.zig).
+    // The http-diff harnesses (testing/build/server_http.zig).
     server_http_build.add(b, .{ .target = cfg.target, .optimize = cfg.optimize, .sdk = sdk, .reference = reference, .mtmd_ref = mtmd_ref, .cuda = cuda, .ui = ui });
     // The server's data layer, its tests and the
     // server-task-diff harness (build/server_task.zig).
@@ -689,13 +699,13 @@ pub fn build(b: *std.Build) !void {
     b.modules.put(b.graph.arena, "llama_h", exports.llama_h) catch @panic("OOM");
     b.modules.put(b.graph.arena, "llama-server-core", exports.server_core) catch @panic("OOM");
 
-    // llama-server-core's tests (harness/server_core_test.zig): the entry
+    // llama-server-core's tests (testing/harness/server_core_test.zig): the entry
     // points a consumer calls, compiled, and a completion on a tiny model,
     // run in-process. They import the exports by name, as a consumer does,
     // so a renamed or dropped export fails here. For a target the host
     // cannot run (-Dtarget=x86_64-windows-gnu) they are compiled only.
     const core_test = b.createModule(.{
-        .root_source_file = b.path("harness/server_core_test.zig"),
+        .root_source_file = b.path("testing/harness/server_core_test.zig"),
         .target = cfg.target,
         .optimize = cfg.optimize,
         .link_libc = true,
@@ -705,7 +715,7 @@ pub fn build(b: *std.Build) !void {
     }
     const core_run = b.addRunArtifact(b.addTest(.{ .root_module = core_test }));
     core_run.skip_foreign_checks = true;
-    const core_test_step = b.step("test-server-core", "Run llama-server-core's tests (harness/server_core_test.zig): its API compiled, a completion run in-process; compile only for a foreign -Dtarget");
+    const core_test_step = b.step("test-server-core", "Run llama-server-core's tests (testing/harness/server_core_test.zig): its API compiled, a completion run in-process; compile only for a foreign -Dtarget");
     core_test_step.dependOn(&core_run.step);
 
     const mtmd_module = mtmd_build.add(b, .{

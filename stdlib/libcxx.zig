@@ -13,7 +13,7 @@
 //! **Not upstream llama.cpp code**, so there is no pinned commit to cite, and
 //! the citations below name the header and the template rather than a line.
 //! The SDK is not a repository `port-links` can read. What pins this file is
-//! the oracle instead: `scripts/libcxx-diff` runs every function here against
+//! the oracle instead: `testing/scripts/libcxx-diff` runs every function here against
 //! the real template, instantiated from the same headers, in one process.
 //!
 //! # Why reproduce a standard library

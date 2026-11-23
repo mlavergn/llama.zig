@@ -1,3 +1,0 @@
-#!/bin/bash
-# The audio cases use the vision cases' media: scripts/server-diff audio.
-exec "$(dirname "$0")/vision.setup"

@@ -14,7 +14,7 @@
 //! there is nothing in the ported code that could notice -- no assertion
 //! it violates, no pointer it invalidates.
 //!
-//! So this file is produced by `scripts/gen-kargs` from the header, and
+//! So this file is produced by `testing/scripts/gen-kargs` from the header, and
 //! `make struct-layout` compares every struct's size and alignment and
 //! every field's offset and width against the real header. Do not edit it
 //! by hand; change the generator and re-run it.
@@ -1350,7 +1350,7 @@ pub const silu_back = extern struct {
 // -----------------------------------------------------------------------------
 // The gate's view
 //
-// `harness/kargs_layout.cpp` includes the real header and compares these
+// `testing/harness/kargs_layout.cpp` includes the real header and compares these
 // against `offsetof`/`sizeof`. Names travel with the numbers so a
 // reordering cannot let two wrong entries cancel.
 

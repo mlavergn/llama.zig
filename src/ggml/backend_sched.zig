@@ -1924,7 +1924,7 @@ test "setCause and getCause are the compiled-out arm" {
 // Why the assignment passes are gated elsewhere
 //
 // **The five assignment passes have no unit test here, deliberately.** They are
-// gated by `make sched-diff`, which builds `harness/sched_dump.c` against the
+// gated by `make sched-diff`, which builds `testing/harness/sched_dump.c` against the
 // reference C and against this port and diffs the result.
 //
 // They need *some* gate, because no existing one could see them. Measured by

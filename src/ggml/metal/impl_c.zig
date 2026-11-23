@@ -333,7 +333,7 @@ pub const count: usize = 139;
 // -----------------------------------------------------------------------------
 // The gate's view
 //
-// `harness/struct_layout.cpp` includes the real header and compares these
+// `testing/harness/struct_layout.cpp` includes the real header and compares these
 // against its own `#define`s. Name and value travel together so a
 // reordering cannot let two wrong entries cancel. Every value is the
 // declaration above it, not a second copy of the number: a table of literals would

@@ -1,0 +1,542 @@
+#!/usr/bin/env python3
+"""Compare tools/common's sampler and speculative decoding with upstream's.
+
+`testing/harness/spec_ref.cpp` drives upstream's `common/` -- sampling.cpp,
+reasoning-budget.cpp, speculative.cpp, ngram-cache/-map/-mod.cpp, compiled
+unmodified into libllama-common-ref over libllama-ref -- and
+`testing/harness/spec_diff.zig` the port, through the same script. Each case runs
+both, one process each, and requires the same exit code, the same stdout
+byte for byte (every draft, accepted run, the target sampler's candidates on
+bits, the n-gram stores' iteration order and saved bytes, the reasoning
+budget's states) and the same stderr -- common_log's every line -- after
+masking what differs by design: timings, pointers, an abort's backtrace.
+
+Two decoders over real models: Qwen3-0.6B as target and draft, and the arch
+fixtures' draft architectures (EAGLE3 over a 256-wide Gemma 4, DFlash and
+DSpark over Nemotron-H). Both sides decode through their own libllama over
+the one libggml.a; context-diff holds those to the same bits.
+
+Every phrase in PHRASES must appear in some reference transcript, so a case
+list that drifted away from an arm fails instead of passing on nothing.
+
+Usage: testing/scripts/spec-diff [case-substring ...]
+  SPEC_DIFF_OUT=<dir>   keep every case's transcripts there
+  SPEC_DIFF_NOBUILD=1   use the binaries already in zig-out/spec-diff
+  SPEC_DIFF_PREFIX=<p>  build into and run from <p>/spec-diff instead of zig-out, so a
+                        run touches nothing another gate reads from zig-out
+"""
+
+import os
+import re
+import shutil
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+os.chdir(ROOT)
+
+Q = "Qwen3-0.6B-Q8_0.gguf"
+Q35 = "Qwen3.5-2B-Q4_K_M.gguf"
+F = "zig-out/arch-fixtures"
+
+T1 = "The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick"
+T2 = "def fib(n):\n    if n < 2:\n        return n\n    return fib(n - 1) + fib(n - 2)\n\ndef fib2(n):\n"
+T3 = "Count: one, two, three, four, five, six, seven,"
+T4 = "<think>\nThe user wants a list of colours. Let me think about"
+IDS = "#ids:1,5,9,3,7,2,8,4,6,1,5,9,3,7,2,8,4"
+IDS2 = "#ids:3,3,4,5,6,7,8,9,10,11,3,3,4,5,6|#ids:20,21,22,23,20,21,22,23,24,25,20,21"
+
+COMMON = ["-lv", "5", "--no-log-timestamps", "-s", "7", "-c", "512"]
+FIX = ["-lv", "4", "--no-log-timestamps", "-s", "7", "-c", "256"]
+# the draft fixtures rewritten with a vocabulary (testing/harness/spec_fixtures.c):
+# DFlash's noise block needs a mask token, and the drafters' candidate log a
+# piece for every token; the targets keep none, so -lv 5 is safe with them
+FIXV = ["-lv", "5", "--no-log-timestamps", "-s", "7", "-c", "256"]
+FX = "@FX"
+FX_SOURCES = ["dflash-dense", "dflash-iswa", "dflash2", "dflash-dspark", "dflash-dspark-bonus", "dflash-dspark-noconf",
+              "eagle3-dense", "eagle3-d2t", "dflash-lilicorr", "dflash-lilicorr-wide"]
+
+GGUFS = ":".join([f"{F}/dflash-dense.gguf", f"{F}/dflash-dspark.gguf", f"{F}/dflash2.gguf", f"{F}/eagle3-dense.gguf",
+                  Q, f"{F}/qwen35-dense.gguf", f"{F}/step35-moe.gguf", "/nonexistent.gguf",
+                  # common_get_gguf_info: spec_fixtures --decision's metadata, and a file that is no GGUF
+                  "testing/scripts/spec-diff"] + [f"@FX/decision-{i}.gguf" for i in range(13)] +
+                 [f"@FX/decision-{n}.gguf" for n in ("none", "u32", "ctx64", "noarch", "emptyarch")])
+
+
+def case(name, args, env=None, mode="run"):
+    return (name, mode, args, env or {})
+
+
+CASES = [
+    case("api", ["-m", Q] + COMMON, {"SPEC_GGUFS": GGUFS, "LLAMA_TRACE": "1"}, mode="api"),
+    # a draft model
+    case("draft-simple", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "-p", T1, "-n", "32", "--temp", "0"] + COMMON),
+    case("draft-simple-cpu-2seq", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "-np", "2", "-p", T1 + "|" + T2, "-n", "24",
+                                   "--temp", "0", "-dev", "none", "-devd", "none"] + COMMON),
+    case("draft-simple-sampled", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "-p", T3, "-n", "40", "--temp", "0.8",
+                                  "--spec-draft-n-max", "6", "--spec-draft-n-min", "2", "--spec-draft-p-min", "0.6"] + COMMON),
+    case("draft-simple-grammar", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "-p", T1, "-n", "24", "--temp", "0",
+                                  "--grammar", "root ::= [a-z ]+ \".\""] + COMMON),
+    case("draft-simple-pmin", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "-p", T2, "-n", "32", "--temp", "0",
+                               "--spec-draft-n-max", "8", "--spec-draft-p-min", "0.95"] + COMMON),
+    case("draft-simple-no-draft", ["-m", Q, "--spec-type", "draft-simple", "-p", T1, "-n", "8", "--temp", "0"] + COMMON),
+    case("draft-simple-vocab-mismatch", ["-m", Q, "-md", Q35, "--spec-type", "draft-simple", "-p", T1, "-n", "8", "--temp", "0"] + COMMON),
+    case("synth-len", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "-p", T1, "-n", "16", "--temp", "0"] + COMMON,
+         {"SPEC_SYNTH_LEN": "2.5"}),
+    case("synth-rates-bad", ["-m", Q, "--spec-type", "ngram-mod", "-p", T1, "-n", "8", "--temp", "0"] + COMMON,
+         {"SPEC_SYNTH_RATES": "0.5,0.9"}),
+    case("synth-reduced", ["-m", Q, "-md", Q, "--spec-type", "ngram-cache,draft-simple", "-p", T1, "-n", "8",
+                           "--temp", "0", "--spec-draft-n-max", "12", "-dev", "none", "-devd", "none"] + COMMON,
+         {"SPEC_SYNTH_RATES": "0.9,0.8,0.8,0.7,0.6,0.5,0.4,0.3,0.2,0.1,0.1,0.0"}),
+    # self-speculation
+    case("ngram-simple", ["-m", Q, "--spec-type", "ngram-simple", "-p", T1, "-n", "48", "--temp", "0",
+                          "--spec-ngram-simple-size-n", "3", "--spec-ngram-simple-size-m", "6"] + COMMON),
+    case("ngram-map-k-2seq", ["-m", Q, "--spec-type", "ngram-map-k", "-np", "2", "-p", T1 + "|" + T3, "-n", "40", "--temp", "0",
+                              "--spec-ngram-map-k-size-n", "2", "--spec-ngram-map-k-size-m", "5"] + COMMON),
+    case("ngram-map-k4v", ["-m", Q, "--spec-type", "ngram-map-k4v", "-p", T2, "-n", "48", "--temp", "0",
+                           "--spec-ngram-map-k4v-size-n", "2", "--spec-ngram-map-k4v-size-m", "4",
+                           "--spec-ngram-map-k4v-min-hits", "1"] + COMMON),
+    case("ngram-mod-hot", ["-m", Q, "--spec-type", "ngram-mod", "-p", T3 + " " + T3, "-n", "64", "--temp", "4",
+                           "--top-k", "0", "--top-p", "1", "--min-p", "0", "--spec-ngram-mod-n-match", "2",
+                           "--spec-ngram-mod-n-max", "8"] + COMMON,
+         {"LLAMA_TRACE": "1"}),
+    case("ngram-mod", ["-m", Q, "--spec-type", "ngram-mod", "-p", T1 + " " + T1, "-n", "48", "--temp", "0",
+                       "--spec-ngram-mod-n-match", "4", "--spec-ngram-mod-n-max", "8", "--spec-ngram-mod-n-min", "1"] + COMMON,
+         {"LLAMA_TRACE": "1"}),
+    case("ngram-cache", ["-m", Q, "--spec-type", "ngram-cache", "-p", T1, "-n", "40", "--temp", "0"] + COMMON),
+    # the dynamic cache is saved on destruction, so each side gets its own copy, and the bytes are compared
+    case("ngram-cache-files", ["-m", Q, "--spec-type", "ngram-cache", "-p", T3, "-n", "32", "--temp", "0"] + COMMON,
+         {"SPEC_LCS": "@TMP/cache_3.bin", "SPEC_LCD": "@TMP/dyn_@SIDE.bin", "_COPY": "merged_2.bin"}),
+    # a missing dynamic cache starts empty, and destruction writes it
+    case("ngram-cache-dynamic-new", ["-m", Q, "--spec-type", "ngram-cache", "-p", T3, "-n", "32", "--temp", "0"] + COMMON,
+         {"SPEC_LCD": "@TMP/dyn_@SIDE.bin"}),
+    case("ngram-cache-dynamic-2seq", ["-m", Q, "--spec-type", "ngram-cache", "-np", "2", "-p", T1 + "|" + T3, "-n", "24",
+                                      "--temp", "0"] + COMMON,
+         {"SPEC_LCD": "@TMP/dyn_@SIDE.bin"}),
+    # a path that cannot be opened and is no missing file aborts
+    case("ngram-cache-dynamic-bad", ["-m", Q, "--spec-type", "ngram-cache", "-p", T3, "-n", "8", "--temp", "0"] + COMMON,
+         {"SPEC_LCD": "@TMP/unreadable.bin", "_UNREADABLE": "1"}),
+    case("ngram-cache-missing", ["-m", Q, "--spec-type", "ngram-cache", "-p", T3, "-n", "8", "--temp", "0"] + COMMON,
+         {"SPEC_LCS": "@TMP/nope.bin"}),
+    case("chain", ["-m", Q, "-md", Q, "--spec-type", "ngram-mod,ngram-map-k,draft-simple", "-np", "2", "-p", T2 + "|" + T1,
+                   "-n", "40", "--temp", "0", "--spec-ngram-mod-n-match", "16"] + COMMON),
+    # the reasoning budget, in the target sampler
+    case("rbudget-3", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "-p", T4, "-n", "32", "--temp", "0"] + COMMON,
+         {"SPEC_RBUDGET": "3", "SPEC_GEN_PROMPT": "<think>\n"}),
+    case("rbudget-0-genprompt", ["-m", Q, "--spec-type", "ngram-simple", "-p", T4, "-n", "24", "--temp", "0"] + COMMON,
+         {"SPEC_RBUDGET": "0", "SPEC_GEN_PROMPT": "<think>\n"}),
+    case("rbudget-big", ["-m", Q, "-p", T4, "-n", "24", "--temp", "0.7"] + COMMON, {"SPEC_RBUDGET": "50", "SPEC_GEN_PROMPT": " <think>"}),
+    case("rbudget-lazy-grammar", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "-p", T4, "-n", "40", "--temp", "0",
+                                  "--grammar", "root ::= (\"blue\" | \"red\" | \"green\" | [^\\x00]) [^\\x00]*"] + COMMON,
+         {"SPEC_RBUDGET": "4", "SPEC_GEN_PROMPT": "<think>\n", "SPEC_TRIGGER": "blue", "SPEC_TRIGGER_FULL": "(.|\n)*colour", "SPEC_TRIGGER_PATTERN": "red|gr[e]en"}),
+    case("tool-grammar-prefill", ["-m", Q, "-p", T1, "-n", "12", "--temp", "0", "--grammar", "root ::= [a-z ]+ \".\"", "-bs"] + COMMON,
+         {"SPEC_TOOL_GRAMMAR": "1", "SPEC_GEN_PROMPT": "the "}),
+    # the draft architectures
+    case("eagle3", ["-m", f"{F}/gemma4-dense.gguf", "-md", f"{FX}/eagle3-dense.gguf", "--spec-type", "draft-eagle3", "-p", IDS,
+                    "-n", "16", "--temp", "0"] + FIXV),
+    case("eagle3-novocab", ["-m", f"{F}/gemma4-dense.gguf", "-md", f"{F}/eagle3-dense.gguf", "--spec-type", "draft-eagle3", "-p", IDS,
+                            "-n", "16", "--temp", "0"] + FIX),
+    case("dflash-novocab", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{F}/dflash-dense.gguf", "--spec-type", "draft-dflash",
+                            "-p", IDS, "-n", "8", "--temp", "0"] + FIX),
+    case("eagle3-d2t-2seq", ["-m", f"{F}/gemma4-dense.gguf", "-md", f"{FX}/eagle3-d2t.gguf", "--spec-type", "draft-eagle3",
+                             "-np", "2", "-p", IDS2, "-n", "16", "--temp", "0", "--spec-draft-n-max", "5"] + FIXV),
+    case("eagle3-cpu", ["-m", f"{F}/gemma4-dense.gguf", "-md", f"{FX}/eagle3-dense.gguf", "--spec-type", "draft-eagle3", "-p", IDS,
+                        "-n", "16", "--temp", "0", "-dev", "none", "-devd", "none"] + FIXV),
+    case("dflash", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-dense.gguf", "--spec-type", "draft-dflash", "-p", IDS,
+                    "-n", "16", "--temp", "0"] + FIXV),
+    # DFlash takes the target's features from its device buffer where the draft can read rows
+    # of it (llama_supports_embd_row); LLAMA_DFLASH_DEV=0 keeps the host copies every case used before
+    case("dflash-host", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-dense.gguf", "--spec-type", "draft-dflash",
+                         "-p", IDS, "-n", "16", "--temp", "0"] + FIXV, {"LLAMA_DFLASH_DEV": "0"}),
+    case("dflash-iswa-clamp", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-iswa.gguf", "--spec-type", "draft-dflash",
+                               "-p", IDS, "-n", "16", "--temp", "0", "--spec-draft-n-max", "40", "--spec-draft-n-min", "2"] + FIXV,
+         {"SPEC_SYNTH_LEN": "2"}),
+    case("dflash2", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash2.gguf", "--spec-type", "draft-dflash", "-p", IDS,
+                     "-n", "16", "--temp", "0", "--spec-draft-p-min", "0.2"] + FIXV),
+    # DFlash2 samples its lattice and hands q to the verifier
+    case("dflash2-reject", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash2.gguf", "--spec-type", "draft-dflash",
+                            "--spec-draft-sampling", "probabilistic", "-p", IDS, "-n", "24", "--temp", "0.7", "--seed", "42"] + FIXV,
+         {"SPEC_REJECT": "1"}),
+    case("dflash2-reject-pmin", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash2.gguf", "--spec-type", "draft-dflash",
+                                 "--spec-draft-sampling", "probabilistic", "-p", IDS, "-n", "24", "--temp", "1.3", "--seed", "7",
+                                 "--spec-draft-p-min", "0.2", "--spec-draft-n-min", "2"] + FIXV,
+         {"SPEC_REJECT": "1"}),
+    case("dspark", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-dspark.gguf", "--spec-type", "draft-dspark", "-p", IDS,
+                    "-n", "16", "--temp", "0", "--spec-draft-p-min", "0.3"] + FIXV),
+    case("dspark-bonus-2seq", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-dspark-bonus.gguf", "--spec-type",
+                               "draft-dspark", "-np", "2", "-p", IDS2, "-n", "16", "--temp", "0"] + FIXV),
+    case("mtp-gemma4", ["-m", f"{FX}/gemma4-moe.gguf", "-md", f"{FX}/gemma4-assistant.gguf", "--spec-type", "draft-mtp",
+                        "-p", IDS, "-n", "16", "--temp", "0"] + FIX),
+    case("mtp-gemma4-2seq-cpu", ["-m", f"{FX}/gemma4-moe.gguf", "-md", f"{FX}/gemma4-assistant.gguf", "--spec-type", "draft-mtp",
+                                 "-np", "2", "-p", IDS2, "-n", "16", "--temp", "0", "-dev", "none", "-devd", "none",
+                                 "--spec-draft-n-max", "4"] + FIX),
+    # probabilistic drafting verified by rejection: the server's path at temp > 0
+    case("draft-simple-reject", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "--spec-draft-sampling", "probabilistic",
+                                 "-p", T3, "-n", "40", "--temp", "0.8", "--spec-draft-n-max", "6"] + COMMON,
+         {"SPEC_REJECT": "1"}),
+    case("draft-simple-reject-grammar", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "--spec-draft-sampling",
+                                         "probabilistic", "-p", T1, "-n", "24", "--temp", "1.1",
+                                         "--grammar", "root ::= [a-z ]+ \".\""] + COMMON,
+         {"SPEC_REJECT": "1"}),
+    # a grammar the model fights, so the target's candidates mostly break it and the mask matters
+    case("draft-simple-reject-grammar-digits", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "--spec-draft-sampling",
+                                                "probabilistic", "-p", T1, "-n", "40", "--temp", "1.5", "--top-k", "100",
+                                                "--grammar", "root ::= [0-9 ]+"] + COMMON,
+         {"SPEC_REJECT": "1"}),
+    case("draft-simple-reject-greedy-draft", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "-np", "2", "-p", T1 + "|" + T3,
+                                              "-n", "24", "--temp", "0.8"] + COMMON,
+         {"SPEC_REJECT": "1"}),
+    case("mtp-reject", ["-m", f"{FX}/gemma4-moe.gguf", "-md", f"{FX}/gemma4-assistant.gguf", "--spec-type", "draft-mtp",
+                        "--spec-draft-sampling", "probabilistic", "-p", IDS, "-n", "16", "--temp", "0.7",
+                        "--spec-draft-n-max", "4"] + FIX,
+         {"SPEC_REJECT": "1"}),
+    # greedy selection for an eligible temperature-zero chain, and where it is not
+    case("greedy-topk1", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "-p", T3, "-n", "24", "--temp", "0.8",
+                          "--samplers", "temperature;top_k", "--top-k", "1"] + COMMON),
+    case("temp0-nprobs", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "-p", T3, "-n", "16", "--temp", "0"] + COMMON,
+         {"SPEC_N_PROBS": "3"}),
+    case("temp0-dynatemp", ["-m", Q, "--spec-type", "ngram-simple", "-p", T1, "-n", "16", "--temp", "0",
+                            "--dynatemp-range", "0.5"] + COMMON),
+    case("topk1-not-last", ["-m", Q, "--spec-type", "ngram-simple", "-p", T1, "-n", "16", "--temp", "0.8",
+                            "--samplers", "top_k;temperature", "--top-k", "1"] + COMMON),
+    # the draft context's own n_ubatch (DFlash's feature injection chunks by it) and the MoE cache
+    case("dflash-n-ubatch", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-dense.gguf", "--spec-type", "draft-dflash",
+                             "-p", IDS, "-n", "16", "--temp", "0", "--spec-draft-n-ubatch", "4"] + FIXV),
+    case("draft-simple-n-ubatch", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "-p", T1, "-n", "16", "--temp", "0",
+                                   "--spec-draft-n-ubatch", "64"] + COMMON),
+    # the experts in host memory, the target cached on the GPU; the draft (the same model) must not ask for a cache
+    case("moe-cache", ["-m", f"{F}/qwen3moe-moe.gguf", "-md", f"{F}/qwen3moe-moe.gguf", "--spec-type", "draft-simple", "-p", IDS,
+                       "-n", "8", "--temp", "0", "--cpu-moe", "--moe-cache-mib", "64"] + FIX),
+    # the MTP drafter catches up an embedding prefill (an image's rows) instead of skipping it
+    case("mtp-gemma4-embd", ["-m", f"{FX}/gemma4-moe.gguf", "-md", f"{FX}/gemma4-assistant.gguf", "--spec-type", "draft-mtp",
+                             "-p", IDS, "-n", "16", "--temp", "0"] + FIX,
+         {"SPEC_PREFILL_EMBD": "1"}),
+    # on a shared memory (Gemma 4) the MTP head keeps only the last row of a batch whose
+    # other rows have no output; a prefill with its last token output reaches that arm
+    case("mtp-gemma4-lastout", ["-m", f"{FX}/gemma4-moe.gguf", "-md", f"{FX}/gemma4-assistant.gguf", "--spec-type",
+                                "draft-mtp", "-np", "2", "-p", IDS2, "-n", "16", "--temp", "0"] + FIX,
+         {"SPEC_PREFILL_LAST_OUT": "1"}),
+    # LiliCorr (lilicorr.candidate_topk), a DFlash whose head reads the draft's own projected
+    # embeddings of the last block as a state input and walks a candidate lattice, as DFlash2 does
+    case("lilicorr", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-lilicorr.gguf", "--spec-type", "draft-dflash",
+                      "-p", IDS, "-n", "16", "--temp", "0"] + FIXV),
+    case("lilicorr-pmin-nmax2", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-lilicorr.gguf", "--spec-type",
+                                 "draft-dflash", "-p", IDS, "-n", "16", "--temp", "0", "--spec-draft-n-max", "2",
+                                 "--spec-draft-p-min", "0.265"] + FIXV),
+    case("lilicorr-wide-2seq", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-lilicorr-wide.gguf", "--spec-type",
+                                "draft-dflash", "-np", "2", "-p", IDS2, "-n", "16", "--temp", "0"] + FIXV),
+    # v1.0.0 (a8fad21e9): an in-model MTP head (Qwen3.5) reads the target's hidden states from the
+    # device buffer (llama_set_embeddings_nextn_dev, common_batch::set_embd_state_row); every other
+    # MTP case is Gemma 4, whose shared memory never takes that path
+    case("mtp-qwen35-devrows", ["-m", f"{F}/mtp/qwen35-mtp-dense.gguf", "--spec-type", "draft-mtp",
+                                "-p", IDS, "-n", "16", "--temp", "0"] + FIX),
+    case("mtp-qwen35-devrows-2seq", ["-m", f"{F}/mtp/qwen35-mtp-dense.gguf", "--spec-type", "draft-mtp",
+                                     "-np", "2", "-p", IDS2, "-n", "16", "--temp", "0"] + FIX),
+    # the server's common_context_can_seq_rm probe on each context; a draft context with a
+    # state input (MTP, LiliCorr) decodes the probe with zero state rows
+    case("seq-rm-mtp", ["-m", f"{FX}/gemma4-moe.gguf", "-md", f"{FX}/gemma4-assistant.gguf", "--spec-type", "draft-mtp",
+                        "-p", IDS, "-n", "8", "--temp", "0"] + FIX, {"SPEC_SEQ_RM": "1"}),
+    case("seq-rm-lilicorr", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-lilicorr.gguf", "--spec-type",
+                             "draft-dflash", "-p", IDS, "-n", "8", "--temp", "0"] + FIXV, {"SPEC_SEQ_RM": "1"}),
+    case("seq-rm-draft-simple", ["-m", Q, "-md", Q, "--spec-type", "draft-simple", "-p", T1, "-n", "8", "--temp", "0"] + COMMON,
+         {"SPEC_SEQ_RM": "1"}),
+    case("dspark-noconf", ["-m", f"{F}/nemotron_h-dense.gguf", "-md", f"{FX}/dflash-dspark-noconf.gguf", "--spec-type",
+                           "draft-dspark", "-p", IDS, "-n", "8", "--temp", "0", "--spec-draft-p-min", "0.5"] + FIXV),
+]
+
+# Cases where upstream itself aborts, and the port must abort alike.
+# dflash-novocab is one: a draft without a mask token puts
+# LLAMA_TOKEN_NULL in the noise block, which common_batch takes for an
+# embedding entry with no data, and get_sub_batch aborts.
+EXPECT_ABORT = {"ngram-cache-missing", "ngram-cache-dynamic-bad", "dflash-novocab"}
+
+# Each must appear in some reference transcript (stdout or stderr).
+PHRASES = [
+    "from_names 'bogus' -> invalid_argument: unknown speculative type: bogus",
+    "invalid_argument: synthetic acceptance rates must contain",
+    "invalid_argument: synthetic acceptance length must be finite",
+    "auto-detected speculative type 'draft-dspark'",
+    "from_gguf " + Q + " -> ''",
+    "load missing: Unable to open file",
+    "budget exhausted, forcing end sequence",
+    "budget exhausted, waiting for UTF-8 completion",
+    "UTF-8 complete, now forcing end sequence",
+    "re-activated on new start tag",
+    "budget=0, forcing immediately",
+    "forced into forcing state (manual transition)",
+    "deactivated (natural end)",
+    "forced sequence complete, done",
+    "found matching pattern at pos",
+    "refresh map:",
+    "shrink cleanup begin",
+    "unable to match sampler by name 'bogus'",
+    "unable to match sampler by char '?'",
+    "adding speculative implementation 'draft-simple'",
+    "adding speculative implementation 'ngram-simple'",
+    "adding speculative implementation 'ngram-map-k'",
+    "adding speculative implementation 'ngram-map-k4v'",
+    "adding speculative implementation 'ngram-mod'",
+    "adding speculative implementation 'ngram-cache'",
+    "adding speculative implementation 'draft-eagle3'",
+    "adding speculative implementation 'draft-dflash'",
+    "adding speculative implementation 'draft-dspark'",
+    "adding speculative implementation 'draft-mtp'",
+    "DFlash target features via host copies",
+    "DFlash target features via device buffer",
+    "is too small - poor quality is possible",
+    "ngram_mod occupancy =",
+    "low acceptance streak",
+    "draft candidate",
+    "truncating draft to",
+    "called impl ngram-mod",
+    "called impl draft-simple",
+    "called impl draft-eagle3",
+    "called impl draft-dflash",
+    "called impl draft-dspark",
+    "called impl ngram-cache",
+    "called impl ngram-map-k4v",
+    "called impl ngram-simple",
+    "statistics ",
+    "#mean acc len",
+    "synthetic speculative acceptance is enabled for benchmarking",
+    "synthetic acceptance draft limit was reduced",
+    "synthetic acceptance: n_max",
+    "exception: draft-simple requires a draft context",
+    "exception: draft model vocab type must match target model to use speculation",
+    "the target and draft vocabs are not compatible",
+    "exceeds the trained block size",
+    "failed to open static lookup cache",
+    "Couldn't read static lookup cache",
+    "dynamic lookup cache file does not exist",
+    "saving dynamic lookup cache at",
+    "failed to open dynamic lookup cache",
+    "Couldn't read dynamic lookup cache",
+    "reasoning-budget accepted prefill token",
+    "grammar accepted prefill token",
+    "prefill token:",
+    "backend sampling is not compatible with grammar",
+    "loading draft model",
+    "getting device memory data for the extra model",
+    "rb force 1",
+    "  rejection",
+    "failed to add embedding at index",
+    "-> greedy  seed=",
+    "-> temp-ext -> dist  seed=",
+    "cparams ubatch=512/4 ",
+    "moe_cache=67108864/0",
+    "MoE cache size =",
+    "decision 11 n_ctx_train 1234",
+    "decision 5 n_ctx_train 0",
+    "runtime_error: Grammar trigger word should be marked as preserved token",
+    "runtime_error: Error: no triggers set for lazy grammar!",
+    "stdo on, written",
+    "seq_rm dft=",
+]
+
+MASKS = [
+    # each side's own dynamic cache file
+    (re.compile(r"dyn_(?:ref|port)\.bin"), "dyn_SIDE.bin"),
+    (re.compile(r"took [0-9.]+ (ms|seconds)"), "took T"),
+    # The Metal backend compiles its libraries at start-up and says how long each took
+    (re.compile(r"library in [0-9.]+ sec"), "library in T sec"),
+    (re.compile(r"embedded data in [0-9.]+ sec \(max single = [0-9.]+ sec\)"), "embedded data in T sec (max single = T sec)"),
+    (re.compile(r"0x[0-9a-f]+"), "0xP"),
+    (re.compile(r"dur\(b,g,a\) = [0-9., ]+ ms"), "dur(b,g,a) = T ms"),
+    (re.compile(r"\d+\.\d+ ms(?: per token)?"), "T ms"),
+    # A unified-memory GPU's free memory (the GB10's CUDA0) is read live as
+    # each side runs, one after the other; on the Mac these never moved.
+    (re.compile(r"final available_memory_kb: \d+"), "final available_memory_kb: N"),
+    (re.compile(r" - \d+ MiB free$"), " - N MiB free"),
+    (re.compile(r"vs\. \d+ MiB of free device memory"), "vs. N MiB of free device memory"),
+    (re.compile(r"will leave -?\d+ ([<>]=?) \d+ MiB"), r"will leave N \1 M MiB"),
+    (re.compile(r"= +\d+ \+ \("), "= N + ("), (re.compile(r"\) \+ +\d+ \|"), ") + N |"),
+]
+BACKTRACE = re.compile(r"^\d+\s+\S+\s+0x")
+# On Linux ggml_print_backtrace attaches gdb, whose lines -- a thread list,
+# frames and their source lines (`2093<TAB>...`, a different source on each
+# side), a missing-source warning glued to whatever the process wrote last
+# -- land in both streams and differ every run. GGML_NO_BACKTRACE would
+# silence them, but the attach is also what gives upstream's log worker time
+# to write the lines queued before the abort: without it the GB10 lost
+# ngram-cache-missing's last three. So they are dropped here instead.
+GDB_LINE = re.compile(r"^\[New LWP \d+\]$|^\[New Thread |^\[Thread debugging |^Using host libthread_db|"
+                      r"^\[Inferior \d+ |^#\d+ |^0x[0-9a-f]+ in |^\d+\t|^warning: \d+\t")
+GDB_TAIL = re.compile(r"warning: \d+\t\S+: No such file or directory$")
+# a backtrace glued to a log line that had no newline when the process died
+TRACE_TAIL = re.compile(r"\d+\s+spec_(?:ref|diff)\s+0x.*$")
+# GGML_ABORT's text: upstream passes __FILE__, the port a file name; and the
+# abort races the C++'s asynchronous log worker, so it is compared as a set
+ABORT = re.compile(r"(?:[\w./-]*/)?((?:speculative|sampling|ngram-cache|ngram-map|ngram-mod|reasoning-budget|common|"
+                   r"llama-[a-z-]+|ggml[a-z-]*)\.(?:cpp|c)):(\d+): (.*)$")
+
+
+# llama_graph_n_input_tensors (llama-context.cpp) logs each input
+# tensor's users from an unordered_map keyed by tensor address, so the order
+# of a run of those lines is the allocator's, run to run, on either side;
+# each run is compared sorted.
+GRAPH_INPUT = "llama_graph_n_input_tensors: input tensor "
+
+
+def sort_graph_inputs(lines):
+    out, run = [], []
+    for line in lines + [None]:
+        if line is not None and GRAPH_INPUT in line:
+            run.append(line)
+            continue
+        out.extend(sorted(run))
+        run = []
+        if line is not None:
+            out.append(line)
+    return out
+
+
+def mask(text):
+    out, aborts = [], []
+    for line in text.splitlines():
+        line = GDB_TAIL.sub("", TRACE_TAIL.sub("", line))
+        if BACKTRACE.match(line) or GDB_LINE.match(line):
+            continue
+        m = ABORT.search(line)
+        if m:
+            aborts.append(f"ABORT {m.group(1)}:{m.group(2)}: {m.group(3)}")
+            line = line[:m.start()]
+            if not line:
+                continue
+        for rx, rep in MASKS:
+            line = rx.sub(rep, line)
+        if line.strip():
+            out.append(line)
+    return sort_graph_inputs(out) + sorted(aborts)
+
+
+def run(cmd, what):
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"FAIL: {what}\n{r.stderr[-3000:]}", file=sys.stderr)
+        sys.exit(2)
+
+
+def main():
+    picks = sys.argv[1:]
+    prefix = os.environ.get("SPEC_DIFF_PREFIX") or "zig-out"
+    bindir = f"{prefix}/spec-diff"
+    if not os.environ.get("SPEC_DIFF_NOBUILD"):
+        run(["zig", "build", "spec-diff", "--release=fast", "-p", prefix], "could not build the harnesses (zig build spec-diff)")
+    for p in [f"{bindir}/spec_ref", f"{bindir}/spec_diff", f"{bindir}/spec_fixtures", Q]:
+        if not os.path.exists(p):
+            print(f"FAIL: missing {p}", file=sys.stderr)
+            sys.exit(2)
+    if not os.path.exists(f"{F}/eagle3-dense.gguf"):
+        print(f"FAIL: missing {F}; run 'make arch-fixtures'", file=sys.stderr)
+        sys.exit(2)
+
+    out = os.environ.get("SPEC_DIFF_OUT") or tempfile.mkdtemp(prefix="spec-diff.")
+    os.makedirs(out, exist_ok=True)
+    # one scratch directory, the same path for both sides: the api case
+    # writes the n-gram caches the ngram-cache-files case loads
+    tmp = os.path.join(out, "tmp")
+    os.makedirs(tmp, exist_ok=True)
+
+    fxdir = os.path.join(out, "fx")
+    os.makedirs(fxdir, exist_ok=True)
+    for name in FX_SOURCES:
+        run([f"{bindir}/spec_fixtures", f"{F}/{name}.gguf", f"{fxdir}/{name}.gguf"], f"could not rewrite {name}")
+    run([f"{bindir}/spec_fixtures", "--gemma4", fxdir], "could not write the Gemma 4 pair")
+    run([f"{bindir}/spec_fixtures", "--decision", fxdir], "could not write the decision metadata files")
+
+    t0 = time.time()
+    failed = []
+    lines = 0
+    ref_text = []
+    for name, mode, args, env in CASES:
+        if picks and not any(p in name for p in picks):
+            continue
+        # An abort races upstream's log worker: what it had queued may be lost
+        # on either side, more often on a loaded machine, so such a case gets
+        # a few tries to show the whole transcript on both.
+        for attempt in range(6 if name in EXPECT_ABORT else 1):
+            res = {}
+            for side, exe in (("ref", "spec_ref"), ("port", "spec_diff")):
+                e = dict(os.environ)
+                e["SPEC_TMP"] = tmp
+                for k, v in env.items():
+                    e[k] = v.replace("@TMP", tmp).replace("@FX", fxdir).replace("@SIDE", side)
+                # the file a case's dynamic cache is written to, each side's own
+                dyn = os.path.join(tmp, f"dyn_{side}.bin")
+                if os.path.exists(dyn):
+                    os.unlink(dyn)
+                if "_COPY" in env:
+                    shutil.copy(os.path.join(tmp, env["_COPY"]), dyn)
+                if "_UNREADABLE" in env:
+                    bad = os.path.join(tmp, "unreadable.bin")
+                    if os.path.exists(bad):
+                        os.unlink(bad)
+                    open(bad, "w").close()
+                    os.chmod(bad, 0)
+                args = [a.replace("@FX", fxdir) for a in args]
+                if mode == "api":
+                    # the same files on both sides
+                    for f in os.listdir(tmp):
+                        os.unlink(os.path.join(tmp, f))
+                cmd = ["perl", "-e", "alarm shift; exec @ARGV", "300", f"{bindir}/{exe}", mode] + args
+                r = subprocess.run(cmd, capture_output=True, env=e)
+                o = r.stdout.decode("utf-8", "replace")
+                er = r.stderr.decode("utf-8", "replace")
+                with open(os.path.join(out, f"{name}.{side}.out"), "w") as fh:
+                    fh.write(o)
+                with open(os.path.join(out, f"{name}.{side}.err"), "w") as fh:
+                    fh.write(er)
+                res[side] = (r.returncode, [l for l in o.splitlines() if not GDB_LINE.match(l)], mask(er))
+            if res["ref"][2] == res["port"][2]:
+                break
+        (rc_r, o_r, e_r), (rc_p, o_p, e_p) = res["ref"], res["port"]
+        saved = [os.path.join(tmp, f"dyn_{s}.bin") for s in ("ref", "port")]
+        dyn_differs = "SPEC_LCD" in env and "@SIDE" in env["SPEC_LCD"] and name not in EXPECT_ABORT and (
+            not all(os.path.exists(p) for p in saved) or open(saved[0], "rb").read() != open(saved[1], "rb").read())
+        ref_text.append("\n".join(o_r) + "\n" + "\n".join(e_r))
+        lines += len(o_r) + len(e_r)
+        bad = []
+        if rc_r != rc_p:
+            bad.append(f"exit {rc_r} vs {rc_p}")
+        if dyn_differs:
+            bad.append("saved dynamic caches differ")
+        if o_r != o_p:
+            bad.append("stdout differs")
+        if e_r != e_p:
+            bad.append("stderr differs")
+        if rc_r == 142 or (rc_r < 0 and name not in EXPECT_ABORT):
+            bad.append(f"reference timed out or died ({rc_r})")
+        status = "ok  " if not bad else "FAIL"
+        print(f"{status} {name}: rc {rc_r}, {len(o_r)} + {len(e_r)} lines" + (f" -- {', '.join(bad)}" if bad else ""))
+        if bad:
+            failed.append(name)
+            import difflib
+            for a, b, label in ((o_r, o_p, "stdout"), (e_r, e_p, "stderr")):
+                if a != b:
+                    for i, d in enumerate(difflib.unified_diff(a, b, f"ref {label}", f"port {label}", lineterm="", n=1)):
+                        print("    " + d[:240])
+                        if i > 24:
+                            break
+
+    if not picks:
+        everything = "\n".join(ref_text)
+        missing = [p for p in PHRASES if p not in everything]
+        for p in missing:
+            print(f"FAIL: no reference transcript reaches: {p}")
+        if missing:
+            failed.append("phrases")
+    dt = time.time() - t0
+    if failed:
+        print(f"FAIL: spec-diff: {len(failed)} failing ({', '.join(failed)}); transcripts in {out}")
+        sys.exit(1)
+    print(f"ok: spec-diff: {sum(1 for c in CASES if not picks or any(p in c[0] for p in picks))} cases, "
+          f"{lines} lines identical, {len(PHRASES)} phrases reached, {dt:.0f} s")
+    if not os.environ.get("SPEC_DIFF_OUT"):
+        shutil.rmtree(out, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    main()

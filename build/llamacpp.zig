@@ -248,7 +248,7 @@ const ggml_metal_objc_sources = [_][]const u8{
 // alone -- `src/llama/module.zig`, with `exports.zig` exporting the C API.
 //
 // The stock C++ is still compiled, as `libllama-ref.a`, for the in-process
-// harnesses (`scripts/*-diff`), which link it beside the port and compare.
+// harnesses (`testing/scripts/*-diff`), which link it beside the port and compare.
 // It is the whole of upstream's libllama, the sampler and the grammar
 // included, unmodified.
 const llama_ref_sources = [_][]const u8{
@@ -315,22 +315,6 @@ pub const Options = struct {
     /// native build, where Zig sets up the SDK include chain itself. See
     /// `writeAppleLibcFile`.
     libc_file: ?std.Build.LazyPath = null,
-    /// Makes ported code abort on a hot path, to prove it is executing.
-    ///
-    /// Comparing output cannot distinguish code that is correct from code that
-    /// never runs. A swapped symbol can be defined, referenced and linked while
-    /// the program reaches a different implementation entirely -- not
-    /// hypothetical, that is what sank the incremental swap trial.
-    /// `scripts/probe-ported` builds with this on and requires the abort, so a
-    /// silent bypass fails loudly.
-    probe_ported: bool = false,
-    /// The same, for the ported CPU backend.
-    ///
-    /// A separate flag because a single one would only prove whichever site
-    /// runs first. `ggml-alloc.c` runs while the graph is being planned and
-    /// `ggml-cpu.c` while it is being computed, so each needs its own run to
-    /// be shown reachable.
-    probe_cpu: bool = false,
     /// Builds upstream's CUDA backend into `libggml.a`; null leaves it out.
     /// See `addCuda`.
     cuda: ?Cuda = null,
@@ -436,8 +420,6 @@ fn addGgml(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
     });
 
     const options = b.addOptions();
-    options.addOption(bool, "probe_ported", opts.probe_ported);
-    options.addOption(bool, "probe_cpu", opts.probe_cpu);
     // Mirrors the `-DGGML_USE_METAL` below, for ported Zig that has to make
     // the same choice the C++ preprocessor does. `src/ggml/backend_reg.zig`
     // is the one that needs it: the registry constructor registers Metal
@@ -934,7 +916,7 @@ pub fn addCudaLibraries(b: *std.Build, mod: *std.Build.Module, cuda: ?Cuda) void
 }
 
 /// Linux: gcc's static `libgcc.a` on an executable's link, ahead of Zig's
-/// `compiler_rt`, as `scripts/platform-libs` gives the references.
+/// `compiler_rt`, as `testing/scripts/platform-libs` gives the references.
 ///
 /// glibc has no `__divti3`, so on Linux a Zig program that divides an
 /// `i128` -- jinja's clock and `random`, `std.Io.Threaded`'s timestamps --
@@ -966,7 +948,7 @@ pub fn addLibgcc(b: *std.Build, mod: *std.Build.Module) void {
 /// `__gxx_personality_v0`, and that personality aborts on Zig's exceptions,
 /// so no exception can be caught -- upstream's argument parser reports every
 /// bad flag by throwing. Zig's libc++ supplies all the CUB shim needs
-/// (`scripts/platform-libs`), and libcublas loads libstdc++ itself at run
+/// (`testing/scripts/platform-libs`), and libcublas loads libstdc++ itself at run
 /// time.
 ///
 /// Parameters:
@@ -1283,8 +1265,8 @@ pub fn addVulkanRef(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
     return b.addLibrary(.{ .name = "ggml-vulkan-ref", .root_module = mod, .linkage = .static });
 }
 
-/// Compiles `harness/vk_push_layout.cpp`, the `static_assert`s
-/// `scripts/gen-vk-push` writes against the push-constant structs of the
+/// Compiles `testing/harness/vk_push_layout.cpp`, the `static_assert`s
+/// `testing/scripts/gen-vk-push` writes against the push-constant structs of the
 /// real `ggml-vulkan.cpp`, which it includes. Compiling it is the check.
 ///
 /// Parameters:
@@ -1305,7 +1287,7 @@ pub fn addVulkanPushLayout(b: *std.Build, opts: Options) !*std.Build.Step.Compil
     mod.addIncludePath(b.path(root ++ "/ggml/include"));
     mod.addIncludePath(b.path(root ++ "/ggml/src"));
     mod.addIncludePath(shaders.header_dir);
-    mod.addCSourceFile(.{ .file = b.path("harness/vk_push_layout.cpp"), .flags = vulkanCxxFlags(b, vk, &.{}) });
+    mod.addCSourceFile(.{ .file = b.path("testing/harness/vk_push_layout.cpp"), .flags = vulkanCxxFlags(b, vk, &.{}) });
     return b.addObject(.{ .name = "vk_push_layout", .root_module = mod });
 }
 
@@ -1366,8 +1348,7 @@ fn embedMetalKernel(b: *std.Build, kind: []const u8) std.Build.LazyPath {
 /// The C translation units the ported-but-not-yet-swapped Zig depends on.
 ///
 /// Deliberately short: it must never include a file whose symbols overlap the
-/// ported code, or the test link fails with duplicates. See
-/// `src/ggml/ported.zig`.
+/// ported code, or the test link fails with duplicates.
 const ported_test_c_sources = [_][]const u8{
     // Empty: every C translation unit under ggml/src/ is ported. The traits
     // table resolves entirely to Zig.
@@ -1385,7 +1366,7 @@ const ported_test_c_sources = [_][]const u8{
 /// Return: the library; callers link it instead of `libggml.a`.
 pub fn addPortedGgml(b: *std.Build, opts: Options) *std.Build.Step.Compile {
     const mod = b.createModule(.{
-        .root_source_file = b.path("src/ggml/ported.zig"),
+        .root_source_file = b.path("src/ggml/module.zig"),
         .target = opts.target,
         .optimize = opts.optimize,
         .link_libc = true,
@@ -1393,8 +1374,6 @@ pub fn addPortedGgml(b: *std.Build, opts: Options) *std.Build.Step.Compile {
     });
 
     const options = b.addOptions();
-    options.addOption(bool, "probe_ported", opts.probe_ported);
-    options.addOption(bool, "probe_cpu", opts.probe_cpu);
     // No `-DGGML_USE_METAL` in this archive's define list and no Metal in its
     // link, exactly as in the ported test root above. The ported registry
     // must not reference the Metal backend.
@@ -1455,7 +1434,7 @@ pub fn addPortedGgml(b: *std.Build, opts: Options) *std.Build.Step.Compile {
 ///
 /// Return: the test module, for the caller to attach to a step.
 pub fn portedTestModule(b: *std.Build, opts: Options) *std.Build.Module {
-    return portedTestModuleInner(b, opts, "src/ggml/ported.zig", &ported_test_c_sources);
+    return portedTestModuleInner(b, opts, "src/ggml/module.zig", &ported_test_c_sources);
 }
 
 fn portedTestModuleInner(
@@ -1473,8 +1452,6 @@ fn portedTestModuleInner(
     });
 
     const options = b.addOptions();
-    options.addOption(bool, "probe_ported", false);
-    options.addOption(bool, "probe_cpu", false);
     // No `-DGGML_USE_METAL` in this root's define list, and no Metal sources
     // in its link. The ported registry must not reference the Metal backend.
     options.addOption(bool, "use_metal", false);

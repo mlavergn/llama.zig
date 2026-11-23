@@ -5,7 +5,7 @@
 //! Ported from `llama.cpp/tools/quantize/quantize.cpp` at v1.0.0
 //! (`b1b770d90`). Each declaration names the C++ it replaces and the line it
 //! began at. The quantizing itself is libllama's `llama_model_quantize`,
-//! ported and gated by `scripts/quant-diff`; this is the command line
+//! ported and gated by `testing/scripts/quant-diff`; this is the command line
 //! around it.
 //!
 //! # Map order

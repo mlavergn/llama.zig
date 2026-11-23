@@ -8,11 +8,11 @@
 //!
 //! **Not a port.** This is build description.
 //!
-//! The reference half, `harness/server_task_ref.cpp` over upstream's
+//! The reference half, `testing/harness/server_task_ref.cpp` over upstream's
 //! `server-common.cpp`, `server-task.cpp`, `server-schema.cpp` and
 //! `server-chat.cpp` compiled unmodified, is linked by
-//! `scripts/server-task-diff` against the libraries `zig build tools-ref`
-//! installs, as `scripts/chat-msg-diff` links its own.
+//! `testing/scripts/server-task-diff` against the libraries `zig build tools-ref`
+//! installs, as `testing/scripts/chat-msg-diff` links its own.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -191,7 +191,7 @@ pub fn add(b: *std.Build, opts: Options) void {
     test_step.dependOn(&b.addRunArtifact(tests).step);
 
     const step = b.step("server-task-diff-bins", "Build the port's server-task-diff harness into zig-out/server-task-diff");
-    const port_mod = b.createModule(.{ .root_source_file = b.path("harness/server_task_diff.zig"), .target = opts.target, .optimize = safe, .link_libc = true, .link_libcpp = true });
+    const port_mod = b.createModule(.{ .root_source_file = b.path("testing/harness/server_task_diff.zig"), .target = opts.target, .optimize = safe, .link_libc = true, .link_libcpp = true });
     port_mod.addImport("server_data", data);
     port_mod.addImport("tools_common", m.tools_common);
     port_mod.addImport("tools_h", m.tools_h);

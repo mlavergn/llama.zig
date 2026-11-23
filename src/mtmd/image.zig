@@ -602,7 +602,7 @@ pub const Kind = enum {
     muse_glimmer,
     /// `mtmd_image_preprocessor_deepseek4v` (mtmd-image.h:185 @b1b770d90),
     /// last so the earlier kinds keep their ordinals, which
-    /// `harness/mtmd_image_ref.cpp` switches on
+    /// `testing/harness/mtmd_image_ref.cpp` switches on
     deepseek4v,
     /// `mtmd_image_preprocessor_glm5v` (mtmd-image.h:172 @b1b770d90),
     /// after `deepseek4v` for the same reason

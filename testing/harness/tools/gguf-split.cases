@@ -1,0 +1,60 @@
+# llama-gguf-split against upstream's: testing/scripts/tools-diff gguf-split.
+# Cases run in order in one directory per side; later ones merge what earlier
+# ones split.
+
+# The command line. `--split-max-size xM` is left out: sscanf converts
+# nothing and the C reads an uninitialised `n`, so upstream's answer is
+# whatever was on its stack.
+--help
+--version
+!fail -h
+!fail --foo in out
+!fail --split --merge in out
+!fail --split-max-tensors
+!fail --split-max-size 4K in out
+!fail --split-max-size 0M in out
+!fail --split-max-tensors 3 --split-max-size 1M in out
+!fail --merge --split in out
+!fail one-arg-only
+!fail /nonexistent/in.gguf out
+
+# Split by tensor count, with the default and with a small limit
+$FIX/qwen3-dense.gguf qd
+--split-max-tensors 5 $FIX/llama-dense.gguf ld
+--split_max_tensors 7 --no-tensor-first-split $FIX/gemma3-dense.gguf gd
+--dry-run --split-max-tensors 4 $FIX/qwen3moe-moe.gguf dry
+--split-max-tensors 1000 $FIX/mamba-dense.gguf md
+
+# Split by size; a limit below one tensor leaves a split empty
+--split-max-size 100M $PLAIN pd
+--split-max-size 2M $FIX/qwen3moe-moe.gguf qm
+!fail --split-max-size 1M $PLAIN tiny
+
+# No tensors at all
+$VOCAB/ggml-vocab-llama-spm.gguf vs
+
+# Merge
+--merge ld-00001-of-00014.gguf ld-merged.gguf
+!fail --merge ld-00001-of-00014.gguf ld-merged.gguf
+--merge gd-00001-of-00011.gguf gd-merged.gguf
+--merge --dry-run pd-00001-of-00002.gguf pd-dry.gguf
+--merge --delete-splits pd-00001-of-00002.gguf pd-merged.gguf
+!fail --merge $FIX/qwen3-dense.gguf notsplit.gguf
+!fail --merge ld-merged.gguf again.gguf
+!fail --merge /nonexistent-00001-of-00002.gguf x.gguf
+
+# a short read stops the tool, with the offset, and does not copy
+# whatever the buffer held
+!fail --split-max-tensors 5 $DATA/trunc.gguf tr
+# --dry-run: what a failed merge leaves on disk is whatever each side's stream
+# had flushed, upstream's std::ofstream dropping its buffer at exit()
+!fail --merge --dry-run $DATA/trunc-merge-00001-of-00001.gguf tm.gguf
+
+# every split must be the next of the first one's set, and the set
+# must hold split.tensors.count tensors -- each used to merge regardless
+!fail --merge $DATA/cnt-00001-of-00002.gguf cnt.gguf
+!fail --merge $DATA/no-00001-of-00002.gguf no.gguf
+!fail --merge $DATA/tc-00001-of-00002.gguf tc.gguf
+!fail --merge --dry-run $DATA/tc-00001-of-00002.gguf tc-dry.gguf
+--merge $DATA/lm-00001-of-00002.gguf lm.gguf
+--merge $DATA/l3-00001-of-00003.gguf l3.gguf

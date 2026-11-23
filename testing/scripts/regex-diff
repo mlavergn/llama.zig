@@ -1,0 +1,47 @@
+#!/bin/bash
+# Compare src/llama/regex.zig with libc++'s std::regex.
+#
+# A lazy grammar's trigger patterns are std::regex, ECMAScript grammar, and
+# where a match starts and which capture group is first non-empty decide the
+# text the grammar is fed. `make sampler-diff` runs five patterns; this runs
+# the real trigger patterns upstream's chat code builds and 30,000 random
+# ones, malformed ones included, through both engines in one process. See
+# testing/harness/regex_diff.zig.
+#
+# Usage: testing/scripts/regex-diff
+#   WIN_X86=1   build for the Windows laptop and run there (testing/scripts/win-target);
+#               `make win-host-diffs` builds the port it links first
+set -u
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$ROOT" || exit 2
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+# The target, the port's archive, and the system libraries the harness links
+# beside it: the Metal frameworks on macOS, the CUDA libraries on Linux,
+# nothing extra for Windows. See testing/scripts/win-target.
+. testing/scripts/win-target
+
+zig c++ "${GATE_CC[@]}" -std=c++17 -O2 \
+    -c testing/harness/regex_ref.cpp -o "$tmp/ref.o" 2>"$tmp/err" \
+    || { echo "FAIL: cannot compile the reference" >&2; head -10 "$tmp/err" >&2; exit 1; }
+
+# `regex.zig` reaches `ggml_abort` and a C logger through `impl.zig`; the
+# ported ggml supplies the first, and nothing on these paths calls the second.
+[ -f "$GATE_GGML" ] || { echo "missing $GATE_GGML -- run 'zig build reference --release=fast'" >&2; exit 2; }
+
+# Zig 0.17 has no `@cImport`: `impl.zig` imports llama.h as the module
+# `llama_c`, translated from `src/llama/c_import.h` as build/llamacpp.zig does.
+zig translate-c "${GATE_TC[@]}" -I llama.cpp/include -I llama.cpp/ggml/include \
+    src/llama/c_import.h >"$tmp/llama_c.zig" 2>"$tmp/terr" \
+    || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
+
+zig build-exe "${GATE_EXE[@]}" -femit-bin="$tmp/regex_diff$GATE_SUFFIX" -Ofast -lc \
+    --dep regex -Mroot=testing/harness/regex_diff.zig \
+    --dep llama_c --dep stdlib -Mregex=src/llama/regex.zig -Mstdlib=stdlib/module.zig -Mllama_c="$tmp/llama_c.zig" \
+    "$tmp/ref.o" "$GATE_GGML" -lc++ \
+    ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"} 2>"$tmp/berr" \
+    || { echo "FAIL: could not build the harness" >&2; head -30 "$tmp/berr" >&2; exit 1; }
+
+gate_run "$tmp/regex_diff$GATE_SUFFIX" llamazig-regex-diff

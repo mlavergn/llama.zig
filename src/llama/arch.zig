@@ -17,7 +17,7 @@
 //!
 //! The C++ formats a name with `vsnprintf`: a key's format takes the
 //! architecture name for its one `%s`, a tensor's takes the block and
-//! expert indices for up to two `%d`. `scripts/gen-arch` refuses a table
+//! expert indices for up to two `%d`. `testing/scripts/gen-arch` refuses a table
 //! entry with any other conversion, so substituting those two by hand here
 //! is the whole of `vsnprintf` these strings can reach.
 

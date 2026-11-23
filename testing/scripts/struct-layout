@@ -1,0 +1,69 @@
+#!/bin/bash
+# Compare the hand-declared Metal structs against the real headers.
+#
+# `src/ggml/metal/device_c.zig` hand-declares `ggml_metal_device_props`
+# instead of importing `ggml-metal-device.h`, because that header would
+# have to join `impl.zig`'s single cImport and widen the `c` namespace
+# every ported file sees. The struct is 18 fields of which the port reads
+# seven; the rest exist only to place those seven correctly.
+#
+# It also checks two generated files for the same reason: the 138
+# `FC_*`/`OP_*`/`N_*` constants in `metal/impl_c.zig`, and the 72
+# `ggml_metal_kargs_*` structs in `metal/kargs.zig` -- the fields the
+# Metal kernels read **by offset**, where one wrong offset feeds a kernel
+# a different number with nothing in the ported code able to notice.
+#
+# Hand-transcription is the largest source of silent error here. This asks the C compiler instead of trusting the transcription:
+# sizeof, alignof, every offsetof, and every field's width.
+#
+# Usage: testing/scripts/struct-layout
+#   Requires: zig build reference --release=fast
+set -u
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$ROOT" || exit 2
+
+LIB="${METAL_DIFF_LIB:-zig-out/lib/libggml.a}"
+[ -f "$LIB" ] || { echo "missing $LIB -- run 'zig build reference --release=fast'" >&2; exit 2; }
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+
+build_harness() {
+    zig c++ -mcpu=baseline "$1" "$LIB" -o "$2" \
+        -std=c++17 -w -O2 \
+        -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-metal \
+        -lc++ \
+        -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+        -F "$SDK/System/Library/Frameworks" 2>"$tmp/err" \
+        || { echo "FAIL: could not build $1" >&2; head -20 "$tmp/err" >&2; exit 1; }
+}
+
+build_harness testing/harness/kargs_layout.cpp "$tmp/kargs"
+"$tmp/kargs" || exit 1
+echo
+
+zig c++ -mcpu=baseline testing/harness/struct_layout.cpp "$LIB" -o "$tmp/layout" \
+    -std=c++17 -w -O2 \
+    -I llama.cpp/ggml/include -I llama.cpp/ggml/src -I llama.cpp/ggml/src/ggml-metal \
+    -lc++ \
+    -framework Foundation -framework Metal -framework MetalKit -framework Accelerate \
+    -F "$SDK/System/Library/Frameworks" 2>"$tmp/err" \
+    || { echo "FAIL: could not build the layout harness" >&2; head -20 "$tmp/err" >&2; exit 1; }
+
+"$tmp/layout" || exit 1
+
+# The harness compares the Zig table with its own hand-kept list, so a
+# `#define` upstream adds to neither passes it: both counts move together or
+# not at all. Ask the header for its names directly.
+grep -oE '^#define [A-Z0-9_]+' llama.cpp/ggml/src/ggml-metal/ggml-metal-impl.h \
+    | awk '$2 != "GGML_METAL_IMPL" {print $2}' | sort > "$tmp/hdr"
+grep -oE '\.name = "[A-Z0-9_]+"' src/ggml/metal/impl_c.zig \
+    | sed 's/.*"\(.*\)"/\1/' | sort > "$tmp/zig"
+if ! diff "$tmp/hdr" "$tmp/zig" > "$tmp/ddiff"; then
+    echo "FAIL: ggml-metal-impl.h #defines and impl_c.zig differ (< header only, > impl_c only):"
+    cat "$tmp/ddiff"
+    exit 1
+fi
+echo "ggml-metal-impl.h: all $(wc -l < "$tmp/hdr" | tr -d ' ') #defines are in impl_c.zig"

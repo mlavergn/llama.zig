@@ -1,0 +1,108 @@
+#!/bin/bash
+# Diff every graph node's output, ported vs reference, on a real model.
+#
+# `testing/harness/node_dump.c` hashes the output of each node of one prompt decode
+# and one single-token decode. It is linked once against the ported libraries
+# and once against `llama.cpp.zmake` -- the stock C built by the same Zig
+# toolchain -- and the listings are diffed. The first differing line is the
+# first op that computed a different bit.
+#
+# This is the gate between `make ops-diff` (exact, but only the shapes it was
+# written for) and token parity (the model's real graph, but coarse: a
+# last-bit difference has to move an argmax to show). It found three
+# dot-product epilogues the vec_dot goldens had passed (`q5_K`, `tq1_0`, `tq2_0`).
+#
+# By default the model runs on the CPU device alone: on a Metal machine the
+# CPU kernels are otherwise never reached by inference. `--gpu` runs it on
+# Metal instead, which checks the ported host code around the GPU kernels.
+#
+# Each mode runs two passes: per node, then **fused** -- no callback, the
+# graph as the binary runs it, full logits for the prompt and `STEPS`
+# (default 32) greedy steps. The per-node pass splits the graph at every
+# node, so it can never see a backend's fusion; the fused pass names the
+# step rather than the op.
+#
+# Usage: testing/scripts/node-diff [--gpu] <model.gguf> [prompt]
+#   Requires: make -C llama.cpp.zmake lib --release=fast, zig build reference --release=fast
+set -u
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$ROOT" || exit 2
+
+MODE=cpu
+if [ "${1:-}" = "--gpu" ]; then MODE=gpu; shift; fi
+MODEL="${1:?usage: testing/scripts/node-diff [--gpu] <model.gguf> [prompt]}"
+PROMPT="${2:-Explain gravity in one sentence, then give an example from daily life:}"
+
+# The reference must be the same upstream commit we port from; this gate
+# compares on bits and would otherwise report a version gap as a port bug.
+. "$ROOT/testing/scripts/check-reference-pin"
+. "$ROOT/testing/scripts/gate-cpu"
+
+REF_LIBS=(llama.cpp.zmake/zig-out/lib/libllama.a llama.cpp.zmake/zig-out/lib/libggml.a)
+PORT_LIBS=(zig-out/lib/libllama.a zig-out/lib/libggml.a)
+for lib in "${REF_LIBS[@]}" "${PORT_LIBS[@]}"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'make node-diff'" >&2; exit 2; }
+done
+
+# Both libraries must be built for GATE_CPU; see testing/scripts/gate-cpu.
+gate_cpu_probe reference llama.cpp.zmake/zig-out/lib/libggml.a || exit 1
+gate_cpu_probe port      zig-out/lib/libggml.a || exit 1
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+platform_libs cc   # testing/scripts/platform-libs, through testing/scripts/gate-cpu
+FW=(-lc++ ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"})
+INC=(-I llama.cpp/include -I llama.cpp/ggml/include)
+
+zig cc -mcpu="$GATE_CPU" testing/harness/node_dump.c -o "$tmp/ref"  -std=c11 -O2 "${INC[@]}" "${REF_LIBS[@]}"  "${FW[@]}" 2>"$tmp/ref.log" \
+    || { echo "FAIL: could not link against the reference libraries" >&2; tail -5 "$tmp/ref.log" >&2; exit 1; }
+zig cc -mcpu="$GATE_CPU" testing/harness/node_dump.c -o "$tmp/port" -std=c11 -O2 "${INC[@]}" "${PORT_LIBS[@]}" "${FW[@]}" 2>"$tmp/port.log" \
+    || { echo "FAIL: could not link against the ported libraries" >&2; tail -5 "$tmp/port.log" >&2; exit 1; }
+libm_check "$tmp/ref" "$tmp/port" || exit 1
+
+# Two thread counts, for the same reason ops-diff runs two: one thread makes
+# every kernel's row split the trivial one.
+fail=0
+for nt in 1 4; do
+    "$tmp/ref"  "$MODEL" "$PROMPT" "$nt" "$MODE" > "$tmp/ref.txt"  2>/dev/null || { echo "FAIL: reference run aborted (threads=$nt)"; exit 1; }
+    "$tmp/port" "$MODEL" "$PROMPT" "$nt" "$MODE" > "$tmp/port.txt" 2>/dev/null || { echo "FAIL: ported run aborted (threads=$nt)"; exit 1; }
+    nodes=$(wc -l < "$tmp/ref.txt" | tr -d ' ')
+    [ "$nodes" -gt 0 ] || { echo "FAIL: no nodes observed (threads=$nt)"; exit 1; }
+    if diff -q "$tmp/ref.txt" "$tmp/port.txt" > /dev/null; then
+        printf '  %-4s threads=%d  %s nodes identical\n' "$MODE" "$nt" "$nodes"
+    else
+        printf '  %-4s threads=%d  DIFFERS; first divergent nodes:\n' "$MODE" "$nt"
+        diff "$tmp/ref.txt" "$tmp/port.txt" | grep '^[<>]' | head -6
+        fail=1
+    fi
+done
+
+# Fused: no per-node callback, so the graph runs as the real binary runs it.
+# The pass above answers the scheduler's `ask` with true, which splits the
+# graph at every node -- so Metal's fusion (`ggml_metal_op` folding a
+# RMS_NORM + MUL + ADD, a MUL_MAT + ADD, ...) and its concurrent encoding
+# never run on either side, and a broken fusion path passes every node.
+# Measured on CUDA. Full logits, bit for bit, for the
+# prompt and STEPS greedy steps.
+STEPS=${STEPS:-32}
+for nt in 1 4; do
+    "$tmp/ref"  "$MODEL" "$PROMPT" "$nt" "$MODE" fused "$STEPS" > "$tmp/ref.txt"  2>/dev/null || { echo "FAIL: fused reference run aborted (threads=$nt)"; exit 1; }
+    "$tmp/port" "$MODEL" "$PROMPT" "$nt" "$MODE" fused "$STEPS" > "$tmp/port.txt" 2>/dev/null || { echo "FAIL: fused ported run aborted (threads=$nt)"; exit 1; }
+    steps=$(grep -c '^step' "$tmp/ref.txt")
+    [ "$steps" -eq $((STEPS + 1)) ] || { echo "FAIL: fused reference produced $steps steps"; exit 1; }
+    if diff -q "$tmp/ref.txt" "$tmp/port.txt" > /dev/null; then
+        printf '  %-4s fused threads=%d  %s decodes, logits identical\n' "$MODE" "$nt" "$steps"
+    else
+        printf '  %-4s fused threads=%d  DIFFERS; first divergent decodes:\n' "$MODE" "$nt"
+        diff "$tmp/ref.txt" "$tmp/port.txt" | grep '^[<>]' | head -4
+        fail=1
+    fi
+done
+
+if [ "$fail" -eq 0 ]; then
+    echo "PASS: every node and every fused decode identical, ported vs reference"
+    exit 0
+fi
+echo "FAIL: node outputs differ between ported and reference builds"
+exit 1

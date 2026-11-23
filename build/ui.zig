@@ -1,7 +1,7 @@
 //! The web UI for both sides of the server build.
 //!
 //! Not a port of a file: the build-graph half of upstream's
-//! `tools/ui/CMakeLists.txt` and `scripts/ui-assets.cmake`. `-Dui=<dist>`
+//! `tools/ui/CMakeLists.txt` and `testing/scripts/ui-assets.cmake`. `-Dui=<dist>`
 //! names a built SvelteKit bundle -- `make -C llama.cpp.zmake ui` writes one
 //! to `llama.cpp.zmake/.ui/dist` -- and both servers embed it:
 //!

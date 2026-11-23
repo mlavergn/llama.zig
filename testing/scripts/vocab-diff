@@ -1,0 +1,47 @@
+#!/bin/bash
+# Compare src/llama/vocab/ with llama.cpp's llama-vocab.cpp, in one process.
+#
+# The vocabulary is ported ahead of libllama's single swap,
+# so nothing downstream can see it yet: this links the C++
+# vocabulary, inside libllama-ref.a, beside the Zig one and loads every
+# vocabulary file both ways. See testing/harness/vocab_diff.zig for what is compared
+# and which files are synthesized.
+#
+# Usage: testing/scripts/vocab-diff [extra.gguf...]
+#   Requires: zig build reference --release=fast
+#   Any Qwen3.5 model in the repository root is added automatically.
+set -u
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$ROOT" || exit 2
+
+for lib in zig-out/lib/libllama-ref.a zig-out/lib/libggml.a; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
+done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+# The system libraries the harness links beside libggml.a: the Metal
+# frameworks on macOS, the CUDA libraries on Linux. See testing/scripts/platform-libs.
+. testing/scripts/platform-libs
+platform_libs exe
+
+# Zig 0.17 has no `@cImport`: `impl.zig` imports llama.h and gguf.h as the module
+# `llama_c`, translated from `src/llama/c_import.h` as build/llamacpp.zig does.
+zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
+    src/llama/c_import.h >"$tmp/llama_c.zig" 2>"$tmp/terr" \
+    || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
+
+zig build-exe -mcpu baseline -femit-bin="$tmp/vocab_diff" -Ofast -lc \
+    --dep llama -Mroot=testing/harness/vocab_diff.zig \
+    --dep llama_c --dep stdlib -Mllama=src/llama/module.zig -Mstdlib=stdlib/module.zig -Mllama_c="$tmp/llama_c.zig" \
+    zig-out/lib/libllama-ref.a zig-out/lib/libggml.a -lc++ \
+    "${PLATFORM_LIBS[@]}" 2>"$tmp/berr" \
+    || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }
+
+models=(llama.cpp/models/ggml-vocab-*.gguf)
+for m in Qwen3.5-*.gguf; do
+    [ -f "$m" ] && { models+=("$m"); break; }
+done
+
+"$tmp/vocab_diff" "$tmp" llama.cpp/models/ggml-vocab-*.inp "${models[@]}" "$@"

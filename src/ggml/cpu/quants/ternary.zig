@@ -10,7 +10,7 @@
 //!
 //! As with `legacy.zig` and `k.zig`: `arch/arm/quants.c` supplies the real
 //! entry points, so these `_generic` names are exported and never called.
-//! `golden.zig` is their only gate.
+//! `testing/golden/cpu_quants_golden.zig` is their only gate.
 //!
 //! # Base-three unpacking, done in fixed point
 //!
@@ -181,14 +181,6 @@ pub fn ggml_vec_dot_tq2_0_q8_K_generic(
 
 test {
     std.testing.refAllDecls(@This());
-}
-
-test "tq1_0 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_tq1_0_q8_K_generic, ggml.impl.ggml_c.GGML_TYPE_TQ1_0, ggml.impl.ggml_c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.tq1_0);
-}
-
-test "tq2_0 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_tq2_0_q8_K_generic, ggml.impl.ggml_c.GGML_TYPE_TQ2_0, ggml.impl.ggml_c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.tq2_0);
 }
 
 /// Packs five ternary digits exactly as `quantize_row_tq1_0_ref` does

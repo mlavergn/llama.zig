@@ -28,7 +28,7 @@
 //! all five kernels came out one ULP wrong until each was named with
 //! `@mulAdd`.
 //!
-//! `scripts/vecdot-prefix` is what settles these when the shape is ambiguous
+//! `testing/scripts/vecdot-prefix` is what settles these when the shape is ambiguous
 //! -- see the note on `iq4_nl` in `legacy.zig` for why an oracle rather than a
 //! guess is the only sound way to place a fusion.
 
@@ -631,28 +631,6 @@ pub fn ggml_vec_dot_q6_K_q8_K(
 
 test {
     std.testing.refAllDecls(@This());
-}
-
-const golden = if (ggml.cpu.features.golden_generic) ggml.cpu.quants.arch.golden_generic else ggml.cpu.quants.arch.golden;
-
-test "q2_K dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q2_K_q8_K, ggml.impl.ggml_c.GGML_TYPE_Q2_K, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.q2_K);
-}
-
-test "q3_K dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q3_K_q8_K, ggml.impl.ggml_c.GGML_TYPE_Q3_K, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.q3_K);
-}
-
-test "q4_K dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q4_K_q8_K, ggml.impl.ggml_c.GGML_TYPE_Q4_K, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.q4_K);
-}
-
-test "q5_K dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q5_K_q8_K, ggml.impl.ggml_c.GGML_TYPE_Q5_K, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.q5_K);
-}
-
-test "q6_K dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q6_K_q8_K, ggml.impl.ggml_c.GGML_TYPE_Q6_K, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.q6_K);
 }
 
 test "the widening product does not truncate" {

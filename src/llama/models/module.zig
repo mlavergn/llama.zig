@@ -8,7 +8,7 @@
 //! class. Here a class is a file exporting those three functions, and
 //! `dispatch.zig`'s `forArch` is the mapping. An architecture with no entry is one the port
 //! has not reached: loading it stops at `error.Unported`, which
-//! `scripts/arch-model-diff` counts.
+//! `testing/scripts/arch-model-diff` counts.
 
 const std = @import("std");
 

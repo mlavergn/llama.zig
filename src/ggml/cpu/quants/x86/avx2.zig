@@ -54,7 +54,7 @@
 //!
 //! Nothing here is analysed on another target: `quants/module.zig` and
 //! `repack/module.zig` import `x86/` only for `x86_64`. Its oracle is
-//! `scripts/x86-quants-diff`, on the Windows laptop.
+//! `testing/scripts/x86-quants-diff`, on the Windows laptop.
 
 const std = @import("std");
 

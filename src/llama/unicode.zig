@@ -9,13 +9,13 @@
 //! - `llama.cpp/src/unicode-data.h`
 //!
 //! All at v1.0.0 (`b1b770d90`). The tables of `llama.cpp/src/unicode-data.cpp`
-//! are generated into `unicode_data.zig` by `scripts/gen-unicode-data`.
+//! are generated into `unicode_data.zig` by `testing/scripts/gen-unicode-data`.
 //!
 //! # Contract
 //!
 //! Nothing here is exported. `llama-vocab.cpp` is the only caller of these
 //! functions, all of them C++-linkage, so this file is gated in-process by
-//! `scripts/unicode-diff` against the real `unicode.cpp` and swaps in with
+//! `testing/scripts/unicode-diff` against the real `unicode.cpp` and swaps in with
 //! the vocabulary.
 //!
 //! # Exceptions

@@ -2,7 +2,7 @@
 //! arena they build, partial parsing over a stream, the AST and GBNF
 //! export. Upstream has no JSON form of the arena (`save` and `load`); the gates
 //! keep a serializer of their own,
-//! `harness/peg_serialize.zig`.
+//! `testing/harness/peg_serialize.zig`.
 //!
 //! # Provenance
 //!

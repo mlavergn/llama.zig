@@ -47,7 +47,7 @@
 //!   same function. Chasing it further would mean modelling a specific clang
 //!   version's arithmetic across 5,000 lines.
 //!
-//! So `scripts/quants-golden` builds its reference with `-ffp-contract=off`
+//! So `testing/scripts/quants-golden` builds its reference with `-ffp-contract=off`
 //! and the ported code stays plain. The comparison is still byte-exact and
 //! still catches every real porting bug; both sides simply round the same way.
 //!

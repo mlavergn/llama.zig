@@ -1,0 +1,95 @@
+#!/bin/bash
+# Compare src/llama/quant.zig and src/llama/model_saver.zig with llama.cpp's
+# llama-quant.cpp and llama-model-saver.cpp, in one process.
+#
+# The quantizer and the saver are ported ahead of libllama's single swap.
+# This quantizes through the C++ in libllama-ref.a and
+# through the port into separate files and compares the files byte for byte
+# and everything logged; diffs the type-selection rules on every
+# architecture through llama-ext.h's helpers; and saves every local model
+# through both. See testing/harness/quant_diff.zig.
+#
+# Usage: testing/scripts/quant-diff [--quick] [--skip-big] [--only layout|types|files|big|saver]
+#   Requires: zig build reference --release=fast
+#   Every Qwen3.5 model in the repository root is quantized (a few types
+#   each) and saved.
+set -u
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$ROOT" || exit 2
+
+for lib in zig-out/lib/libllama-ref.a zig-out/lib/libggml.a; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'zig build reference --release=fast'" >&2; exit 2; }
+done
+
+# The saver cases below need testing/scripts/gen-arch-fixtures' output. A missing
+# fixture is a failure, not a smaller run: once a combined gate run
+# reached this script before the fixtures were written and passed on the
+# rest.
+FIXTURES="${ARCH_FIXTURES:-zig-out/arch-fixtures}"
+save_fixtures=("$FIXTURES/hrm_text-dense.gguf" "$FIXTURES/gemma3-dense.gguf"
+               "$FIXTURES/cohere2moe-moe.gguf" "$FIXTURES/olmo2-dense.gguf"
+               "$FIXTURES/exaone-moe-moe.gguf"
+               "$FIXTURES/deepseek41-moe.gguf" "$FIXTURES/qwen4exp-moe.gguf"
+               "$FIXTURES/muse-spark-moe.gguf"
+               "$FIXTURES/gemma4-dense.gguf"
+               "$FIXTURES/limite-dense.gguf" "$FIXTURES/metis16-moe.gguf"
+               "$FIXTURES/mistral-large4-moe.gguf"
+               "$FIXTURES/kimi-k31-moe.gguf" "$FIXTURES/ricursive-dense.gguf"
+               "$FIXTURES/xing4_0-moe.gguf")
+for m in "${save_fixtures[@]}"; do
+    [ -f "$m" ] || { echo "FAIL: missing $m -- run 'make arch-fixtures'" >&2; exit 2; }
+done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+# The system libraries the harness links beside libggml.a: the Metal
+# frameworks on macOS, the CUDA libraries on Linux. See testing/scripts/platform-libs.
+. testing/scripts/platform-libs
+platform_libs exe
+
+# model_saver.zig's layer walk, one offsetof per entry, for quant_ref.cpp.
+sed -n '/BEGIN layer_fields/,/END layer_fields/p' src/llama/model_saver.zig \
+    | grep -o '"[a-z0-9_.]*"' | tr -d '"' \
+    | sed 's/.*/offsetof(llama_layer, &),/' >"$tmp/quant_layer_offsets.inc"
+[ -s "$tmp/quant_layer_offsets.inc" ] || { echo "FAIL: no layer_fields in model_saver.zig" >&2; exit 1; }
+
+# The model-level tensors the saver skips must be exactly llama_model's
+# tensors that add_tensors_from_model does not name.
+want="$(awk '/^struct llama_model \{/,/^\};/' llama.cpp/src/llama-model.h \
+    | grep -E '^ *struct ggml_tensor \* *[a-z0-9_]+ *(=|;)' | sed 's/.*ggml_tensor \* *//; s/[ =;].*//' \
+    | grep -v -x -F -f <(sed -n '/^void llama_model_saver::add_tensors_from_model/,/^}/p' llama.cpp/src/llama-model-saver.cpp \
+        | grep -o 'model->[a-z0-9_]*' | sed 's/model->//') | sort)"
+have="$(sed -n '/^const model_unsaved = /,/^};/p' src/llama/model_saver.zig | grep -o '"[a-z0-9_]*"' | tr -d '"' | sort)"
+if [ "$want" != "$have" ]; then
+    echo "FAIL: model_unsaved in model_saver.zig does not match llama-model.h" >&2
+    diff <(echo "$want") <(echo "$have") >&2
+    exit 1
+fi
+
+zig c++ -mcpu=baseline -c testing/harness/quant_ref.cpp -o "$tmp/quant_ref.o" -std=c++17 -O2 -w \
+    -I "$tmp" -I harness -I llama.cpp/src -I llama.cpp/include -I llama.cpp/ggml/include -I llama.cpp/ggml/src 2>"$tmp/cerr" \
+    || { echo "FAIL: cannot compile testing/harness/quant_ref.cpp" >&2; head -20 "$tmp/cerr" >&2; exit 1; }
+
+zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
+    src/llama/c_import.h >"$tmp/llama_c.zig" 2>"$tmp/terr" \
+    || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
+
+zig build-exe -mcpu baseline -femit-bin="$tmp/quant_diff" -Ofast -lc \
+    --dep llama --dep stdlib -Mroot=testing/harness/quant_diff.zig \
+    --dep llama_c --dep stdlib -Mllama=src/llama/module.zig -Mstdlib=stdlib/module.zig -Mllama_c="$tmp/llama_c.zig" \
+    "$tmp/quant_ref.o" zig-out/lib/libllama-ref.a zig-out/lib/libggml.a -lc++ \
+    "${PLATFORM_LIBS[@]}" 2>"$tmp/berr" \
+    || { echo "FAIL: could not build the harness" >&2; head -40 "$tmp/berr" >&2; exit 1; }
+
+models=(llama.cpp/models/ggml-vocab-*.gguf)
+for m in Qwen3.5-*.gguf; do
+    [ -f "$m" ] && models+=("$m")
+done
+# Saved and nothing else: the looped hrm_text, and architectures with an
+# SWA pattern the saver writes per layer.
+for m in "${save_fixtures[@]}"; do
+    models+=("save:$m")
+done
+
+"$tmp/quant_diff" "$tmp" "$@" "${models[@]}"

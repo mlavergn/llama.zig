@@ -24,7 +24,7 @@
 /// Measured: with the dispatch stubbed, `port-coverage` read
 /// `36 / 36 symbols (100%)` and `node-diff` failed on the first `MUL_MAT`
 /// because the repack buffer type was never registered and the graph was
-/// built differently. `scripts/cluster-check` asserts this flag at
+/// built differently. `testing/scripts/cluster-check` asserts this flag at
 /// comptime so that cannot read as complete again.
 ///
 /// `dispatch.zig` is what makes it true.
@@ -73,7 +73,7 @@ test {
 // quantize kernels; everything that decides when to call them — the buffer
 // type, `extra_buffer_type::{supports_op, get_tensor_traits}`, and the
 // `tensor_traits` template instantiations — has C++ linkage and is
-// invisible to `scripts/port-coverage`.
+// invisible to `testing/scripts/port-coverage`.
 //
 // Measured the hard way: with those stubbed, `port-coverage` read
 // `36 / 36 symbols (100%)` and `node-diff` failed on the first `MUL_MAT`

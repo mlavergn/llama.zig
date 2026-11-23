@@ -148,20 +148,6 @@ test {
     std.testing.refAllDecls(@This());
 }
 
-const golden = if (ggml.cpu.features.golden_generic) ggml.cpu.quants.arch.golden_generic else ggml.cpu.quants.arch.golden;
-
-test "q8_0 row quantizer matches the C" {
-    try ggml.cpu.quants.testing.checkRow(quantize_row_q8_0, ggml.impl.ggml_c.GGML_TYPE_Q8_0, golden.row_q8_0);
-}
-
-test "q8_1 row quantizer matches the C" {
-    try ggml.cpu.quants.testing.checkRow(quantize_row_q8_1, ggml.impl.ggml_c.GGML_TYPE_Q8_1, golden.row_q8_1);
-}
-
-test "q8_K row quantizer matches the C" {
-    try ggml.cpu.quants.testing.checkRow(quantize_row_q8_K, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.row_q8_K);
-}
-
 test "the NEON and scalar q8 quantizers agree byte for byte" {
     // ggml relies on this: a GGML_CPU_GENERIC build uses the scalar ones and
     // must load the same models. The two round by different routines --

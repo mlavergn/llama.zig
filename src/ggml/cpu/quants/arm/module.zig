@@ -21,7 +21,6 @@
 //! - `k.zig`       — the K-quant super-block dot products
 //! - `mmla.zig`    — the two-row i8mm arms of five of the above
 //! - `iq.zig`      — the codebook formats
-//! - `golden.zig`  — values captured from the C, generated
 //!
 //! # These kernels are live
 //!
@@ -40,10 +39,6 @@ pub const k = @import("k.zig");
 pub const mmla = @import("mmla.zig");
 pub const iq = @import("iq.zig");
 pub const neon = @import("neon.zig");
-
-pub const golden_generic = @import("golden_generic.zig");
-
-pub const golden = @import("golden.zig");
 
 // -----------------------------------------------------------------------------
 // Unit Tests

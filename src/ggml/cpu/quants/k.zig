@@ -9,7 +9,7 @@
 //! # Unreachable on this target
 //!
 //! As with `legacy.zig`: `arch/arm/quants.c` supplies the real entry points and
-//! these `_generic` names are exported and never called. `golden.zig` is their
+//! these `_generic` names are exported and never called. `testing/golden/cpu_quants_golden.zig` is their
 //! only gate.
 //!
 //! # The accumulation order is the specification
@@ -440,26 +440,6 @@ pub fn ggml_vec_dot_q6_K_q8_K_generic(
 
 test {
     std.testing.refAllDecls(@This());
-}
-
-test "q2_K dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q2_K_q8_K_generic, ggml.impl.ggml_c.GGML_TYPE_Q2_K, ggml.impl.ggml_c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.q2_K);
-}
-
-test "q3_K dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q3_K_q8_K_generic, ggml.impl.ggml_c.GGML_TYPE_Q3_K, ggml.impl.ggml_c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.q3_K);
-}
-
-test "q4_K dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q4_K_q8_K_generic, ggml.impl.ggml_c.GGML_TYPE_Q4_K, ggml.impl.ggml_c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.q4_K);
-}
-
-test "q5_K dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q5_K_q8_K_generic, ggml.impl.ggml_c.GGML_TYPE_Q5_K, ggml.impl.ggml_c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.q5_K);
-}
-
-test "q6_K dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_q6_K_q8_K_generic, ggml.impl.ggml_c.GGML_TYPE_Q6_K, ggml.impl.ggml_c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.q6_K);
 }
 
 test "the shared scale unpacking splits eight scales and eight mins" {

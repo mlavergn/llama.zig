@@ -3,7 +3,7 @@
 //!
 //! **Not a port.** Build description: the one place `build/` reads the pin
 //! from. A sync moves it with the `llama.cpp/` submodule, and
-//! `scripts/check-reference-pin` holds it, `llama.cpp.zmake/build.zig` and
+//! `testing/scripts/check-reference-pin` holds it, `llama.cpp.zmake/build.zig` and
 //! the two literals the port returns (`src/ggml/runtime.zig`,
 //! `src/llama/api/llama.zig`) to the submodule's `HEAD`.
 

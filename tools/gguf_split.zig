@@ -12,7 +12,7 @@
 //! `stderr` as the C chose each, and the files are written in the C's order:
 //! a split's metadata then each tensor padded to `GGUF_DEFAULT_ALIGNMENT`; a
 //! merge's metadata as a zeroed placeholder, the tensors, then the metadata
-//! over the placeholder. `scripts/tools-diff` holds both to upstream's
+//! over the placeholder. `testing/scripts/tools-diff` holds both to upstream's
 //! binary.
 //!
 //! # Streams

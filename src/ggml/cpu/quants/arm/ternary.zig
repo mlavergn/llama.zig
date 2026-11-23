@@ -230,16 +230,6 @@ test {
     std.testing.refAllDecls(@This());
 }
 
-const golden = if (ggml.cpu.features.golden_generic) ggml.cpu.quants.arch.golden_generic else ggml.cpu.quants.arch.golden;
-
-test "tq1_0 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_tq1_0_q8_K, ggml.impl.ggml_c.GGML_TYPE_TQ1_0, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.tq1_0);
-}
-
-test "tq2_0 dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_tq2_0_q8_K, ggml.impl.ggml_c.GGML_TYPE_TQ2_0, ggml.impl.ggml_c.GGML_TYPE_Q8_K, golden.tq2_0);
-}
-
 test "the vector digit extraction agrees with the scalar form" {
     // `(halving_add(q, q >> 1)) >> 6` must equal `(q * 3) >> 8` in eight-bit
     // arithmetic, for every byte -- that equivalence is the whole reason the

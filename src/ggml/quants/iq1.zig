@@ -128,7 +128,7 @@ const Pair = struct {
     /// Matching that would mean reproducing one libc's internals. Instead the
     /// order is made total here, so our output depends on nothing but the
     /// input. It differs from the reference only where the C's own result is
-    /// unspecified; `iq_test.zig` skips that one golden case and says so.
+    /// unspecified; `testing/golden/quants_iq.zig` skips that one golden case and says so.
     fn lessThan(_: void, a: Pair, b: Pair) bool {
         if (a.x != b.x) return a.x < b.x;
         return a.idx < b.idx;

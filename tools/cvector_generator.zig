@@ -13,7 +13,7 @@
 //! -- with `std::time(0)`, so upstream's PCA output moves from one second to
 //! the next. The engine and `std::uniform_real_distribution<float>` are
 //! reproduced exactly (`MinstdRand`), from the same seed; the `mean` method
-//! has no randomness, and is what `scripts/tools-diff` compares on bytes.
+//! has no randomness, and is what `testing/scripts/tools-diff` compares on bytes.
 
 const std = @import("std");
 const llama = @import("llama");

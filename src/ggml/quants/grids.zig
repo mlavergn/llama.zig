@@ -4,7 +4,7 @@
 //!
 //! **Not a port, and not hand-written.** Extracted from
 //! `llama.cpp/ggml/src/ggml-quants.c` (v1.0.0, `b1b770d90`) by
-//! `scripts/iq-grids`.
+//! `testing/scripts/iq-grids`.
 //!
 //! # Why these are not imported
 //!

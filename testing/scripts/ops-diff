@@ -1,0 +1,109 @@
+#!/bin/bash
+# Diff the CPU op kernels' computed output against the reference C, on bits.
+#
+# This is the **only value-level oracle for ggml-cpu**. The others cannot do
+# the job:
+#
+#  - `testing/scripts/graph-diff` runs with no_alloc and never computes. It checks the
+#    structure a constructor produces, not the numbers a kernel writes.
+#  - `make backend-ops` executes, but compares CPU against Metal with NMSE at
+#    1e-7. Measured on unary-ops.cpp: a `softplus` cutoff moved from 20 to 2
+#    gives NMSE around 8e-9 and passes. Its `--diff` mode does not close that
+#    -- `test-backend-ops` prints the error value only when it exceeds the
+#    threshold, so a clean log carries no computed values and the diff is
+#    structural.
+#  - `make port` and `make parity-cli` never reach the CPU kernels on a Metal
+#    machine at all.
+#
+# One thread on both sides: the CPU backend sums per-thread chunks, so a
+# different thread count is a different summation order and a different last
+# bit.
+#
+# The reference side is `llama.cpp.zmake` -- the **stock C sources built by the
+# same Zig toolchain** -- and not the Apple-clang CMake build the other diffs
+# use. That matters here and nowhere else: `graph-diff` and `sched-diff`
+# compare structure, which no compiler changes, but this compares bits, and a
+# compiler that contracts an expression differently moves the last one.
+#
+# Measured, which is how this was found: against the Apple-clang reference the
+# baseline failed on `xielu` and on a Q6_K `mul_mat` with ops.cpp unported and
+# byte-identical on both sides -- a compiler difference reported as a port bug.
+#
+# GATE_CPU names the CPU both libraries were built for, `baseline` when
+# unset; `make ops-diff GATE_CPU=apple_m3` builds them that way. It decides
+# which kernel arms exist -- i8mm's two-row dot products and gemms only
+# compile for a CPU that has it -- so the first line of each side's output
+# reports what the library was compiled with, and that line is checked
+# against the compiler's own answer for GATE_CPU. A library left over from
+# a build for another CPU would otherwise pass on the arms it never reached.
+#
+# Requires: make -C llama.cpp.zmake lib, zig build reference
+# Usage: [GATE_CPU=<cpu>] testing/scripts/ops-diff
+set -u
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$ROOT" || exit 2
+
+# The reference must be the same upstream commit we port from; this gate
+# compares on bits and would otherwise report a version gap as a port bug.
+. "$ROOT/testing/scripts/check-reference-pin"
+. "$ROOT/testing/scripts/gate-cpu"
+
+REF_LIBS=( llama.cpp.zmake/zig-out/lib/libggml.a )
+for lib in "${REF_LIBS[@]}"; do
+    [ -f "$lib" ] || { echo "missing $lib -- run 'make -C llama.cpp.zmake lib'" >&2; exit 2; }
+done
+[ -f zig-out/lib/libggml.a ] || { echo "missing zig-out/lib/libggml.a -- run 'zig build reference'" >&2; exit 2; }
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+platform_libs cc   # testing/scripts/platform-libs, through testing/scripts/gate-cpu
+INC=(-I llama.cpp/ggml/include -I llama.cpp/ggml/src)
+
+# Both sides are Zig-linked, because both sides are Zig-built. The Apple-clang
+# detour the other diff scripts need does not apply.
+zig cc -mcpu="$GATE_CPU" testing/harness/ops_dump.c -o "$tmp/ref" -std=c11 -w -O2 "${INC[@]}" \
+    "${REF_LIBS[@]}" -lc++ \
+    ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"} 2>"$tmp/ref.log" \
+    || { echo "FAIL: could not link against the reference libraries" >&2; tail -20 "$tmp/ref.log" >&2; exit 1; }
+
+zig cc -mcpu="$GATE_CPU" testing/harness/ops_dump.c -o "$tmp/port" -std=c11 -w -O2 "${INC[@]}" \
+    zig-out/lib/libggml.a -lc++ \
+    ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"} 2>"$tmp/port.log" \
+    || { echo "FAIL: could not link against the ported libraries" >&2; tail -20 "$tmp/port.log" >&2; exit 1; }
+libm_check "$tmp/ref" "$tmp/port" || exit 1
+
+# The reference writes its quantized blocks; the port replays them. The two
+# builds' quantizers do not agree (Q6_K differs, Q4_K and Q8_0 match), and that
+# is accepted -- see the note in testing/harness/ops_dump.c. Sharing the bytes keeps
+# this gate about the kernels rather than about the quantizers.
+#
+# Each side runs twice, at one thread and at three. At one thread every
+# kernel's `ith`/`nth` split is the trivial one, so a wrong row partition --
+# the bug a port of a threaded kernel actually has -- cannot show. Three is
+# still deterministic: the split depends on the count, not on which thread
+# takes a chunk.
+for nt in 1 3; do
+    OPS_THREADS=$nt "$tmp/ref"  write-q "$tmp/q.bin" > "$tmp/ref.$nt.txt"  2>"$tmp/ref.err" \
+        || { echo "FAIL: reference run aborted at $nt thread(s)" >&2; head -3 "$tmp/ref.err" >&2; exit 1; }
+    OPS_THREADS=$nt "$tmp/port" read-q  "$tmp/q.bin" > "$tmp/port.$nt.txt" 2>"$tmp/port.err" \
+        || { echo "FAIL: ported run aborted at $nt thread(s)" >&2; head -3 "$tmp/port.err" >&2; exit 1; }
+    gate_cpu_check reference "$(head -1 "$tmp/ref.$nt.txt")"  || exit 1
+    gate_cpu_check port      "$(head -1 "$tmp/port.$nt.txt")" || exit 1
+    sed "s/^/[nt=$nt] /" "$tmp/ref.$nt.txt"  >> "$tmp/ref.txt"
+    sed "s/^/[nt=$nt] /" "$tmp/port.$nt.txt" >> "$tmp/port.txt"
+done
+
+# OPS_DIFF_OUT=<dir> keeps both full outputs, for when 40 lines of diff is
+# not enough to see which ops fail.
+if [ -n "${OPS_DIFF_OUT:-}" ]; then
+    mkdir -p "$OPS_DIFF_OUT" && cp "$tmp/ref.txt" "$tmp/port.txt" "$OPS_DIFF_OUT/"
+fi
+
+if diff -u "$tmp/ref.txt" "$tmp/port.txt" > "$tmp/diff.txt"; then
+    printf 'PASS: %d op results identical, ported vs reference\n' "$(grep -c 'hash=' "$tmp/ref.txt")"
+    exit 0
+fi
+echo "FAIL: computed output differs between ported and reference builds"
+head -40 "$tmp/diff.txt"
+exit 1

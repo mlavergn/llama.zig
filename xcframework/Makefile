@@ -394,7 +394,7 @@ negative-compat:
 # Smoke tests
 
 # The reference: test/driver.c against the port's own libraries, as
-# scripts/parity-port links its port side, with the BLAS backend the framework
+# testing/scripts/parity-port links its port side, with the BLAS backend the framework
 # has -- one per CPU a slice is built for, because the CPU comparison is only
 # exact when both sides compiled the same kernel arms. Each is installed to a
 # prefix of its own rather than zig-out/, which the root gates rebuild for

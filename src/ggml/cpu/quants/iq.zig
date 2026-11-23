@@ -11,7 +11,7 @@
 //!
 //! As with `legacy.zig`, `k.zig` and `ternary.zig`: `arch/arm/quants.c`
 //! supplies the real entry points, so these `_generic` names are exported and
-//! never called. `golden.zig` is their only gate.
+//! never called. `testing/golden/cpu_quants_golden.zig` is their only gate.
 //!
 //! # Grid width is the trap
 //!
@@ -582,38 +582,6 @@ pub fn ggml_vec_dot_iq4_xs_q8_K_generic(
 
 test {
     std.testing.refAllDecls(@This());
-}
-
-test "iq2_xxs dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq2_xxs_q8_K_generic, ggml.impl.ggml_c.GGML_TYPE_IQ2_XXS, ggml.impl.ggml_c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.iq2_xxs);
-}
-
-test "iq2_xs dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq2_xs_q8_K_generic, ggml.impl.ggml_c.GGML_TYPE_IQ2_XS, ggml.impl.ggml_c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.iq2_xs);
-}
-
-test "iq2_s dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq2_s_q8_K_generic, ggml.impl.ggml_c.GGML_TYPE_IQ2_S, ggml.impl.ggml_c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.iq2_s);
-}
-
-test "iq3_xxs dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq3_xxs_q8_K_generic, ggml.impl.ggml_c.GGML_TYPE_IQ3_XXS, ggml.impl.ggml_c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.iq3_xxs);
-}
-
-test "iq3_s dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq3_s_q8_K_generic, ggml.impl.ggml_c.GGML_TYPE_IQ3_S, ggml.impl.ggml_c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.iq3_s);
-}
-
-test "iq1_s dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq1_s_q8_K_generic, ggml.impl.ggml_c.GGML_TYPE_IQ1_S, ggml.impl.ggml_c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.iq1_s);
-}
-
-test "iq1_m dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq1_m_q8_K_generic, ggml.impl.ggml_c.GGML_TYPE_IQ1_M, ggml.impl.ggml_c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.iq1_m);
-}
-
-test "iq4_xs dot matches the C" {
-    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq4_xs_q8_K_generic, ggml.impl.ggml_c.GGML_TYPE_IQ4_XS, ggml.impl.ggml_c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.iq4_xs);
 }
 
 test "the 32-bit grids are half the width of the 64-bit ones" {

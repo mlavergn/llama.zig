@@ -177,14 +177,6 @@ test "a forwarder produces what the reference quantizer produces" {
     try std.testing.expect(!std.mem.eql(u8, &via_wrapper, &other));
 }
 
-test "the generic q8 row quantizers match the C" {
-    // These three are the `_generic` fallbacks, unreachable on this target
-    // like the generic dot products, so the goldens are their only gate.
-    try ggml.cpu.quants.testing.checkRow(quantize_row_q8_0_generic, ggml.impl.ggml_c.GGML_TYPE_Q8_0, ggml.cpu.quants.golden.row_q8_0);
-    try ggml.cpu.quants.testing.checkRow(quantize_row_q8_1_generic, ggml.impl.ggml_c.GGML_TYPE_Q8_1, ggml.cpu.quants.golden.row_q8_1);
-    try ggml.cpu.quants.testing.checkRow(quantize_row_q8_K_generic, ggml.impl.ggml_c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.row_q8_K);
-}
-
 test "the K-quant forwarders assert their row length" {
     // Not decoration: `quantize_row_q2_K_ref` reads whole super-blocks and
     // would run past a row that is not a multiple of 256.

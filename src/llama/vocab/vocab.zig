@@ -12,7 +12,7 @@
 //! # Contract
 //!
 //! The `llama_vocab_*` and `llama_tokenize` entry points are in `api/`.
-//! `scripts/vocab-diff` loads the same files through the C++ and this, and
+//! `testing/scripts/vocab-diff` loads the same files through the C++ and this, and
 //! compares.
 //!
 //! # What is libc++'s and not the C++'s

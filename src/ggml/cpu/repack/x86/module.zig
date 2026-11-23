@@ -19,7 +19,7 @@
 //!
 //! # The oracle
 //!
-//! `scripts/x86-repack-diff`: `harness/repack_diff.zig` against the
+//! `testing/scripts/x86-repack-diff`: `testing/harness/repack_diff.zig` against the
 //! reference C++, on bits, on the Windows laptop at x86-64-v3 and on an
 //! AVX-512 machine at v4.
 

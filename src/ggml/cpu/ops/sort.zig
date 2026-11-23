@@ -20,7 +20,7 @@
 //! treatment: the comparator is reproduced
 //! exactly, the algorithm is a stable sort, and ties therefore resolve by
 //! index. Output depends only on input. On keys without ties — which is what
-//! `harness/ops_dump.c` feeds it — the two agree exactly.
+//! `testing/harness/ops_dump.c` feeds it — the two agree exactly.
 //!
 //! # Loop index names
 //!

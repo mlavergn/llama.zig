@@ -29,7 +29,7 @@
 //!
 //! # Behaviour
 //!
-//! This is the contract `harness/conversation_ref.cpp` reimplements and
+//! This is the contract `testing/harness/conversation_ref.cpp` reimplements and
 //! `make cnv-diff` holds the two to.
 //!
 //! Templates:

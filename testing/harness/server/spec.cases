@@ -1,0 +1,84 @@
+# Speculative decoding through the server: testing/scripts/server-diff
+# spec. The drafters are tools/common's (spec-diff holds them to upstream's);
+# here the slots drive them: drafting, verifying, accepting, and on a
+# hybrid model restoring the speculative checkpoint.
+!server -m $QWEN3 -c 2048 -np 2 --no-jinja --spec-type ngram-simple --spec-ngram-simple-size-n 2 --spec-ngram-simple-size-m 6 -lv 4
+!fulllog
+POST /completion {"prompt": "a b c d e f g a b c d e f g a b c d e f g a b c", "n_predict": 24, "temperature": 0}
+POST /completion {"prompt": "1 2 3 4 5 1 2 3 4 5 1 2 3 4 5 1 2", "n_predict": 16, "temperature": 0, "stream": true}
+GET /slots
+GET /props
+
+!server -m $QWEN3 -md $QWEN3 -c 2048 -np 1 --no-jinja --spec-type draft-simple --spec-draft-n-max 4 -lv 4
+!fulllog
+POST /completion {"prompt": "The capital of France is", "n_predict": 16, "temperature": 0}
+POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 16, "temperature": 0, "n_probs": 2}
+# probabilities of accepted draft tokens, from each one's own batch row;
+# post_sampling_probs stays empty with speculative decoding
+POST /completion {"prompt": "1 2 3 4 5 1 2 3 4 5 1 2 3", "n_predict": 12, "temperature": 0, "n_probs": 3}
+POST /completion {"prompt": "1 2 3 4 5 1 2 3 4 5 1 2 3", "n_predict": 8, "temperature": 0, "n_probs": 2, "post_sampling_probs": true}
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "Count to five."}], "max_tokens": 12, "temperature": 0, "logprobs": true, "top_logprobs": 2}
+POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 16, "temperature": 0, "stop": [" 9"]}
+POST /completion {"prompt": "Once upon a time", "n_predict": 24, "temperature": 1.0, "seed": 11}
+
+# a probabilistic draft (--spec-draft-sampling) fills its candidate
+# distributions, and above temperature 0 the target verifies by rejection;
+# at 0 it still samples and matches
+!server -m $QWEN3 -md $QWEN3 -c 2048 -np 1 --no-jinja --spec-type draft-simple --spec-draft-n-max 4 --spec-draft-sampling probabilistic -lv 4
+!fulllog
+POST /completion {"prompt": "Once upon a time", "n_predict": 24, "temperature": 1.0, "seed": 11}
+POST /completion {"prompt": "The capital of France is", "n_predict": 16, "temperature": 0.7, "seed": 5, "n_probs": 2}
+POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 16, "temperature": 0}
+GET /slots
+
+!server -m $QWEN3 -c 2048 -np 1 --no-jinja --spec-type ngram-mod,ngram-map-k --spec-ngram-mod-n-match 4 --spec-ngram-mod-n-min 2 --spec-ngram-mod-n-max 8 --spec-ngram-map-k-size-n 2 --spec-ngram-map-k-size-m 6 -lv 4
+!fulllog
+POST /completion {"prompt": "red green blue red green blue red green blue red green blue red", "n_predict": 20, "temperature": 0}
+
+!server -m $QWEN3 -c 2048 -np 1 --no-jinja --spec-type ngram-simple --spec-ngram-simple-size-n 2 --spec-ngram-simple-size-m 6 --spec-synth-len 2.5 -lv 4
+!fulllog
+POST /completion {"prompt": "a b c a b c a b c a b c", "n_predict": 16, "temperature": 0, "seed": 3}
+
+# hybrid: a partly accepted draft rolls the recurrent state back to the
+# speculative checkpoint
+!server -m $QWEN35 -c 2048 -np 1 --no-jinja --spec-type ngram-simple --spec-ngram-simple-size-n 2 --spec-ngram-simple-size-m 6 -lv 4
+!fulllog
+POST /completion {"prompt": "a b c d e f g a b c d e f g a b c d e f g a b c", "n_predict": 24, "temperature": 0}
+POST /completion {"prompt": "one two three one two three one two three one", "n_predict": 16, "temperature": 0}
+POST /completion {"prompt": "1 2 3 4 1 2 3 5 1 2 3 4 1 2 3 5 1 2 3 4 1 2 3", "n_predict": 24, "temperature": 0}
+POST /completion {"prompt": "Once upon a time there was a cat. Once upon a time there was a dog. Once upon a time there was", "n_predict": 24, "temperature": 1.0, "seed": 5}
+
+# (#30574) a slot file carries the draft context's state and the
+# drafter's ("SDFT") after the checkpoints; restored into a server whose
+# draft does not match, the draft starts empty. --spec-draft-n-ubatch
+# (#30459) sizes the draft context's ubatch on its own
+!server -m $QWEN3 -md $QWEN3 -c 2048 -np 2 --no-jinja --spec-type draft-simple --spec-draft-n-max 4 --spec-draft-n-ubatch 8 --slot-save-path ./ -lv 4
+!fulllog
+POST /completion {"prompt": "Count: 1, 2, 3,", "n_predict": 16, "temperature": 0, "id_slot": 0}
+POST /slots/0?action=save {"filename": "dft.bin"}
+POST /slots/1?action=restore {"filename": "dft.bin"}
+POST /completion {"prompt": "Count: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11", "n_predict": 12, "temperature": 0, "id_slot": 1}
+GET /slots
+!server -m $QWEN3 -c 2048 -np 1 --no-jinja --slot-save-path ./ -lv 4
+!fulllog
+POST /slots/0?action=restore {"filename": "dft.bin"}
+POST /completion {"prompt": "Count: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11", "n_predict": 12, "temperature": 0, "id_slot": 0}
+POST /slots/0?action=save {"filename": "nodft.bin"}
+!server -m $QWEN3 -md $QWEN3 -c 2048 -np 1 --no-jinja --spec-type draft-simple --spec-draft-n-max 4 --slot-save-path ./ -lv 4
+!fulllog
+POST /slots/0?action=restore {"filename": "nodft.bin"}
+POST /completion {"prompt": "Count: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12", "n_predict": 12, "temperature": 0, "id_slot": 0}
+
+# on a recurrent or hybrid target the speculative checkpoint is
+# restored when the *draft* is longer than n_rs_seq, no longer only when the
+# rollback is (server-context.cpp:4962). n_rs_seq is the MTP drafter's n_max,
+# 2; ngram-simple proposes 6. The prompt (the fixture's own 7-token loop,
+# then a copy whose last bigram is followed by 4 right tokens and 2 wrong
+# ones) makes a 6-token draft accepted 4/6 and 5/6: rollback 2 and 1, within
+# n_rs_seq, so only the new rule restores the checkpoint. LLAMA_TRACE logs
+# each draft's acceptance and the restore.
+!env LLAMA_TRACE=1
+!server -m $FIX/mtp/qwen35-mtp-dense.gguf -c 512 -np 1 --no-jinja --spec-type draft-mtp,ngram-simple --spec-draft-n-max 2 --spec-ngram-simple-size-n 2 --spec-ngram-simple-size-m 6 -lv 4
+!fulllog
+POST /completion {"prompt": [6, 105, 4, 123, 24, 11, 36, 91, 74, 97, 123, 24, 11, 36, 91, 74, 50, 60], "n_predict": 24, "temperature": 0}
+POST /completion {"prompt": [6, 105, 4, 123, 24, 11, 36, 91, 74, 97, 123, 24, 11, 36, 91, 74, 97, 50], "n_predict": 24, "temperature": 0}

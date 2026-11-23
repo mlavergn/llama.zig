@@ -1,0 +1,98 @@
+# Sourced, not run: `platform_libs cc|exe [archive...]` sets PLATFORM_LIBS, the system
+# libraries an in-process harness needs beside
+# zig-out/lib/{libllama-ref.a,libggml.a}, for a `zig cc`/`zig c++` link or a
+# `zig build-exe` one -- the two spell an rpath differently.
+#
+# macOS: the Metal and Accelerate frameworks from the SDK.
+# Linux: the CUDA runtime, cuBLAS and the driver when the toolkit is
+# installed -- and deliberately *not*
+# the system libstdc++ the cuda-* scripts link. Zig appends its own
+# libc++abi.a after every input, so a libstdc++.so on the line wins the
+# runtime symbols nothing in libc++.a pulls first: the binary then throws
+# with Zig's `__cxa_throw` and unwinds through libstdc++'s
+# `__gxx_personality_v0`, which aborts, and no exception in the reference
+# can be caught (the Gemma 4 assistant's refused context, for one). Zig's
+# libc++ supplies all `cub_shim.o` needs, and libcublas still loads
+# libstdc++ at run time through its own DT_NEEDED.
+platform_libs() {
+    local mode="$1"; shift
+    case "$(uname -s)" in
+        Darwin)
+            local sdk
+            sdk="$(xcrun --sdk macosx --show-sdk-path)"
+            PLATFORM_LIBS=(-framework Foundation -framework Metal -framework MetalKit -framework Accelerate
+                           -F "$sdk/System/Library/Frameworks")
+            ;;
+        Linux)
+            # The CUDA libraries only where the toolkit is: a CPU-only Linux
+            # build of libggml.a needs none of them, and a machine without
+            # CUDA has nothing to link.
+            local cuda=${CUDA_HOME:-/usr/local/cuda} rpath
+            PLATFORM_LIBS=()
+            if [ -e "$cuda/lib64/libcudart.so" ]; then
+                if [ "$mode" = exe ]; then rpath=(-rpath "$cuda/lib64"); else rpath=(-Wl,-rpath,"$cuda/lib64"); fi
+                PLATFORM_LIBS=(-L"$cuda/lib64" "${rpath[@]}" -lcudart -lcublas -lcublasLt -lcuda)
+            fi
+            PLATFORM_LIBS+=(-lgcc_s -lm -lpthread)
+            # gcc's static libgcc, ahead of Zig's compiler_rt, which is
+            # searched last and drops -lgcc_s. The reference's
+            # ggml-backend-reg.o calls `fs::current_path(ec)`, whose libc++
+            # object needs `__divti3`; from compiler_rt it brings that
+            # archive's single object, and with it compiler_rt's `expf` and
+            # `logf` in place of glibc's -- on the reference side only, which
+            # libm_check below then refuses. libgcc.a supplies `__divti3`
+            # alone, as it would in upstream's own gcc or clang build. A link
+            # that needs nothing from it takes nothing from it.
+            local libgcc
+            if libgcc="$(gcc -print-libgcc-file-name 2>/dev/null)" && [ -f "$libgcc" ]; then
+                PLATFORM_LIBS+=("$libgcc")
+            fi
+            ;;
+        *)
+            echo "platform-libs: no link line for $(uname -s)" >&2
+            exit 2
+            ;;
+    esac
+    # The Vulkan loader, for an archive built with ggml's Vulkan backend
+    # (`make -C llama.cpp.zmake lib VULKAN=1`), which calls it directly. Keyed
+    # on the archives named, not on the machine, so a CPU-only link never
+    # gains a DT_NEEDED it does not use.
+    local a
+    for a in "$@"; do
+        if [ -f "$a" ] && nm -u "$a" 2>/dev/null | grep -qE '(^|[ _])vkGetInstanceProcAddr$'; then
+            # The pinned toolchain's link to the system loader, where no
+            # libvulkan-dev provides the unversioned name (testing/scripts/vk-toolchain).
+            local vk_lib
+            vk_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/.tools/vulkan/lib"
+            [ -e "$vk_lib/libvulkan.so" ] && PLATFORM_LIBS+=(-L"$vk_lib")
+            PLATFORM_LIBS+=(-lvulkan)
+            break
+        fi
+    done
+}
+
+# `libm_check <ref binary> <port binary>`: fail unless both sides take their
+# libm functions from the same place.
+#
+# Zig's compiler_rt defines `expf` and `logf`, weakly, and is linked as one
+# object: once anything in a link needs it -- `__divti3`, say -- those two
+# come with it, and a regular object's weak definition beats the C library's
+# shared one. The CUDA build's `@panic("OOM")` did exactly that, through the
+# panic handler's `std.Io.Threaded`, and every `expf`/`logf` the port called
+# moved by an ULP against glibc's while `expm1f` and `tanhf`, which
+# compiler_rt lacks, did not. A bit-exact gate
+# would report that as a kernel fault; this names it.
+libm_check() {
+    local f defs ref port
+    defs() {
+        nm "$1" 2>/dev/null | awk '$2 ~ /^[tTwW]$/ {print $3}' | sed 's/^_//' \
+            | grep -xE 'expf|logf|expm1f|log1pf|tanhf|sinf|cosf|powf|sqrtf|erff|exp|log|pow|sin|cos|tanh' | sort -u
+    }
+    ref="$(defs "$1")"
+    port="$(defs "$2")"
+    if [ "$ref" != "$port" ]; then
+        echo "FAIL: the two sides take libm from different places -- defined in the reference: [${ref//$'\n'/ }], in the port: [${port//$'\n'/ }]" >&2
+        echo "      a linked-in compiler_rt (or another libm) is shadowing the C library's; see testing/scripts/platform-libs" >&2
+        return 1
+    fi
+}

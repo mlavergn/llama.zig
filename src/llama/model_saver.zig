@@ -43,7 +43,7 @@
 //!
 //! `add_tensors_from_model` reads `llama_layer` as a flat array of tensor
 //! pointers. `layer_fields` is that array's order, nested structs
-//! included, and `scripts/quant-diff` checks every entry against
+//! included, and `testing/scripts/quant-diff` checks every entry against
 //! `offsetof` in the C++ and the count against `sizeof`. The port's
 //! `Layer` declares only the tensors its models use: each entry is taken
 //! from it when it has the field, and a comptime check refuses a `Layer`

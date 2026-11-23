@@ -56,12 +56,7 @@ pub const ops = @import("ops/module.zig");
 pub const extra = @import("extra.zig"); // ggml-cpu/traits.cpp
 pub const cpu_backend = @import("cpu_backend.zig"); // ggml-cpu/ggml-cpu.cpp
 pub const repack = @import("repack/module.zig"); // ggml-cpu/repack.cpp, arch/arm/repack.cpp
-pub const vec_testing = @import("vec_testing.zig");
 pub const simd = @import("simd.zig");
-
-pub const vec_golden_generic = @import("vec_golden_generic.zig");
-
-pub const vec_golden = @import("vec_golden.zig");
 
 // -----------------------------------------------------------------------------
 // Unit Tests

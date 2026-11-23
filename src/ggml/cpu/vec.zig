@@ -24,7 +24,7 @@
 //! **no SIMD arm at all here** and is a plain scalar loop accumulating in
 //! `double`.
 //!
-//! # The gate is `src/ggml/cpu/vec_golden.zig`, and nothing else
+//! # The gate is `testing/golden/cpu_vec_golden.zig`, and nothing else
 //!
 //! These are accumulating reductions, so the answer depends on the accumulator
 //! structure and the summation order, not just the arithmetic. No other check
@@ -36,8 +36,8 @@
 //! - `make backend-ops` compares with NMSE at `1e-7`, which catches a kernel
 //!   wrong across the domain and misses one wrong in a band of it.
 //!
-//! So `scripts/vec-golden` captures the exact bits the C produces and
-//! `vec_testing.zig` compares on bits. Two of its six patterns — `random` and
+//! So `testing/scripts/vec-golden` captures the exact bits the C produces and
+//! `testing/golden/cpu_vec.zig` compares on bits. Two of its six patterns — `random` and
 //! `lopsided` — actually discriminate summation order; that was measured, not
 //! assumed.
 //!
@@ -57,7 +57,7 @@
 //! either four `f16x8` over 32 accumulating in **half precision** or four
 //! widened `f32x4` over 16 -- `simd.F16.half_precision` says which. The two
 //! tails accumulate in different types from each other, which is why
-//! `vec_golden.zig` captures a second length that leaves a remainder.
+//! `testing/golden/cpu_vec_golden.zig` captures a second length that leaves a remainder.
 
 const std = @import("std");
 const ggml = @import("../module.zig");
@@ -482,7 +482,7 @@ pub fn ggml_vec_dot_f16_f32(
 // `vfmsq_f32` or `_mm256_fmadd_ps` / `_mm256_fnmadd_ps`, so the port names the
 // same fusions with `@mulAdd` and the result is bit-identical rather than
 // merely close. That is the condition for naming a fusion,
-// and `vec_golden.zig` is the something that can say it is wrong.
+// and `testing/golden/cpu_vec_golden.zig` is the something that can say it is wrong.
 //
 // The two arms were read side by side: the AVX2 one computes `z`, `b`, the
 // polynomial `j` and both slow-path selects with the same operands in the

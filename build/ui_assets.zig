@@ -2,7 +2,7 @@
 //! a built web UI.
 //!
 //! Not a port of a file. It does for the port what upstream's
-//! `scripts/ui-assets.cmake` (`emit_files`) does for `ui.cpp`, and what
+//! `testing/scripts/ui-assets.cmake` (`emit_files`) does for `ui.cpp`, and what
 //! `llama.cpp.zmake/zig/ui_embed.zig` does for the reference built here:
 //! every file under the dist directory, `_gzip/` excluded, sorted by name;
 //! none when there is no `index.html`; the required-asset check; with gzip

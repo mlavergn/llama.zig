@@ -1,0 +1,592 @@
+// Dump the scheduler's split structure for a few small graphs.
+//
+// `testing/scripts/sched-diff` builds this twice -- once against the reference C
+// libraries and once against the ported Zig -- and diffs the output. It is the
+// scheduler's equivalent of `testing/harness/graph_dump.c`, and it exists because the
+// five assignment passes in `ggml_backend_sched_split_graph` had no gate:
+// breaking one changes which backend runs an op, and `make parity-cli` cannot
+// see that, because at --temp 0 the argmax is unchanged whichever backend runs
+// it.
+//
+// Two stub devices make the passes observable. FAST claims only GGML_OP_ADD and
+// has its own buffer type; SLOW claims everything. Where a node lands is then a
+// direct readout of what the passes decided.
+#include "ggml.h"
+#include "ggml-backend.h"
+#include "ggml-backend-impl.h"
+#include "ggml-cpu.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static struct ggml_backend_buffer_type g_fast_buft;
+static struct ggml_backend_buffer_type g_slow_buft;
+static struct ggml_backend_device      g_fast_dev;
+static struct ggml_backend_device      g_slow_dev;
+static struct ggml_backend             g_fast_backend;
+static struct ggml_backend             g_slow_backend;
+
+static const char * buft_name(ggml_backend_buffer_type_t buft) {
+    return buft == &g_fast_buft ? "FAST" : "SLOW";
+}
+static size_t buft_alignment(ggml_backend_buffer_type_t buft) { (void) buft; return 32; }
+static bool   buft_is_host  (ggml_backend_buffer_type_t buft) { (void) buft; return true; }
+
+static const char * dev_name(ggml_backend_dev_t dev) {
+    return dev == &g_fast_dev ? "FAST" : "SLOW";
+}
+static enum ggml_backend_dev_type dev_type(ggml_backend_dev_t dev) {
+    return dev == &g_fast_dev ? GGML_BACKEND_DEVICE_TYPE_GPU : GGML_BACKEND_DEVICE_TYPE_CPU;
+}
+static ggml_backend_buffer_type_t dev_buffer_type(ggml_backend_dev_t dev) {
+    return dev == &g_fast_dev ? &g_fast_buft : &g_slow_buft;
+}
+static bool dev_supports_op(ggml_backend_dev_t dev, const struct ggml_tensor * op) {
+    if (dev == &g_slow_dev) return true;
+    return op->op == GGML_OP_ADD;
+}
+static bool dev_supports_buft(ggml_backend_dev_t dev, ggml_backend_buffer_type_t buft) {
+    return buft == dev_buffer_type(dev);
+}
+static const char * backend_name(ggml_backend_t b) {
+    return b == &g_fast_backend ? "FAST" : "SLOW";
+}
+static void backend_free(ggml_backend_t b) { (void) b; }
+
+static void stubs_init(void) {
+    memset(&g_fast_buft, 0, sizeof(g_fast_buft));
+    memset(&g_slow_buft, 0, sizeof(g_slow_buft));
+    memset(&g_fast_dev,  0, sizeof(g_fast_dev));
+    memset(&g_slow_dev,  0, sizeof(g_slow_dev));
+    memset(&g_fast_backend, 0, sizeof(g_fast_backend));
+    memset(&g_slow_backend, 0, sizeof(g_slow_backend));
+
+    g_fast_buft.iface.get_name      = buft_name;
+    g_fast_buft.iface.get_alignment = buft_alignment;
+    g_fast_buft.iface.is_host       = buft_is_host;
+    g_fast_buft.device              = &g_fast_dev;
+    g_slow_buft.iface               = g_fast_buft.iface;
+    g_slow_buft.device              = &g_slow_dev;
+
+    g_fast_dev.iface.get_name        = dev_name;
+    g_fast_dev.iface.get_description = dev_name;
+    g_fast_dev.iface.get_type        = dev_type;
+    g_fast_dev.iface.get_buffer_type = dev_buffer_type;
+    g_fast_dev.iface.supports_op     = dev_supports_op;
+    g_fast_dev.iface.supports_buft   = dev_supports_buft;
+    g_slow_dev.iface                 = g_fast_dev.iface;
+
+    g_fast_backend.iface.get_name = backend_name;
+    g_fast_backend.iface.free     = backend_free;
+    g_fast_backend.device         = &g_fast_dev;
+    g_slow_backend.iface          = g_fast_backend.iface;
+    g_slow_backend.device         = &g_slow_dev;
+}
+
+static void dump(const char * label, struct ggml_cgraph * graph) {
+    stubs_init();
+    ggml_backend_t backends[2] = { &g_fast_backend, &g_slow_backend };
+    ggml_backend_buffer_type_t bufts[2] = { &g_fast_buft, &g_slow_buft };
+    ggml_backend_sched_t sched = ggml_backend_sched_new(backends, bufts, 2, 512, false, false);
+
+    ggml_backend_sched_split_graph(sched, graph);
+
+    printf("%s: n_splits=%d\n", label, ggml_backend_sched_get_n_splits(sched));
+    // `ggml_cgraph` is opaque in the public header, so walk it with the
+    // accessors rather than reaching into the struct.
+    for (int i = 0; i < ggml_graph_n_nodes(graph); i++) {
+        struct ggml_tensor * n = ggml_graph_node(graph, i);
+        ggml_backend_t b = ggml_backend_sched_get_tensor_backend(sched, n);
+        printf("  %s node %2d %-12s -> %s\n", label, i, ggml_op_name(n->op), b ? ggml_backend_name(b) : "NULL");
+    }
+    ggml_backend_sched_free(sched);
+}
+
+
+// -----------------------------------------------------------------------------
+// The copy and realloc callbacks
+//
+// `ggml_backend_sched_set_copy_callback` and `_set_realloc_callback` are what
+// libllama's MoE cache uses to copy only the experts a batch selects. Only a
+// split on a backend that cannot read host memory copies inputs at all, so
+// this stands up a third stub, ACC: a device with its own malloc'd buffer
+// type that claims only GGML_OP_ADD and offloads it, and computes ADD in f32
+// itself. The CPU backend is the real one, holding the weights. Printed: each
+// copy callback's src, dst and what the dst of the split's *non-weight* input
+// already holds when a weight is offered (host weights are copied last,
+// so it holds the input's data), each realloc callback's two flags,
+// and the result, which shows which half of a weight the callback copied.
+
+static struct ggml_backend_buffer_type g_acc_buft;
+static struct ggml_backend_device      g_acc_dev;
+static struct ggml_backend             g_acc_backend;
+
+// The context is the calloc'd block; the base is it rounded up to the
+// buffer type's 32-byte alignment, which ggml_tallocr asserts.
+static void   acc_buf_free(ggml_backend_buffer_t b) { free(b->context); }
+static void * acc_buf_base(ggml_backend_buffer_t b) { return (void *) (((uintptr_t) b->context + 31) & ~(uintptr_t) 31); }
+static void   acc_buf_memset(ggml_backend_buffer_t b, struct ggml_tensor * t, uint8_t v, size_t off, size_t size) {
+    (void) b; memset((char *) t->data + off, v, size);
+}
+// Set by `prefetch()`: the ACC stub then logs every write into its buffers and
+// every async read and event, which is how the input copies show.
+static int g_acc_log = 0;
+
+static void   acc_buf_set(ggml_backend_buffer_t b, struct ggml_tensor * t, const void * data, size_t off, size_t size) {
+    (void) b; memcpy((char *) t->data + off, data, size);
+    if (g_acc_log) printf("  acc set %s off=%zu size=%zu\n", t->name, off, size);
+}
+static void   acc_buf_get(ggml_backend_buffer_t b, const struct ggml_tensor * t, void * data, size_t off, size_t size) {
+    (void) b; memcpy(data, (const char *) t->data + off, size);
+}
+static void   acc_buf_clear(ggml_backend_buffer_t b, uint8_t v) { memset(acc_buf_base(b), v, b->size); }
+
+static ggml_backend_buffer_t acc_buft_alloc(ggml_backend_buffer_type_t buft, size_t size) {
+    struct ggml_backend_buffer_i iface;
+    memset(&iface, 0, sizeof(iface));
+    iface.free_buffer   = acc_buf_free;
+    iface.get_base      = acc_buf_base;
+    iface.memset_tensor = acc_buf_memset;
+    iface.set_tensor    = acc_buf_set;
+    iface.get_tensor    = acc_buf_get;
+    iface.clear         = acc_buf_clear;
+    // calloc, so bytes no copy wrote read the same on both sides
+    return ggml_backend_buffer_init(buft, iface, calloc(1, size + 64), size);
+}
+static const char * acc_name(void * p) { (void) p; return "ACC"; }
+static bool   acc_buft_is_host(ggml_backend_buffer_type_t buft) { (void) buft; return false; }
+static enum ggml_backend_dev_type acc_dev_type(ggml_backend_dev_t dev) { (void) dev; return GGML_BACKEND_DEVICE_TYPE_GPU; }
+static ggml_backend_buffer_type_t acc_dev_buft(ggml_backend_dev_t dev) { (void) dev; return &g_acc_buft; }
+// Set by `prefetch()`, whose ACC-resident weight is a leaf the scheduler
+// asks ACC about.
+static int g_acc_leafs = 0;
+static bool   acc_supports_op(ggml_backend_dev_t dev, const struct ggml_tensor * op) {
+    (void) dev; return op->op == GGML_OP_ADD || (g_acc_leafs && op->op == GGML_OP_NONE);
+}
+static bool   acc_supports_buft(ggml_backend_dev_t dev, ggml_backend_buffer_type_t buft) { (void) dev; return buft == &g_acc_buft; }
+static bool   acc_offload_op(ggml_backend_dev_t dev, const struct ggml_tensor * op) { (void) dev; (void) op; return true; }
+
+static enum ggml_status acc_graph_compute(ggml_backend_t backend, struct ggml_cgraph * g) {
+    (void) backend;
+    for (int i = 0; i < ggml_graph_n_nodes(g); i++) {
+        struct ggml_tensor * t = ggml_graph_node(g, i);
+        if (t->op != GGML_OP_ADD) continue;
+        const float * a = t->src[0]->data;
+        const float * b = t->src[1]->data;
+        float * d = t->data;
+        for (int64_t j = 0; j < ggml_nelements(t); j++) d[j] = a[j] + b[j];
+    }
+    return GGML_STATUS_SUCCESS;
+}
+
+static void acc_init(void) {
+    memset(&g_acc_buft, 0, sizeof(g_acc_buft));
+    memset(&g_acc_dev, 0, sizeof(g_acc_dev));
+    memset(&g_acc_backend, 0, sizeof(g_acc_backend));
+    g_acc_buft.iface.get_name      = (const char * (*)(ggml_backend_buffer_type_t)) acc_name;
+    g_acc_buft.iface.alloc_buffer  = acc_buft_alloc;
+    g_acc_buft.iface.get_alignment = buft_alignment;
+    g_acc_buft.iface.is_host       = acc_buft_is_host;
+    g_acc_buft.device              = &g_acc_dev;
+    g_acc_dev.iface.get_name        = (const char * (*)(ggml_backend_dev_t)) acc_name;
+    g_acc_dev.iface.get_description = (const char * (*)(ggml_backend_dev_t)) acc_name;
+    g_acc_dev.iface.get_type        = acc_dev_type;
+    g_acc_dev.iface.get_buffer_type = acc_dev_buft;
+    g_acc_dev.iface.supports_op     = acc_supports_op;
+    g_acc_dev.iface.supports_buft   = acc_supports_buft;
+    g_acc_dev.iface.offload_op      = acc_offload_op;
+    g_acc_backend.iface.get_name      = (const char * (*)(ggml_backend_t)) acc_name;
+    g_acc_backend.iface.free          = backend_free;
+    g_acc_backend.iface.graph_compute = acc_graph_compute;
+    g_acc_backend.device              = &g_acc_dev;
+}
+
+// What the copy callback is told, and what it does: the n-th call copies the
+// first half of the weight itself and returns true when bit n of `mode` is
+// set, and declines otherwise, so the scheduler copies the whole weight.
+struct copy_ud {
+    int calls;
+    unsigned mode;
+    const struct ggml_tensor * input; // the split's user input, for its copy
+};
+
+static bool copy_cb(ggml_backend_t backend, const struct ggml_tensor * src, struct ggml_tensor * dst,
+                    struct ggml_cgraph * graph, void * user_data) {
+    struct copy_ud * ud = user_data;
+    // the split's copy of the user input, named "<backend>#x#<copy>"
+    const struct ggml_tensor * in_cpy = NULL;
+    for (int i = 0; i < ggml_graph_n_nodes(graph); i++) {
+        const struct ggml_tensor * t = ggml_graph_node(graph, i);
+        for (int s = 0; s < 2; s++) {
+            if (t->src[s] && strstr(t->src[s]->name, "#x#")) in_cpy = t->src[s];
+        }
+    }
+    float v0 = -1.0f;
+    if (in_cpy && in_cpy->data) memcpy(&v0, in_cpy->data, sizeof(v0));
+    const bool take = (ud->mode >> ud->calls) & 1;
+    printf("  copy_cb #%d backend=%s src=%s dst=%s graph_nodes=%d input_cpy[0]=%g take=%s\n", ud->calls,
+           ggml_backend_name(backend), src->name, dst->name, ggml_graph_n_nodes(graph), v0, take ? "half" : "decline");
+    ud->calls++;
+    if (take) {
+        ggml_backend_tensor_set(dst, src->data, 0, ggml_nbytes(src) / 2);
+    }
+    return take;
+}
+
+static void realloc_cb(ggml_backend_sched_t sched, struct ggml_cgraph * graph, bool ids_changed, bool size_changed,
+                       void * user_data) {
+    (void) sched;
+    int * n = user_data;
+    printf("  realloc_cb #%d backend_ids_changed=%d graph_size_changed=%d nodes=%d\n", (*n)++, ids_changed,
+           size_changed, ggml_graph_n_nodes(graph));
+}
+
+// y = w0 + x on ACC, then y2 = w1 + y, then n_extra more ADDs of w1, so a
+// second run changes the graph's size. `x` is a user input on the CPU; `w0`
+// and `w1` are weights in a CPU buffer, so the ADDs are offloaded to ACC and
+// both weights become inputs of its split, listed before `x`.
+//
+// `pin`, when not NULL, is the backend the first ADD is pinned to, which
+// changes the assignment without changing the node count.
+static void run_callbacks(const char * label, ggml_backend_sched_t sched, struct ggml_tensor * w0,
+                          struct ggml_tensor * w1, int n_extra, struct copy_ud * ud, ggml_backend_t pin) {
+    struct ggml_init_params p = { 1024*1024, NULL, true };
+    struct ggml_context * ctx = ggml_init(p);
+    struct ggml_tensor * x = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 8);
+    ggml_set_name(x, "x");
+    ggml_set_input(x);
+    struct ggml_tensor * y = ggml_add(ctx, w0, x);
+    struct ggml_tensor * y0 = y;
+    y = ggml_add(ctx, w1, y);
+    for (int i = 0; i < n_extra; i++) y = ggml_add(ctx, w1, y);
+    ggml_set_output(y);
+    struct ggml_cgraph * g = ggml_new_graph(ctx);
+    ggml_build_forward_expand(g, y);
+
+    static int run = 0;
+    run++;
+    ud->input = x;
+    printf("%s:\n", label);
+    if (pin) ggml_backend_sched_set_tensor_backend(sched, y0, pin);
+    if (!ggml_backend_sched_alloc_graph(sched, g)) {
+        printf("  alloc failed\n");
+    } else {
+        float xs[8];
+        // a new value every run, so a copy that has not happened yet reads
+        // the previous run's and shows
+        for (int i = 0; i < 8; i++) xs[i] = 100.0f * run + i;
+        ggml_backend_tensor_set(x, xs, 0, sizeof(xs));
+        const enum ggml_status st = ggml_backend_sched_graph_compute(sched, g);
+        printf("  n_splits=%d status=%d\n", ggml_backend_sched_get_n_splits(sched), st);
+        float ys[8];
+        ggml_backend_tensor_get(y, ys, 0, sizeof(ys));
+        printf("  y =");
+        for (int i = 0; i < 8; i++) printf(" %g", ys[i]);
+        printf("\n");
+    }
+    ggml_backend_sched_reset(sched);
+    ggml_free(ctx);
+}
+
+static void callbacks(void) {
+    acc_init();
+    ggml_backend_t cpu = ggml_backend_cpu_init();
+
+    struct ggml_init_params pw = { 1024*1024, NULL, true };
+    struct ggml_context * ctx_w = ggml_init(pw);
+    struct ggml_tensor * w0 = ggml_new_tensor_1d(ctx_w, GGML_TYPE_F32, 8);
+    struct ggml_tensor * w1 = ggml_new_tensor_1d(ctx_w, GGML_TYPE_F32, 8);
+    ggml_set_name(w0, "w0");
+    ggml_set_name(w1, "w1");
+    ggml_backend_buffer_t wbuf = ggml_backend_alloc_ctx_tensors(ctx_w, cpu);
+    ggml_backend_buffer_set_usage(wbuf, GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
+    float ws[8];
+    for (int i = 0; i < 8; i++) ws[i] = 1.0f + i;
+    ggml_backend_tensor_set(w0, ws, 0, sizeof(ws));
+    for (int i = 0; i < 8; i++) ws[i] = 10.0f * (i + 1);
+    ggml_backend_tensor_set(w1, ws, 0, sizeof(ws));
+
+    ggml_backend_t backends[2] = { &g_acc_backend, cpu };
+    ggml_backend_sched_t sched = ggml_backend_sched_new(backends, NULL, 2, 512, false, true);
+
+    // no callbacks: the whole weights are copied
+    struct copy_ud ud = { 0, 0, NULL };
+    int n_realloc = 0;
+    run_callbacks("callbacks none", sched, w0, w1, 0, &ud, NULL);
+
+    ggml_backend_sched_set_copy_callback(sched, copy_cb, &ud);
+    ggml_backend_sched_set_realloc_callback(sched, realloc_cb, &n_realloc);
+
+    ud.calls = 0; ud.mode = 0x1; // take w0's half, decline w1
+    run_callbacks("callbacks first", sched, w0, w1, 0, &ud, NULL);
+    ud.calls = 0; ud.mode = 0x2; // decline w0, take w1's half
+    run_callbacks("callbacks same", sched, w0, w1, 0, &ud, NULL);
+    ud.calls = 0; ud.mode = 0x3; // take both, on a larger graph
+    run_callbacks("callbacks larger", sched, w0, w1, 3, &ud, NULL);
+    ud.calls = 0; ud.mode = 0x0; // decline both, back to the smaller graph
+    run_callbacks("callbacks smaller", sched, w0, w1, 0, &ud, NULL);
+    ud.calls = 0; ud.mode = 0x1; // the first ADD pinned to the CPU: same nodes, new assignment
+    run_callbacks("callbacks pinned", sched, w0, w1, 0, &ud, cpu);
+
+    ggml_backend_sched_set_copy_callback(sched, NULL, NULL);
+    ggml_backend_sched_set_realloc_callback(sched, NULL, NULL);
+    run_callbacks("callbacks cleared", sched, w0, w1, 0, &ud, NULL);
+
+    ggml_backend_sched_free(sched);
+    ggml_backend_buffer_free(wbuf);
+    ggml_free(ctx_w);
+    ggml_backend_free(cpu);
+}
+
+// The input copies (#31419, #32100). The ACC stub gains an async read and
+// events, which `ggml_backend_sched_prefetch_inputs` needs; each logs.
+static void acc_get_async(ggml_backend_t backend, const struct ggml_tensor * t, void * data, size_t off, size_t size) {
+    (void) backend; memcpy(data, (const char *) t->data + off, size);
+    printf("  acc get_async %s off=%zu size=%zu\n", t->name, off, size);
+}
+static void acc_synchronize(ggml_backend_t backend) { (void) backend; printf("  acc synchronize\n"); }
+static int g_events = 0;
+static ggml_backend_event_t acc_event_new(ggml_backend_dev_t dev) {
+    ggml_backend_event_t e = calloc(1, sizeof(*e));
+    e->device = dev;
+    e->context = (void *) (intptr_t) ++g_events;
+    printf("  acc event_new #%d\n", g_events);
+    return e;
+}
+static void acc_event_free(ggml_backend_dev_t dev, ggml_backend_event_t e) {
+    (void) dev; printf("  acc event_free #%d\n", (int) (intptr_t) e->context); free(e);
+}
+static void acc_event_sync(ggml_backend_dev_t dev, ggml_backend_event_t e) {
+    (void) dev; printf("  acc event_synchronize #%d\n", (int) (intptr_t) e->context);
+}
+static void acc_event_record(ggml_backend_t b, ggml_backend_event_t e) {
+    (void) b; printf("  acc event_record #%d\n", (int) (intptr_t) e->context);
+}
+static void acc_event_wait(ggml_backend_t b, ggml_backend_event_t e) {
+    (void) b; printf("  acc event_wait #%d\n", (int) (intptr_t) e->context);
+}
+
+/* A weight in an ACC buffer, which the CPU reads: select == -3 multiplies by
+ * it, and a read ahead must skip it (only compute buffers are prefetched). */
+static struct ggml_tensor * g_acc_weight = NULL;
+
+static void prefetch_run(const char * label, ggml_backend_sched_t sched, struct ggml_tensor * w0, int select) {
+    struct ggml_init_params p = { 1024*1024, NULL, true };
+    struct ggml_context * ctx = ggml_init(p);
+    struct ggml_tensor * x = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 8);
+    ggml_set_name(x, "x");
+    ggml_set_input(x);
+    // ACC computes a; the CPU b; ACC c from both; the CPU d from a, which an
+    // earlier ACC split computed, so ACC's split for c may read it ahead
+    struct ggml_tensor * a = ggml_add(ctx, w0, x);           ggml_set_name(a, "a");
+    struct ggml_tensor * b = ggml_mul(ctx, x, x);            ggml_set_name(b, "b");
+    // select == -2: c adds into a in place, so ACC's split for c writes a
+    // view of what the CPU split reads, and must not read it ahead
+    struct ggml_tensor * cc = select == -2 ? ggml_add_inplace(ctx, a, b) : ggml_add(ctx, a, b);
+    ggml_set_name(cc, "c");
+    struct ggml_tensor * d = select == -2 ? ggml_mul(ctx, cc, x)
+                           : select == -3 ? ggml_mul(ctx, g_acc_weight, cc)
+                           :                ggml_mul(ctx, a, cc);
+    ggml_set_name(d, "d");
+    struct ggml_cgraph * g = ggml_new_graph(ctx);
+    struct ggml_tensor * out = d;
+    if (select >= 0) {
+        // two branches, one computed: the other's inputs stay in their split
+        // but are not copied
+        struct ggml_tensor * x2 = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 8);
+        ggml_set_name(x2, "x2");
+        ggml_set_input(x2);
+        struct ggml_tensor * e = ggml_add(ctx, w0, x2);      ggml_set_name(e, "e");
+        struct ggml_tensor * curs[2] = { ggml_mul(ctx, d, x), ggml_mul(ctx, e, x2) };
+        ggml_set_name(curs[0], "s0");
+        ggml_set_name(curs[1], "s1");
+        out = ggml_build_forward_select(g, curs, 2, select);
+        ggml_set_output(out);
+        printf("%s:\n", label);
+        if (!ggml_backend_sched_alloc_graph(sched, g)) { printf("  alloc failed\n"); goto done; }
+        float xs2[8];
+        for (int i = 0; i < 8; i++) xs2[i] = -1.0f - i;
+        ggml_backend_tensor_set(x2, xs2, 0, sizeof(xs2));
+    } else {
+        ggml_set_output(out);
+        ggml_build_forward_expand(g, out);
+        printf("%s:\n", label);
+        if (!ggml_backend_sched_alloc_graph(sched, g)) { printf("  alloc failed\n"); goto done; }
+    }
+    {
+        float xs[8];
+        for (int i = 0; i < 8; i++) xs[i] = 0.5f * (i + 1);
+        ggml_backend_tensor_set(x, xs, 0, sizeof(xs));
+        g_acc_log = 1;
+        const enum ggml_status st = ggml_backend_sched_graph_compute(sched, g);
+        g_acc_log = 0;
+        printf("  n_splits=%d status=%d\n", ggml_backend_sched_get_n_splits(sched), st);
+        for (int i = 0; i < ggml_graph_n_nodes(g); i++) {
+            struct ggml_tensor * t = ggml_graph_node(g, i);
+            ggml_backend_t be = ggml_backend_sched_get_tensor_backend(sched, t);
+            printf("  node %s -> %s compute=%d\n", t->name, be ? ggml_backend_name(be) : "-",
+                   (t->flags & GGML_TENSOR_FLAG_COMPUTE) != 0);
+        }
+        float ys[8];
+        ggml_backend_tensor_get(out, ys, 0, sizeof(ys));
+        printf("  out =");
+        for (int i = 0; i < 8; i++) printf(" %g", ys[i]);
+        printf("\n");
+    }
+done:
+    ggml_backend_sched_reset(sched);
+    ggml_free(ctx);
+}
+
+static void prefetch(void) {
+    acc_init();
+    g_acc_backend.iface.get_tensor_async = acc_get_async;
+    g_acc_backend.iface.synchronize      = acc_synchronize;
+    g_acc_backend.iface.event_record     = acc_event_record;
+    g_acc_backend.iface.event_wait       = acc_event_wait;
+    g_acc_dev.iface.event_new            = acc_event_new;
+    g_acc_dev.iface.event_free           = acc_event_free;
+    g_acc_dev.iface.event_synchronize    = acc_event_sync;
+    g_acc_leafs = 1;
+
+    ggml_backend_t cpu = ggml_backend_cpu_init();
+    struct ggml_init_params pw = { 1024*1024, NULL, true };
+    struct ggml_context * ctx_w = ggml_init(pw);
+    struct ggml_tensor * w0 = ggml_new_tensor_1d(ctx_w, GGML_TYPE_F32, 8);
+    ggml_set_name(w0, "w0");
+    ggml_backend_buffer_t wbuf = ggml_backend_alloc_ctx_tensors(ctx_w, cpu);
+    ggml_backend_buffer_set_usage(wbuf, GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
+    float ws[8];
+    for (int i = 0; i < 8; i++) ws[i] = 2.0f + i;
+    ggml_backend_tensor_set(w0, ws, 0, sizeof(ws));
+
+    struct ggml_context * ctx_aw = ggml_init(pw);
+    g_acc_weight = ggml_new_tensor_1d(ctx_aw, GGML_TYPE_F32, 8);
+    ggml_set_name(g_acc_weight, "w2");
+    ggml_backend_buffer_t awbuf = ggml_backend_alloc_ctx_tensors_from_buft(ctx_aw, &g_acc_buft);
+    ggml_backend_buffer_set_usage(awbuf, GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
+    for (int i = 0; i < 8; i++) ws[i] = 0.25f * (i + 3);
+    ggml_backend_tensor_set(g_acc_weight, ws, 0, sizeof(ws));
+
+    ggml_backend_t backends[2] = { &g_acc_backend, cpu };
+    for (int par = 0; par < 2; par++) {
+        printf("prefetch parallel=%d\n", par);
+        ggml_backend_sched_t sched = ggml_backend_sched_new(backends, NULL, 2, 512, par != 0, true);
+        prefetch_run("prefetch chain", sched, w0, -1);
+        prefetch_run("prefetch chain again", sched, w0, -1);
+        prefetch_run("prefetch inplace", sched, w0, -2);
+        prefetch_run("prefetch weight", sched, w0, -3);
+        prefetch_run("select 0", sched, w0, 0);
+        prefetch_run("select 1", sched, w0, 1);
+        ggml_backend_sched_free(sched);
+    }
+
+    ggml_backend_buffer_free(awbuf);
+    ggml_free(ctx_aw);
+    ggml_backend_buffer_free(wbuf);
+    ggml_free(ctx_w);
+    ggml_backend_free(cpu);
+    g_acc_leafs = 0;
+    acc_init();
+}
+
+int main(void) {
+    struct ggml_init_params p = { 64*1024*1024, NULL, true };
+
+    {   // add -> mul -> add: the middle op forces a change of backend
+        struct ggml_context * ctx = ggml_init(p);
+        struct ggml_tensor * a = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 4);
+        struct ggml_tensor * b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 4);
+        struct ggml_tensor * t = ggml_add(ctx, a, b);
+        t = ggml_mul(ctx, t, b);
+        t = ggml_add(ctx, t, b);
+        struct ggml_cgraph * g = ggml_new_graph(ctx);
+        ggml_build_forward_expand(g, t);
+        dump("mixed", g);
+        ggml_free(ctx);
+    }
+    {   // every op supported by FAST
+        struct ggml_context * ctx = ggml_init(p);
+        struct ggml_tensor * a = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 4);
+        struct ggml_tensor * b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 4);
+        struct ggml_tensor * t = ggml_add(ctx, a, b);
+        for (int i = 0; i < 5; i++) t = ggml_add(ctx, t, b);
+        struct ggml_cgraph * g = ggml_new_graph(ctx);
+        ggml_build_forward_expand(g, t);
+        dump("alladd", g);
+        ggml_free(ctx);
+    }
+    {   // Pass 2 only fires when something is already assigned: it expands an
+        // existing assignment to adjacent unassigned nodes, and skips the
+        // lowest-priority backend while doing so. `ggml_set_input` makes pass 1
+        // pin a tensor to the last backend (assumed CPU), which is exactly the
+        // assignment the skip is about.
+        struct ggml_context * ctx = ggml_init(p);
+        struct ggml_tensor * a = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 4);
+        struct ggml_tensor * b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 4);
+        struct ggml_tensor * t = ggml_add(ctx, a, b);
+        // Pin an intermediate *node*: pass 2 walks nodes, not leafs, so a
+        // flagged leaf would leave it with nothing to expand from. The flag
+        // is set by hand: `ggml_set_input` asserts the tensor
+        // is a leaf (`op == GGML_OP_NONE`).
+        t->flags |= GGML_TENSOR_FLAG_INPUT;
+        for (int i = 0; i < 3; i++) t = ggml_add(ctx, t, b);
+        struct ggml_cgraph * g = ggml_new_graph(ctx);
+        ggml_build_forward_expand(g, t);
+        dump("input", g);
+        ggml_free(ctx);
+    }
+    {   // a view, to exercise pass 4's view_src propagation
+        struct ggml_context * ctx = ggml_init(p);
+        struct ggml_tensor * a = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 8);
+        struct ggml_tensor * b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 8);
+        struct ggml_tensor * s = ggml_add(ctx, a, b);
+        struct ggml_tensor * v = ggml_view_1d(ctx, s, 4, 0);
+        struct ggml_tensor * o = ggml_add(ctx, v, ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 4));
+        struct ggml_cgraph * g = ggml_new_graph(ctx);
+        ggml_build_forward_expand(g, o);
+        dump("view", g);
+        ggml_free(ctx);
+    }
+    {   // Pipeline parallelism (`n_copies > 1`): pass 6 gives every input
+        // *leaf* its per-copy tensors and lists it in `graph_inputs`, which
+        // the graph copy then allocates first -- including an input no node
+        // consumes (`x`, expanded on its own). Neither is visible in the
+        // assignments, so this allocates on a real CPU backend and prints
+        // the buffer size and where each leaf landed.
+        struct ggml_context * ctx = ggml_init(p);
+        struct ggml_tensor * x = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 64);
+        struct ggml_tensor * a = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 16);
+        struct ggml_tensor * b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 16);
+        struct ggml_tensor * w = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 16);
+        ggml_set_name(x, "x"); ggml_set_name(a, "a"); ggml_set_name(b, "b"); ggml_set_name(w, "w");
+        ggml_set_input(x);
+        ggml_set_input(a);
+        ggml_set_input(b);
+        struct ggml_tensor * t = ggml_add(ctx, b, w);
+        t = ggml_mul(ctx, t, a);
+        struct ggml_cgraph * g = ggml_new_graph(ctx);
+        ggml_build_forward_expand(g, x);
+        ggml_build_forward_expand(g, t);
+
+        ggml_backend_t cpu = ggml_backend_cpu_init();
+        ggml_backend_t backends[1] = { cpu };
+        ggml_backend_sched_t sched = ggml_backend_sched_new(backends, NULL, 1, 512, true, false);
+        bool ok = ggml_backend_sched_alloc_graph(sched, g);
+        printf("parallel: alloc=%d n_copies=%d buffer=%zu\n", ok, ggml_backend_sched_get_n_copies(sched),
+               ggml_backend_sched_get_buffer_size(sched, cpu));
+        struct ggml_tensor * leafs[4] = { x, a, b, w };
+        for (int i = 0; i < 4; i++) {
+            struct ggml_tensor * l = leafs[i];
+            long off = l->data && l->buffer ? (long) ((char *) l->data - (char *) ggml_backend_buffer_get_base(l->buffer)) : -1;
+            printf("  parallel leaf %s -> off %ld\n", l->name, off);
+        }
+        ggml_backend_sched_free(sched);
+        ggml_backend_free(cpu);
+        ggml_free(ctx);
+    }
+    callbacks();
+    prefetch();
+    return 0;
+}

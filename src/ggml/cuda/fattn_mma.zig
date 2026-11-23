@@ -8,7 +8,7 @@
 //! The K/V tile stride is `ggml_cuda_fattn_mma_get_swizzled` and one
 //! inline line in `ggml_cuda_flash_attn_ext_mma_f16_case`.
 //! The configuration tables are generated into `fattn_config_table.zig` by
-//! `scripts/gen-fattn-config`. The kernel stays CUDA, one instantiation set
+//! `testing/scripts/gen-fattn-config`. The kernel stays CUDA, one instantiation set
 //! per `(ncols1, ncols2)` in
 //! `template-instances/fattn-mma-f16-instance-ncols1_<n1>-ncols2_<n2>.cu`.
 //!

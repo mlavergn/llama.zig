@@ -155,14 +155,14 @@ pub const Session = struct {
     ///
     /// Set from `LLAMAZIG_CNV_TRACE` by `main.zig`. Prefix reuse rarely
     /// shows in what a greedy decode says -- measured, a turn decoded from
-    /// scratch picks the same tokens in four of `scripts/cnv-diff`'s six
+    /// scratch picks the same tokens in four of `testing/scripts/cnv-diff`'s six
     /// Qwen3-0.6B scenarios -- so this line is how that gate tells a
     /// conversation that keeps its prefix from one that silently re-decodes
     /// everything.
     turn_trace: ?*std.Io.Writer = null,
     /// The `n_gpu_layers` the model was loaded with, after `--fit`: what
     /// `main.zig` reports under `LLAMAZIG_CNV_TRACE` beside the context size,
-    /// so `scripts/cnv-diff` sees what the fit decided reach libllama.
+    /// so `testing/scripts/cnv-diff` sees what the fit decided reach libllama.
     gpu_layers: i32,
     /// What `llama_model_params` points into while the model loads, kept for
     /// the model's lifetime since libllama keeps the parameters. Heap
@@ -762,7 +762,7 @@ pub const Session = struct {
     ///
     /// **This goes to stdout**, as upstream's does. That is worth stating because
     /// it means a redirect captures it alongside the completion. `--no-show-timings`
-    /// is how a caller gets clean output, and `scripts/parity-cli` passes exactly
+    /// is how a caller gets clean output, and `testing/scripts/parity-cli` passes exactly
     /// that.
     ///
     /// Parameters:

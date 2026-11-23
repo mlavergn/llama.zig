@@ -19,9 +19,9 @@
 //! missing-symbol errors are what proved the port complete: all **72**
 //! of the translation unit's unmangled exports resolve. They were
 //! deliberately *private* while bodies were still stubs, because
-//! `scripts/port-coverage` would otherwise have read `66 / 66 (100%)`
+//! `testing/scripts/port-coverage` would otherwise have read `66 / 66 (100%)`
 //! for a file whose every dispatch aborted — which is exactly what
-//! `repack.cpp` did before `scripts/cluster-check` existed.
+//! `repack.cpp` did before `testing/scripts/cluster-check` existed.
 //!
 //! `encoders_implemented` is the comptime guard for that, in the same
 //! shape as `repack.dispatch_implemented`.

@@ -9,7 +9,7 @@
 //!
 //! The pattern table below is **generated from the C++ literals** -- every
 //! `regex_exprs = { ... }` in `llm_tokenizer_bpe`'s constructor, byte for
-//! byte -- and `scripts/unicode-diff` extracts the same literals at run time
+//! byte -- and `testing/scripts/unicode-diff` extracts the same literals at run time
 //! and checks `unicode_regex_split` on each. Regenerate rather than edit.
 //!
 //! The work queue's comparator orders on rank and then `left`, so ties are

@@ -276,7 +276,7 @@ pub fn ggml_gemv_q5_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopa
                     // accumulated in an integer and subtracted once after
                     // it. `sb_min` is constant across `sb`, so the two are
                     // the same arithmetic -- and not the same rounding.
-                    // `scripts/repack-diff` caught the difference.
+                    // `testing/scripts/repack-diff` caught the difference.
                     var bias = ggml.cpu.quants.arch.neon.mull_s16(bsums_vec_lo, group_mins_lo);
                     bias = ggml.cpu.quants.arch.neon.mlal_s16(bias, bsums_vec_hi, group_mins_hi);
                     acc_f32[i] = ggml.cpu.quants.arch.neon.mlsq_f32(acc_f32[i], sb_min, ggml.cpu.quants.arch.neon.cvt_f32_s32(bias));

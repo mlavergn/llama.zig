@@ -24,7 +24,7 @@
 //! them through each of `tiled_kernel.zig`'s arms on this Mac against
 //! `vec_dot`. The bit-exact gate is the Windows pickup: `x86-ops-diff` on
 //! x86-64-v3 (`DESKTOP-BR7J5S9`) and at `x86_64_v4` and `tigerlake`
-//! (`JWHLPTOP`), whose `harness/ops_dump.c` has a tiled section shaped to
+//! (`JWHLPTOP`), whose `testing/harness/ops_dump.c` has a tiled section shaped to
 //! reach the standard and narrow paths of both ops for every format.
 //!
 //! # The C's quirk kept

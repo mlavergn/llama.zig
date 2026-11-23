@@ -19,7 +19,7 @@
 //!
 //! # The oracle
 //!
-//! `scripts/x86-quants-diff`: every one of the 28 exports against the
+//! `testing/scripts/x86-quants-diff`: every one of the 28 exports against the
 //! reference C, in one process, on bits, run on the Windows laptop's
 //! Haswell. All 28 are ported.
 

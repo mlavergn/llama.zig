@@ -31,7 +31,7 @@
 //! **One of the seven needs a workaround.** `fa_vec_set_override` takes
 //! `fa_vec_cfg_t` **by value**, and Zig 0.16 hands a callee zeros for an
 //! `extern struct` that size — see
-//! `harness/abi_structs.c` for the measured table of shapes. The exported
+//! `testing/harness/abi_structs.c` for the measured table of shapes. The exported
 //! thunk takes a `u16` and `@bitCast`s, which is the same two bytes in the
 //! same register and was measured correct.
 

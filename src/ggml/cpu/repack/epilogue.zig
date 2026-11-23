@@ -13,7 +13,7 @@
 //!
 //! # The fusion is named, because there is an oracle
 //!
-//! A fusion is named only when something can tell you you got it wrong. `scripts/repack-diff` is that something: it runs
+//! A fusion is named only when something can tell you you got it wrong. `testing/scripts/repack-diff` is that something: it runs
 //! every one of these kernels against the reference C++ in one process and
 //! compares on bits. Before this helper existed it reported 12 of 36
 //! kernels differing, every one of them by one ULP.

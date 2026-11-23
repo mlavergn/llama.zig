@@ -36,7 +36,7 @@ comptime {
         "VK_VALVE_shader_mixed_float_dot_product", "VK_EXT_shader_ocp_microscaling_types",
         "VK_EXT_shader_float8",                    "VK_NV_cooperative_matrix2",
     }) |ext| {
-        if (!@hasDecl(ggml.vulkan.common.vulkan_c, ext)) @compileError("the Vulkan headers predate " ++ ext ++ "; build with the pinned SDK (scripts/vk-toolchain)");
+        if (!@hasDecl(ggml.vulkan.common.vulkan_c, ext)) @compileError("the Vulkan headers predate " ++ ext ++ "; build with the pinned SDK (testing/scripts/vk-toolchain)");
     }
 }
 

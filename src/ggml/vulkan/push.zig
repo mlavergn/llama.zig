@@ -9,7 +9,7 @@
 //! # Generated, not written
 //!
 //! A shader reads these by offset. This file is produced by
-//! `scripts/gen-vk-push`, which also writes `harness/vk_push_layout.cpp`:
+//! `testing/scripts/gen-vk-push`, which also writes `testing/harness/vk_push_layout.cpp`:
 //! the same sizes and offsets as `static_assert`s against the structs the
 //! reference compiles. Do not edit it by hand; change the generator and
 //! re-run it.

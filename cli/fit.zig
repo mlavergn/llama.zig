@@ -26,9 +26,9 @@
 //! does the same thing the Zig way, importing libllama's own module as
 //! `llama` and calling `api/`'s Zig functions directly -- the CLI compiles
 //! libllama into itself rather than linking its archive, so every call here
-//! reaches the same code the `llama.h` exports do. `harness/fit_diff.zig`
-//! binds `llama` to `harness_root.zig` instead and runs this beside the
-//! C++.
+//! reaches the same code the `llama.h` exports do. `testing/harness/fit_diff.zig`
+//! binds `llama` to the same module, without its exports, and runs this
+//! beside the C++.
 //!
 //! # Logging
 //!
@@ -640,7 +640,7 @@ const FitImpl = struct {
 /// Upstream's `assert`, as the reference compiles it: out, under `NDEBUG`
 /// (upstream's Release build defines it, and so does `zig c++ -O2`). A
 /// failed one changes nothing, and the unsigned arithmetic after it wraps as
-/// the C's does -- measured: `gpu3-moe-40-10-30` in `scripts/fit-diff` fails
+/// the C's does -- measured: `gpu3-moe-40-10-30` in `testing/scripts/fit-diff` fails
 /// `n_full`'s on both sides and agrees on everything after. A
 /// `std.debug.assert` there would be undefined behaviour in ReleaseFast.
 fn cAssert(ok: bool) void {

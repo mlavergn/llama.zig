@@ -1,6 +1,6 @@
 // The reference side of `make smoke-macos` and `make smoke-sim`.
 //
-// The driver `scripts/parity-port` writes inline, kept here as a file: greedy
+// The driver `testing/scripts/parity-port` writes inline, kept here as a file: greedy
 // decoding through `llama.h`, `cpu` restricting the model to the CPU device.
 // The Makefile links it against the port's own libraries (`zig build
 // reference --release=fast -Dblas`), and `smoke.swift` runs the identical

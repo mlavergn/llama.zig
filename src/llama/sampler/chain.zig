@@ -22,7 +22,7 @@
 //! small `extern struct` received by value -- the callee sees zeros -- unless
 //! its size is a multiple of 4 with no padding. So the
 //! parameter is declared as the byte it is and bit-cast, and the entry point
-//! is in `harness/abi_structs.c`.
+//! is in `testing/harness/abi_structs.c`.
 
 const std = @import("std");
 const llama = @import("../module.zig");

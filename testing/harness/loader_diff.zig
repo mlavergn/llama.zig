@@ -1,0 +1,1558 @@
+//! Compares `src/llama/loader.zig` and `src/llama/model.zig` with
+//! llama.cpp's `llama-model-loader.cpp` and `llama-model.cpp`.
+//!
+//! **Not a port.** The harness behind `testing/scripts/loader-diff`. It runs the
+//! metadata half of `llama_model_load` twice per file in one process --
+//! through the C++ in `libllama.a` (`testing/harness/loader_ref.cpp`) and through
+//! `model.loadMetadata` -- and compares:
+//!
+//! - **everything logged**: the loader's metadata dump and type counts, its
+//!   `print_info`, override and warning lines, the model's `print_info` and
+//!   the vocabulary's; or, for a file that must fail, the message;
+//! - **every `llama_hparams` member**, the C++ object read through the
+//!   port's layout-identical `Hparams` once every offset and size has been
+//!   checked against `offsetof` and `sizeof`;
+//! - the model's size class, architecture, name, description, element and
+//!   byte counts, file type, classifier labels, and `gguf_kv` in its
+//!   `std::unordered_map` order.
+//!
+//! An architecture the port has no `load_arch_hparams` for loads only as a
+//! vocabulary; past that, the port's log must be a prefix of the C++'s and
+//! nothing else is compared.
+//!
+//! Inputs are upstream's vocabulary files, any Qwen3.5 model present, and
+//! files synthesized into the directory given: Qwen3.5's metadata without
+//! its tensors and edited one key at a time, small files with real tensors
+//! for the type guess and the bounds check, and split sets -- also
+//! given as `llama_model_load_from_splits`' paths, with extra shards
+//! and external per-layer embedding tables appended (5f490d7bf).
+//!
+//! Usage: loader_diff <tmpdir> <file.gguf>...
+
+const std = @import("std");
+const llama = @import("llama");
+
+extern fn ref_load_metadata(path: [*:0]const u8, split_paths: [*]const [*:0]const u8, n_split_paths: c_int, overrides: ?[*]const llama.impl.llama_c.llama_model_kv_override, vocab_only: c_int, what: [*]u8, n: usize) ?*llama.impl.llama_c.llama_model;
+extern fn ref_free(model: *llama.impl.llama_c.llama_model) void;
+extern fn ref_hparams(model: *const llama.impl.llama_c.llama_model) *const anyopaque;
+extern fn ref_type(model: *const llama.impl.llama_c.llama_model) c_int;
+extern fn ref_arch(model: *const llama.impl.llama_c.llama_model) c_int;
+extern fn ref_name(model: *const llama.impl.llama_c.llama_model) [*:0]const u8;
+extern fn ref_desc(model: *const llama.impl.llama_c.llama_model, buf: [*]u8, n: usize) void;
+extern fn ref_n_elements(model: *const llama.impl.llama_c.llama_model) u64;
+extern fn ref_n_bytes(model: *const llama.impl.llama_c.llama_model) usize;
+extern fn ref_ftype(model: *const llama.impl.llama_c.llama_model) c_int;
+extern fn ref_n_labels(model: *const llama.impl.llama_c.llama_model) usize;
+extern fn ref_label(model: *const llama.impl.llama_c.llama_model, i: usize) [*:0]const u8;
+extern fn ref_decision_label(model: *const llama.impl.llama_c.llama_model, i: u32) ?[*:0]const u8;
+extern fn ref_n_decision_labels(model: *const llama.impl.llama_c.llama_model) usize;
+extern fn ref_n_kv(model: *const llama.impl.llama_c.llama_model) usize;
+extern fn ref_kv(model: *const llama.impl.llama_c.llama_model, i: usize, key: *[*:0]const u8, value: *[*:0]const u8) c_int;
+extern fn ref_hparams_sizeof() usize;
+extern fn ref_hparams_alignof() usize;
+extern fn ref_hparams_nfields() usize;
+extern fn ref_hparams_field(i: usize, offset: *usize, size: *usize) [*:0]const u8;
+extern "c" fn truncate(path: [*:0]const u8, length: i64) c_int;
+extern fn ref_layer_tensor(model: *const llama.impl.llama_c.llama_model, il: c_int, field: [*:0]const u8) ?[*:0]const u8;
+extern fn ref_model_tensor(model: *const llama.impl.llama_c.llama_model, field: [*:0]const u8) ?[*:0]const u8;
+extern fn ref_n_layers(model: *const llama.impl.llama_c.llama_model) usize;
+extern fn ref_n_tensors(model: *const llama.impl.llama_c.llama_model) usize;
+extern fn ref_tensor_at(model: *const llama.impl.llama_c.llama_model, i: usize, name: *[*:0]const u8) *llama.impl.llama_c.ggml_tensor;
+extern fn ref_n_devices(model: *const llama.impl.llama_c.llama_model) usize;
+extern fn ref_device(model: *const llama.impl.llama_c.llama_model, i: usize) llama.impl.llama_c.ggml_backend_dev_t;
+extern fn ref_dev_layer(model: *const llama.impl.llama_c.llama_model, il: c_int) llama.impl.llama_c.ggml_backend_dev_t;
+extern fn ref_dev_output(model: *const llama.impl.llama_c.llama_model) llama.impl.llama_c.ggml_backend_dev_t;
+extern fn ref_memory_breakdown(model: *const llama.impl.llama_c.llama_model, i: usize, buft: *llama.impl.llama_c.ggml_backend_buffer_type_t) usize;
+extern fn ref_hash_tensor(t: *const llama.impl.llama_c.ggml_tensor) u64;
+
+var checks: usize = 0;
+var failures: usize = 0;
+var case_failures: usize = 0;
+
+fn fail(comptime fmt: []const u8, args: anytype) void {
+    failures += 1;
+    case_failures += 1;
+    if (case_failures <= 6) std.debug.print("FAIL " ++ fmt ++ "\n", args);
+}
+
+fn expectStr(what: []const u8, ref: []const u8, port: []const u8) void {
+    checks += 1;
+    if (!std.mem.eql(u8, ref, port)) fail("{s}: ref '{s}' port '{s}'", .{ what, ref, port });
+}
+
+fn expectInt(what: []const u8, ref: i128, port: i128) void {
+    checks += 1;
+    if (ref != port) fail("{s}: ref {d} port {d}", .{ what, ref, port });
+}
+
+// -----------------------------------------------------------------------------
+// Logs
+
+var log_target: ?*std.ArrayList(u8) = null;
+
+fn logCb(_: llama.impl.llama_c.enum_ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
+    const t = log_target orelse return;
+    t.appendSlice(std.heap.c_allocator, std.mem.span(@as([*:0]const u8, @ptrCast(text)))) catch unreachable;
+}
+
+/// The first line where two logs differ, for the report.
+fn firstDiff(a: []const u8, b: []const u8) void {
+    var ia = std.mem.splitScalar(u8, a, '\n');
+    var ib = std.mem.splitScalar(u8, b, '\n');
+    var line: usize = 1;
+    while (true) : (line += 1) {
+        const la = ia.next();
+        const lb = ib.next();
+        if (la == null and lb == null) return;
+        if (la == null or lb == null or !std.mem.eql(u8, la.?, lb.?)) {
+            fail("log line {d}:\n    ref  '{s}'\n    port '{s}'", .{ line, la orelse "<end>", lb orelse "<end>" });
+            return;
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// The layout
+
+/// Every `llama_hparams` member's name, offset and size against the port's
+/// `Hparams`, and the struct's size and alignment. The comparison of
+/// values below reads the C++ object through `Hparams`, so it means nothing
+/// unless this passes.
+fn checkLayout() bool {
+    @setEvalBranchQuota(20000);
+    const before = failures;
+    const names = @typeInfo(llama.hparams.Hparams).@"struct".field_names;
+    expectInt("sizeof(llama_hparams)", ref_hparams_sizeof(), @sizeOf(llama.hparams.Hparams));
+    expectInt("alignof(llama_hparams)", ref_hparams_alignof(), @alignOf(llama.hparams.Hparams));
+    expectInt("llama_hparams members", ref_hparams_nfields(), names.len);
+    const n = @min(ref_hparams_nfields(), names.len);
+    inline for (names, 0..) |name, i| {
+        if (i < n) {
+            var off: usize = 0;
+            var size: usize = 0;
+            const ref_name_ = std.mem.span(ref_hparams_field(i, &off, &size));
+            expectStr("member name", ref_name_, name);
+            expectInt(name ++ " offset", off, @offsetOf(llama.hparams.Hparams, name));
+            expectInt(name ++ " size", size, @sizeOf(@FieldType(llama.hparams.Hparams, name)));
+        }
+    }
+    return failures == before;
+}
+
+fn compareHparams(ref: *const llama.hparams.Hparams, port: *const llama.hparams.Hparams) void {
+    @setEvalBranchQuota(20000);
+    inline for (@typeInfo(llama.hparams.Hparams).@"struct".field_names) |name| {
+        checks += 1;
+        const a = std.mem.asBytes(&@field(ref.*, name));
+        const b = std.mem.asBytes(&@field(port.*, name));
+        if (!std.mem.eql(u8, a, b)) {
+            const at = std.mem.findDiff(u8, a, b) orelse 0;
+            fail("hparams.{s}: first difference at byte {d} (ref 0x{x:0>2}, port 0x{x:0>2})", .{ name, at, a[at], b[at] });
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// One case
+
+const Case = struct {
+    name: []const u8,
+    path: [:0]const u8,
+    vocab_only: bool,
+    overrides: []const llama.impl.llama_c.llama_model_kv_override = &.{},
+    /// The paths `llama_model_load_from_splits` would be given, `path`
+    /// first; empty for `llama_model_load_from_file`.
+    splits: []const [:0]const u8 = &.{},
+};
+
+const Tally = struct {
+    loaded: usize = 0,
+    thrown: usize = 0,
+    unported: usize = 0,
+};
+var tally: Tally = .{};
+
+fn runCase(cs: Case) void {
+    case_failures = 0;
+    const before = checks;
+
+    var ovr: std.ArrayList(llama.impl.llama_c.llama_model_kv_override) = .empty;
+    defer ovr.deinit(std.heap.c_allocator);
+    if (cs.overrides.len != 0) {
+        ovr.appendSlice(std.heap.c_allocator, cs.overrides) catch unreachable;
+        ovr.append(std.heap.c_allocator, std.mem.zeroes(llama.impl.llama_c.llama_model_kv_override)) catch unreachable;
+    }
+    const ovr_ptr: ?[*]const llama.impl.llama_c.llama_model_kv_override = if (cs.overrides.len != 0) ovr.items.ptr else null;
+
+    var ref_log: std.ArrayList(u8) = .empty;
+    defer ref_log.deinit(std.heap.c_allocator);
+    var port_log: std.ArrayList(u8) = .empty;
+    defer port_log.deinit(std.heap.c_allocator);
+
+    // Reference.
+    var what: [1024]u8 = undefined;
+    log_target = &ref_log;
+    var split_ptrs: [8][*:0]const u8 = undefined;
+    for (cs.splits, 0..) |sp, i| split_ptrs[i] = sp.ptr;
+    const ref_model = ref_load_metadata(cs.path.ptr, &split_ptrs, @intCast(cs.splits.len), ovr_ptr, @intFromBool(cs.vocab_only), &what, what.len);
+    defer if (ref_model) |m| ref_free(m);
+
+    // Port.
+    log_target = &port_log;
+    var exc: llama.impl.Exception = .{};
+    var splits: std.ArrayList([:0]const u8) = .empty;
+    defer {
+        for (splits.items) |s| std.heap.c_allocator.free(s);
+        splits.deinit(std.heap.c_allocator);
+    }
+    for (cs.splits) |sp| splits.append(std.heap.c_allocator, std.heap.c_allocator.dupeSentinel(u8, sp, 0) catch unreachable) catch unreachable;
+    var params = llama.model.defaultParams();
+    params.vocab_only = cs.vocab_only;
+    var loaded = llama.model.loadMetadata(.{ .path = cs.path }, &splits, params, ovr_ptr, &exc);
+    defer if (loaded == .model) loaded.model.deinit();
+    log_target = null;
+
+    // An empty log is a prefix of anything and equal to another empty one,
+    // so a model that loaded, or got as far as unported, must have logged.
+    // A constructor that throws first legitimately logs nothing; its message
+    // carries that comparison.
+    if (loaded != .thrown) {
+        checks += 1;
+        if (ref_log.items.len == 0 or port_log.items.len == 0) {
+            fail("{s}: a side logged nothing (ref {d} bytes, port {d})", .{ cs.name, ref_log.items.len, port_log.items.len });
+        }
+    }
+
+    switch (loaded) {
+        .unported => {
+            tally.unported += 1;
+            checks += 1;
+            if (!std.mem.startsWith(u8, ref_log.items, port_log.items)) {
+                fail("{s}: an unported architecture's log is not a prefix of the C++'s", .{cs.name});
+                firstDiff(ref_log.items, port_log.items);
+            }
+        },
+        .thrown => {
+            tally.thrown += 1;
+            checks += 1;
+            if (ref_model != null) {
+                fail("{s}: the port threw '{s}', the C++ loaded", .{ cs.name, exc.what() });
+            } else {
+                expectStr("error", std.mem.sliceTo(&what, 0), exc.what());
+            }
+            firstDiff(ref_log.items, port_log.items);
+        },
+        .model => |*m| {
+            tally.loaded += 1;
+            checks += 1;
+            const rm = ref_model orelse {
+                fail("{s}: the C++ threw '{s}', the port loaded", .{ cs.name, std.mem.sliceTo(&what, 0) });
+                return;
+            };
+            firstDiff(ref_log.items, port_log.items);
+            compareHparams(@ptrCast(@alignCast(ref_hparams(rm))), &m.hparams);
+            expectInt("type", ref_type(rm), @backingInt(m.type));
+            expectInt("arch", ref_arch(rm), @backingInt(m.arch));
+            expectStr("name", std.mem.span(ref_name(rm)), m.name.items);
+            var desc: [512]u8 = undefined;
+            ref_desc(rm, &desc, desc.len);
+            expectStr("desc", std.mem.sliceTo(&desc, 0), m.desc());
+            expectInt("n_elements", ref_n_elements(rm), m.n_elements);
+            expectInt("n_bytes", ref_n_bytes(rm), m.n_bytes);
+            expectInt("ftype", ref_ftype(rm), m.ftype);
+            expectInt("classifier labels", ref_n_labels(rm), m.classifier_labels.items.len);
+            for (m.classifier_labels.items, 0..) |l, i| {
+                if (i < ref_n_labels(rm)) expectStr("classifier label", std.mem.span(ref_label(rm, i)), l);
+            }
+            // `llama_model_decision_label`, past the last one too.
+            expectInt("decision labels", ref_n_decision_labels(rm), m.decision_labels.items.len);
+            for (0..m.decision_labels.items.len + 2) |li| {
+                const rl = ref_decision_label(rm, @intCast(li));
+                const pl: ?[*:0]const u8 = @ptrCast(llama.api.model.llama_model_decision_label(@ptrCast(m), @intCast(li)));
+                checks += 1;
+                if ((rl == null) != (pl == null)) {
+                    fail("{s}: decision label {d}: null C++ {} port {}", .{ cs.name, li, rl == null, pl == null });
+                } else if (rl) |r| expectStr("decision label", std.mem.span(r), std.mem.span(pl.?));
+            }
+            expectInt("gguf_kv size", ref_n_kv(rm), m.gguf_kv.len);
+            var it = m.gguf_kv.iterator();
+            var i: usize = 0;
+            while (it.next()) |e| : (i += 1) {
+                var k: [*:0]const u8 = undefined;
+                var v: [*:0]const u8 = undefined;
+                if (ref_kv(rm, i, &k, &v) == 0) break;
+                expectStr("gguf_kv key", std.mem.span(k), e.key);
+                expectStr("gguf_kv value", std.mem.span(v), e.value.*);
+            }
+        },
+    }
+
+    const outcome = switch (loaded) {
+        .model => "loaded",
+        .thrown => "threw",
+        .unported => "unported",
+    };
+    std.debug.print("  {s:<44} {s:<8} {d:>8} checks\n", .{ cs.name, outcome, checks - before });
+}
+
+// -----------------------------------------------------------------------------
+// Full loads: the tensor half
+
+const FullCase = struct {
+    name: []const u8,
+    path: [:0]const u8,
+    edit: *const fn (*llama.impl.llama_c.llama_model_params) void,
+};
+
+/// A log line's free-memory figure moves with what the process has
+/// allocated, and the two loads run one after the other.
+fn normalizeLog(log: []const u8) std.ArrayList(u8) {
+    var out: std.ArrayList(u8) = .empty;
+    var lines = std.mem.splitScalar(u8, log, '\n');
+    var first = true;
+    while (lines.next()) |line| {
+        if (!first) out.append(std.heap.c_allocator, '\n') catch unreachable;
+        first = false;
+        if (std.mem.startsWith(u8, line, "ggml_metal_log_allocated_size:")) {
+            // `( total / max)`: the process-wide total, which counts the
+            // other side's model too.
+            if (std.mem.findScalar(u8, line, '(')) |open| {
+                out.appendSlice(std.heap.c_allocator, line[0..open]) catch unreachable;
+                out.appendSlice(std.heap.c_allocator, "(N)") catch unreachable;
+                continue;
+            }
+        }
+        if (std.mem.find(u8, line, "available_memory_kb: ")) |at| {
+            // CUDA on a unified-memory device reads the system's free
+            // memory from /proc/meminfo, which moves between any two reads.
+            // `context_diff.zig` masks it the same way.
+            out.appendSlice(std.heap.c_allocator, line[0 .. at + "available_memory_kb: ".len]) catch unreachable;
+            out.appendSlice(std.heap.c_allocator, "N") catch unreachable;
+            continue;
+        }
+        if (std.mem.find(u8, line, " MiB free")) |end| {
+            var start = end;
+            while (start > 0 and std.ascii.isDigit(line[start - 1])) start -= 1;
+            out.appendSlice(std.heap.c_allocator, line[0..start]) catch unreachable;
+            out.appendSlice(std.heap.c_allocator, "N") catch unreachable;
+            out.appendSlice(std.heap.c_allocator, line[end..]) catch unreachable;
+        } else {
+            out.appendSlice(std.heap.c_allocator, line) catch unreachable;
+        }
+    }
+    return out;
+}
+
+fn cancelHalfway(progress: f32, _: ?*anyopaque) callconv(.c) bool {
+    return progress < 0.5;
+}
+
+fn devName(dev: llama.impl.llama_c.ggml_backend_dev_t) []const u8 {
+    return if (dev == null) "(null)" else std.mem.span(llama.impl.llama_c.ggml_backend_dev_name(dev));
+}
+
+fn compareTensor(what: []const u8, ref: *const llama.impl.llama_c.ggml_tensor, port: *const llama.impl.llama_c.ggml_tensor, hash: bool) void {
+    expectStr(what, std.mem.sliceTo(&ref.name, 0), std.mem.sliceTo(&port.name, 0));
+    expectInt("type", ref.type, port.type);
+    for (0..4) |d| {
+        expectInt("ne", ref.ne[d], port.ne[d]);
+        expectInt("nb", ref.nb[d], port.nb[d]);
+    }
+    checks += 1;
+    if ((ref.buffer == null) != (port.buffer == null)) {
+        fail("{s}: buffer presence differs", .{std.mem.sliceTo(&ref.name, 0)});
+        return;
+    }
+    if (ref.buffer == null) return;
+    expectStr("buffer", std.mem.span(llama.impl.llama_c.ggml_backend_buffer_name(ref.buffer)), std.mem.span(llama.impl.llama_c.ggml_backend_buffer_name(port.buffer)));
+    expectInt("usage", llama.impl.llama_c.ggml_backend_buffer_get_usage(ref.buffer), llama.impl.llama_c.ggml_backend_buffer_get_usage(port.buffer));
+    const rb = llama.impl.llama_c.ggml_backend_buffer_get_base(ref.buffer);
+    const pb = llama.impl.llama_c.ggml_backend_buffer_get_base(port.buffer);
+    if (rb != null and pb != null and ref.data != null and port.data != null) {
+        expectInt("offset in buffer", @as(i128, @intFromPtr(ref.data)) - @intFromPtr(rb), @as(i128, @intFromPtr(port.data)) - @intFromPtr(pb));
+    }
+    if (hash) expectInt("data hash", ref_hash_tensor(ref), ref_hash_tensor(port));
+}
+
+var warmed_up = false;
+
+fn runFullCase(fc: FullCase) void {
+    case_failures = 0;
+    const before = checks;
+
+    var params = llama.impl.llama_c.llama_model_default_params();
+    fc.edit(&params);
+    var port_params = llama.model.defaultParams();
+    fc.edit(&port_params);
+
+    // The first load in the process initializes the backends, which log.
+    if (!warmed_up) {
+        warmed_up = true;
+        var warm = llama.impl.llama_c.llama_model_default_params();
+        warm.vocab_only = true;
+        if (llama.impl.llama_c.llama_model_load_from_file(fc.path.ptr, warm)) |m| llama.impl.llama_c.llama_model_free(m);
+    }
+
+    var ref_log: std.ArrayList(u8) = .empty;
+    defer ref_log.deinit(std.heap.c_allocator);
+    var port_log: std.ArrayList(u8) = .empty;
+    defer port_log.deinit(std.heap.c_allocator);
+
+    log_target = &ref_log;
+    const rm = llama.impl.llama_c.llama_model_load_from_file(fc.path.ptr, params);
+    defer if (rm) |m| llama.impl.llama_c.llama_model_free(m);
+
+    log_target = &port_log;
+    var splits: std.ArrayList([:0]const u8) = .empty;
+    defer {
+        for (splits.items) |s| std.heap.c_allocator.free(s);
+        splits.deinit(std.heap.c_allocator);
+    }
+    const pm = llama.model.loadFromFileImpl(.{ .path = fc.path }, &splits, null, null, port_params);
+    defer if (pm) |m| llama.model.destroy(m);
+    log_target = null;
+
+    var rl = normalizeLog(ref_log.items);
+    defer rl.deinit(std.heap.c_allocator);
+    var pl = normalizeLog(port_log.items);
+    defer pl.deinit(std.heap.c_allocator);
+    checks += 1;
+    if (rl.items.len == 0) fail("{s}: the C++ logged nothing", .{fc.name});
+    firstDiff(rl.items, pl.items);
+
+    checks += 1;
+    const outcome: []const u8 = if (rm != null and pm != null) "loaded" else if (rm == null and pm == null) "failed" else blk: {
+        fail("{s}: ref {s}, port {s}", .{ fc.name, if (rm != null) "loaded" else "failed", if (pm != null) "loaded" else "failed" });
+        break :blk "differ";
+    };
+
+    if (rm != null and pm != null) {
+        const r = rm.?;
+        const m = pm.?;
+        const hash = !port_params.no_alloc and !port_params.vocab_only;
+
+        expectInt("n_tensors", ref_n_tensors(r), m.tensors_by_name.items.len);
+        for (m.tensors_by_name.items, 0..) |t, i| {
+            if (i >= ref_n_tensors(r)) break;
+            var name: [*:0]const u8 = undefined;
+            const rt = ref_tensor_at(r, i, &name);
+            expectStr("tensors_by_name key", std.mem.span(name), std.mem.sliceTo(&t.name, 0));
+            compareTensor("tensor", rt, t, hash);
+        }
+
+        // Every model-level tensor, and every member of every layer, the
+        // nested ones by their path: the C++ tables are generated with the
+        // port's structs, so a name the C++ does not know reads "?".
+        {
+            @setEvalBranchQuota(200_000);
+            const minfo = @typeInfo(llama.model.Model).@"struct";
+            inline for (minfo.field_names, minfo.field_types) |f, F| {
+                if (F != ?*llama.impl.llama_c.ggml_tensor) continue;
+                const rt = ref_model_tensor(r, f);
+                const pt = @field(m.*, f);
+                expectStr("model." ++ f, if (rt) |p| std.mem.span(p) else "(null)", if (pt) |p| std.mem.sliceTo(&p.name, 0) else "(null)");
+            }
+        }
+
+        expectInt("n layers", ref_n_layers(r), m.layers.len);
+        for (m.layers, 0..) |*layer, il| {
+            if (il >= ref_n_layers(r)) break;
+            compareLayer(llama.model.Layer, "", r, @intCast(il), layer);
+        }
+
+        expectInt("n devices", ref_n_devices(r), m.devices.items.len);
+        for (m.devices.items, 0..) |d, i| {
+            if (i < ref_n_devices(r)) expectStr("device", devName(ref_device(r, i)), devName(d.dev));
+        }
+        if (!port_params.vocab_only) {
+            for (0..m.hparams.n_layer_all) |il| expectStr("dev_layer", devName(ref_dev_layer(r, @intCast(il))), devName(m.devLayer(il)));
+            expectStr("dev_output", devName(ref_dev_output(r)), devName(m.devOutput()));
+        }
+
+        const mb = m.memoryBreakdown();
+        defer std.heap.c_allocator.free(mb);
+        for (mb, 0..) |e, i| {
+            var buft: llama.impl.llama_c.ggml_backend_buffer_type_t = null;
+            const size = ref_memory_breakdown(r, i, &buft);
+            expectStr("memory_breakdown buft", if (buft == null) "(none)" else std.mem.span(llama.impl.llama_c.ggml_backend_buft_name(buft)), std.mem.span(llama.impl.llama_c.ggml_backend_buft_name(e.buft)));
+            expectInt("memory_breakdown size", size, e.size);
+        }
+        var extra: llama.impl.llama_c.ggml_backend_buffer_type_t = null;
+        _ = ref_memory_breakdown(r, mb.len, &extra);
+        checks += 1;
+        if (extra != null) fail("memory_breakdown: the C++ has more entries", .{});
+    }
+    std.debug.print("  {s:<44} {s:<8} {d:>8} checks\n", .{ fc.name, outcome, checks - before });
+}
+
+const Edit = struct {
+    fn none(_: *llama.impl.llama_c.llama_model_params) void {}
+    fn cpuOnly(p: *llama.impl.llama_c.llama_model_params) void {
+        p.n_gpu_layers = 0;
+    }
+    fn partial(p: *llama.impl.llama_c.llama_model_params) void {
+        p.n_gpu_layers = 10;
+    }
+    fn noMmap(p: *llama.impl.llama_c.llama_model_params) void {
+        p.load_mode = llama.impl.llama_c.LLAMA_LOAD_MODE_NONE;
+    }
+    fn noMmapCpu(p: *llama.impl.llama_c.llama_model_params) void {
+        p.load_mode = llama.impl.llama_c.LLAMA_LOAD_MODE_NONE;
+        p.n_gpu_layers = 0;
+    }
+    fn mmapExplicit(p: *llama.impl.llama_c.llama_model_params) void {
+        p.load_mode = llama.impl.llama_c.LLAMA_LOAD_MODE_MMAP;
+    }
+    /// Direct I/O: `O_DIRECT` reads through the bounded, aligned staging
+    /// buffer on Linux (`readAlignedChunk`); macOS reports alignment 1
+    /// and reads as without it.
+    fn directIo(p: *llama.impl.llama_c.llama_model_params) void {
+        p.load_mode = llama.impl.llama_c.LLAMA_LOAD_MODE_DIRECT_IO;
+    }
+    fn directIoCpu(p: *llama.impl.llama_c.llama_model_params) void {
+        p.load_mode = llama.impl.llama_c.LLAMA_LOAD_MODE_DIRECT_IO;
+        p.n_gpu_layers = 0;
+    }
+    fn noExtraBufts(p: *llama.impl.llama_c.llama_model_params) void {
+        p.use_extra_bufts = false;
+        p.n_gpu_layers = 0;
+    }
+    fn noHost(p: *llama.impl.llama_c.llama_model_params) void {
+        p.no_host = true;
+        p.n_gpu_layers = 0;
+    }
+    fn checkTensors(p: *llama.impl.llama_c.llama_model_params) void {
+        p.check_tensors = true;
+    }
+    /// `no_alloc` with mmap trips `GGML_ASSERT(!ml.no_alloc)` in the C++
+    /// itself (llama-model.cpp:1701), so it is only ever used without.
+    fn noAlloc(p: *llama.impl.llama_c.llama_model_params) void {
+        p.no_alloc = true;
+        p.load_mode = llama.impl.llama_c.LLAMA_LOAD_MODE_NONE;
+    }
+    fn noAllocCpu(p: *llama.impl.llama_c.llama_model_params) void {
+        p.no_alloc = true;
+        p.load_mode = llama.impl.llama_c.LLAMA_LOAD_MODE_NONE;
+        p.n_gpu_layers = 0;
+    }
+    fn vocabOnly(p: *llama.impl.llama_c.llama_model_params) void {
+        p.vocab_only = true;
+    }
+    fn loadMtp(p: *llama.impl.llama_c.llama_model_params) void {
+        p.load_mtp = true;
+    }
+    fn splitNoneNoGpu(p: *llama.impl.llama_c.llama_model_params) void {
+        p.split_mode = llama.impl.llama_c.LLAMA_SPLIT_MODE_NONE;
+        p.main_gpu = -1;
+    }
+    fn splitNone(p: *llama.impl.llama_c.llama_model_params) void {
+        p.split_mode = llama.impl.llama_c.LLAMA_SPLIT_MODE_NONE;
+    }
+    fn badMainGpu(p: *llama.impl.llama_c.llama_model_params) void {
+        p.split_mode = llama.impl.llama_c.LLAMA_SPLIT_MODE_NONE;
+        p.main_gpu = 5;
+    }
+    fn tensorSplit(p: *llama.impl.llama_c.llama_model_params) void {
+        const S = struct {
+            var split: [16]f32 = .{ 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+        };
+        p.tensor_split = &S.split;
+    }
+    fn cancel(p: *llama.impl.llama_c.llama_model_params) void {
+        p.progress_callback = cancelHalfway;
+    }
+    fn overrideFfnCpu(p: *llama.impl.llama_c.llama_model_params) void {
+        const S = struct {
+            var o: [2]llama.impl.llama_c.llama_model_tensor_buft_override = undefined;
+        };
+        S.o = .{ .{ .pattern = "ffn_(up|down)", .buft = llama.impl.llama_c.ggml_backend_cpu_buffer_type() }, .{ .pattern = null, .buft = null } };
+        p.tensor_buft_overrides = &S.o;
+    }
+    fn overrideBadRegex(p: *llama.impl.llama_c.llama_model_params) void {
+        const S = struct {
+            var o: [2]llama.impl.llama_c.llama_model_tensor_buft_override = undefined;
+        };
+        S.o = .{ .{ .pattern = "blk.(", .buft = llama.impl.llama_c.ggml_backend_cpu_buffer_type() }, .{ .pattern = null, .buft = null } };
+        p.tensor_buft_overrides = &S.o;
+    }
+    // `TENSOR_READ_LAZY`: the architectures that mark a tensor lazy are
+    // gemma4 and qwen4exp. A fixture's tensors are far below the 4 GiB
+    // `LLAMA_LAZY_MODE_AUTO` wants, so only `ON` reaches the lazy path.
+    fn lazyOn(p: *llama.impl.llama_c.llama_model_params) void {
+        p.lazy_mode = llama.impl.llama_c.LLAMA_LAZY_MODE_ON;
+    }
+    fn lazyOff(p: *llama.impl.llama_c.llama_model_params) void {
+        p.lazy_mode = llama.impl.llama_c.LLAMA_LAZY_MODE_OFF;
+    }
+    fn lazyOnCpu(p: *llama.impl.llama_c.llama_model_params) void {
+        p.lazy_mode = llama.impl.llama_c.LLAMA_LAZY_MODE_ON;
+        p.n_gpu_layers = 0;
+    }
+    /// Lazy without mmap: the files are mapped for the lazy tensors alone,
+    /// not prefetched, and the rest are read biggest-staged-first.
+    fn lazyOnNoMmap(p: *llama.impl.llama_c.llama_model_params) void {
+        p.lazy_mode = llama.impl.llama_c.LLAMA_LAZY_MODE_ON;
+        p.load_mode = llama.impl.llama_c.LLAMA_LOAD_MODE_NONE;
+    }
+    fn lazyOnNoMmapCpu(p: *llama.impl.llama_c.llama_model_params) void {
+        p.lazy_mode = llama.impl.llama_c.LLAMA_LAZY_MODE_ON;
+        p.load_mode = llama.impl.llama_c.LLAMA_LOAD_MODE_NONE;
+        p.n_gpu_layers = 0;
+    }
+    /// `no_alloc` asks without recording: the tensor still goes in the lazy
+    /// context, and nothing is mapped for it.
+    fn lazyOnNoAlloc(p: *llama.impl.llama_c.llama_model_params) void {
+        p.lazy_mode = llama.impl.llama_c.LLAMA_LAZY_MODE_ON;
+        p.no_alloc = true;
+        p.load_mode = llama.impl.llama_c.LLAMA_LOAD_MODE_NONE;
+    }
+    /// mlock skips the lazy tensors.
+    fn lazyOnMlock(p: *llama.impl.llama_c.llama_model_params) void {
+        p.lazy_mode = llama.impl.llama_c.LLAMA_LAZY_MODE_ON;
+        p.load_mode = llama.impl.llama_c.LLAMA_LOAD_MODE_MMAP_MLOCK;
+    }
+    fn lazyOnDirectIo(p: *llama.impl.llama_c.llama_model_params) void {
+        p.lazy_mode = llama.impl.llama_c.LLAMA_LAZY_MODE_ON;
+        p.load_mode = llama.impl.llama_c.LLAMA_LOAD_MODE_DIRECT_IO;
+    }
+    fn lazyOnCheck(p: *llama.impl.llama_c.llama_model_params) void {
+        p.lazy_mode = llama.impl.llama_c.LLAMA_LAZY_MODE_ON;
+        p.check_tensors = true;
+    }
+    fn overrideEmpty(p: *llama.impl.llama_c.llama_model_params) void {
+        const S = struct {
+            var o: [1]llama.impl.llama_c.llama_model_tensor_buft_override = .{.{ .pattern = null, .buft = null }};
+        };
+        p.tensor_buft_overrides = &S.o;
+    }
+};
+
+// -----------------------------------------------------------------------------
+// Synthetic files
+
+fn kvInt(key: []const u8, v: i64) llama.impl.llama_c.llama_model_kv_override {
+    var o = std.mem.zeroes(llama.impl.llama_c.llama_model_kv_override);
+    o.tag = llama.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_INT;
+    @memcpy(o.key[0..key.len], key);
+    o.unnamed_0.val_i64 = v;
+    return o;
+}
+
+fn kvFloat(key: []const u8, v: f64) llama.impl.llama_c.llama_model_kv_override {
+    var o = std.mem.zeroes(llama.impl.llama_c.llama_model_kv_override);
+    o.tag = llama.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_FLOAT;
+    @memcpy(o.key[0..key.len], key);
+    o.unnamed_0.val_f64 = v;
+    return o;
+}
+
+fn kvBool(key: []const u8, v: bool) llama.impl.llama_c.llama_model_kv_override {
+    var o = std.mem.zeroes(llama.impl.llama_c.llama_model_kv_override);
+    o.tag = llama.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_BOOL;
+    @memcpy(o.key[0..key.len], key);
+    o.unnamed_0.val_bool = v;
+    return o;
+}
+
+fn kvStr(key: []const u8, v: []const u8) llama.impl.llama_c.llama_model_kv_override {
+    var o = std.mem.zeroes(llama.impl.llama_c.llama_model_kv_override);
+    o.tag = llama.impl.llama_c.LLAMA_KV_OVERRIDE_TYPE_STR;
+    @memcpy(o.key[0..key.len], key);
+    @memcpy(o.unnamed_0.val_str[0..v.len], v);
+    return o;
+}
+
+/// The edits on fixtures' metadata.
+const Fixture = struct {
+    fn hrmPrefix(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_bool(ctx, "hrm_text.hrm.prefix_lm", true);
+    }
+    fn hrmNoL(ctx: *llama.impl.llama_c.gguf_context) void {
+        _ = llama.impl.llama_c.gguf_remove_key(ctx, "hrm_text.hrm.l_cycles");
+    }
+    fn hrmHFloat(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_f32(ctx, "hrm_text.hrm.h_cycles", 2.0);
+    }
+    fn hrmScale(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_f32(ctx, "hrm_text.embedding_scale", 39.19);
+    }
+    fn nemotronNoRms(ctx: *llama.impl.llama_c.gguf_context) void {
+        _ = llama.impl.llama_c.gguf_remove_key(ctx, "nemotron_h.attention.layer_norm_rms_epsilon");
+        llama.impl.llama_c.gguf_set_val_f32(ctx, "nemotron_h.attention.layer_norm_epsilon", 3.0e-5);
+    }
+    fn nemotronNoEps(ctx: *llama.impl.llama_c.gguf_context) void {
+        _ = llama.impl.llama_c.gguf_remove_key(ctx, "nemotron_h.attention.layer_norm_epsilon");
+    }
+    /// A section order needs M-RoPE, which nemotron_h has not.
+    fn nemotronSectionOrder(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_str(ctx, "nemotron_h.rope.section_order", "zyxt");
+    }
+    /// prism.hadamard on an architecture not verified to apply it.
+    fn nemotronHadamard(ctx: *llama.impl.llama_c.gguf_context) void {
+        Hadamard.base(ctx, 1, false);
+    }
+};
+
+/// The `prism.hadamard` metadata (llama-model.cpp:2030 @620d2225c),
+/// on Qwen3.5: a valid base, then one fault at a time, each a throw of
+/// `load_hparams_hadamard`'s.
+const Hadamard = struct {
+    fn base(ctx: *llama.impl.llama_c.gguf_context, version: u32, tied: bool) void {
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "prism.hadamard.version", version);
+        llama.impl.llama_c.gguf_set_val_bool(ctx, "prism.hadamard.tied_output", tied);
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "prism.hadamard.block_size", 64);
+        llama.impl.llama_c.gguf_set_val_str(ctx, "prism.hadamard.transform", "normalized-sylvester-walsh-hadamard");
+        llama.impl.llama_c.gguf_set_val_str(ctx, "prism.hadamard.axis", "input-last-dimension");
+        llama.impl.llama_c.gguf_set_val_str(ctx, "prism.hadamard.sign_mode", "identity");
+        setStrs(ctx, "prism.hadamard.weight_names", &.{ "blk.0.attn_qkv.weight", "blk.0.ffn_up.weight", "blk.3.attn_output.weight", "blk.0.ssm_out.weight" });
+    }
+    fn identity(ctx: *llama.impl.llama_c.gguf_context) void {
+        base(ctx, 1, false);
+    }
+    fn tiedLatent(ctx: *llama.impl.llama_c.gguf_context) void {
+        base(ctx, 2, true);
+        setStrs(ctx, "prism.hadamard.inverse_weight_names", &.{"token_embd.weight"});
+        llama.impl.llama_c.gguf_set_val_bool(ctx, "prism.hadamard.gdn_v_grouped", true);
+    }
+    fn explicit(ctx: *llama.impl.llama_c.gguf_context) void {
+        base(ctx, 1, false);
+        llama.impl.llama_c.gguf_set_val_str(ctx, "prism.hadamard.sign_mode", "explicit");
+        setI32s(ctx, "prism.hadamard.sign_widths", &.{ 64, 128 });
+        var v: [192]i32 = undefined;
+        for (&v, 0..) |*x, i| x.* = if (i % 3 == 0) -1 else 1;
+        setI32s(ctx, "prism.hadamard.sign_values", &v);
+    }
+    fn badVersion(ctx: *llama.impl.llama_c.gguf_context) void {
+        base(ctx, 3, false);
+    }
+    fn v2Untied(ctx: *llama.impl.llama_c.gguf_context) void {
+        base(ctx, 2, false);
+    }
+    fn v1Tied(ctx: *llama.impl.llama_c.gguf_context) void {
+        base(ctx, 1, true);
+    }
+    fn tiedNoVersion(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_bool(ctx, "prism.hadamard.tied_output", true);
+    }
+    fn tiedNoLatent(ctx: *llama.impl.llama_c.gguf_context) void {
+        base(ctx, 2, true);
+    }
+    fn latentUntied(ctx: *llama.impl.llama_c.gguf_context) void {
+        base(ctx, 1, false);
+        setStrs(ctx, "prism.hadamard.inverse_weight_names", &.{"token_embd.weight"});
+    }
+    fn blockNotPow2(ctx: *llama.impl.llama_c.gguf_context) void {
+        base(ctx, 1, false);
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "prism.hadamard.block_size", 48);
+    }
+    fn noBlock(ctx: *llama.impl.llama_c.gguf_context) void {
+        base(ctx, 1, false);
+        _ = llama.impl.llama_c.gguf_remove_key(ctx, "prism.hadamard.block_size");
+    }
+    fn badTransform(ctx: *llama.impl.llama_c.gguf_context) void {
+        base(ctx, 1, false);
+        llama.impl.llama_c.gguf_set_val_str(ctx, "prism.hadamard.transform", "walsh");
+    }
+    fn badAxis(ctx: *llama.impl.llama_c.gguf_context) void {
+        base(ctx, 1, false);
+        llama.impl.llama_c.gguf_set_val_str(ctx, "prism.hadamard.axis", "output");
+    }
+    fn badSignMode(ctx: *llama.impl.llama_c.gguf_context) void {
+        base(ctx, 1, false);
+        llama.impl.llama_c.gguf_set_val_str(ctx, "prism.hadamard.sign_mode", "random");
+    }
+    fn noWeights(ctx: *llama.impl.llama_c.gguf_context) void {
+        base(ctx, 1, false);
+        setStrs(ctx, "prism.hadamard.weight_names", &.{});
+    }
+    fn explicitNoWidths(ctx: *llama.impl.llama_c.gguf_context) void {
+        explicit(ctx);
+        setI32s(ctx, "prism.hadamard.sign_widths", &.{});
+    }
+    fn explicitBadWidth(ctx: *llama.impl.llama_c.gguf_context) void {
+        explicit(ctx);
+        setI32s(ctx, "prism.hadamard.sign_widths", &.{ 64, 96 });
+    }
+    fn explicitDupWidth(ctx: *llama.impl.llama_c.gguf_context) void {
+        explicit(ctx);
+        setI32s(ctx, "prism.hadamard.sign_widths", &.{ 64, 64 });
+    }
+    fn explicitBadValue(ctx: *llama.impl.llama_c.gguf_context) void {
+        explicit(ctx);
+        var v: [192]i32 = @splat(1);
+        v[70] = 2;
+        setI32s(ctx, "prism.hadamard.sign_values", &v);
+    }
+    fn explicitShort(ctx: *llama.impl.llama_c.gguf_context) void {
+        explicit(ctx);
+        setI32s(ctx, "prism.hadamard.sign_widths", &.{64});
+    }
+    fn notFoldable(ctx: *llama.impl.llama_c.gguf_context) void {
+        base(ctx, 1, false);
+        setStrs(ctx, "prism.hadamard.weight_names", &.{ "blk.0.attn_qkv.weight", "blk.0.ssm_alpha.weight" });
+    }
+    fn badBlockName(ctx: *llama.impl.llama_c.gguf_context) void {
+        base(ctx, 1, false);
+        setStrs(ctx, "prism.hadamard.weight_names", &.{"blk..attn_q.weight"});
+    }
+    fn duplicateWeight(ctx: *llama.impl.llama_c.gguf_context) void {
+        base(ctx, 1, false);
+        setStrs(ctx, "prism.hadamard.weight_names", &.{ "output.weight", "blk.2.ffn_down.weight", "output.weight" });
+    }
+    fn badInverse(ctx: *llama.impl.llama_c.gguf_context) void {
+        base(ctx, 2, true);
+        setStrs(ctx, "prism.hadamard.inverse_weight_names", &.{"output.weight"});
+    }
+    fn duplicateInverse(ctx: *llama.impl.llama_c.gguf_context) void {
+        base(ctx, 2, true);
+        setStrs(ctx, "prism.hadamard.inverse_weight_names", &.{ "token_embd.weight", "token_embd.weight" });
+    }
+};
+
+/// A tensor-less copy of `base`'s metadata with `edit` applied, written to
+/// `dir/name.gguf`.
+fn derive(dir: []const u8, base: [:0]const u8, name: []const u8, comptime edit: fn (*llama.impl.llama_c.gguf_context) void) [:0]const u8 {
+    const src = llama.impl.llama_c.gguf_init_from_file(base.ptr, .{ .no_alloc = true, .ctx = null }).?;
+    defer llama.impl.llama_c.gguf_free(src);
+    const ctx = llama.impl.llama_c.gguf_init_empty().?;
+    defer llama.impl.llama_c.gguf_free(ctx);
+    llama.impl.llama_c.gguf_set_kv(ctx, src);
+    edit(ctx);
+    const path = std.heap.c_allocator.printSentinel("{s}/{s}.gguf", .{ dir, name }, 0) catch unreachable;
+    if (!llama.impl.llama_c.gguf_write_to_file(ctx, path.ptr, true)) @panic("cannot write a synthetic file");
+    return path;
+}
+
+fn setI32s(ctx: *llama.impl.llama_c.gguf_context, key: [:0]const u8, v: []const i32) void {
+    llama.impl.llama_c.gguf_set_arr_data(ctx, key.ptr, llama.impl.llama_c.GGUF_TYPE_INT32, v.ptr, v.len);
+}
+
+fn setU32s(ctx: *llama.impl.llama_c.gguf_context, key: [:0]const u8, v: []const u32) void {
+    llama.impl.llama_c.gguf_set_arr_data(ctx, key.ptr, llama.impl.llama_c.GGUF_TYPE_UINT32, v.ptr, v.len);
+}
+
+/// `n` copies of `pattern`, cycled, as a `uint32` array.
+fn setCycle(ctx: *llama.impl.llama_c.gguf_context, key: [:0]const u8, pattern: []const u32, n: usize) void {
+    var v: [512]u32 = undefined;
+    for (v[0..n], 0..) |*x, i| x.* = pattern[i % pattern.len];
+    setU32s(ctx, key, v[0..n]);
+}
+
+fn setStrs(ctx: *llama.impl.llama_c.gguf_context, key: [:0]const u8, strs: []const [*:0]const u8) void {
+    llama.impl.llama_c.gguf_set_arr_str(ctx, key.ptr, @ptrCast(@constCast(strs.ptr)), strs.len);
+}
+
+/// Edits of Qwen3.5's metadata, one key or one family at a time.
+const Qwen = struct {
+    fn asIs(_: *llama.impl.llama_c.gguf_context) void {}
+
+    fn noContext(ctx: *llama.impl.llama_c.gguf_context) void {
+        _ = llama.impl.llama_c.gguf_remove_key(ctx, "qwen35.context_length");
+    }
+
+    fn contextAsString(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_str(ctx, "qwen35.context_length", "262144");
+    }
+
+    fn headsPerLayer(ctx: *llama.impl.llama_c.gguf_context) void {
+        setCycle(ctx, "qwen35.attention.head_count", &.{ 8, 16, 8, 4 }, 24);
+        setCycle(ctx, "qwen35.attention.head_count_kv", &.{ 2, 4 }, 24);
+        setCycle(ctx, "qwen35.feed_forward_length", &.{ 6144, 3072 }, 24);
+    }
+
+    fn headsWrongLength(ctx: *llama.impl.llama_c.gguf_context) void {
+        setCycle(ctx, "qwen35.attention.head_count", &.{8}, 23);
+    }
+
+    fn headsHuge(ctx: *llama.impl.llama_c.gguf_context) void {
+        // Past INT32_MAX: print_info's lambda returns int32_t.
+        setCycle(ctx, "qwen35.attention.head_count_kv", &.{ 0x80000001, 2 }, 24);
+    }
+
+    fn sectionsScalar(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_i32(ctx, "qwen35.rope.dimension_sections", 11);
+    }
+
+    fn sectionsShort(ctx: *llama.impl.llama_c.gguf_context) void {
+        setI32s(ctx, "qwen35.rope.dimension_sections", &.{ 11, 11, 10 });
+    }
+
+    fn sectionsU32(ctx: *llama.impl.llama_c.gguf_context) void {
+        setU32s(ctx, "qwen35.rope.dimension_sections", &.{ 7, 0, 3, 1 });
+    }
+
+    fn sectionsFloat(ctx: *llama.impl.llama_c.gguf_context) void {
+        const v = [_]f32{ 1, 2, 3, 4 };
+        llama.impl.llama_c.gguf_set_arr_data(ctx, "qwen35.rope.dimension_sections", llama.impl.llama_c.GGUF_TYPE_FLOAT32, &v, v.len);
+    }
+
+    fn noSections(ctx: *llama.impl.llama_c.gguf_context) void {
+        _ = llama.impl.llama_c.gguf_remove_key(ctx, "qwen35.rope.dimension_sections");
+    }
+
+    fn yarn(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_str(ctx, "qwen35.rope.scaling.type", "yarn");
+        llama.impl.llama_c.gguf_set_val_f32(ctx, "qwen35.rope.scaling.factor", 4.0);
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.rope.scaling.original_context_length", 32768);
+        llama.impl.llama_c.gguf_set_val_bool(ctx, "qwen35.rope.scaling.finetuned", true);
+        llama.impl.llama_c.gguf_set_val_f32(ctx, "qwen35.rope.scaling.attn_factor", 0.5);
+    }
+
+    fn scaleLinear(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_f32(ctx, "qwen35.rope.scale_linear", 3.0);
+    }
+
+    fn interval0(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.full_attention_interval", 0);
+    }
+
+    fn interval3(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.full_attention_interval", 3);
+    }
+
+    fn recurrentArray(ctx: *llama.impl.llama_c.gguf_context) void {
+        setCycle(ctx, "qwen35.attention.recurrent_layers", &.{ 1, 0, 0 }, 24);
+    }
+
+    fn recurrentBools(ctx: *llama.impl.llama_c.gguf_context) void {
+        var v: [24]bool = undefined;
+        for (&v, 0..) |*x, i| x.* = i % 5 == 0;
+        llama.impl.llama_c.gguf_set_arr_data(ctx, "qwen35.attention.recurrent_layers", llama.impl.llama_c.GGUF_TYPE_BOOL, &v, v.len);
+    }
+
+    fn nextn(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.nextn_predict_layers", 2);
+    }
+
+    fn size4b(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.block_count", 32);
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.embedding_length", 2560);
+    }
+
+    fn size9b(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.block_count", 32);
+    }
+
+    fn size27b(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.block_count", 64);
+    }
+
+    fn sizeOdd(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.block_count", 7);
+    }
+
+    fn size0_8b(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.embedding_length", 1024);
+    }
+
+    fn fileType(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "general.file_type", llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_IQ3_M);
+    }
+
+    fn fileTypeF8(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "general.file_type", llama.impl.llama_c.LLAMA_FTYPE_MOSTLY_F8_E4M3);
+    }
+
+    fn noFileType(ctx: *llama.impl.llama_c.gguf_context) void {
+        _ = llama.impl.llama_c.gguf_remove_key(ctx, "general.file_type");
+    }
+
+    fn noName(ctx: *llama.impl.llama_c.gguf_context) void {
+        _ = llama.impl.llama_c.gguf_remove_key(ctx, "general.name");
+    }
+
+    fn labels(ctx: *llama.impl.llama_c.gguf_context) void {
+        setStrs(ctx, "qwen35.classifier.output_labels", &.{ "negative", "neutral", "positive \"quoted\"" });
+    }
+
+    /// The `<arch>.decision.labels`.
+    fn decisionLabels(ctx: *llama.impl.llama_c.gguf_context) void {
+        setStrs(ctx, "qwen35.decision.labels", &.{ "yes", "no", "maybe \"so\"" });
+    }
+
+    /// `gguf_kv_to_str` stops rendering an array once the text is
+    /// past 40 bytes, so the dump must show the same around that edge: one
+    /// short of it, at it, one past it, a last element that crosses it, and
+    /// an element that ends in an escape exactly there.
+    fn arrayEdges(ctx: *llama.impl.llama_c.gguf_context) void {
+        const fits = "12345678901234567890123456789012345";
+        setStrs(ctx, "general.arr_38", &.{fits});
+        setStrs(ctx, "general.arr_39", &.{fits ++ "6"});
+        setStrs(ctx, "general.arr_40", &.{fits ++ "67"});
+        setStrs(ctx, "general.arr_41", &.{fits ++ "678"});
+        setStrs(ctx, "general.arr_two", &.{ fits ++ "6789", "more" });
+        setStrs(ctx, "general.arr_cross", &.{ "short", fits, "tail" });
+        setStrs(ctx, "general.arr_esc", &.{ "1234567890123456789012345678901234\\\"", "more" });
+        setStrs(ctx, "general.arr_bs", &.{ "a\\b", "c\"d" });
+        setStrs(ctx, "general.arr_empty", &.{});
+        const ints = [_]u32{ 100000, 200000, 300000, 400000, 500000, 600000, 700000, 800000 };
+        llama.impl.llama_c.gguf_set_arr_data(ctx, "general.ints_8", llama.impl.llama_c.GGUF_TYPE_UINT32, &ints, ints.len);
+        llama.impl.llama_c.gguf_set_arr_data(ctx, "general.ints_5", llama.impl.llama_c.GGUF_TYPE_UINT32, &ints, 5);
+        llama.impl.llama_c.gguf_set_arr_data(ctx, "general.ints_4", llama.impl.llama_c.GGUF_TYPE_UINT32, &ints, 4);
+    }
+
+    fn headSizes(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.attention.key_length", 96);
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.attention.value_length", 80);
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.rope.dimension_count", 48);
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.attention.key_length_swa", 32);
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.rope.dimension_count_swa", 16);
+    }
+
+    fn noHeads(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.attention.head_count", 0);
+    }
+
+    fn pooling(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.pooling_type", 2);
+        llama.impl.llama_c.gguf_set_val_bool(ctx, "qwen35.attention.causal", false);
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.embedding_length_out", 512);
+    }
+
+    /// The `pooling_type_cls`, the pooling before a RANK classifier
+    /// head (ModernBERT's "mean").
+    fn classifierPooling(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.classifier.pooling_type", 1);
+    }
+
+    fn moe(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.expert_count", 8);
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.expert_used_count", 2);
+    }
+
+    fn noSsm(ctx: *llama.impl.llama_c.gguf_context) void {
+        _ = llama.impl.llama_c.gguf_remove_key(ctx, "qwen35.ssm.state_size");
+    }
+
+    fn rmsEpsAsDouble(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_f64(ctx, "qwen35.attention.layer_norm_rms_epsilon", 1e-6);
+    }
+
+    fn freqBase(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_f32(ctx, "qwen35.rope.freq_base", 1234567.875);
+    }
+
+    fn unknownArch(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_str(ctx, "general.architecture", "no-such-arch");
+    }
+
+    fn noArch(ctx: *llama.impl.llama_c.gguf_context) void {
+        _ = llama.impl.llama_c.gguf_remove_key(ctx, "general.architecture");
+    }
+
+    fn gptj(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_str(ctx, "general.architecture", "gptj");
+    }
+
+    /// The `<arch>.classifier.activation`.
+    fn clsActGelu(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_str(ctx, "qwen35.classifier.activation", "gelu");
+    }
+    fn clsActSilu(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_str(ctx, "qwen35.classifier.activation", "silu");
+    }
+    /// The `<arch>.classifier_free_guidance` (b1c902f02), read for
+    /// every architecture.
+    fn cfgOn(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_bool(ctx, "qwen35.classifier_free_guidance", true);
+    }
+    fn cfgAsU32(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.classifier_free_guidance", 1);
+    }
+    /// The `<arch>.rope.section_order`, which Qwen3.5's M-RoPE takes.
+    fn sectionOrderZyxt(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_str(ctx, "qwen35.rope.section_order", "zyxt");
+    }
+    fn sectionOrderTyxz(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_str(ctx, "qwen35.rope.section_order", "tyxz");
+    }
+    fn sectionOrderBad(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_str(ctx, "qwen35.rope.section_order", "txyz");
+    }
+    fn sectionOrderU32(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.rope.section_order", 1);
+    }
+    /// The MoVA counts (K2 Horizon), which only that architecture
+    /// reads: present here they change nothing but the metadata log.
+    fn valueExperts(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.attention.value_expert_count", 8);
+        llama.impl.llama_c.gguf_set_val_u32(ctx, "qwen35.attention.value_expert_used_count", 2);
+    }
+
+    fn longValues(ctx: *llama.impl.llama_c.gguf_context) void {
+        llama.impl.llama_c.gguf_set_val_str(ctx, "general.description", "line one\nline two, which is long enough to be cut off at forty bytes");
+        llama.impl.llama_c.gguf_set_val_str(ctx, "general.short", "a\nb");
+        llama.impl.llama_c.gguf_set_val_f64(ctx, "general.f64", 3.14159265358979);
+        llama.impl.llama_c.gguf_set_val_i8(ctx, "general.i8", -5);
+        llama.impl.llama_c.gguf_set_val_u64(ctx, "general.u64", 18446744073709551615);
+        llama.impl.llama_c.gguf_set_val_i64(ctx, "general.i64", -9223372036854775807);
+        llama.impl.llama_c.gguf_set_val_i16(ctx, "general.i16", -300);
+        llama.impl.llama_c.gguf_set_val_u16(ctx, "general.u16", 65535);
+        const v = [_]f32{ 0.1, -2.5e10, 7 };
+        llama.impl.llama_c.gguf_set_arr_data(ctx, "general.f32s", llama.impl.llama_c.GGUF_TYPE_FLOAT32, &v, v.len);
+        const b = [_]bool{ true, false };
+        llama.impl.llama_c.gguf_set_arr_data(ctx, "general.bools", llama.impl.llama_c.GGUF_TYPE_BOOL, &b, b.len);
+    }
+};
+
+/// A small file with real tensors, for the file-type guess and the bounds
+/// check. `blk.2.*` is Q6_K and `blk.10.*` Q4_K, two each: in
+/// `weight_name_comparer` order Q6_K reaches two first and wins the tie,
+/// where a plain name sort would put `blk.10` first and pick Q4_K.
+fn tensorFile(dir: []const u8, base: [:0]const u8, name: []const u8, comptime edit: fn (*llama.impl.llama_c.gguf_context, *llama.impl.llama_c.ggml_context) void, truncate_by: usize) [:0]const u8 {
+    const src = llama.impl.llama_c.gguf_init_from_file(base.ptr, .{ .no_alloc = true, .ctx = null }).?;
+    defer llama.impl.llama_c.gguf_free(src);
+    const gctx = llama.impl.llama_c.gguf_init_empty().?;
+    defer llama.impl.llama_c.gguf_free(gctx);
+    llama.impl.llama_c.gguf_set_kv(gctx, src);
+
+    const ctx = llama.impl.llama_c.ggml_init(.{ .mem_size = 1 << 22, .mem_buffer = null, .no_alloc = false }).?;
+    defer llama.impl.llama_c.ggml_free(ctx);
+    edit(gctx, ctx);
+
+    const path = std.heap.c_allocator.printSentinel("{s}/{s}.gguf", .{ dir, name }, 0) catch unreachable;
+    if (!llama.impl.llama_c.gguf_write_to_file(gctx, path.ptr, false)) @panic("cannot write a synthetic file");
+    if (truncate_by != 0) {
+        const f = llama.impl.llama_c.fopen(path.ptr, "rb+").?;
+        _ = llama.impl.llama_c.fseeko(f, 0, llama.impl.llama_c.SEEK_END);
+        const size = llama.impl.llama_c.ftello(f);
+        _ = llama.impl.llama_c.fclose(f);
+        if (truncate(path.ptr, size - @as(i64, @intCast(truncate_by))) != 0) @panic("truncate");
+    }
+    return path;
+}
+
+fn addTensor(gctx: *llama.impl.llama_c.gguf_context, ctx: *llama.impl.llama_c.ggml_context, name: [:0]const u8, ty: llama.impl.llama_c.enum_ggml_type, n: i64) void {
+    const t = llama.impl.llama_c.ggml_new_tensor_1d(ctx, ty, n);
+    _ = llama.impl.llama_c.ggml_set_name(t, name.ptr);
+    @memset(@as([*]u8, @ptrCast(t.*.data))[0..llama.impl.llama_c.ggml_nbytes(t)], 0);
+    llama.impl.llama_c.gguf_add_tensor(gctx, t);
+}
+
+const Tensors = struct {
+    fn tie(g: *llama.impl.llama_c.gguf_context, ctx: *llama.impl.llama_c.ggml_context) void {
+        addTensor(g, ctx, "output.weight", llama.impl.llama_c.GGML_TYPE_F32, 64);
+        addTensor(g, ctx, "blk.10.a.weight", llama.impl.llama_c.GGML_TYPE_Q4_K, 256);
+        addTensor(g, ctx, "blk.10.b.weight", llama.impl.llama_c.GGML_TYPE_Q4_K, 256);
+        addTensor(g, ctx, "blk.2.b.weight", llama.impl.llama_c.GGML_TYPE_Q6_K, 256);
+        addTensor(g, ctx, "blk.2.a.weight", llama.impl.llama_c.GGML_TYPE_Q6_K, 256);
+        _ = llama.impl.llama_c.gguf_remove_key(g, "general.file_type");
+    }
+
+    fn integers(g: *llama.impl.llama_c.gguf_context, ctx: *llama.impl.llama_c.ggml_context) void {
+        addTensor(g, ctx, "blk.0.x", llama.impl.llama_c.GGML_TYPE_I32, 16);
+        addTensor(g, ctx, "blk.0.y", llama.impl.llama_c.GGML_TYPE_I32, 16);
+        addTensor(g, ctx, "blk.-1.z", llama.impl.llama_c.GGML_TYPE_F16, 16);
+        _ = llama.impl.llama_c.gguf_remove_key(g, "general.file_type");
+    }
+
+    /// `tie` with a per-layer embedding table of its own, for an external
+    /// one to replace (5f490d7bf).
+    fn withPle(g: *llama.impl.llama_c.gguf_context, ctx: *llama.impl.llama_c.ggml_context) void {
+        tie(g, ctx);
+        addTensor(g, ctx, "per_layer_token_embd.weight", llama.impl.llama_c.GGML_TYPE_F16, 64);
+    }
+
+    /// F8_E4M3: the guessed type and its file-type name.
+    fn f8(g: *llama.impl.llama_c.gguf_context, ctx: *llama.impl.llama_c.ggml_context) void {
+        addTensor(g, ctx, "output.weight", llama.impl.llama_c.GGML_TYPE_F32, 64);
+        addTensor(g, ctx, "blk.0.a.weight", llama.impl.llama_c.GGML_TYPE_F8_E4M3, 256);
+        addTensor(g, ctx, "blk.0.b.weight", llama.impl.llama_c.GGML_TYPE_F8_E4M3, 256);
+        addTensor(g, ctx, "blk.1.a.weight", llama.impl.llama_c.GGML_TYPE_Q8_0, 256);
+        _ = llama.impl.llama_c.gguf_remove_key(g, "general.file_type");
+    }
+
+    fn many(g: *llama.impl.llama_c.gguf_context, ctx: *llama.impl.llama_c.ggml_context) void {
+        const types = [_]llama.impl.llama_c.enum_ggml_type{ llama.impl.llama_c.GGML_TYPE_Q8_0, llama.impl.llama_c.GGML_TYPE_BF16, llama.impl.llama_c.GGML_TYPE_IQ4_NL, llama.impl.llama_c.GGML_TYPE_Q5_1, llama.impl.llama_c.GGML_TYPE_Q8_0 };
+        for (types, 0..) |ty, i| {
+            var buf: [32]u8 = undefined;
+            const n = std.fmt.bufPrintSentinel(&buf, "blk.{d}.w", .{i % 3}, 0) catch unreachable;
+            var nb: [40]u8 = undefined;
+            const nm = std.fmt.bufPrintSentinel(&nb, "{s}{d}", .{ n, i }, 0) catch unreachable;
+            addTensor(g, ctx, nm, ty, 1024);
+        }
+    }
+};
+
+/// A split set derived from `base`: the first file holds the metadata and
+/// one tensor, the second another tensor; `kind` breaks it in one place.
+fn splitSet(dir: []const u8, base: [:0]const u8, name: []const u8, kind: enum { ok, wrong_idx, first_not_zero, bad_count, missing_second, duplicate, bad_name, ple_second, missing_bad_count }) [:0]const u8 {
+    const src = llama.impl.llama_c.gguf_init_from_file(base.ptr, .{ .no_alloc = true, .ctx = null }).?;
+    defer llama.impl.llama_c.gguf_free(src);
+
+    var paths: [2][:0]const u8 = undefined;
+    for (0..2) |i| {
+        paths[i] = if (kind == .bad_name and i == 0)
+            std.heap.c_allocator.printSentinel("{s}/{s}-first.gguf", .{ dir, name }, 0) catch unreachable
+        else
+            std.heap.c_allocator.printSentinel("{s}/{s}-{d:0>5}-of-00002.gguf", .{ dir, name, i + 1 }, 0) catch unreachable;
+    }
+    for (0..2) |i| {
+        if ((kind == .missing_second or kind == .missing_bad_count) and i == 1) continue;
+        const g = llama.impl.llama_c.gguf_init_empty().?;
+        defer llama.impl.llama_c.gguf_free(g);
+        if (i == 0) llama.impl.llama_c.gguf_set_kv(g, src);
+        _ = llama.impl.llama_c.gguf_remove_key(g, "general.file_type");
+        const no: u16 = switch (kind) {
+            .wrong_idx => if (i == 1) 5 else 0,
+            .first_not_zero => if (i == 0) 1 else 1,
+            else => @intCast(i),
+        };
+        llama.impl.llama_c.gguf_set_val_u16(g, "split.no", no);
+        llama.impl.llama_c.gguf_set_val_u16(g, "split.count", 2);
+        llama.impl.llama_c.gguf_set_val_i32(g, "split.tensors.count", if (kind == .bad_count or kind == .missing_bad_count) 3 else 2);
+        const ctx = llama.impl.llama_c.ggml_init(.{ .mem_size = 1 << 20, .mem_buffer = null, .no_alloc = false }).?;
+        defer llama.impl.llama_c.ggml_free(ctx);
+        const tname: [:0]const u8 = if (kind == .duplicate) "blk.0.dup" else if (i == 0) "blk.0.a" else if (kind == .ple_second) "per_layer_token_embd.weight" else "blk.1.b";
+        addTensor(g, ctx, tname, if (i == 0) llama.impl.llama_c.GGML_TYPE_F16 else llama.impl.llama_c.GGML_TYPE_Q8_0, 64);
+        if (!llama.impl.llama_c.gguf_write_to_file(g, paths[i].ptr, false)) @panic("cannot write a split");
+    }
+    return paths[0];
+}
+
+/// The second file of `splitSet`'s set `name` in `dir`.
+fn splitSecond(dir: []const u8, name: []const u8) [:0]const u8 {
+    return std.heap.c_allocator.printSentinel("{s}/{s}-00002-of-00002.gguf", .{ dir, name }, 0) catch unreachable;
+}
+
+/// Extra GGUF shards (5f490d7bf): a file of the given tensors and
+/// no other metadata -- with `numbered`, the split keys too, which the
+/// loader ignores on an extra. One tensor named `per_layer_token_embd.weight`
+/// makes it an external per-layer embedding table.
+fn shardFile(dir: []const u8, name: []const u8, tensors: []const [:0]const u8, ty: llama.impl.llama_c.enum_ggml_type, numbered: bool) [:0]const u8 {
+    const g = llama.impl.llama_c.gguf_init_empty().?;
+    defer llama.impl.llama_c.gguf_free(g);
+    if (numbered) {
+        llama.impl.llama_c.gguf_set_val_u16(g, "split.no", 0);
+        llama.impl.llama_c.gguf_set_val_u16(g, "split.count", 1);
+        llama.impl.llama_c.gguf_set_val_i32(g, "split.tensors.count", @intCast(tensors.len));
+    }
+    const ctx = llama.impl.llama_c.ggml_init(.{ .mem_size = 1 << 20, .mem_buffer = null, .no_alloc = false }).?;
+    defer llama.impl.llama_c.ggml_free(ctx);
+    for (tensors) |t| addTensor(g, ctx, t, ty, 64);
+    const path = std.heap.c_allocator.printSentinel("{s}/{s}.gguf", .{ dir, name }, 0) catch unreachable;
+    if (!llama.impl.llama_c.gguf_write_to_file(g, path.ptr, false)) @panic("cannot write a shard");
+    return path;
+}
+
+// -----------------------------------------------------------------------------
+
+/// One layer's members against the C++'s, recursing into the nested
+/// structs with their path as the prefix.
+fn compareLayer(comptime T: type, comptime prefix: []const u8, r: *const llama.impl.llama_c.llama_model, il: c_int, layer: *const T) void {
+    @setEvalBranchQuota(200_000);
+    const info = @typeInfo(T).@"struct";
+    inline for (info.field_names, info.field_types) |f, F| {
+        if (F == ?*llama.impl.llama_c.ggml_tensor) {
+            const rt = ref_layer_tensor(r, il, prefix ++ f);
+            const pt = @field(layer.*, f);
+            expectStr("layer." ++ prefix ++ f, if (rt) |p| std.mem.span(p) else "(null)", if (pt) |p| std.mem.sliceTo(&p.name, 0) else "(null)");
+        } else {
+            compareLayer(F, prefix ++ f ++ ".", r, il, &@field(layer.*, f));
+        }
+    }
+}
+
+pub fn main(init: std.process.Init) !void {
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    if (args.len < 3) {
+        std.debug.print("usage: loader_diff <tmpdir> <file.gguf>...\n", .{});
+        std.process.exit(2);
+    }
+    const dir = args[1];
+    llama.impl.llama_c.llama_log_set(logCb, null);
+    llama.api.impl.llama_log_set(logCb, null);
+    llama.impl.llama_c.ggml_log_set(logCb, null);
+
+    std.debug.print("  llama_hparams layout\n", .{});
+    if (!checkLayout()) {
+        std.debug.print("FAIL: the port's Hparams does not have llama_hparams's layout; nothing else is meaningful\n", .{});
+        std.process.exit(1);
+    }
+
+    var qwen: ?[:0]const u8 = null;
+    var gpt2: ?[:0]const u8 = null;
+    var hrm: ?[:0]const u8 = null;
+    var nemotron_h: ?[:0]const u8 = null;
+    for (args[2..]) |a| {
+        const path = try std.heap.c_allocator.dupeSentinel(u8, a, 0);
+        const name = std.fs.path.basename(a);
+        if (std.mem.startsWith(u8, name, "Qwen3.5")) qwen = path;
+        if (std.mem.startsWith(u8, name, "hrm_text-")) hrm = path;
+        if (std.mem.startsWith(u8, name, "nemotron_h-")) nemotron_h = path;
+        if (std.mem.eql(u8, name, "ggml-vocab-gpt-2.gguf")) gpt2 = path;
+        runCase(.{ .name = name, .path = path, .vocab_only = true });
+        var nb: [128]u8 = undefined;
+        runCase(.{ .name = try std.fmt.bufPrint(&nb, "{s} (full)", .{name}), .path = path, .vocab_only = false });
+    }
+
+    if (gpt2) |base| {
+        runCase(.{ .name = "tensors: type tie", .path = tensorFile(dir, base, "tie", Tensors.tie, 0), .vocab_only = true });
+        runCase(.{ .name = "tensors: integer types", .path = tensorFile(dir, base, "integers", Tensors.integers, 0), .vocab_only = true });
+        runCase(.{ .name = "tensors: many types", .path = tensorFile(dir, base, "many", Tensors.many, 0), .vocab_only = true });
+        runCase(.{ .name = "tensors: f8_e4m3", .path = tensorFile(dir, base, "f8", Tensors.f8, 0), .vocab_only = true });
+        runCase(.{ .name = "tensors: truncated", .path = tensorFile(dir, base, "truncated", Tensors.tie, 100), .vocab_only = true });
+        runCase(.{ .name = "split: ok", .path = splitSet(dir, base, "s-ok", .ok), .vocab_only = true });
+        runCase(.{ .name = "split: wrong index", .path = splitSet(dir, base, "s-idx", .wrong_idx), .vocab_only = true });
+        runCase(.{ .name = "split: first not zero", .path = splitSet(dir, base, "s-first", .first_not_zero), .vocab_only = true });
+        runCase(.{ .name = "split: tensor count", .path = splitSet(dir, base, "s-count", .bad_count), .vocab_only = true });
+        runCase(.{ .name = "split: second missing", .path = splitSet(dir, base, "s-missing", .missing_second), .vocab_only = true });
+        runCase(.{ .name = "split: duplicate tensor", .path = splitSet(dir, base, "s-dup", .duplicate), .vocab_only = true });
+        runCase(.{ .name = "split: unrecognized name", .path = splitSet(dir, base, "s-name", .bad_name), .vocab_only = true });
+        runCase(.{ .name = "missing file", .path = try std.heap.c_allocator.printSentinel("{s}/no-such-file.gguf", .{dir}, 0), .vocab_only = true });
+        // Extra shards and external per-layer embedding tables
+        // (5f490d7bf), given as llama_model_load_from_splits' paths.
+        const ple = shardFile(dir, "ple", &.{"per_layer_token_embd.weight"}, llama.impl.llama_c.GGML_TYPE_Q8_0, false);
+        const ple2 = shardFile(dir, "ple2", &.{"per_layer_token_embd.weight"}, llama.impl.llama_c.GGML_TYPE_F16, false);
+        const ple_numbered = shardFile(dir, "ple-numbered", &.{"per_layer_token_embd.weight"}, llama.impl.llama_c.GGML_TYPE_Q8_0, true);
+        const extra_dup = shardFile(dir, "extra-dup", &.{"output.weight"}, llama.impl.llama_c.GGML_TYPE_F16, false);
+        const extra_new = shardFile(dir, "extra-new", &.{ "blk.9.x", "blk.9.y" }, llama.impl.llama_c.GGML_TYPE_F16, false);
+        const single = tensorFile(dir, base, "single", Tensors.tie, 0);
+        const single_ple = tensorFile(dir, base, "single-ple", Tensors.withPle, 0);
+        runCase(.{ .name = "extra: one file, given alone", .path = single, .vocab_only = true, .splits = &.{single} });
+        runCase(.{ .name = "extra: PLE appended", .path = single, .vocab_only = true, .splits = &.{ single, ple } });
+        runCase(.{ .name = "extra: PLE overrides the model's", .path = single_ple, .vocab_only = true, .splits = &.{ single_ple, ple } });
+        runCase(.{ .name = "extra: numbered PLE", .path = single, .vocab_only = true, .splits = &.{ single, ple_numbered } });
+        runCase(.{ .name = "extra: two PLEs", .path = single, .vocab_only = true, .splits = &.{ single, ple, ple2 } });
+        runCase(.{ .name = "extra: duplicate, not PLE", .path = single, .vocab_only = true, .splits = &.{ single, extra_dup } });
+        runCase(.{ .name = "extra: new tensors", .path = single, .vocab_only = true, .splits = &.{ single, extra_new } });
+        runCase(.{ .name = "extra: missing file", .path = single, .vocab_only = true, .splits = &.{ single, try std.heap.c_allocator.printSentinel("{s}/no-such-extra.gguf", .{dir}, 0) } });
+
+        const s_extra = splitSet(dir, base, "s-extra", .ok);
+        runCase(.{ .name = "split: given, with an extra", .path = s_extra, .vocab_only = true, .splits = &.{ s_extra, extra_new } });
+        runCase(.{ .name = "split: given, with a PLE", .path = s_extra, .vocab_only = true, .splits = &.{ s_extra, ple } });
+        runCase(.{ .name = "split: given, first only", .path = s_extra, .vocab_only = true, .splits = &.{s_extra} });
+        const s_pmiss = splitSet(dir, base, "s-pmiss", .missing_second);
+        runCase(.{ .name = "split+PLE: second missing", .path = s_pmiss, .vocab_only = true, .splits = &.{ s_pmiss, ple } });
+        const s_pcount = splitSet(dir, base, "s-pcount", .missing_bad_count);
+        runCase(.{ .name = "split+PLE: second missing, count wrong", .path = s_pcount, .vocab_only = true, .splits = &.{ s_pcount, ple } });
+        const s_pple = splitSet(dir, base, "s-pple", .ple_second);
+        runCase(.{ .name = "split: second PLE-only", .path = s_pple, .vocab_only = true });
+        runCase(.{ .name = "split+PLE: second PLE-only", .path = s_pple, .vocab_only = true, .splits = &.{ s_pple, ple } });
+        const s_name = splitSet(dir, base, "s-gname", .bad_name);
+        runCase(.{ .name = "split: unrecognized name, given", .path = s_name, .vocab_only = true, .splits = &.{ s_name, splitSecond(dir, "s-gname") } });
+        runCase(.{ .name = "split: unrecognized name, given short", .path = s_name, .vocab_only = true, .splits = &.{s_name} });
+        runCase(.{ .name = "split: unrecognized name, given with a PLE", .path = s_name, .vocab_only = true, .splits = &.{ s_name, splitSecond(dir, "s-gname"), ple } });
+        // A numbered split given from another directory wins over the one
+        // the name implies, which is missing.
+        const sub = try std.heap.c_allocator.printSentinel("{s}/sub", .{dir}, 0);
+        _ = std.c.mkdir(sub.ptr, 0o755);
+        const s_moved = splitSet(dir, base, "s-moved", .missing_second);
+        _ = splitSet(sub, base, "s-moved", .ok);
+        runCase(.{ .name = "split: second given from another directory", .path = s_moved, .vocab_only = true, .splits = &.{ s_moved, splitSecond(sub, "s-moved") } });
+        runCase(.{ .name = "split: second given out of order", .path = s_moved, .vocab_only = true, .splits = &.{ splitSecond(sub, "s-moved"), s_moved } });
+    }
+
+    // The hyperparameter reads on fixtures, one key edited at a time:
+    // hrm_text's four hrm.* keys (models/hrm-text.cpp:6 @620d2225c) and
+    // nemotron_h's RMS epsilon, which falls back to the LayerNorm one
+    // (models/nemotron-h.cpp:5 @620d2225c).
+    if (hrm) |base| {
+        runCase(.{ .name = "hrm_text: prefix_lm", .path = derive(dir, base, "hrm-prefix", Fixture.hrmPrefix), .vocab_only = false });
+        runCase(.{ .name = "hrm_text: no l_cycles", .path = derive(dir, base, "hrm-nol", Fixture.hrmNoL), .vocab_only = false });
+        runCase(.{ .name = "hrm_text: h_cycles as f32", .path = derive(dir, base, "hrm-hf", Fixture.hrmHFloat), .vocab_only = false });
+        runCase(.{ .name = "hrm_text: embedding_scale", .path = derive(dir, base, "hrm-scale", Fixture.hrmScale), .vocab_only = false });
+    }
+    if (nemotron_h) |base| {
+        runCase(.{ .name = "nemotron_h: no rms eps", .path = derive(dir, base, "nh-norms", Fixture.nemotronNoRms), .vocab_only = false });
+        runCase(.{ .name = "nemotron_h: no eps", .path = derive(dir, base, "nh-noeps", Fixture.nemotronNoEps), .vocab_only = false });
+        runCase(.{ .name = "nemotron_h: rope section order", .path = derive(dir, base, "nh-order", Fixture.nemotronSectionOrder), .vocab_only = false });
+        runCase(.{ .name = "nemotron_h: hadamard", .path = derive(dir, base, "nh-hdmd", Fixture.nemotronHadamard), .vocab_only = false });
+    }
+
+    if (qwen) |base| {
+        const edits = .{
+            .{ "qwen35 metadata", Qwen.asIs },
+            .{ "no context_length", Qwen.noContext },
+            .{ "context_length as string", Qwen.contextAsString },
+            .{ "per-layer heads", Qwen.headsPerLayer },
+            .{ "heads, wrong length", Qwen.headsWrongLength },
+            .{ "heads past INT32_MAX", Qwen.headsHuge },
+            .{ "sections scalar", Qwen.sectionsScalar },
+            .{ "sections short", Qwen.sectionsShort },
+            .{ "sections uint32", Qwen.sectionsU32 },
+            .{ "sections float", Qwen.sectionsFloat },
+            .{ "no sections", Qwen.noSections },
+            .{ "yarn", Qwen.yarn },
+            .{ "scale_linear", Qwen.scaleLinear },
+            .{ "full_attention_interval 0", Qwen.interval0 },
+            .{ "full_attention_interval 3", Qwen.interval3 },
+            .{ "recurrent_layers array", Qwen.recurrentArray },
+            .{ "recurrent_layers bools", Qwen.recurrentBools },
+            .{ "nextn", Qwen.nextn },
+            .{ "size 4B", Qwen.size4b },
+            .{ "size 9B", Qwen.size9b },
+            .{ "size 27B", Qwen.size27b },
+            .{ "size unknown", Qwen.sizeOdd },
+            .{ "size 0.8B", Qwen.size0_8b },
+            .{ "file_type", Qwen.fileType },
+            .{ "no file_type", Qwen.noFileType },
+            .{ "file_type f8_e4m3", Qwen.fileTypeF8 },
+            .{ "no name", Qwen.noName },
+            .{ "classifier labels", Qwen.labels },
+            .{ "decision labels", Qwen.decisionLabels },
+            .{ "array edges", Qwen.arrayEdges },
+            .{ "head sizes", Qwen.headSizes },
+            .{ "no heads", Qwen.noHeads },
+            .{ "pooling", Qwen.pooling },
+            .{ "classifier pooling", Qwen.classifierPooling },
+            .{ "moe", Qwen.moe },
+            .{ "no ssm state", Qwen.noSsm },
+            .{ "rms eps as f64", Qwen.rmsEpsAsDouble },
+            .{ "freq_base", Qwen.freqBase },
+            .{ "unknown arch", Qwen.unknownArch },
+            .{ "no arch", Qwen.noArch },
+            .{ "gptj", Qwen.gptj },
+            .{ "long and odd values", Qwen.longValues },
+            // the classifier, rope section order and MoVA keys
+            .{ "classifier activation gelu", Qwen.clsActGelu },
+            .{ "classifier activation silu", Qwen.clsActSilu },
+            .{ "rope section order zyxt", Qwen.sectionOrderZyxt },
+            .{ "rope section order tyxz", Qwen.sectionOrderTyxz },
+            .{ "rope section order unknown", Qwen.sectionOrderBad },
+            .{ "rope section order as u32", Qwen.sectionOrderU32 },
+            .{ "value expert counts", Qwen.valueExperts },
+            // the classifier-free guidance and hadamard keys
+            .{ "classifier free guidance", Qwen.cfgOn },
+            .{ "classifier free guidance as u32", Qwen.cfgAsU32 },
+            .{ "hadamard identity", Hadamard.identity },
+            .{ "hadamard tied latent", Hadamard.tiedLatent },
+            .{ "hadamard explicit", Hadamard.explicit },
+            .{ "hadamard version 3", Hadamard.badVersion },
+            .{ "hadamard v2 untied", Hadamard.v2Untied },
+            .{ "hadamard v1 tied", Hadamard.v1Tied },
+            .{ "hadamard tied, no version", Hadamard.tiedNoVersion },
+            .{ "hadamard tied, no latent", Hadamard.tiedNoLatent },
+            .{ "hadamard latent, untied", Hadamard.latentUntied },
+            .{ "hadamard block 48", Hadamard.blockNotPow2 },
+            .{ "hadamard no block", Hadamard.noBlock },
+            .{ "hadamard transform", Hadamard.badTransform },
+            .{ "hadamard axis", Hadamard.badAxis },
+            .{ "hadamard sign mode", Hadamard.badSignMode },
+            .{ "hadamard no weights", Hadamard.noWeights },
+            .{ "hadamard explicit, no widths", Hadamard.explicitNoWidths },
+            .{ "hadamard explicit, bad width", Hadamard.explicitBadWidth },
+            .{ "hadamard explicit, duplicate width", Hadamard.explicitDupWidth },
+            .{ "hadamard explicit, bad value", Hadamard.explicitBadValue },
+            .{ "hadamard explicit, short", Hadamard.explicitShort },
+            .{ "hadamard not foldable", Hadamard.notFoldable },
+            .{ "hadamard bad block name", Hadamard.badBlockName },
+            .{ "hadamard duplicate weight", Hadamard.duplicateWeight },
+            .{ "hadamard bad inverse", Hadamard.badInverse },
+            .{ "hadamard duplicate inverse", Hadamard.duplicateInverse },
+        };
+        inline for (edits, 0..) |e, i| {
+            var nb: [32]u8 = undefined;
+            const file = try std.fmt.bufPrint(&nb, "q{d}", .{i});
+            const path = derive(dir, base, file, e[1]);
+            runCase(.{ .name = e[0], .path = path, .vocab_only = false });
+        }
+
+        const meta = derive(dir, base, "qmeta", Qwen.asIs);
+        runCase(.{ .name = "override: int", .path = meta, .vocab_only = false, .overrides = &.{
+            kvInt("qwen35.context_length", 4096),
+            kvInt("qwen35.block_count", 32),
+            kvInt("qwen35.full_attention_interval", -1),
+        } });
+        runCase(.{ .name = "override: float", .path = meta, .vocab_only = false, .overrides = &.{
+            kvFloat("qwen35.attention.layer_norm_rms_epsilon", 1.0e-5),
+            kvFloat("qwen35.rope.freq_base", 1e300),
+        } });
+        runCase(.{ .name = "override: bool and str", .path = meta, .vocab_only = false, .overrides = &.{
+            kvBool("qwen35.attention.causal", false),
+            kvStr("qwen35.rope.scaling.type", "yarn"),
+            kvStr("general.name", "overridden"),
+            kvStr("general.architecture", "qwen35"),
+        } });
+        runCase(.{ .name = "override: mistyped", .path = meta, .vocab_only = false, .overrides = &.{
+            kvStr("qwen35.context_length", "4096"),
+            kvInt("qwen35.rope.freq_base", 5),
+            kvFloat("qwen35.attention.causal", 1),
+        } });
+        runCase(.{ .name = "override: repeated key", .path = meta, .vocab_only = false, .overrides = &.{
+            kvInt("qwen35.context_length", 111),
+            kvInt("qwen35.context_length", 222),
+        } });
+        runCase(.{ .name = "override: arch to gptj", .path = meta, .vocab_only = false, .overrides = &.{
+            kvStr("general.architecture", "gptj"),
+        } });
+    }
+
+    // The tensor half: every Qwen3.5 model whole, and the first under
+    // every parameter that changes where a tensor goes or how it loads.
+    var first_qwen: ?[:0]const u8 = null;
+    for (args[2..]) |a| {
+        const name = std.fs.path.basename(a);
+        if (!std.mem.startsWith(u8, name, "Qwen3.5")) continue;
+        const path = try std.heap.c_allocator.dupeSentinel(u8, a, 0);
+        var nb: [128]u8 = undefined;
+        runFullCase(.{ .name = try std.fmt.bufPrint(&nb, "{s} (tensors)", .{name}), .path = path, .edit = Edit.none });
+        if (first_qwen == null) first_qwen = path;
+    }
+    if (first_qwen) |path| {
+        const variants = .{
+            .{ "tensors: cpu only", Edit.cpuOnly },
+            .{ "tensors: 10 layers offloaded", Edit.partial },
+            .{ "tensors: no mmap", Edit.noMmap },
+            .{ "tensors: no mmap, cpu", Edit.noMmapCpu },
+            .{ "tensors: mmap explicit", Edit.mmapExplicit },
+            .{ "tensors: direct io", Edit.directIo },
+            .{ "tensors: direct io, cpu", Edit.directIoCpu },
+            .{ "tensors: no extra buffer types", Edit.noExtraBufts },
+            .{ "tensors: no host buffer", Edit.noHost },
+            .{ "tensors: check tensors", Edit.checkTensors },
+            .{ "tensors: no alloc", Edit.noAlloc },
+            .{ "tensors: no alloc, cpu", Edit.noAllocCpu },
+            .{ "tensors: vocab only", Edit.vocabOnly },
+            .{ "tensors: load mtp", Edit.loadMtp },
+            .{ "tensors: split none, no gpu", Edit.splitNoneNoGpu },
+            .{ "tensors: split none", Edit.splitNone },
+            .{ "tensors: bad main_gpu", Edit.badMainGpu },
+            .{ "tensors: tensor split", Edit.tensorSplit },
+            .{ "tensors: cancelled", Edit.cancel },
+            .{ "tensors: ffn overridden to CPU", Edit.overrideFfnCpu },
+            .{ "tensors: override, bad regex", Edit.overrideBadRegex },
+            .{ "tensors: override list empty", Edit.overrideEmpty },
+        };
+        inline for (variants) |v| runFullCase(.{ .name = v[0], .path = path, .edit = v[1] });
+        // Metadata alone: the first tensor is missing.
+        runFullCase(.{ .name = "tensors: metadata only", .path = derive(dir, path, "qtensorless", Qwen.asIs), .edit = Edit.none });
+    }
+
+    // Lazy reads, on the architectures that mark a tensor lazy: every lazy
+    // mode, with and without mmap, offloaded and not.
+    var n_lazy: usize = 0;
+    for (args[2..]) |a| {
+        const name = std.fs.path.basename(a);
+        // hrm_text marks nothing lazy, but its cache slots alias two
+        // physical blocks, and these are the loads that place tensors.
+        if (!std.mem.startsWith(u8, name, "gemma4-dense") and !std.mem.startsWith(u8, name, "gemma4-moe") and
+            !std.mem.startsWith(u8, name, "qwen4exp-") and !std.mem.startsWith(u8, name, "hrm_text-")) continue;
+        n_lazy += 1;
+        const path = try std.heap.c_allocator.dupeSentinel(u8, a, 0);
+        const variants = .{
+            .{ "lazy: default (auto)", Edit.none },
+            .{ "lazy: off", Edit.lazyOff },
+            .{ "lazy: on", Edit.lazyOn },
+            .{ "lazy: on, cpu", Edit.lazyOnCpu },
+            .{ "lazy: on, no mmap", Edit.lazyOnNoMmap },
+            .{ "lazy: on, no mmap, cpu", Edit.lazyOnNoMmapCpu },
+            .{ "lazy: on, no alloc", Edit.lazyOnNoAlloc },
+            .{ "lazy: on, mlock", Edit.lazyOnMlock },
+            .{ "lazy: on, direct io", Edit.lazyOnDirectIo },
+            .{ "lazy: on, check tensors", Edit.lazyOnCheck },
+        };
+        inline for (variants) |v| {
+            var nb: [160]u8 = undefined;
+            runFullCase(.{ .name = try std.fmt.bufPrint(&nb, "{s} {s}", .{ name, v[0] }), .path = path, .edit = v[1] });
+        }
+    }
+    if (n_lazy == 0) std.debug.print("  lazy reads: no gemma4 or qwen4exp fixture given -- run testing/scripts/gen-arch-fixtures\n", .{});
+
+    std.debug.print("  {d} loaded, {d} threw, {d} unported\n", .{ tally.loaded, tally.thrown, tally.unported });
+    if (failures != 0) {
+        std.debug.print("FAIL: {d} of {d} loader results differ, Zig vs llama-model-loader.cpp\n", .{ failures, checks });
+        std.process.exit(1);
+    }
+    std.debug.print("PASS: {d} loader results identical, Zig vs llama-model-loader.cpp\n", .{checks});
+}

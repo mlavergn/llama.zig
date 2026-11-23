@@ -1477,7 +1477,7 @@ pub fn ggml_backend_multi_buffer_set_usage(buffer: mod.impl.ggml_c.ggml_backend_
 /// indexes in steps of the array's size: that loop copied 128 bytes starting
 /// at `nb`, so every scheduler input copy inherited its source's `op`,
 /// `op_params`, `flags` and first three `src` pointers. Outputs stayed right,
-/// which is why nothing caught it until `scripts/node-diff --gpu` printed the
+/// which is why nothing caught it until `testing/scripts/node-diff --gpu` printed the
 /// copies' ops. `p[0].arr[i]`, or a `*T`, indexes correctly.
 pub fn dupTensorLayout(ctx: *mod.context.Context, tensor: [*c]const mod.impl.ggml_c.ggml_tensor) [*c]mod.impl.ggml_c.ggml_tensor {
     const dup = mod.impl.one(mod.impl.ggml_c.ggml_tensor, mod.context.ggml_dup_tensor(ctx, tensor));

@@ -22,7 +22,7 @@ const std = @import("std");
 const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 
-const op_name = [_][*:0]const u8{
+pub const op_name = [_][*:0]const u8{
     "NONE",              "DUP",                "ADD",                "ADD_ID",
     "ACC",               "SUB",                "MUL",                "DIV",
     "SQR",               "SQRT",               "LOG",                "SIN",
@@ -50,7 +50,7 @@ const op_name = [_][*:0]const u8{
     "OPT_STEP_ADAMW",    "OPT_STEP_SGD",       "GLU",
 };
 
-const op_symbol = [_][*:0]const u8{
+pub const op_symbol = [_][*:0]const u8{
     "none",                                           "x",                                      "x+y",
     "x[i]+y",                                         "view(x,nb,offset)+=y->x",                "x-y",
     "x*y",                                            "x/y",                                    "x^2",
@@ -90,7 +90,7 @@ const op_symbol = [_][*:0]const u8{
     "glu(x)",
 };
 
-const unary_op_name = [_][*:0]const u8{
+pub const unary_op_name = [_][*:0]const u8{
     "ABS",         "SGN",        "NEG",   "STEP",
     "TANH",        "ELU",        "RELU",  "SIGMOID",
     "GELU",        "GELU_QUICK", "SILU",  "HARDSWISH",
@@ -100,12 +100,12 @@ const unary_op_name = [_][*:0]const u8{
 };
 
 /// Ports `GGML_GLU_OP_NAME` (ggml.c:1261 @b1b770d90).
-const glu_op_name = [_][*:0]const u8{
+pub const glu_op_name = [_][*:0]const u8{
     "REGLU",     "GEGLU",       "SWIGLU",       "SWIGLU_OAI",
     "GEGLU_ERF", "GEGLU_QUICK", "SWIGLU_CLAMP",
 };
 
-const type_traits = blk: {
+pub const type_traits = blk: {
     var t: [mod.impl.ggml_c.GGML_TYPE_COUNT]mod.impl.ggml_c.ggml_type_traits = @splat(std.mem.zeroes(mod.impl.ggml_c.ggml_type_traits));
     t[mod.impl.ggml_c.GGML_TYPE_I8] = .{
         .type_name = "i8",
@@ -809,72 +809,6 @@ pub fn isPadded1d(tensor: *const mod.impl.ggml_c.ggml_tensor) bool {
 
 // -----------------------------------------------------------------------------
 // Unit Tests
-
-// Golden checksums of the C tables, captured from a C-only build before any
-// of ggml.c was ported.
-//
-// These cannot be direct comparisons against `c.ggml_get_type_traits` or
-// `c.ggml_op_name`: this file exports those very symbols, so such a test would
-// resolve back to the code under test and pass no matter how wrong the table
-// became. That is not hypothetical -- it happened, and corrupting a block size
-// left the comparison green.
-//
-// Regenerate only from a C build: `scripts/types-golden` prints the traits and
-// four name checksums from the stock ggml `llama.cpp.zmake` builds.
-const golden_traits: u64 = 0xbbdffe39ac19e897;
-const golden_op_name: u64 = 0x0fc0e52932954250;
-const golden_op_symbol: u64 = 0x889b46b6e2bd5c8e;
-const golden_unary_name: u64 = 0x78d971e2f43bd703;
-const golden_glu_name: u64 = 0xbcc1426328c349eb;
-
-/// Folds a C string into the checksum, distinguishing absent from empty.
-fn mixStr(h_in: u64, s: ?[*:0]const u8) u64 {
-    const str = s orelse return mod.impl.mix(h_in, 0xdeadbeef);
-    var h = h_in;
-    var i: usize = 0;
-    while (str[i] != 0) : (i += 1) h = mod.impl.mix(h, str[i]);
-    return mod.impl.mix(h, 0);
-}
-
-test "traits table matches the C checksum" {
-    var h: u64 = 0;
-    var t: usize = 0;
-    while (t < mod.impl.ggml_c.GGML_TYPE_COUNT) : (t += 1) {
-        const tr = &type_traits[t];
-        h = mixStr(h, @ptrCast(tr.type_name));
-        h = mod.impl.mix(h, @bitCast(tr.blck_size));
-        h = mod.impl.mix(h, tr.type_size);
-        h = mod.impl.mix(h, if (tr.is_quantized) 1 else 0);
-        h = mod.impl.mix(h, if (tr.to_float != null) 1 else 0);
-        h = mod.impl.mix(h, if (tr.from_float_ref != null) 1 else 0);
-    }
-    try std.testing.expectEqual(golden_traits, h);
-}
-
-test "op name tables match the C checksums" {
-    var hn: u64 = 0;
-    var hs: u64 = 0;
-    for (op_name, op_symbol) |n, sym| {
-        hn = mixStr(hn, n);
-        hs = mixStr(hs, sym);
-    }
-    try std.testing.expectEqual(golden_op_name, hn);
-    try std.testing.expectEqual(golden_op_symbol, hs);
-
-    var hu: u64 = 0;
-    for (unary_op_name) |n| hu = mixStr(hu, n);
-    try std.testing.expectEqual(golden_unary_name, hu);
-
-    var hg: u64 = 0;
-    for (glu_op_name) |n| hg = mixStr(hg, n);
-    try std.testing.expectEqual(golden_glu_name, hg);
-
-    // The tables must also be exactly as long as the enums they index.
-    try std.testing.expectEqual(@as(usize, mod.impl.ggml_c.GGML_OP_COUNT), op_name.len);
-    try std.testing.expectEqual(@as(usize, mod.impl.ggml_c.GGML_OP_COUNT), op_symbol.len);
-    try std.testing.expectEqual(@as(usize, mod.impl.ggml_c.GGML_UNARY_OP_COUNT), unary_op_name.len);
-    try std.testing.expectEqual(@as(usize, mod.impl.ggml_c.GGML_GLU_OP_COUNT), glu_op_name.len);
-}
 
 test "traits conversion pointers name the right routines" {
     // The checksum above only records whether a pointer is set. This checks

@@ -41,7 +41,7 @@ const mod = @import("module.zig");
 /// Mirrors `ggml_critical_section_mutex` (ggml-threading.cpp:4 @b1b770d90).
 ///
 /// Exported rather than file-private because the C++ global it replaces is
-/// exported too, and `scripts/port-coverage` compares the whole symbol list.
+/// exported too, and `testing/scripts/port-coverage` compares the whole symbol list.
 /// Nothing outside this file references it, in the C++ or here.
 ///
 /// libc++'s `constexpr mutex()`.

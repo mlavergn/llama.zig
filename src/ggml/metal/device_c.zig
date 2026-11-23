@@ -44,7 +44,7 @@ const ggml = @import("../module.zig");
 
 /// Mirrors `enum ggml_metal_device_id` (ggml-metal-device.h:268 @b1b770d90).
 ///
-/// Written by `scripts/gen-tuning-table`, in the enum's own order: the props
+/// Written by `testing/scripts/gen-tuning-table`, in the enum's own order: the props
 /// field below has its width, and the port only carries it through to
 /// `ggml_metal_device_id_token`. Do not edit the members; rerun the script.
 pub const DeviceId = enum(c_uint) {
@@ -271,7 +271,7 @@ pub extern fn ggml_metal_capture_next_compute(ctx: *Context) void;
 // -----------------------------------------------------------------------------
 // The layout gate's view of `DeviceProps`
 //
-// `harness/struct_layout.cpp` includes the real header and compares these
+// `testing/harness/struct_layout.cpp` includes the real header and compares these
 // against its own `sizeof` and `offsetof`. Exported rather than asserted
 // at comptime because only the C compiler knows the answer.
 
@@ -342,7 +342,7 @@ pub fn zz_props_field_size(i: usize) callconv(.c) usize {
     return std.math.maxInt(usize);
 }
 
-// `BufferId`'s layout and round-trip, for `harness/struct_layout.cpp`.
+// `BufferId`'s layout and round-trip, for `testing/harness/struct_layout.cpp`.
 
 pub fn zz_bid_sizeof() callconv(.c) usize {
     return @sizeOf(BufferId);

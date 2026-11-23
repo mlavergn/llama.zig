@@ -6,7 +6,7 @@
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/fattn-tile.cu` and the host
 //! half of `llama.cpp/ggml/src/ggml-cuda/fattn-tile.cuh` at v1.0.0
 //! (`b1b770d90`), the non-HIP arms. The configuration tables are generated
-//! into `fattn_config_table.zig` by `scripts/gen-fattn-config`. The kernel
+//! into `fattn_config_table.zig` by `testing/scripts/gen-fattn-config`. The kernel
 //! stays CUDA, one instantiation set per head size in
 //! `template-instances/fattn-tile-instance-dkq<DKQ>-dv<DV>.cu`, which every
 //! `ggml_cuda_flash_attn_ext_tile_case` is declared `extern` against.

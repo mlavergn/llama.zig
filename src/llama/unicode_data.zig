@@ -2,10 +2,10 @@
 //!
 //! # Provenance
 //!
-//! **Generated** by `scripts/gen-unicode-data` from
+//! **Generated** by `testing/scripts/gen-unicode-data` from
 //! `llama.cpp/src/unicode-data.cpp` and `llama.cpp/src/unicode-data.h`
 //! (`b1b770d90`), which upstream itself generates. Do not edit; rerun the
-//! script. `scripts/unicode-diff` checks every code point against the C++.
+//! script. `testing/scripts/unicode-diff` checks every code point against the C++.
 
 /// Ports `unicode_ranges_flags` (unicode-data.cpp:10 @b1b770d90): each
 /// entry's flags apply from its start up to the next entry's start. The

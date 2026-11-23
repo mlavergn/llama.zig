@@ -16,7 +16,7 @@
 //! it appears in `nm -gU | grep -v _Z`, which is why `port-coverage` read
 //! `36 / 36 symbols (100%)` for a `repack.cpp` port that could not
 //! function. For `repack.cpp` the unmangled exports
-//! are not the whole contract, and this file is what the rest of it is. `scripts/cluster-check` asserts
+//! are not the whole contract, and this file is what the rest of it is. `testing/scripts/cluster-check` asserts
 //! `module.dispatch_implemented` at comptime so the count cannot read as
 //! complete again on its own.
 //!

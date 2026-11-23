@@ -18,7 +18,7 @@ const llama = @import("../module.zig");
 
 /// `LLAMA_VERSION`, which the C++ takes from the `llama-version.h` the build
 /// configures: the pinned tag without its `v`. It must equal
-/// `build/upstream.zig`'s `version`, which `scripts/check-reference-pin`
+/// `build/upstream.zig`'s `version`, which `testing/scripts/check-reference-pin`
 /// asserts.
 pub const version = "1.0.0";
 

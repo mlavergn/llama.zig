@@ -6,12 +6,12 @@
 //! `b1b770d90`), 5,667 lines and 79 exported symbols. Each names the section of
 //! that file it covers.
 //!
-//! **This file is not a port**: it is a barrel, and `testing.zig` and
-//! `golden.zig` are test scaffolding rather than translations.
+//! **This file is not a port**: it is a barrel.
 //!
 //! # How this file is tested
 //!
-//! `golden.zig` holds checksums captured from the C by `scripts/quants-golden`.
+//! `testing/golden/quants_golden.zig` holds checksums captured from the C by
+//! `testing/scripts/quants-golden`.
 //! Every quantizer is checked against those rather than against a round trip
 //! through its own dequantizer -- a round trip passes happily with both halves
 //! wrong in the same way, and this project has produced four such false passes
@@ -33,10 +33,6 @@ pub const iq1 = @import("iq1.zig");
 pub const iq2 = @import("iq2.zig");
 pub const iq3 = @import("iq3.zig");
 pub const legacy = @import("legacy.zig");
-pub const golden = @import("golden.zig");
-pub const testing = @import("testing.zig");
-
-pub const iq_test = @import("iq_test.zig");
 
 // -----------------------------------------------------------------------------
 // Unit Tests
@@ -53,7 +49,6 @@ test {
     _ = codebook;
     _ = validate;
     _ = iq1;
-    _ = iq_test;
     _ = iq2;
     _ = iq3;
     _ = legacy;

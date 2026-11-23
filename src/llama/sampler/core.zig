@@ -21,7 +21,7 @@
 //! The partial sorts call `libcxx.zig`, which reproduces libc++'s `std::sort`
 //! and `std::partial_sort` exactly, because the order they leave tied logits
 //! in decides which candidate a cut keeps. See that file and
-//! `scripts/libcxx-diff`.
+//! `testing/scripts/libcxx-diff`.
 
 const std = @import("std");
 const llama = @import("../module.zig");

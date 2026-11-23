@@ -1,0 +1,663 @@
+# Gates, oracle builds and checks for llama.zig. Included by the root
+# Makefile; every recipe runs from the repository root.
+
+# $(shell), not $(wildcard): make splits a function's arguments on spaces, and
+# the checkout may live under a path with one ("/Volumes/Macintosh HD").
+CMAKE ?= $(or $(shell ls -d "$(CURDIR)"/.tools/cmake-*/CMake.app/Contents/bin/cmake 2>/dev/null | head -1),cmake)
+
+MACOS_FLAGS = -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_OSX_SYSROOT=macosx -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=26.0 -DCMAKE_BUILD_TYPE=Release -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=OFF -DGGML_OPENMP=OFF -DGGML_NATIVE=OFF -DBUILD_SHARED_LIBS=OFF -DLLAMA_CURL=OFF
+
+ZIG_CC  = $(CURDIR)/testing/scripts/zigcc
+ZIG_CXX = $(CURDIR)/testing/scripts/zigcxx
+
+PARITY_NPRED ?= 32
+
+# The CPU the bit-exact gates build both libraries for: ops-diff,
+# repack-diff, node-diff, parity-port. The kernel arms that exist depend on
+# it -- i8mm's two-row dot products and gemms compile only for a CPU that
+# has i8mm -- so a target that ships for apple_m3 is gated at apple_m3 too:
+#   make ops-diff repack-diff node-diff GATE_CPU=apple_m3
+# See testing/scripts/gate-cpu.
+GATE_CPU ?= baseline
+export GATE_CPU
+
+# Download CMake into .tools/.
+cmake:
+	mkdir -p .tools
+	cd .tools; curl -sSL -o cmake.tar.gz https://github.com/Kitware/CMake/releases/download/v4.4.3/cmake-4.4.3-macos-universal.tar.gz
+	cd .tools; tar xzf cmake.tar.gz && rm cmake.tar.gz
+	"$(CMAKE)" --version
+
+# Performance of the stock C against the port (testing/metrics/).
+perf:
+	$(MAKE) -C testing/metrics
+
+# The same on the CPU device alone, so the ported CPU kernels carry the model.
+perf-cpu:
+	$(MAKE) -C testing/metrics cpu
+
+# The xcframework plus every gate on it, and `validate ops-diff`.
+xcframework-check:
+	$(MAKE) -C xcframework check
+
+# Build llama.cpp for iOS with CMake.
+buildios:
+	-mkdir cmake-build
+	cd cmake-build; cmake ../llama.cpp -G "Unix Makefiles" -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphoneos -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=26.0 -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=OFF -DGGML_OPENMP=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_SERVER=OFF -DLLAMA_CURL=OFF
+	cd cmake-build; make -j
+
+# Build llama.cpp for macOS with Apple clang; the control build.
+buildmacos:
+	-mkdir -p cmake-build/apple
+	cd cmake-build/apple; "$(CMAKE)" "$(CURDIR)/llama.cpp" -G "Unix Makefiles" $(MACOS_FLAGS)
+	cd cmake-build/apple; make -j
+
+# Build the same sources with zig cc.
+buildmacos-zig:
+	-mkdir -p cmake-build/zig
+	cd cmake-build/zig; "$(CMAKE)" "$(CURDIR)/llama.cpp" -G "Unix Makefiles" $(MACOS_FLAGS) "-DCMAKE_C_COMPILER=$(ZIG_CC)" "-DCMAKE_CXX_COMPILER=$(ZIG_CXX)" "-DCMAKE_ASM_COMPILER=$(ZIG_CC)"
+	cd cmake-build/zig; make -j
+
+# Build the llama.cpp reference libraries with the Zig toolchain.
+reference:
+	zig build reference
+
+# Build upstream's llama-cli through llama.cpp.zmake.
+zmake:
+	cd llama.cpp.zmake; $(MAKE) cli
+
+# Without the styleguide checkout (the gate machines have none), validate is
+# the format check, the scaffold and the checks below.
+ifeq ($(wildcard ../styleguide/Makefile.in),)
+validate:
+	@printf '\n== formatting ==\n'
+	zig fmt --check build.zig $(ZIG_DIRS)
+	@printf '\n== scaffold ==\n'
+	@$(MAKE) --no-print-directory build test
+	@printf '\nvalidate: OK\n'
+endif
+
+# Run every check that needs no model or reference build.
+test:
+	@printf '\n== unit tests ==\n'
+	zig build test --summary all
+	@printf '\n== ported ggml (debug) ==\n'
+	zig build test-port --summary all
+	@printf '\n== ported ggml (release) ==\n'
+	zig build test-port --release=fast --summary all
+	@printf '\n== ported libllama (debug) ==\n'
+	zig build test-llama --summary all
+	@printf '\n== ported libmtmd (debug) ==\n'
+	zig build test-mtmd --summary all
+	@printf '\n== libc++ algorithms vs the SDK templates ==\n'
+	./testing/scripts/libcxx-diff
+	@printf '\n== std::regex vs libc++ ==\n'
+	zig build reference --release=fast
+	./testing/scripts/regex-diff
+	@printf '\n== common_json vs the port ==\n'
+	./testing/scripts/json-diff
+	@printf '\n== json-schema-to-grammar.cpp vs the port ==\n'
+	./testing/scripts/schema-diff
+	@printf '\n== peg-parser.cpp and chat-peg-parser.cpp vs the port ==\n'
+	./testing/scripts/peg-diff
+	@printf '\n== chat.cpp, the auto-parser and parsers/ vs the port ==\n'
+	./testing/scripts/chat-parse-diff
+	@printf '\n== unicode.cpp vs the port ==\n'
+	./testing/scripts/unicode-diff
+	@printf '\n== llama-vocab.cpp vs the port ==\n'
+	./testing/scripts/vocab-diff
+	@printf '\n== llama-arch.cpp vs the port ==\n'
+	./testing/scripts/arch-diff
+	@printf '\n== llama-model-loader.cpp vs the port ==\n'
+	@# loader-diff requires the arch fixtures, and validate's clean removed them.
+	./testing/scripts/gen-arch-fixtures > /dev/null
+	./testing/scripts/loader-diff
+	@printf '\n== llama-batch.cpp vs the port ==\n'
+	./testing/scripts/batch-diff
+	@printf '\n== llama-chat.cpp vs the port ==\n'
+	./testing/scripts/chat-diff
+	@printf '\n== llama.h at the C boundary vs the port ==\n'
+	./testing/scripts/api-diff
+	@printf '\n== ported symbol coverage ==\n'
+	./testing/scripts/port-coverage
+	@printf '\n== libmtmd exports ==\n'
+	zig build mtmd-ref --release=fast
+	./testing/scripts/mtmd-exports
+	@printf '\n== the libraries for iOS ==\n'
+	@# Nothing else compiles library code for iOS before the xcframework next
+	@# builds. The xcframework's iOS device slice: libggml with BLAS, libmtmd
+	@# with libllama inside, for the A7 upstream's framework is built for.
+	zig build xcframework -Dblas -Dtarget=aarch64-ios.26.0 -Dcpu=apple_a7 --release=fast --prefix zig-out/ios-check
+	@printf '\n== llama-server-core as a consumer builds it (host, Windows) ==\n'
+	./testing/scripts/server-core-consumer
+	@printf '\n== upstream citations ==\n'
+	./testing/scripts/port-links
+	@printf '\n== scheduler diff vs reference ==\n'
+	@if [ -f cmake-build/apple/ggml/src/libggml.a ]; then ./testing/scripts/sched-diff; else echo "  skipped: no reference build (run 'make buildmacos')"; fi
+	@printf '\n== graph diff vs reference ==\n'
+	@if [ -f cmake-build/apple/ggml/src/libggml.a ]; then zig build ported-lib --release=fast && ./testing/scripts/graph-diff; else echo "  skipped: no reference build (run 'make buildmacos')"; fi
+	@printf '\ntest: OK\n'
+
+# Diff the token streams of the Apple-clang and zig cc builds.
+parity:
+	./testing/scripts/parity $(MODEL) "$(PROMPT)"
+
+# Check every upstream citation still points at the C it names.
+port-links:
+	./testing/scripts/port-links
+
+# Diff the graphs the ported constructors build against the reference ones.
+graph-diff:
+	zig build ported-lib --release=fast
+	./testing/scripts/graph-diff
+
+# Diff the scheduler's backend assignments against the reference ones.
+# Nothing else covers them: see the header of testing/scripts/sched-diff.
+sched-diff:
+	zig build reference
+	./testing/scripts/sched-diff
+
+# Diff the CPU op kernels' computed output against the reference C, on bits.
+# The only value-level oracle for ggml-cpu -- see the header of testing/scripts/ops-diff.
+#
+# Both sides must be --release=fast: the reference is the stock C built by the
+# same Zig toolchain, and an optimization difference moves the last bit. The
+# reference lives in llama.cpp.zmake, which is a separate repository.
+ops-diff:
+	cd llama.cpp.zmake && zig build lib --release=fast -Dcpu=$(GATE_CPU)
+	zig build reference --release=fast -Dcpu=$(GATE_CPU)
+	./testing/scripts/ops-diff
+
+# Compare the ported Metal vtables against the reference's, directly.
+# node-diff --gpu runs the graph and sees almost none of ggml-metal.cpp:
+# measured, dropping the FLASH_ATTN_EXT scratch terms from get_alloc_size
+# passed it. See the header of testing/scripts/metal-diff.
+metal-diff:
+	zig build reference --release=fast
+	./testing/scripts/metal-diff
+
+# Diff the Metal encoders' output on bits against llama.cpp.zmake's: the new
+# newer ops, which backend-ops holds only to a tolerance and no decode
+# reaches. See the header of testing/harness/metal_ops_dump.c.
+metal-ops-diff:
+	cd llama.cpp.zmake && zig build lib --release=fast
+	zig build reference --release=fast
+	./testing/scripts/metal-ops-diff
+
+# Compare the hand-declared Metal structs against the real headers.
+# device_c.zig hand-declares ggml_metal_device_props rather than widening
+# impl.zig's cImport; this asks the C compiler whether the transcription is
+# right, and whether the generated metal/impl_c.zig and metal/kargs.zig
+# agree with ggml-metal-impl.h -- 65 kargs structs and 936 fields the
+# Metal kernels read by offset. Regenerate those with testing/scripts/gen-kargs.
+# See the header of testing/scripts/struct-layout.
+struct-layout:
+	zig build reference --release=fast
+	./testing/scripts/struct-layout
+
+# Sweep the flash-attention tuning lookup against the reference.
+# tuning_table.zig is 936 transcribed rows and no other gate can tell a
+# dropped row from a kept one. See the header of testing/scripts/tuning-diff.
+tuning-diff:
+	zig build reference --release=fast
+	./testing/scripts/tuning-diff
+
+# Call the port's by-value-struct entry points as a C caller does.
+# The gate for a toolchain bug: Zig 0.16 miscompiles an extern struct
+# received by value across the C ABI unless its size is a multiple of 4
+# with no padding. See the header of testing/scripts/abi-check.
+abi-check:
+	zig build reference --release=fast
+	./testing/scripts/abi-check
+
+# Diff every interleaved repack kernel against the reference C++, on bits.
+# The only oracle those 36 kernels have: test-backend-ops never allocates a
+# CPU_REPACK buffer, ops-diff's tensors live in a plain CPU buffer, and
+# `make port` runs on Metal. node-diff reaches them but stops at the first
+# divergent node. See the header of testing/scripts/repack-diff.
+repack-diff:
+	zig build reference --release=fast -Dcpu=$(GATE_CPU)
+	./testing/scripts/repack-diff
+
+# Every public sampler and the grammar, ported vs reference, on bits.
+# parity-cli builds one chain and reads one token a step; this prints every
+# candidate's id, logit and probability after every call, and reaches the
+# samplers, grammars and backend-sampling path the CLI never configures. See
+# the header of testing/scripts/sampler-diff.
+sampler-diff:
+	cd llama.cpp.zmake && zig build lib --release=fast
+	zig build reference --release=fast
+	./testing/scripts/sampler-diff $(MODEL)
+
+# The first Vulkan measurement: is the reference Vulkan backend reproducible
+# run to run, per node and fused? Builds llama.cpp.zmake with its Vulkan
+# backend with the pinned toolchain in .tools/vulkan (`make vk-toolchain`),
+# so it runs on the GB10 and not on this Mac's
+# Metal. See the header of testing/scripts/vk-repro.
+VK_TOOLS = $(CURDIR)/.tools/vulkan
+VK_FLAGS = -Dvulkan "-Dglslc=$(VK_TOOLS)/bin/glslc" "-Dvulkan-include=$(VK_TOOLS)/include"
+
+vk-toolchain:
+	./testing/scripts/vk-toolchain
+
+vk-repro:
+	cd llama.cpp.zmake && zig build lib --release=fast $(VK_FLAGS)
+	./testing/scripts/vk-repro $(MODEL)
+
+# The Vulkan gates: this repository's libggml
+# with upstream's ggml-vulkan.cpp (vk-upstream) and with the Zig host layer
+# (vk-port), CUDA off so the only GPU device is Vulkan's, and upstream's
+# backend with its exports renamed for the in-process gates. vk-backend-diff
+# asks both registries the same questions; vk-ops-diff runs test-backend-ops
+# with the reference where the CPU goes, on bits; vk-node-diff diffs every
+# node of a decode, per node and fused, on every arm of the GB10;
+# vk-push-layout checks the generated push constants against the C++'s.
+# See each script.
+VK_GATE_FLAGS = --release=fast -Dvulkan -Dcuda=false
+
+vk-builds:
+	zig build reference $(VK_GATE_FLAGS) -Dvulkan-port=false --prefix zig-out/vk-upstream
+	zig build reference vk-ref $(VK_GATE_FLAGS) --prefix zig-out/vk-port
+
+vk-backend-diff: vk-builds
+	./testing/scripts/vk-backend-diff
+
+vk-node-diff: vk-builds
+	./testing/scripts/vk-node-diff $(MODEL)
+
+# Our llama-cli on the Vulkan device against raw_completion.c over
+# upstream's libllama and Vulkan host layer, greedy, six prompts.
+vk-parity-cli: vk-builds
+	zig build cli $(VK_GATE_FLAGS) --prefix zig-out/vk-cli
+	./testing/scripts/vk-parity-cli $(MODEL) $(PARITY_NPRED)
+
+vk-ops-diff: vk-builds
+	./testing/scripts/vk-ops-diff $(ARGS)
+
+vk-push-layout:
+	zig build vk-push-layout $(VK_GATE_FLAGS)
+
+# The BLAS backend: Apple only, over Accelerate.
+# blas-diff runs upstream's ggml-blas.cpp, its exports renamed, beside the
+# port in one process -- the vtables, supports_op swept, every type's
+# computation on bits; blas-node-diff diffs a decode node by node with BLAS
+# in the scheduler. See each script.
+blas-builds:
+	zig build reference --release=fast -Dblas -Dblas-port=false --prefix zig-out/blas-upstream
+	zig build reference --release=fast -Dblas --prefix zig-out/blas-port
+	zig build reference --release=fast --prefix zig-out/noblas
+
+blas-diff: blas-builds
+	./testing/scripts/blas-diff
+
+blas-node-diff: blas-builds
+	./testing/scripts/blas-node-diff
+
+# The x86 gates, run on the Windows laptop through
+# ziglink: each cross-builds both sides for
+# x86_64-windows-gnu at X86_CPU (x86_64_v3), pushes the programs and reads
+# back the verdict. The agent's window must be open there. AVX-512 --
+# X86_CPU=x86_64_v4 or tigerlake -- runs on X86_AGENT=JWHLPTOP, a Tiger Lake. x86-quants-diff
+# and x86-repack-diff are the per-kernel oracles; x86-ops-diff and
+# x86-node-diff are testing/scripts/ops-diff and testing/scripts/node-diff on Intel silicon,
+# the second with a model on the laptop (X86_MODEL). See the header of each
+# script, and testing/scripts/win-run.
+x86-quants-diff:
+	./testing/scripts/x86-quants-diff
+
+x86-repack-diff:
+	./testing/scripts/x86-repack-diff
+
+x86-ops-diff:
+	./testing/scripts/x86-ops-diff
+
+x86-node-diff:
+	./testing/scripts/x86-node-diff
+
+x86-gates: x86-quants-diff x86-repack-diff x86-ops-diff x86-node-diff
+
+# The Windows pickup's host gates, on the laptop:
+# host-arms-diff (priority, power throttling, affinity, the clock seed),
+# libcxx-diff, regex-diff and unicode-diff, each cross-built by its own
+# script under WIN_X86=1 (testing/scripts/win-target). host-arms-diff goes first: it
+# builds the Windows port the other three link.
+win-host-diffs:
+	WIN_X86=1 ./testing/scripts/host-arms-diff
+	WIN_X86=1 ./testing/scripts/libcxx-diff
+	WIN_X86=1 ./testing/scripts/regex-diff
+	WIN_X86=1 ./testing/scripts/unicode-diff
+
+# The CPU backend's host arms -- thread priority, CPU affinity, NUMA, the
+# sampler's default seed -- read back from the OS on every worker, ported
+# against reference, one process per scenario. Needs no model. The gate for
+# the Linux arms on Linux; on macOS it covers the Apple ones. See the header
+# of testing/scripts/host-arms-diff.
+host-arms-diff:
+	cd llama.cpp.zmake && zig build lib --release=fast
+	zig build reference --release=fast
+	./testing/scripts/host-arms-diff
+
+# The libc++ sort, heap, mt19937 and distributions src/llama/libcxx.zig
+# reproduces, against the real templates, in one process. The sampler's tie
+# order and draws depend on them. See the header of testing/scripts/libcxx-diff.
+libcxx-diff:
+	./testing/scripts/libcxx-diff
+
+# src/llama/regex.zig against libc++'s std::regex, which the lazy grammar's
+# trigger patterns use. See the header of testing/scripts/regex-diff.
+regex-diff:
+	zig build reference --release=fast
+	./testing/scripts/regex-diff
+
+# cli/json/ against upstream's common/json.cpp over the vendored nlohmann, in
+# one process: parse, every accessor, dump at every indent, the error text.
+# See the header of testing/scripts/json-diff.
+json-diff:
+	./testing/scripts/json-diff
+
+# tools/server/http.zig and tools/server/httplib/ against upstream's
+# server-http.cpp over cpp-httplib: the same routes on both, raw requests,
+# raw responses and every log line compared. See the header of
+# testing/scripts/http-diff.
+http-diff:
+	./testing/scripts/http-diff
+
+# cli/json/schema*.zig against upstream's json-schema.cpp and
+# json-schema-to-grammar.cpp, in one process: upstream's own test cases,
+# mutated and random schemas, the grammar text or the exception, byte for
+# byte. See the header of testing/scripts/schema-diff.
+schema-diff:
+	zig build reference tools-ref --release=fast
+	./testing/scripts/schema-diff
+
+# tools/common's sampler, reasoning budget, speculative drafters and n-gram
+# stores against upstream's common/ (libllama-common-ref), one process per
+# side: every draft, accepted run and candidate on bits, the stores' order
+# and saved bytes, and every log line, on Qwen3-0.6B and the draft fixtures.
+# See the header of testing/scripts/spec-diff.
+spec-diff:
+	zig build reference --release=fast
+	./testing/scripts/spec-diff
+
+# cli/peg/ and cli/common_chat/chat_peg.zig against upstream's
+# peg-parser.cpp and chat-peg-parser.cpp, in one process: the parsers
+# upstream's PEG tests build, recorded as they run, and random ones; every
+# parse complete and partial, the AST, the mapped message, the GBNF, the
+# saved arena, every exception. See the header of testing/scripts/peg-diff.
+peg-diff:
+	zig build reference --release=fast
+	./testing/scripts/peg-diff
+
+# cli/common_chat/'s chat data model against upstream's common/chat.cpp:
+# messages, tools and diffs both ways, every exception's text. See the
+# header of testing/scripts/chat-msg-diff.
+chat-msg-diff:
+	./testing/scripts/chat-msg-diff
+
+# cli/common_chat/'s templates, differential analysis, auto-parser,
+# per-model parsers and parse against upstream's common/chat.cpp and
+# friends, one process per side: every template applied over sampled
+# conversations, upstream's own chat tests recorded as they run, replies
+# whole, cut short and mutated. See the header of testing/scripts/chat-parse-diff.
+chat-parse-diff:
+	zig build reference --release=fast
+	./testing/scripts/chat-parse-diff
+
+# tools/server/'s data layer against upstream's server-common.cpp,
+# server-task.cpp, server-schema.cpp and server-chat.cpp: request fields
+# into task parameters and back, the OpenAI conversions on the legacy
+# template path, prompt tokenization with and without an mmproj, every
+# result in every response format, the SSE formatters, the prompt cache;
+# transcripts and logs. See the header of testing/scripts/server-task-diff.
+server-task-diff:
+	./testing/scripts/server-task-diff
+
+# llama-server-core as a consumer builds it: `zig build test-server-core`
+# (testing/harness/server_core_test.zig over the exports, by name) from another
+# directory; its API compiled and a completion on a tiny model run on the
+# host, compiled for Windows. See the header of testing/scripts/server-core-consumer.
+server-core-consumer:
+	./testing/scripts/server-core-consumer
+
+# Our llama-server against upstream's on request transcripts
+# (testing/harness/server/<name>.cases), every case file or SERVER_CASES="core ...".
+# See the header of testing/scripts/server-diff.
+# Both servers embed the web UI bundle `make ui` builds (build/ui.zig);
+# `ui` holds its asset routes.
+SERVER_CASES ?= core slots embd lora cache auth parallel spec sleep stream chat responses anthropic asr vision audio tools mcp proxy router sched connect hub ui decision rerank tts realtime
+server-diff: ui
+	@set -e; for n in $(SERVER_CASES); do SERVER_UI=$(UI_DIST) ./testing/scripts/server-diff $$n; done
+
+# src/llama/unicode.zig against the unmodified unicode.cpp, in one process:
+# every code point, UTF-8 decoding, the byte map, and every pre-tokenizer
+# pattern set in llama-vocab.cpp. See the header of testing/scripts/unicode-diff.
+unicode-diff:
+	zig build reference --release=fast
+	./testing/scripts/unicode-diff
+
+# src/llama/vocab/ against the C++ vocabulary inside libllama.a, in one
+# process: every vocabulary file upstream ships, the local Qwen3.5 model,
+# and synthesized files for the tokenizer types and error paths no real
+# file reaches. See the header of testing/scripts/vocab-diff.
+vocab-diff:
+	zig build reference --release=fast
+	./testing/scripts/vocab-diff
+
+# llama-arch.cpp's tables and lookups, Zig against the C++ in one process:
+# every architecture, every metadata key for every architecture, every
+# tensor name and info. The tables are generated by testing/scripts/gen-arch.
+arch-diff:
+	zig build reference --release=fast
+	./testing/scripts/arch-diff
+
+# The loader, hyperparameters and model metadata, Zig against the C++ in one
+# process: the metadata half of llama_model_load on every upstream vocabulary
+# file, the local Qwen3.5 model, and synthesized files.
+loader-diff:
+	zig build reference --release=fast
+	./testing/scripts/loader-diff
+
+# The batch splitter, Zig against the C++ in one process.
+batch-diff:
+	zig build reference --release=fast
+	./testing/scripts/batch-diff
+
+# The built-in chat templates, Zig against the C++ in one process.
+chat-diff:
+	zig build reference --release=fast
+	./testing/scripts/chat-diff
+
+# The CLI's Jinja chat templates (cli/chat.zig over zigjinja) against
+# upstream's common/jinja, on every template in llama.cpp/models/templates:
+# the text, which side raises, and that ours never trusts a byte upstream
+# marks as input. See the header of testing/scripts/jinja-diff.
+jinja-diff:
+	zig build reference --release=fast
+	./testing/scripts/jinja-diff
+
+# The context, the memory modules, the graph and Qwen3.5's graph: a decode
+# script run through llama.h and through the port, every graph node, every
+# output's bits and the state API compared; on the GPU, the CPU, a partial
+# offload, a device without the fused Gated Delta Net, and tensor
+# parallelism. ARGS=--quick for the GPU's multi-sequence cases only.
+context-diff:
+	zig build reference --release=fast
+	./testing/scripts/context-diff $(ARGS)
+
+# Every llama.h entry point the context does not own -- model, vocabulary,
+# loading, chat, batch, logging -- at the C boundary, Zig against the C++.
+api-diff:
+	zig build reference --release=fast
+	./testing/scripts/api-diff
+
+# The MoE cache's eviction policy, Zig against the C++ in one process.
+moe-slru-diff:
+	zig build reference --release=fast
+	./testing/scripts/moe-slru-diff $(ARGS)
+
+# LoRA and control-vector adapters, Zig against the C++ in one process.
+adapter-diff:
+	zig build reference --release=fast
+	./testing/scripts/adapter-diff $(ARGS)
+
+# One small random model per architecture, written by upstream's own
+# tests/test-llama-archs.cpp, for arch-model-diff. See testing/scripts/gen-arch-fixtures.
+arch-fixtures:
+	zig build reference --release=fast
+	./testing/scripts/gen-arch-fixtures
+
+# Every architecture on its fixture, the port against the C++: context-diff
+# across architectures. Counts the architectures not yet ported rather than
+# failing on them. ARGS=<substring...> narrows it. See testing/scripts/arch-model-diff.
+arch-model-diff:
+	zig build reference --release=fast
+	@[ -d zig-out/arch-fixtures ] || ./testing/scripts/gen-arch-fixtures
+	./testing/scripts/arch-model-diff zig-out/arch-fixtures $(ARGS)
+
+# The MTP (NextN) draft heads, which arch-model-diff's target-only harness
+# cannot build: the fixtures under zig-out/arch-fixtures/mtp/.
+# ARGS=<substring...> narrows it. See testing/scripts/mtp-diff.
+mtp-diff:
+	zig build reference --release=fast
+	@[ -d zig-out/arch-fixtures/mtp ] || ./testing/scripts/gen-arch-fixtures
+	./testing/scripts/mtp-diff zig-out/arch-fixtures $(ARGS)
+
+# The Gemma 4 assistant over a Gemma 4 target, which arch-model-diff cannot
+# reach. See testing/scripts/gemma4-assistant-diff.
+gemma4-assistant-diff:
+	zig build reference --release=fast
+	./testing/scripts/gemma4-assistant-diff
+
+# Diff our CLI's output against the C reference, end to end.
+parity-cli: buildcli
+	@[ "$$(uname -s)" = Darwin ] || zig build reference tools-ref --release=fast
+	./testing/scripts/parity-cli $(MODEL) $(PARITY_NPRED)
+
+# Our CLI's conversation mode (-cnv) against a reference conversation over
+# upstream's Jinja engine and libllama: replies, stderr and the cache each
+# turn kept. Needs both models: make qwen35 qwen3. See testing/scripts/cnv-diff.
+cnv-diff:
+	zig build cli --release=fast
+	./testing/scripts/cnv-diff $(ARGS)
+
+# cli/fit.zig -- what --fit decides from free memory -- against upstream's
+# common/fit.cpp, on fake GPUs with chosen memory, the CPU alone and Metal.
+# Needs make qwen35 qwen3 and make arch-fixtures. See testing/scripts/fit-diff.
+fit-diff:
+	zig build reference --release=fast
+	./testing/scripts/fit-diff $(ARGS)
+
+# Upstream's other tools: each of our twelve ports run
+# beside upstream's own binary on testing/harness/tools/<tool>.cases, stdout,
+# stderr, exit code and every file written compared. TOOL=<name> runs one.
+TOOLS ?= gguf-split quantize tokenize fit-params export-lora batched-bench cvector-generator imatrix perplexity bench tts mtmd-cli server
+tools-diff:
+	@set -e; for t in $(if $(TOOL),$(TOOL),$(TOOLS)); do ./testing/scripts/tools-diff $$t; done
+
+# libmtmd. mmproj-fixtures writes one small
+# random mmproj per projector type and checks each through upstream's
+# libmtmd; the gates compare the port against it.
+.PHONY: mmproj-fixtures mtmd-diff mtmd-exports mtmd-image-diff mtmd-audio-diff mtmd-decode-diff mtmd-gates
+mmproj-fixtures:
+	./testing/scripts/gen-mmproj-fixtures $(ARGS)
+
+# libmtmd through mtmd.h and mtmd-helper.h, port against upstream, on every
+# fixture: logs, every encoder node, chunks, embeddings and logits on bits,
+# TTS output. DEVS=cpu|gpu|both, FILTER=<projector substring>.
+mtmd-diff:
+	zig build reference mtmd-ref --release=fast
+	./testing/scripts/mtmd-diff $(if $(DEVS),$(DEVS),both) $(FILTER)
+
+# The 84 mtmd_* exports, equal to the reference's.
+mtmd-exports:
+	zig build mtmd-ref --release=fast
+	./testing/scripts/mtmd-exports
+
+# The image and audio preprocessors and the vendored decoders, each against
+# upstream's translation unit compiled unmodified, in one process.
+mtmd-image-diff:
+	./testing/scripts/mtmd-image-diff $(ARGS)
+mtmd-audio-diff:
+	./testing/scripts/mtmd-audio-diff $(ARGS)
+mtmd-decode-diff:
+	./testing/scripts/mtmd-decode-diff $(ARGS)
+
+mtmd-gates: mtmd-exports mtmd-image-diff mtmd-audio-diff mtmd-decode-diff mtmd-diff
+
+# Run upstream's test-backend-ops against the ported ggml.
+backend-ops:
+	zig build reference --release=fast
+	./testing/scripts/backend-ops $(ARGS)
+
+# Diff inference output between the ported and reference libraries.
+# Both sides --release=fast, against llama.cpp.zmake: see testing/scripts/parity-port.
+parity-port:
+	cd llama.cpp.zmake && zig build lib --release=fast -Dcpu=$(GATE_CPU)
+	zig build reference --release=fast -Dcpu=$(GATE_CPU)
+	./testing/scripts/parity-port $(MODEL)
+
+# Every graph node of a real model's decode, ported vs reference, on bits. CPU
+# by default; ARGS=--gpu for Metal. See the header of testing/scripts/node-diff.
+node-diff:
+	cd llama.cpp.zmake && zig build lib --release=fast -Dcpu=$(GATE_CPU)
+	zig build reference --release=fast -Dcpu=$(GATE_CPU)
+	./testing/scripts/node-diff $(ARGS) $(MODEL)
+
+# The same, with the model on the CPU device alone, so inference runs through
+# the ported ggml-cpu kernels -- which on a Metal machine it otherwise never
+# does.
+parity-port-cpu:
+	cd llama.cpp.zmake && zig build lib --release=fast -Dcpu=$(GATE_CPU)
+	zig build reference --release=fast -Dcpu=$(GATE_CPU)
+	./testing/scripts/parity-port --cpu $(MODEL)
+
+cuda-require-linux:
+	@[ "$$(uname -s)" = Linux ] || { echo "the CUDA gates run on the Linux CUDA machine only" >&2; exit 2; }
+
+# test-backend-ops on bits, the ported CUDA backend against upstream's.
+cuda-ops-diff: cuda-require-linux
+	zig build reference cuda-ref --release=fast --prefix zig-out/cuda-port
+	./testing/scripts/cuda-ops-diff $(ARGS)
+
+# Every node of a decode, then the fused graph, ported host layer vs upstream's.
+cuda-node-diff: cuda-require-linux
+	zig build reference -Dcuda-port=false --release=fast --prefix zig-out/cuda-upstream
+	zig build reference --release=fast --prefix zig-out/cuda-port
+	./testing/scripts/cuda-node-diff $(MODEL)
+
+# The device, buffer-type and registry vtables: metal-diff for CUDA.
+cuda-backend-diff: cuda-require-linux
+	zig build reference cuda-ref --release=fast --prefix zig-out/cuda-port
+	./testing/scripts/cuda-backend-diff
+
+# parity-cli for the CUDA machine.
+cuda-parity-cli: cuda-require-linux
+	zig build cli --release=fast
+	zig build reference -Dcuda-port=false --release=fast --prefix zig-out/cuda-upstream
+	./testing/scripts/cuda-parity-cli $(MODEL) $(PARITY_NPRED)
+
+# Load a model through the reference build and generate.
+smoke:
+	zig build smoke -- "$(MODEL)" "$(PROMPT)"
+
+# Run the same completion loop linked against the stock C libraries.
+#
+# Linked with Apple's clang, not `zig cc`. These objects come from the
+# Apple-clang CMake build, and since Xcode 27 Zig's linker cannot consume them
+# -- "failed to resolve relocations and write atoms: Overflow" on
+# llama-model.cpp.o and friends. Apple's own linker takes them without
+# complaint, and this target is the Apple-clang reference side anyway, so the
+# compiler confound it documents is unchanged.
+ref:
+	@test -f cmake-build/apple/src/libllama.a || { echo "missing the reference libraries -- run 'make buildmacos'" >&2; exit 2; }
+	@clang testing/harness/raw_completion.c -o $(SCRATCH)/raw_completion -std=c11 -w -I llama.cpp/include -I llama.cpp/ggml/include cmake-build/apple/src/libllama.a cmake-build/apple/ggml/src/libggml.a cmake-build/apple/ggml/src/ggml-metal/libggml-metal.a cmake-build/apple/ggml/src/libggml-cpu.a cmake-build/apple/ggml/src/libggml-base.a -lc++ -framework Foundation -framework Metal -framework MetalKit -framework Accelerate -F "$$(xcrun --sdk macosx --show-sdk-path)/System/Library/Frameworks"
+	@printf '\n$$ raw_completion %s %s %s --temp %s -s %s\n' "$(MODEL)" "'$(PROMPT)'" "$(NPRED)" "$(TEMP)" "$(SEED)"
+	@$(SCRATCH)/raw_completion "$(MODEL)" "$(PROMPT)" $(NPRED) show $(TEMP) $(SEED) 2>/dev/null
+	@printf '\n'
+
+# Run upstream's llama-cli as a chat REPL; output will not match `make port`.
+ref-chat:
+	@test -x "$(REF_CLI)" || { echo "missing $(REF_CLI) -- run 'make zmake'" >&2; exit 2; }
+	@printf '\n$$ %s -m %s -p %s -n %s -st %s\n' "$(REF_CLI)" "$(MODEL)" "'$(PROMPT)'" "$(NPRED)" "$(ARGS)"
+	@$(REF_CLI) -m "$(MODEL)" -p "$(PROMPT)" -n $(NPRED) -st $(ARGS) </dev/null
+	@printf '\n'

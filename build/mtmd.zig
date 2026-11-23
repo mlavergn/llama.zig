@@ -60,9 +60,9 @@ pub fn add(b: *std.Build, opts: Options, mtmd_ref: *std.Build.Step.Compile) *std
         .mtmd_ref = mtmd_ref,
         .cuda = opts.cuda,
     };
-    @import("mtmd_image_diff.zig").add(b, gate_opts);
-    @import("mtmd_audio_diff.zig").add(b, gate_opts);
-    @import("mtmd_decode_diff.zig").add(b, gate_opts);
-    @import("mtmd_fixtures.zig").add(b, gate_opts);
+    @import("../testing/build/mtmd_image_diff.zig").add(b, gate_opts);
+    @import("../testing/build/mtmd_audio_diff.zig").add(b, gate_opts);
+    @import("../testing/build/mtmd_decode_diff.zig").add(b, gate_opts);
+    @import("../testing/build/mtmd_fixtures.zig").add(b, gate_opts);
     return mod;
 }

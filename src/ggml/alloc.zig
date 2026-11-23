@@ -30,26 +30,10 @@
 
 const std = @import("std");
 const mod = @import("module.zig");
-const config = @import("config");
 const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 // The hash-set lifecycle used to be reached through `impl.zig` as an extern,
 // because it was still C. It is ported now, so call it directly.
-
-/// Build-time switch that makes this file abort on a hot path.
-///
-/// Off by default and compiled out entirely. See `probe` below.
-/// The marker `scripts/probe-ported` looks for.
-pub const probe_marker = "LLAMAZIG PORTED CODE REACHED";
-
-/// Aborts if the probe is enabled, proving this file is on the execution path.
-///
-/// Output comparison cannot tell correct code from code that never runs. This
-/// can: build with `-Dprobe-ported`, and a run that does *not* abort means the
-/// ported implementation was bypassed, whatever the symbol tables say.
-inline fn probe() void {
-    if (config.probe_ported) @panic(probe_marker);
-}
 
 /// Ports `MAX_FREE_BLOCKS` (ggml-alloc.c:14 @b1b770d90).
 const max_free_blocks = 256;
@@ -1112,7 +1096,6 @@ fn needsRealloc(galloc: *Gallocr, graph: *mod.impl.CGraph) bool {
 pub fn ggml_gallocr_alloc_graph(galloc: *Gallocr, graph: *mod.impl.CGraph) callconv(.c) bool {
     // Called for every graph evaluation, so a run that never trips this never
     // reached our allocator at all.
-    probe();
 
     if (needsRealloc(galloc, graph)) {
         if (galloc.n_buffers != 1) {

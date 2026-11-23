@@ -248,7 +248,7 @@ pub fn add(b: *std.Build, opts: Options) !Exports {
     const ref_step = b.step("tools-ref", "Build upstream's tools over libllama-ref, the tool gates' references");
     const common_ref = addCommonRef(b, opts);
     // Installed for the in-process gates over upstream's `common/`
-    // (`scripts/chat-msg-diff`), which link it beside a harness of their own.
+    // (`testing/scripts/chat-msg-diff`), which link it beside a harness of their own.
     const common_ref_install = b.addInstallArtifact(common_ref, .{});
     ref_step.dependOn(&common_ref_install.step);
     // That library alone: on Windows `tools-ref` cannot build (its server and
@@ -300,12 +300,12 @@ pub fn add(b: *std.Build, opts: Options) !Exports {
         const server_ref_step = b.step("server-ref", "Build upstream's llama-server over libllama-ref, the server gates' reference");
         server_ref_step.dependOn(&install.step);
     }
-    // `scripts/spec-diff`'s two sides: `harness/spec_diff.zig` over the port's
-    // `tools/common/`, `harness/spec_ref.cpp` over upstream's `common/`.
+    // `testing/scripts/spec-diff`'s two sides: `testing/harness/spec_diff.zig` over the port's
+    // `tools/common/`, `testing/harness/spec_ref.cpp` over upstream's `common/`.
     {
         const spec_step = b.step("spec-diff", "Build the spec-diff harnesses: the port's common/ sampling and speculative decoding, and upstream's");
         const port = b.createModule(.{
-            .root_source_file = b.path("harness/spec_diff.zig"),
+            .root_source_file = b.path("testing/harness/spec_diff.zig"),
             .target = opts.target,
             .optimize = opts.optimize,
             .link_libc = true,
@@ -322,7 +322,7 @@ pub fn add(b: *std.Build, opts: Options) !Exports {
         spec_step.dependOn(&b.addInstallArtifact(port_exe, .{ .dest_dir = .{ .override = .{ .custom = "spec-diff" } } }).step);
 
         const ref = refModule(b, opts);
-        ref.addCSourceFiles(.{ .root = b.path("harness"), .files = &.{"spec_ref.cpp"}, .flags = &cxx_flags });
+        ref.addCSourceFiles(.{ .root = b.path("testing/harness"), .files = &.{"spec_ref.cpp"}, .flags = &cxx_flags });
         ref.linkLibrary(common_ref);
         ref.linkLibrary(opts.reference.llama_ref);
         ref.linkLibrary(opts.reference.ggml);
@@ -334,7 +334,7 @@ pub fn add(b: *std.Build, opts: Options) !Exports {
 
         // gives the draft fixtures a vocabulary, so DFlash has a mask token
         const fx = b.createModule(.{ .target = opts.target, .optimize = opts.optimize, .link_libc = true, .link_libcpp = true });
-        fx.addCSourceFiles(.{ .root = b.path("harness"), .files = &.{"spec_fixtures.c"}, .flags = &.{"-std=c11"} });
+        fx.addCSourceFiles(.{ .root = b.path("testing/harness"), .files = &.{"spec_fixtures.c"}, .flags = &.{"-std=c11"} });
         fx.addIncludePath(b.path(root ++ "/ggml/include"));
         fx.linkLibrary(opts.reference.ggml);
         llamacpp.addSdkPaths(b, fx, opts.sdk);

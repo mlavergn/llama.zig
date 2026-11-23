@@ -1,0 +1,98 @@
+#!/bin/bash
+# Assert that llama.cpp.zmake compiles the same upstream commit we port from.
+#
+# Sourced by every gate that compares **on bits** against the zmake reference:
+# ops-diff, node-diff, parity-port.
+#
+# Why this exists
+# ---------------
+# `llama.cpp/` here is a submodule pinned at a commit. `llama.cpp.zmake` is
+# the build system only -- its own .gitignore says "Not vendored here: this
+# repository is the build system, not a fork" -- so the sources it compiles
+# live in an **untracked** checkout at llama.cpp.zmake/llama.cpp, fetched by
+# its `make clone`.
+#
+# Nothing makes those two agree. They do today, by convention. If the zmake
+# checkout ever moved, these gates would compile a *different upstream* as
+# the reference and report the difference as a porting bug -- green or red
+# for a reason unrelated to what they claim to measure, which is this
+# project's recurring failure mode.
+#
+# Note submoduling llama.cpp.zmake would NOT fix this: it would pin the
+# build.zig and leave the sources, which are what actually gets compiled,
+# exactly as unpinned. Hence a check rather than a pin.
+#
+# Usage: . testing/scripts/check-reference-pin   (from the repository root)
+_ours="$(git -C llama.cpp rev-parse HEAD 2>/dev/null)"
+_theirs="$(git -C llama.cpp.zmake/llama.cpp rev-parse HEAD 2>/dev/null)"
+
+if [ -z "$_ours" ]; then
+    echo "FAIL: cannot read llama.cpp HEAD -- is the submodule checked out?" >&2
+    echo "      git submodule update --init" >&2
+    exit 2
+fi
+if [ -z "$_theirs" ]; then
+    echo "FAIL: cannot read llama.cpp.zmake/llama.cpp HEAD -- the reference sources are missing." >&2
+    echo "      make -C llama.cpp.zmake clone" >&2
+    exit 2
+fi
+# The commit is not the whole contract: a build *flag* that differs changes
+# which code compiles on each side. GGML_USE_CPU_REPACK is the live example --
+# with it on one side only, the port registers the repack buffer type and the
+# reference does not, and every bit-exact gate diverges for a reason that has
+# nothing to do with the port. Measured: enabling it here first did exactly
+# that.
+# `grep -c` prints 0 *and* exits 1 when there is no match, so `|| echo 0`
+# would append a second line and the comparison below would never run.
+_ours_repack=$(grep -c 'GGML_USE_CPU_REPACK' build/llamacpp.zig 2>/dev/null) || _ours_repack=0
+_theirs_repack=$(grep -c 'GGML_USE_CPU_REPACK' llama.cpp.zmake/build.zig 2>/dev/null) || _theirs_repack=0
+if { [ "$_ours_repack" -gt 0 ] && [ "$_theirs_repack" -eq 0 ]; } ||
+   { [ "$_ours_repack" -eq 0 ] && [ "$_theirs_repack" -gt 0 ]; }; then
+    echo "FAIL: GGML_USE_CPU_REPACK is set on one side only." >&2
+    echo "        ours   (build/llamacpp.zig)        $_ours_repack occurrence(s)" >&2
+    echo "        theirs (llama.cpp.zmake/build.zig) $_theirs_repack occurrence(s)" >&2
+    echo "      The two builds would compile different code; this gate compares" >&2
+    echo "      on bits and would report that as a porting bug." >&2
+    exit 2
+fi
+
+if [ "$_ours" != "$_theirs" ]; then
+    echo "FAIL: the reference compiles a different upstream commit from the one we port." >&2
+    echo "        ours   (llama.cpp)              ${_ours}" >&2
+    echo "        theirs (llama.cpp.zmake/llama.cpp) ${_theirs}" >&2
+    echo "      This gate compares on bits, so it would report the version gap as a" >&2
+    echo "      porting bug. Check out ${_ours} in llama.cpp.zmake/llama.cpp." >&2
+    exit 2
+fi
+# The pin is also written down as values: build/upstream.zig (what our build
+# configures the version headers with), llama.cpp.zmake/build.zig (the
+# reference's), and the two literals the port returns from ggml_version and
+# llama_version. A sync that moved the checkout and missed one of them would
+# compare a reference reporting one version against a port reporting another.
+_field() { sed -n "s/^pub const $2 = \"\{0,1\}\([^\";]*\)\"\{0,1\};$/\1/p" "$1"; }
+_zfield() { sed -n "s/^const $2 = \"\{0,1\}\([^\";]*\)\"\{0,1\};$/\1/p" "$1"; }
+_up=build/upstream.zig
+_short="$(git -C llama.cpp rev-parse --short=9 HEAD)"
+_tag_commit="$(git -C llama.cpp rev-parse "$(_field $_up tag)^{commit}" 2>/dev/null)"
+_bad=""
+[ "$(_field $_up commit)" = "$_short" ] || _bad="$_bad build/upstream.zig:commit=$(_field $_up commit)"
+[ "$_tag_commit" = "$_ours" ] || _bad="$_bad build/upstream.zig:tag=$(_field $_up tag)"
+[ "$(_field $_up version)" = "$(_field $_up tag | sed 's/^v//')" ] || _bad="$_bad build/upstream.zig:version"
+for _k in version ggml_version commit build_number; do
+    [ "$(_zfield llama.cpp.zmake/build.zig $_k)" = "$(_field $_up $_k)" ] || _bad="$_bad llama.cpp.zmake/build.zig:$_k"
+done
+grep -q "^const build_version: \[\*:0\]const u8 = \"$(_field $_up ggml_version)\";" src/ggml/runtime.zig || _bad="$_bad src/ggml/runtime.zig:build_version"
+grep -q "^const build_commit: \[\*:0\]const u8 = \"$_short\";" src/ggml/runtime.zig || _bad="$_bad src/ggml/runtime.zig:build_commit"
+grep -q "^pub const version = \"$(_field $_up version)\";" src/llama/api/llama.zig || _bad="$_bad src/llama/api/llama.zig:version"
+# The zmake reference compiles the release *tarball* its
+# build.zig.zon names (unpacked into zig-pkg/), not the nested checkout read
+# above -- which only types-golden and this script still use. So the tag in
+# that URL is the commit the bit-exact gates actually compile against.
+_zon_tag="$(sed -n 's|.*/archive/refs/tags/\(v[^"]*\)\.tar\.gz".*|\1|p' llama.cpp.zmake/build.zig.zon)"
+[ "$_zon_tag" = "$(_field $_up tag)" ] || _bad="$_bad llama.cpp.zmake/build.zig.zon:url=${_zon_tag:-missing}"
+if [ -n "$_bad" ]; then
+    echo "FAIL: the pin's recorded values disagree with llama.cpp at ${_short}:" >&2
+    for _b in $_bad; do echo "        $_b" >&2; done
+    exit 2
+fi
+unset _zon_tag _ours _theirs _ours_repack _theirs_repack _up _short _tag_commit _bad _k

@@ -6,7 +6,8 @@
 //! export, so the in-process harnesses can call it beside upstream's
 //! libmtmd, which defines the same names. Importing this file exports all
 //! of them by name, as `src/llama/exports.zig` does for `llama.h`. Only
-//! `module.zig`, the library root, imports it; `harness_root.zig` must not.
+//! `lib.zig` imports it, forced by `module.zig` only as the compilation root
+//! or under test.
 //!
 //! The reference archive also exports stb_image's, xxHash's and the
 //! SHA-256's C entry points, which upstream compiles into `mtmd-helper.cpp`

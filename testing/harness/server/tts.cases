@@ -1,0 +1,126 @@
+# POST /tts: testing/scripts/server-diff tts. The fixtures' Qwen3-TTS and
+# pocket-tts pipelines; the audio is noise and is compared by its bytes, which
+# the seed fixes; a stream's chunks are compared by what they add up to.
+# how often the idle loop logs is the scheduler's: it differs upstream against upstream
+!droplog update_slots: all slots are idle
+!server -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -c 2048 -np 1 --no-warmup --seed 42 -lv 4
+!fulllog
+POST /tts {"input": "hello", "n_predict": 4, "seed": 7}
+POST /tts {"input": "hello", "n_predict": 4, "seed": 7, "response_format": "pcm"}
+POST /tts {"prompt": "by the other name", "max_tokens": 3, "seed": 8}
+POST /tts {"input": "stream", "n_predict": 6, "seed": 9, "stream": true}
+POST /tts {"input": "stream pcm", "n_predict": 6, "seed": 9, "stream": true, "response_format": "pcm"}
+POST /tts {"input": "sampling", "n_predict": 3, "seed": 1, "top_k": 2, "top_p": 0.5, "repeat_penalty": 1.3}
+POST /tts {"input": "clamped", "n_predict": 3, "seed": 1, "top_k": -4, "top_p": 9}
+POST /tts {"input": "with language", "n_predict": 3, "seed": 1, "lang": "fr"}
+POST /tts {"input": "with voice", "n_predict": 3, "seed": 1, "voice": "alto"}
+POST /tts {"input": "ref", "n_predict": 3, "seed": 1, "speaker_ref_b64": "$WAV"}
+FORM /tts {"input": "form", "n_predict": "3", "seed": "5", "top_k": "2", "top_p": "0.5", "repeat_penalty": "1.2", "stream": "false", "speaker_ref": "@file:$DATA/tone.wav"}
+FORM /tts {"input": "form stream", "max_tokens": "3", "seed": "5", "stream": "true"}
+POST /tts {"input": ""}
+POST /tts {}
+POST /tts {"input": 5}
+POST /tts {"input": "x", "n_predict": -2}
+POST /tts {"input": "x", "n_predict": "many"}
+POST /tts {"input": "x", "top_k": "many"}
+FORM /tts {"input": "x", "n_predict": "many"}
+FORM /tts {"input": "x", "n_predict": "99999999999999999999999"}
+FORM /tts {"input": "x", "top_p": "wide"}
+FORM /tts {"input": "x", "top_p": "1e99"}
+POST /tts {"input": "x", "speaker_ref_b64": "!!!"}
+POST /tts {"input": "x", "speaker_ref_b64": "QUJD"}
+FORM /tts {"input": "x", "speaker_ref": "@file:$DATA/junk.bin"}
+POST /tts not json
+GET /props
+GET /v1/models
+GET /slots
+POST /v1/chat/completions {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 2}
+POST /completion {"prompt": "hi", "n_predict": 2}
+
+# a chat template makes the model a chat model too
+!server -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -c 2048 -np 1 --no-warmup --seed 42 --chat-template chatml -lv 4
+!fulllog
+GET /v1/models
+POST /tts {"input": "hello", "n_predict": 2, "seed": 7}
+
+!server -m $MM/text-pockettts.gguf -mm $MM/pockettts.gguf -c 2048 -np 1 --no-warmup --seed 42 -lv 4
+!fulllog
+POST /tts {"input": "hello", "n_predict": 4, "seed": 7}
+POST /tts {"input": "stream", "n_predict": 4, "seed": 7, "stream": true}
+POST /tts {"input": "ref", "n_predict": 3, "seed": 1, "speaker_ref_b64": "$WAV"}
+GET /v1/models
+# the fixture's two predefined voices, "alba" and "Bob"
+GET /props
+POST /tts {"input": "voiced", "n_predict": 3, "seed": 1, "voice": "alba"}
+POST /tts {"input": "voiced", "n_predict": 3, "seed": 1, "voice": "ALBA"}
+POST /tts {"input": "voiced", "n_predict": 3, "seed": 1, "voice": "carol"}
+POST /tts {"input": "voiced", "n_predict": 3, "seed": 1, "voice": "Bob", "speaker_ref_b64": "$WAV"}
+
+# predefined voices. An LFM3-Audio generator has two, "female" and
+# "male": GET /props lists them, a request speaks with the one it names, or
+# with the first; an unknown one, or one beside a speaker reference, is
+# refused, and so is a speaker reference to a model with no voice encoder
+!server -m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a_gen.gguf -c 4096 -np 1 --no-warmup --seed 42 -lv 4
+!fulllog
+GET /props
+POST /tts {"input": "hello", "n_predict": 3, "seed": 7}
+POST /tts {"input": "hello", "n_predict": 3, "seed": 7, "voice": "male"}
+POST /tts {"input": "hello", "n_predict": 3, "seed": 7, "voice": "female", "stream": true}
+POST /tts {"input": "hello", "n_predict": 3, "voice": "nobody"}
+POST /tts {"input": "hello", "n_predict": 3, "voice": "Male"}
+POST /tts {"input": "hello", "n_predict": 3, "voice": "male", "speaker_ref_b64": "$WAV"}
+POST /tts {"input": "hello", "n_predict": 3, "speaker_ref_b64": "$WAV"}
+FORM /tts {"input": "form", "n_predict": "3", "voice": "male", "speaker_ref": "@file:$DATA/tone.wav"}
+
+# two requests: the second waits for the slot, its prompt re-evaluated whole
+!server -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -c 2048 -np 2 --no-warmup --seed 42 -lv 4
+POST /tts {"input": "one", "n_predict": 2, "seed": 1}
+POST /tts {"input": "one", "n_predict": 2, "seed": 1}
+
+# a model with no audio generation
+!server -m $QWEN3 -c 2048 -np 1
+POST /tts {"input": "x"}
+POST /tts {"input": ""}
+GET /v1/models
+
+# (08f945ffb) /v1/audio/speech and /audio/speech, OpenAI's speech API
+# converted to /tts -- wav or pcm (16-bit signed, converted from the float32
+# output), stream_format audio, a custom voice {"id": ...}; mp3, sse and speed
+# refused, instructions ignored with a warning. /tts takes "pcm16" and
+# "temperature" too
+!server -m $MM/text-qwen3tts.gguf -mm $MM/qwen3tts.gguf -c 2048 -np 1 --no-warmup --seed 42 -lv 4
+!fulllog
+POST /v1/audio/speech {"model": "tts-1", "input": "hello", "n_predict": 4, "seed": 7}
+POST /audio/speech {"input": "hello", "n_predict": 4, "seed": 7, "response_format": "wav"}
+POST /v1/audio/speech {"input": "hello", "n_predict": 4, "seed": 7, "response_format": "pcm"}
+POST /v1/audio/speech {"input": "stream", "n_predict": 6, "seed": 9, "response_format": "pcm", "stream_format": "audio"}
+POST /v1/audio/speech {"input": "stream", "n_predict": 6, "seed": 9, "stream_format": "audio"}
+POST /v1/audio/speech {"input": "hello", "n_predict": 3, "seed": 7, "instructions": "whisper"}
+POST /v1/audio/speech {"input": "hello", "n_predict": 3, "seed": 7, "speed": 1.0}
+POST /v1/audio/speech {"input": "hello", "response_format": "mp3"}
+POST /v1/audio/speech {"input": "hello", "response_format": "pcm16"}
+POST /v1/audio/speech {"input": "hello", "stream_format": "sse"}
+POST /v1/audio/speech {"input": "hello", "speed": 1.25}
+POST /v1/audio/speech {"input": ""}
+POST /v1/audio/speech {"input": "hello", "voice": {"id": "nobody"}, "n_predict": 2}
+FORM /v1/audio/speech {"input": "form", "n_predict": "3", "seed": "5", "speed": "1", "temperature": "0.5", "response_format": "pcm"}
+FORM /v1/audio/speech {"input": "form", "n_predict": "3", "speed": "fast"}
+POST /v1/audio/speech not json
+POST /tts {"input": "hello", "n_predict": 4, "seed": 7, "response_format": "pcm16"}
+POST /tts {"input": "stream", "n_predict": 6, "seed": 9, "stream": true, "response_format": "pcm16"}
+POST /tts {"input": "warm", "n_predict": 3, "seed": 7, "temperature": 0}
+POST /tts {"input": "warm", "n_predict": 3, "seed": 7, "temperature": 1.5}
+POST /tts {"input": "warm", "n_predict": 3, "seed": 7, "temperature": -1}
+FORM /tts {"input": "warm", "n_predict": "3", "seed": "7", "temperature": "0.25"}
+
+# (203b5f404) --tts-voice and --tts-lang are server flags now, the
+# default voice and language; a request's own, or a speaker reference, wins
+!server -m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a_gen.gguf -c 4096 -np 1 --no-warmup --seed 42 --tts-voice male --tts-lang en -lv 4
+!fulllog
+POST /tts {"input": "hello", "n_predict": 3, "seed": 7}
+POST /tts {"input": "hello", "n_predict": 3, "seed": 7, "voice": "female"}
+POST /tts {"input": "hello", "n_predict": 3, "seed": 7, "lang": "fr"}
+POST /tts {"input": "hello", "n_predict": 3, "speaker_ref_b64": "$WAV"}
+POST /v1/audio/speech {"input": "hello", "n_predict": 3, "seed": 7, "voice": {"id": "female"}}
+!server -m $MM/text-qwen3-lfm3.gguf -mm $MM/lfm3a_gen.gguf -c 4096 -np 1 --no-warmup --seed 42 --tts-voice nobody -lv 4
+POST /tts {"input": "hello", "n_predict": 3, "seed": 7}
