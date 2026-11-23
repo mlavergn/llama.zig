@@ -37,7 +37,7 @@ fn launchMmIdsHelper(
     si1: c_int,
     sis1: c_int,
     write_inverse: bool,
-    stream: ggml.cuda.common.cu.cudaStream_t,
+    stream: ggml.cuda.common.cuda_c.cudaStream_t,
 ) void {
     ggml.impl.assert(n_tokens < (1 << 22), "n_tokens          < (1 << 22) && \"too few bits in mm_ids_helper_store\"");
     ggml.impl.assert(n_expert_used_var < (1 << 10), "n_expert_used_var < (1 << 10) && \"too few bits in mm_ids_helper_store\"");
@@ -75,7 +75,7 @@ pub fn launchMmIdsHelperDispatch(
     si1: c_int,
     sis1: c_int,
     write_inverse: bool,
-    stream: ggml.cuda.common.cu.cudaStream_t,
+    stream: ggml.cuda.common.cuda_c.cudaStream_t,
 ) void {
     switch (n_expert_used) {
         inline 2, 4, 6, 8, 10, 16, 32 => |n| launchMmIdsHelper(n, ids, ids_src1, ids_dst, tile_spec, n_experts, n_tokens, n_expert_used, nchannels_y, tile_width, si1, sis1, write_inverse, stream),

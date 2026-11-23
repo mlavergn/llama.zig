@@ -91,7 +91,7 @@ pub fn main(init: std.process.Init) !void {
         std.mem.sort(Entry, entries.items, {}, Entry.lessThan);
         for (entries.items[0..entries.items.len -| 1], entries.items[@min(1, entries.items.len)..]) |a, b| {
             if (std.mem.eql(u8, a.key, b.key)) {
-                std.debug.print("cuda_kernels: {s}: two kernels share the key {s}:\n  {s}\n  {s}\n", .{ name, a.key, a.mangled, b.mangled });
+                std.log.err("cuda_kernels: {s}: two kernels share the key {s}:\n  {s}\n  {s}", .{ name, a.key, a.mangled, b.mangled });
                 return error.DuplicateKernel;
             }
         }

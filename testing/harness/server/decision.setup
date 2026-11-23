@@ -46,7 +46,7 @@
 # path (one task, the decision order on every token, the scores from the
 # first rows of the embeddings) runs whole, if not over a real joint head.
 set -eu
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 "$(dirname "$0")/vision.setup"
 python3 -I - "$DATA" "$ROOT" "$0" <<'PY'
 import hashlib, json, os, struct, sys

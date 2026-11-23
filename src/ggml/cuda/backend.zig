@@ -45,7 +45,7 @@ fn bufferCtx(buffer: ggml.impl.ggml_c.ggml_backend_buffer_t) *BufferCtx {
 fn bufferFreeBuffer(buffer: ggml.impl.ggml_c.ggml_backend_buffer_t) callconv(.c) void {
     const ctx = bufferCtx(buffer);
     // `~ggml_backend_cuda_buffer_context`.
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaFree(ctx.dev_ptr), "cudaFree(dev_ptr)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaFree(ctx.dev_ptr), "cudaFree(dev_ptr)", @src());
     std.heap.c_allocator.destroy(ctx);
 }
 
@@ -75,8 +75,8 @@ fn bufferInitTensor(buffer: ggml.impl.ggml_c.ggml_backend_buffer_t, tensor_c: [*
 
         if (padded_size > original_size) {
             ggml.cuda.common.setDevice(ctx.device);
-            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemsetAsync(@as([*]u8, @ptrCast(tensor.data.?)) + original_size, 0, padded_size - original_size, stream_per_thread), "cudaMemsetAsync((char *)tensor->data + original_size, 0, padded_size - original_size, cudaStreamPerThread)", @src());
-            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
+            ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemsetAsync(@as([*]u8, @ptrCast(tensor.data.?)) + original_size, 0, padded_size - original_size, stream_per_thread), "cudaMemsetAsync((char *)tensor->data + original_size, 0, padded_size - original_size, cudaStreamPerThread)", @src());
+            ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
         }
     }
     return ggml.impl.ggml_c.GGML_STATUS_SUCCESS;
@@ -86,41 +86,41 @@ fn at(p: ?*anyopaque, offset: usize) *anyopaque {
     return @ptrCast(@as([*]u8, @ptrCast(p.?)) + offset);
 }
 
-const stream_per_thread: ggml.cuda.common.cu.cudaStream_t = @ptrFromInt(0x2);
+const stream_per_thread: ggml.cuda.common.cuda_c.cudaStream_t = @ptrFromInt(0x2);
 
 /// Ports `ggml_backend_cuda_buffer_memset_tensor` (ggml-cuda.cu:995 @b1b770d90).
 fn bufferMemsetTensor(buffer: ggml.impl.ggml_c.ggml_backend_buffer_t, tensor: [*c]ggml.impl.ggml_c.ggml_tensor, value: u8, offset: usize, size: usize) callconv(.c) void {
     ggml.cuda.common.setDevice(bufferCtx(buffer).device);
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemsetAsync(at(tensor.*.data, offset), value, size, stream_per_thread), "cudaMemsetAsync((char *) tensor->data + offset, value, size, cudaStreamPerThread)", @src());
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemsetAsync(at(tensor.*.data, offset), value, size, stream_per_thread), "cudaMemsetAsync((char *) tensor->data + offset, value, size, cudaStreamPerThread)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
 }
 
 /// Ports `ggml_backend_cuda_buffer_set_tensor` (ggml-cuda.cu:1003 @b1b770d90).
 fn bufferSetTensor(buffer: ggml.impl.ggml_c.ggml_backend_buffer_t, tensor: [*c]ggml.impl.ggml_c.ggml_tensor, data: ?*const anyopaque, offset: usize, size: usize) callconv(.c) void {
     ggml.cuda.common.setDevice(bufferCtx(buffer).device);
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(at(tensor.*.data, offset), data, size, ggml.cuda.common.cu.cudaMemcpyHostToDevice, stream_per_thread), "cudaMemcpyAsync((char *) tensor->data + offset, data, size, cudaMemcpyHostToDevice, cudaStreamPerThread)", @src());
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpyAsync(at(tensor.*.data, offset), data, size, ggml.cuda.common.cuda_c.cudaMemcpyHostToDevice, stream_per_thread), "cudaMemcpyAsync((char *) tensor->data + offset, data, size, cudaMemcpyHostToDevice, cudaStreamPerThread)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
 }
 
 /// Ports `ggml_backend_cuda_buffer_get_tensor` (ggml-cuda.cu:1011 @b1b770d90).
 fn bufferGetTensor(buffer: ggml.impl.ggml_c.ggml_backend_buffer_t, tensor: [*c]const ggml.impl.ggml_c.ggml_tensor, data: ?*anyopaque, offset: usize, size: usize) callconv(.c) void {
     ggml.cuda.common.setDevice(bufferCtx(buffer).device);
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(data, at(tensor.*.data, offset), size, ggml.cuda.common.cu.cudaMemcpyDeviceToHost, stream_per_thread), "cudaMemcpyAsync(data, (const char *) tensor->data + offset, size, cudaMemcpyDeviceToHost, cudaStreamPerThread)", @src());
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpyAsync(data, at(tensor.*.data, offset), size, ggml.cuda.common.cuda_c.cudaMemcpyDeviceToHost, stream_per_thread), "cudaMemcpyAsync(data, (const char *) tensor->data + offset, size, cudaMemcpyDeviceToHost, cudaStreamPerThread)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
 }
 
 /// Ports `ggml_backend_cuda_buffer_set_tensor_2d` (ggml-cuda.cu:1019 @b1b770d90).
 fn bufferSetTensor2d(buffer: ggml.impl.ggml_c.ggml_backend_buffer_t, tensor: [*c]ggml.impl.ggml_c.ggml_tensor, data: ?*const anyopaque, offset: usize, size: usize, n_copies: usize, stride_tensor: usize, stride_data: usize) callconv(.c) void {
     ggml.cuda.common.setDevice(bufferCtx(buffer).device);
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpy2DAsync(at(tensor.*.data, offset), stride_tensor, data, stride_data, size, n_copies, ggml.cuda.common.cu.cudaMemcpyHostToDevice, stream_per_thread), "cudaMemcpy2DAsync(...)", @src());
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpy2DAsync(at(tensor.*.data, offset), stride_tensor, data, stride_data, size, n_copies, ggml.cuda.common.cuda_c.cudaMemcpyHostToDevice, stream_per_thread), "cudaMemcpy2DAsync(...)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
 }
 
 /// Ports `ggml_backend_cuda_buffer_get_tensor_2d` (ggml-cuda.cu:1029 @b1b770d90).
 fn bufferGetTensor2d(buffer: ggml.impl.ggml_c.ggml_backend_buffer_t, tensor: [*c]const ggml.impl.ggml_c.ggml_tensor, data: ?*anyopaque, offset: usize, size: usize, n_copies: usize, stride_tensor: usize, stride_data: usize) callconv(.c) void {
     ggml.cuda.common.setDevice(bufferCtx(buffer).device);
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpy2DAsync(data, stride_data, at(tensor.*.data, offset), stride_tensor, size, n_copies, ggml.cuda.common.cu.cudaMemcpyDeviceToHost, stream_per_thread), "cudaMemcpy2DAsync(...)", @src());
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpy2DAsync(data, stride_data, at(tensor.*.data, offset), stride_tensor, size, n_copies, ggml.cuda.common.cuda_c.cudaMemcpyDeviceToHost, stream_per_thread), "cudaMemcpy2DAsync(...)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
 }
 
 /// Ports `ggml_backend_cuda_buffer_set_tensor_n` (ggml-cuda.cu:1039 @b1b770d90),
@@ -135,10 +135,10 @@ fn bufferSetTensorN(buffer: ggml.impl.ggml_c.ggml_backend_buffer_t, tensors: [*c
         if (sizes[i] == 0) {
             continue;
         }
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(at(tensors[i].*.data, offsets[i]), data[i], sizes[i], ggml.cuda.common.cu.cudaMemcpyHostToDevice, stream_per_thread), "cudaMemcpyAsync( (char *) tensors[i]->data + offsets[i], data[i], sizes[i], cudaMemcpyHostToDevice, cudaStreamPerThread)", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpyAsync(at(tensors[i].*.data, offsets[i]), data[i], sizes[i], ggml.cuda.common.cuda_c.cudaMemcpyHostToDevice, stream_per_thread), "cudaMemcpyAsync( (char *) tensors[i]->data + offsets[i], data[i], sizes[i], cudaMemcpyHostToDevice, cudaStreamPerThread)", @src());
     }
 
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
 }
 
 /// Ports `ggml_backend_cuda_buffer_get_tensor_n` (ggml-cuda.cu:1059 @b1b770d90),
@@ -159,10 +159,10 @@ fn bufferGetTensorN(buffer: ggml.impl.ggml_c.ggml_backend_buffer_t, tensors: [*c
         if (sizes[i] == 0) {
             continue;
         }
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(data[i], at(tensors[i].*.data, offsets[i]), sizes[i], ggml.cuda.common.cu.cudaMemcpyDeviceToHost, stream_per_thread), "cudaMemcpyAsync( data[i], (const char *) tensors[i]->data + offsets[i], sizes[i], cudaMemcpyDeviceToHost, cudaStreamPerThread)", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpyAsync(data[i], at(tensors[i].*.data, offsets[i]), sizes[i], ggml.cuda.common.cuda_c.cudaMemcpyDeviceToHost, stream_per_thread), "cudaMemcpyAsync( data[i], (const char *) tensors[i]->data + offsets[i], sizes[i], cudaMemcpyDeviceToHost, cudaStreamPerThread)", @src());
     }
 
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
 }
 
 /// Ports `ggml_backend_cuda_buffer_cpy_tensor` (ggml-cuda.cu:1084 @b1b770d90).
@@ -178,11 +178,11 @@ fn bufferCpyTensor(buffer: ggml.impl.ggml_c.ggml_backend_buffer_t, src_c: [*c]co
     const src_physical = ggml.cuda.common.physicalDevice(src_ctx.device);
     const dst_physical = ggml.cuda.common.physicalDevice(dst_ctx.device);
     if (src_physical == dst_physical) {
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(dst.data, src.data, ggml.types.ggml_nbytes(src), ggml.cuda.common.cu.cudaMemcpyDeviceToDevice, stream_per_thread), "cudaMemcpyAsync(dst->data, src->data, ggml_nbytes(src), cudaMemcpyDeviceToDevice, cudaStreamPerThread)", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpyAsync(dst.data, src.data, ggml.types.ggml_nbytes(src), ggml.cuda.common.cuda_c.cudaMemcpyDeviceToDevice, stream_per_thread), "cudaMemcpyAsync(dst->data, src->data, ggml_nbytes(src), cudaMemcpyDeviceToDevice, cudaStreamPerThread)", @src());
     } else {
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyPeerAsync(dst.data, dst_physical, src.data, src_physical, ggml.types.ggml_nbytes(src), stream_per_thread), "cudaMemcpyPeerAsync(dst->data, dst_physical, src->data, src_physical, ggml_nbytes(src), cudaStreamPerThread)", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpyPeerAsync(dst.data, dst_physical, src.data, src_physical, ggml.types.ggml_nbytes(src), stream_per_thread), "cudaMemcpyPeerAsync(dst->data, dst_physical, src->data, src_physical, ggml_nbytes(src), cudaStreamPerThread)", @src());
     }
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
     return true;
 }
 
@@ -216,13 +216,13 @@ fn bufferCpyTensorN(buffer: ggml.impl.ggml_c.ggml_backend_buffer_t, srcs: [*c]co
         const src_physical = ggml.cuda.common.physicalDevice(src_ctx.device);
         const dst_physical = ggml.cuda.common.physicalDevice(dst_ctx_i.device);
         if (src_physical == dst_physical) {
-            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(dst.data, src.data, ggml.types.ggml_nbytes(src), ggml.cuda.common.cu.cudaMemcpyDeviceToDevice, stream_per_thread), "cudaMemcpyAsync(dsts[i]->data, srcs[i]->data, ggml_nbytes(srcs[i]), cudaMemcpyDeviceToDevice, cudaStreamPerThread)", @src());
+            ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpyAsync(dst.data, src.data, ggml.types.ggml_nbytes(src), ggml.cuda.common.cuda_c.cudaMemcpyDeviceToDevice, stream_per_thread), "cudaMemcpyAsync(dsts[i]->data, srcs[i]->data, ggml_nbytes(srcs[i]), cudaMemcpyDeviceToDevice, cudaStreamPerThread)", @src());
         } else {
-            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyPeerAsync(dst.data, dst_physical, src.data, src_physical, ggml.types.ggml_nbytes(src), stream_per_thread), "cudaMemcpyPeerAsync(dsts[i]->data, dst_physical, srcs[i]->data, src_physical, ggml_nbytes(srcs[i]), cudaStreamPerThread)", @src());
+            ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpyPeerAsync(dst.data, dst_physical, src.data, src_physical, ggml.types.ggml_nbytes(src), stream_per_thread), "cudaMemcpyPeerAsync(dsts[i]->data, dst_physical, srcs[i]->data, src_physical, ggml_nbytes(srcs[i]), cudaStreamPerThread)", @src());
         }
     }
 
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
     return true;
 }
 
@@ -230,8 +230,8 @@ fn bufferCpyTensorN(buffer: ggml.impl.ggml_c.ggml_backend_buffer_t, srcs: [*c]co
 fn bufferClear(buffer: ggml.impl.ggml_c.ggml_backend_buffer_t, value: u8) callconv(.c) void {
     const ctx = bufferCtx(buffer);
     ggml.cuda.common.setDevice(ctx.device);
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemsetAsync(ctx.dev_ptr, value, ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend_buffer, buffer).size, stream_per_thread), "cudaMemsetAsync(ctx->dev_ptr, value, buffer->size, cudaStreamPerThread)", @src());
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemsetAsync(ctx.dev_ptr, value, ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend_buffer, buffer).size, stream_per_thread), "cudaMemsetAsync(ctx->dev_ptr, value, buffer->size, cudaStreamPerThread)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
 }
 
 /// Ports `ggml_backend_cuda_buffer_interface` (ggml-cuda.cu:1165 @b1b770d90).
@@ -286,10 +286,10 @@ fn bufferTypeAllocBuffer(buft: ggml.impl.ggml_c.ggml_backend_buffer_type_t, size
 
     var dev_ptr: ?*anyopaque = null;
     const err = ggml.cuda.common.deviceMalloc(&dev_ptr, size, device);
-    if (err != ggml.cuda.common.cu.cudaSuccess) {
+    if (err != ggml.cuda.common.cuda_c.cudaSuccess) {
         // clear the error
-        _ = ggml.cuda.common.cu.cudaGetLastError();
-        ggml.impl.logError("%s: allocating %.2f MiB on device %d: cudaMalloc failed: %s\n", .{ "ggml_backend_cuda_buffer_type_alloc_buffer", @as(f64, @floatFromInt(size)) / 1024.0 / 1024.0, device, ggml.cuda.common.cu.cudaGetErrorString(err) });
+        _ = ggml.cuda.common.cuda_c.cudaGetLastError();
+        ggml.impl.logError("%s: allocating %.2f MiB on device %d: cudaMalloc failed: %s\n", .{ "ggml_backend_cuda_buffer_type_alloc_buffer", @as(f64, @floatFromInt(size)) / 1024.0 / 1024.0, device, ggml.cuda.common.cuda_c.cudaGetErrorString(err) });
         return null;
     }
 
@@ -442,7 +442,7 @@ fn commInitInternal(ret: *CommContext) void {
     }
 
     // Clear sticky CUDA error from the failed init.
-    _ = ggml.cuda.common.cu.cudaGetLastError();
+    _ = ggml.cuda.common.cuda_c.cudaGetLastError();
     ggml.impl.logWarn("internal AllReduce init failed (n_devices != 2?); falling back to meta-backend butterfly\n", .{});
     commInitNone(ret);
 }
@@ -509,7 +509,7 @@ pub fn buftIsCudaHost(buft: ggml.impl.ggml_c.ggml_backend_buffer_type_t) bool {
 
 /// Ports `ggml_backend_cuda_host_buffer_free_buffer` (ggml-cuda.cu:1686 @b1b770d90).
 fn hostBufferFreeBuffer(buffer: ggml.impl.ggml_c.ggml_backend_buffer_t) callconv(.c) void {
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaFreeHost(ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend_buffer, buffer).context), "cudaFreeHost(buffer->context)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaFreeHost(ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend_buffer, buffer).context), "cudaFreeHost(buffer->context)", @src());
 }
 
 /// Ports `ggml_cuda_host_malloc` (ggml-cuda.cu:1690 @b1b770d90).
@@ -517,11 +517,11 @@ fn hostMalloc(size: usize) ?*anyopaque {
     if (ggml.cuda.common.pinnedMemoryDisabled()) return null;
 
     var ptr: ?*anyopaque = null;
-    const err = ggml.cuda.common.cu.cudaMallocHost(&ptr, size);
-    if (err != ggml.cuda.common.cu.cudaSuccess) {
+    const err = ggml.cuda.common.cuda_c.cudaMallocHost(&ptr, size);
+    if (err != ggml.cuda.common.cuda_c.cudaSuccess) {
         // clear the error
-        _ = ggml.cuda.common.cu.cudaGetLastError();
-        ggml.impl.logDebug("%s: failed to allocate %.2f MiB of pinned memory: %s\n", .{ "ggml_cuda_host_malloc", @as(f64, @floatFromInt(size)) / 1024.0 / 1024.0, ggml.cuda.common.cu.cudaGetErrorString(err) });
+        _ = ggml.cuda.common.cuda_c.cudaGetLastError();
+        ggml.impl.logDebug("%s: failed to allocate %.2f MiB of pinned memory: %s\n", .{ "ggml_cuda_host_malloc", @as(f64, @floatFromInt(size)) / 1024.0 / 1024.0, ggml.cuda.common.cuda_c.cudaGetErrorString(err) });
         return null;
     }
     return ptr;
@@ -608,28 +608,28 @@ fn assertOwnBuffer(cuda_ctx: *ggml.cuda.common.Context, tensor: *const ggml.impl
 fn backendSetTensorAsync(backend: ggml.impl.ggml_c.ggml_backend_t, tensor: [*c]ggml.impl.ggml_c.ggml_tensor, data: ?*const anyopaque, offset: usize, size: usize) callconv(.c) void {
     const cuda_ctx = backendCtx(backend);
     assertOwnBuffer(cuda_ctx, ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, tensor));
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(at(tensor.*.data, offset), data, size, ggml.cuda.common.cu.cudaMemcpyHostToDevice, cuda_ctx.stream()), "cudaMemcpyAsync((char *) tensor->data + offset, data, size, cudaMemcpyHostToDevice, cuda_ctx->stream())", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpyAsync(at(tensor.*.data, offset), data, size, ggml.cuda.common.cuda_c.cudaMemcpyHostToDevice, cuda_ctx.stream()), "cudaMemcpyAsync((char *) tensor->data + offset, data, size, cudaMemcpyHostToDevice, cuda_ctx->stream())", @src());
 }
 
 /// Ports `ggml_backend_cuda_get_tensor_async` (ggml-cuda.cu:3097 @b1b770d90).
 fn backendGetTensorAsync(backend: ggml.impl.ggml_c.ggml_backend_t, tensor: [*c]const ggml.impl.ggml_c.ggml_tensor, data: ?*anyopaque, offset: usize, size: usize) callconv(.c) void {
     const cuda_ctx = backendCtx(backend);
     assertOwnBuffer(cuda_ctx, ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, @constCast(tensor)));
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(data, at(tensor.*.data, offset), size, ggml.cuda.common.cu.cudaMemcpyDeviceToHost, cuda_ctx.stream()), "cudaMemcpyAsync(data, (const char *) tensor->data + offset, size, cudaMemcpyDeviceToHost, cuda_ctx->stream())", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpyAsync(data, at(tensor.*.data, offset), size, ggml.cuda.common.cuda_c.cudaMemcpyDeviceToHost, cuda_ctx.stream()), "cudaMemcpyAsync(data, (const char *) tensor->data + offset, size, cudaMemcpyDeviceToHost, cuda_ctx->stream())", @src());
 }
 
 /// Ports `ggml_backend_cuda_set_tensor_2d_async` (ggml-cuda.cu:3106 @b1b770d90).
 fn backendSetTensor2dAsync(backend: ggml.impl.ggml_c.ggml_backend_t, tensor: [*c]ggml.impl.ggml_c.ggml_tensor, data: ?*const anyopaque, offset: usize, size: usize, n_copies: usize, stride_tensor: usize, stride_data: usize) callconv(.c) void {
     const cuda_ctx = backendCtx(backend);
     assertOwnBuffer(cuda_ctx, ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, tensor));
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpy2DAsync(at(tensor.*.data, offset), stride_tensor, data, stride_data, size, n_copies, ggml.cuda.common.cu.cudaMemcpyHostToDevice, cuda_ctx.stream()), "cudaMemcpy2DAsync(...)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpy2DAsync(at(tensor.*.data, offset), stride_tensor, data, stride_data, size, n_copies, ggml.cuda.common.cuda_c.cudaMemcpyHostToDevice, cuda_ctx.stream()), "cudaMemcpy2DAsync(...)", @src());
 }
 
 /// Ports `ggml_backend_cuda_get_tensor_2d_async` (ggml-cuda.cu:3117 @b1b770d90).
 fn backendGetTensor2dAsync(backend: ggml.impl.ggml_c.ggml_backend_t, tensor: [*c]const ggml.impl.ggml_c.ggml_tensor, data: ?*anyopaque, offset: usize, size: usize, n_copies: usize, stride_tensor: usize, stride_data: usize) callconv(.c) void {
     const cuda_ctx = backendCtx(backend);
     assertOwnBuffer(cuda_ctx, ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, @constCast(tensor)));
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpy2DAsync(data, stride_data, at(tensor.*.data, offset), stride_tensor, size, n_copies, ggml.cuda.common.cu.cudaMemcpyDeviceToHost, cuda_ctx.stream()), "cudaMemcpy2DAsync(...)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpy2DAsync(data, stride_data, at(tensor.*.data, offset), stride_tensor, size, n_copies, ggml.cuda.common.cuda_c.cudaMemcpyDeviceToHost, cuda_ctx.stream()), "cudaMemcpy2DAsync(...)", @src());
 }
 
 /// Ports `ggml_backend_cuda_cpy_tensor_async` (ggml-cuda.cu:3128 @b1b770d90).
@@ -658,42 +658,42 @@ fn backendCpyTensorAsync(backend_src: ggml.impl.ggml_c.ggml_backend_t, backend_d
         const src_physical = ggml.cuda.common.physicalDevice(cuda_ctx_src.device);
         const dst_physical = ggml.cuda.common.physicalDevice(cuda_ctx_dst.device);
         if (src_physical == dst_physical) {
-            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(dst.data, src.data, ggml.types.ggml_nbytes(dst), ggml.cuda.common.cu.cudaMemcpyDeviceToDevice, cuda_ctx_src.stream()), "cudaMemcpyAsync(dst->data, src->data, ggml_nbytes(dst), cudaMemcpyDeviceToDevice, cuda_ctx_src->stream())", @src());
+            ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpyAsync(dst.data, src.data, ggml.types.ggml_nbytes(dst), ggml.cuda.common.cuda_c.cudaMemcpyDeviceToDevice, cuda_ctx_src.stream()), "cudaMemcpyAsync(dst->data, src->data, ggml_nbytes(dst), cudaMemcpyDeviceToDevice, cuda_ctx_src->stream())", @src());
         } else {
-            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyPeerAsync(dst.data, dst_physical, src.data, src_physical, ggml.types.ggml_nbytes(dst), cuda_ctx_src.stream()), "cudaMemcpyPeerAsync(dst->data, dst_physical, src->data, src_physical, ggml_nbytes(dst), cuda_ctx_src->stream())", @src());
+            ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpyPeerAsync(dst.data, dst_physical, src.data, src_physical, ggml.types.ggml_nbytes(dst), cuda_ctx_src.stream()), "cudaMemcpyPeerAsync(dst->data, dst_physical, src->data, src_physical, ggml_nbytes(dst), cuda_ctx_src->stream())", @src());
         }
 
         // record event on src stream after the copy
         if (cuda_ctx_src.copy_event == null) {
             ggml.cuda.common.setDevice(cuda_ctx_src.device);
-            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaEventCreateWithFlags(&cuda_ctx_src.copy_event, ggml.cuda.common.cu.cudaEventDisableTiming), "cudaEventCreateWithFlags(&cuda_ctx_src->copy_event, cudaEventDisableTiming)", @src());
+            ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaEventCreateWithFlags(&cuda_ctx_src.copy_event, ggml.cuda.common.cuda_c.cudaEventDisableTiming), "cudaEventCreateWithFlags(&cuda_ctx_src->copy_event, cudaEventDisableTiming)", @src());
         }
 
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaEventRecord(cuda_ctx_src.copy_event, cuda_ctx_src.stream()), "cudaEventRecord(cuda_ctx_src->copy_event, cuda_ctx_src->stream())", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaEventRecord(cuda_ctx_src.copy_event, cuda_ctx_src.stream()), "cudaEventRecord(cuda_ctx_src->copy_event, cuda_ctx_src->stream())", @src());
 
         // wait on dst stream for the copy to complete
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamWaitEvent(cuda_ctx_dst.stream(), cuda_ctx_src.copy_event, 0), "cudaStreamWaitEvent(cuda_ctx_dst->stream(), cuda_ctx_src->copy_event, 0)", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamWaitEvent(cuda_ctx_dst.stream(), cuda_ctx_src.copy_event, 0), "cudaStreamWaitEvent(cuda_ctx_dst->stream(), cuda_ctx_src->copy_event, 0)", @src());
     } else {
         // src and dst are on the same backend
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(dst.data, src.data, ggml.types.ggml_nbytes(dst), ggml.cuda.common.cu.cudaMemcpyDeviceToDevice, cuda_ctx_src.stream()), "cudaMemcpyAsync(dst->data, src->data, ggml_nbytes(dst), cudaMemcpyDeviceToDevice, cuda_ctx_src->stream())", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpyAsync(dst.data, src.data, ggml.types.ggml_nbytes(dst), ggml.cuda.common.cuda_c.cudaMemcpyDeviceToDevice, cuda_ctx_src.stream()), "cudaMemcpyAsync(dst->data, src->data, ggml_nbytes(dst), cudaMemcpyDeviceToDevice, cuda_ctx_src->stream())", @src());
     }
     return true;
 }
 
 /// Ports `ggml_backend_cuda_synchronize` (ggml-cuda.cu:3187 @b1b770d90).
 fn backendSynchronize(backend: ggml.impl.ggml_c.ggml_backend_t) callconv(.c) void {
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamSynchronize(backendCtx(backend).stream()), "cudaStreamSynchronize(cuda_ctx->stream())", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamSynchronize(backendCtx(backend).stream()), "cudaStreamSynchronize(cuda_ctx->stream())", @src());
 }
 
 /// Ports `ggml_backend_cuda_event_record` (ggml-cuda.cu:5483 @b1b770d90).
 fn backendEventRecord(backend: ggml.impl.ggml_c.ggml_backend_t, event: ggml.impl.ggml_c.ggml_backend_event_t) callconv(.c) void {
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaEventRecord(@ptrCast(ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend_event, event).context), backendCtx(backend).stream()), "cudaEventRecord((cudaEvent_t)event->context, cuda_ctx->stream())", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaEventRecord(@ptrCast(ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend_event, event).context), backendCtx(backend).stream()), "cudaEventRecord((cudaEvent_t)event->context, cuda_ctx->stream())", @src());
 }
 
 /// Ports `ggml_backend_cuda_event_wait` (ggml-cuda.cu:5489 @b1b770d90).
 fn backendEventWait(backend: ggml.impl.ggml_c.ggml_backend_t, event: ggml.impl.ggml_c.ggml_backend_event_t) callconv(.c) void {
     if (isCuda(backend)) {
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamWaitEvent(backendCtx(backend).stream(), @ptrCast(ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend_event, event).context), 0), "cudaStreamWaitEvent(cuda_ctx->stream(), (cudaEvent_t)event->context, 0)", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamWaitEvent(backendCtx(backend).stream(), @ptrCast(ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend_event, event).context), 0), "cudaStreamWaitEvent(cuda_ctx->stream(), (cudaEvent_t)event->context, 0)", @src());
     } else {
         ggml.impl.abort("fatal error");
     }
@@ -734,8 +734,8 @@ pub fn getDeviceCount() callconv(.c) c_int {
 
 /// Ports `ggml_cuda_device_description` (ggml-cuda.cu:5936 @b1b770d90).
 fn deviceDescription(device: c_int, out: []u8) [:0]u8 {
-    var prop: ggml.cuda.common.cu.cudaDeviceProp = undefined;
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetDeviceProperties(&prop, ggml.cuda.common.physicalDevice(device)), "cudaGetDeviceProperties(&prop, ggml_cuda_get_physical_device(device))", @src());
+    var prop: ggml.cuda.common.cuda_c.cudaDeviceProp = undefined;
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGetDeviceProperties(&prop, ggml.cuda.common.physicalDevice(device)), "cudaGetDeviceProperties(&prop, ggml_cuda_get_physical_device(device))", @src());
 
     const inf = ggml.cuda.common.info();
     const prop_name = std.mem.sliceTo(@as([*:0]const u8, @ptrCast(&prop.name)), 0);
@@ -763,7 +763,7 @@ fn physicalDeviceShareCount(device: c_int) c_int {
 /// Ports `ggml_backend_cuda_get_device_memory` (ggml-cuda.cu:5959 @b1b770d90).
 pub fn getDeviceMemory(device: c_int, free: [*c]usize, total: [*c]usize) callconv(.c) void {
     ggml.cuda.common.setDevice(device);
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemGetInfo(free, total), "cudaMemGetInfo(free, total)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemGetInfo(free, total), "cudaMemGetInfo(free, total)", @src());
     // virtual devices sharing one physical GPU share its memory pool
     const share_count: usize = @intCast(physicalDeviceShareCount(device));
     free.* /= share_count;
@@ -774,11 +774,11 @@ pub fn getDeviceMemory(device: c_int, free: [*c]usize, total: [*c]usize) callcon
 pub fn registerHostBuffer(buffer: ?*anyopaque, size: usize) callconv(.c) bool {
     if (!ggml.cuda.common.registerHostEnabled()) return false;
 
-    const err = ggml.cuda.common.cu.cudaHostRegister(buffer, size, ggml.cuda.common.cu.cudaHostRegisterPortable | ggml.cuda.common.cu.cudaHostRegisterReadOnly);
-    if (err != ggml.cuda.common.cu.cudaSuccess) {
+    const err = ggml.cuda.common.cuda_c.cudaHostRegister(buffer, size, ggml.cuda.common.cuda_c.cudaHostRegisterPortable | ggml.cuda.common.cuda_c.cudaHostRegisterReadOnly);
+    if (err != ggml.cuda.common.cuda_c.cudaSuccess) {
         // clear the error
-        _ = ggml.cuda.common.cu.cudaGetLastError();
-        ggml.impl.logDebug("%s: failed to register %.2f MiB of pinned memory: %s\n", .{ "ggml_backend_cuda_register_host_buffer", @as(f64, @floatFromInt(size)) / 1024.0 / 1024.0, ggml.cuda.common.cu.cudaGetErrorString(err) });
+        _ = ggml.cuda.common.cuda_c.cudaGetLastError();
+        ggml.impl.logDebug("%s: failed to register %.2f MiB of pinned memory: %s\n", .{ "ggml_backend_cuda_register_host_buffer", @as(f64, @floatFromInt(size)) / 1024.0 / 1024.0, ggml.cuda.common.cuda_c.cudaGetErrorString(err) });
         return false;
     }
     return true;
@@ -787,10 +787,10 @@ pub fn registerHostBuffer(buffer: ?*anyopaque, size: usize) callconv(.c) bool {
 /// Ports `ggml_backend_cuda_unregister_host_buffer` (ggml-cuda.cu:5993 @b1b770d90).
 pub fn unregisterHostBuffer(buffer: ?*anyopaque) callconv(.c) void {
     if (!ggml.cuda.common.registerHostEnabled()) return;
-    const err = ggml.cuda.common.cu.cudaHostUnregister(buffer);
-    if (err != ggml.cuda.common.cu.cudaSuccess) {
+    const err = ggml.cuda.common.cuda_c.cudaHostUnregister(buffer);
+    if (err != ggml.cuda.common.cuda_c.cudaSuccess) {
         // clear the error
-        _ = ggml.cuda.common.cu.cudaGetLastError();
+        _ = ggml.cuda.common.cuda_c.cudaGetLastError();
     }
 }
 
@@ -892,18 +892,18 @@ fn scanField(line: []const u8, prefix: []const u8, suffix: []const u8) ?c_long {
 fn deviceGetMemory(dev: ggml.impl.ggml_c.ggml_backend_dev_t, free: [*c]usize, total: [*c]usize) callconv(.c) void {
     const ctx = deviceCtx(dev);
     ggml.cuda.common.setDevice(ctx.device);
-    const err = ggml.cuda.common.cu.cudaMemGetInfo(free, total);
-    if (err != ggml.cuda.common.cu.cudaSuccess) {
-        _ = ggml.cuda.common.cu.cudaGetLastError();
-        ggml.impl.logWarn("%s: cudaMemGetInfo failed (%s), returning 0/0\n", .{ "ggml_backend_cuda_device_get_memory", ggml.cuda.common.cu.cudaGetErrorString(err) });
+    const err = ggml.cuda.common.cuda_c.cudaMemGetInfo(free, total);
+    if (err != ggml.cuda.common.cuda_c.cudaSuccess) {
+        _ = ggml.cuda.common.cuda_c.cudaGetLastError();
+        ggml.impl.logWarn("%s: cudaMemGetInfo failed (%s), returning 0/0\n", .{ "ggml_backend_cuda_device_get_memory", ggml.cuda.common.cuda_c.cudaGetErrorString(err) });
         free.* = 0;
         total.* = 0;
         return;
     }
 
     // Check if this is a UMA (Unified Memory Architecture) system
-    var prop: ggml.cuda.common.cu.cudaDeviceProp = undefined;
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetDeviceProperties(&prop, ggml.cuda.common.physicalDevice(ctx.device)), "cudaGetDeviceProperties(&prop, ggml_cuda_get_physical_device(ctx->device))", @src());
+    var prop: ggml.cuda.common.cuda_c.cudaDeviceProp = undefined;
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGetDeviceProperties(&prop, ggml.cuda.common.physicalDevice(ctx.device)), "cudaGetDeviceProperties(&prop, ggml_cuda_get_physical_device(ctx->device))", @src());
 
     // Check if UMA is explicitly enabled via environment variable
     const is_uma = prop.integrated > 0 or ggml.cuda.common.unifiedMemoryEnabled();
@@ -927,8 +927,8 @@ fn deviceGetMemory(dev: ggml.impl.ggml_c.ggml_backend_dev_t, free: [*c]usize, to
 
 /// Ports `ggml_backend_cuda_device_get_type` (ggml-cuda.cu:6142 @b1b770d90).
 fn deviceGetType(dev: ggml.impl.ggml_c.ggml_backend_dev_t) callconv(.c) ggml.impl.ggml_c.enum_ggml_backend_dev_type {
-    var prop: ggml.cuda.common.cu.cudaDeviceProp = undefined;
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetDeviceProperties(&prop, ggml.cuda.common.physicalDevice(deviceCtx(dev).device)), "cudaGetDeviceProperties(&prop, ggml_cuda_get_physical_device(ctx->device))", @src());
+    var prop: ggml.cuda.common.cuda_c.cudaDeviceProp = undefined;
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGetDeviceProperties(&prop, ggml.cuda.common.physicalDevice(deviceCtx(dev).device)), "cudaGetDeviceProperties(&prop, ggml_cuda_get_physical_device(ctx->device))", @src());
     return if (prop.integrated != 0) ggml.impl.ggml_c.GGML_BACKEND_DEVICE_TYPE_IGPU else ggml.impl.ggml_c.GGML_BACKEND_DEVICE_TYPE_GPU;
 }
 
@@ -994,8 +994,8 @@ fn deviceOffloadOp(dev: ggml.impl.ggml_c.ggml_backend_dev_t, op: [*c]const ggml.
 /// Ports `ggml_backend_cuda_device_event_new` (ggml-cuda.cu:6714 @b1b770d90).
 fn deviceEventNew(dev: ggml.impl.ggml_c.ggml_backend_dev_t) callconv(.c) ggml.impl.ggml_c.ggml_backend_event_t {
     ggml.cuda.common.setDevice(deviceCtx(dev).device);
-    var event: ggml.cuda.common.cu.cudaEvent_t = null;
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaEventCreateWithFlags(&event, ggml.cuda.common.cu.cudaEventDisableTiming), "cudaEventCreateWithFlags(&event, cudaEventDisableTiming)", @src());
+    var event: ggml.cuda.common.cuda_c.cudaEvent_t = null;
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaEventCreateWithFlags(&event, ggml.cuda.common.cuda_c.cudaEventDisableTiming), "cudaEventCreateWithFlags(&event, cudaEventDisableTiming)", @src());
     const e = std.heap.c_allocator.create(ggml.impl.ggml_c.struct_ggml_backend_event) catch ggml.impl.abort("ggml-cuda: out of memory");
     e.* = .{ .device = dev, .context = event };
     return e;
@@ -1005,14 +1005,14 @@ fn deviceEventNew(dev: ggml.impl.ggml_c.ggml_backend_dev_t) callconv(.c) ggml.im
 fn deviceEventFree(dev: ggml.impl.ggml_c.ggml_backend_dev_t, event: ggml.impl.ggml_c.ggml_backend_event_t) callconv(.c) void {
     _ = dev;
     const e = ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend_event, event);
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaEventDestroy(@ptrCast(e.context)), "cudaEventDestroy((cudaEvent_t)event->context)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaEventDestroy(@ptrCast(e.context)), "cudaEventDestroy((cudaEvent_t)event->context)", @src());
     std.heap.c_allocator.destroy(e);
 }
 
 /// Ports `ggml_backend_cuda_device_event_synchronize` (ggml-cuda.cu:6740 @b1b770d90).
 fn deviceEventSynchronize(dev: ggml.impl.ggml_c.ggml_backend_dev_t, event: ggml.impl.ggml_c.ggml_backend_event_t) callconv(.c) void {
     _ = dev;
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaEventSynchronize(@ptrCast(ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend_event, event).context)), "cudaEventSynchronize((cudaEvent_t)event->context)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaEventSynchronize(@ptrCast(ggml.impl.one(ggml.impl.ggml_c.struct_ggml_backend_event, event).context)), "cudaEventSynchronize((cudaEvent_t)event->context)", @src());
 }
 
 /// Ports `ggml_backend_cuda_device_interface` (ggml-cuda.cu:6745 @b1b770d90).
@@ -1160,7 +1160,7 @@ pub fn reg() callconv(.c) ggml.impl.ggml_c.ggml_backend_reg_t {
             _ = deviceDescription(@intCast(i), &dev_ctx.description);
 
             var pci_bus_id: [32]u8 = @splat(0);
-            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaDeviceGetPCIBusId(&pci_bus_id, pci_bus_id.len, physical_id), "cudaDeviceGetPCIBusId(pci_bus_id, sizeof(pci_bus_id), physical_id)", @src());
+            ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaDeviceGetPCIBusId(&pci_bus_id, pci_bus_id.len, physical_id), "cudaDeviceGetPCIBusId(pci_bus_id, sizeof(pci_bus_id), physical_id)", @src());
             const bus = std.mem.sliceTo(&pci_bus_id, 0);
             const written = if (virtual_devices)
                 // make the pci bus id unique for virtual devices

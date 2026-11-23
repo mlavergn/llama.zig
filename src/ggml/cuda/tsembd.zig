@@ -13,7 +13,7 @@ const block_size = 256;
 
 /// Ports `timestep_embedding_f32_cuda` (tsembd.cu:26 @b1b770d90), which
 /// launches with `<<<>>>`.
-fn timestepEmbeddingF32Cuda(x: ?*const anyopaque, dst: ?*anyopaque, ne00: c_int, nb1: c_int, dim: c_int, max_period: c_int, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn timestepEmbeddingF32Cuda(x: ?*const anyopaque, dst: ?*anyopaque, ne00: c_int, nb1: c_int, dim: c_int, max_period: c_int, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const half_ceil: c_int = @divTrunc(dim + 1, 2);
     const num_blocks: c_int = @divTrunc(half_ceil + block_size - 1, block_size);
     const grid: ggml.cuda.kernels.Dim3 = .{ .x = @bitCast(num_blocks), .y = @bitCast(ne00), .z = 1 };

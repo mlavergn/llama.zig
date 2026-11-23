@@ -45,10 +45,16 @@ CC=(zig cc -target "$TARGET" -mcpu="$X86_CPU" -std=c11 -w -O2 -I harness -I llam
 
 RUN="$ROOT/testing/scripts/win-run"
 pairs=()
-for run in "1" "4" "4 fused"; do
+# "1 dio" loads the weights through llama_file's unbuffered (direct I/O)
+# Windows arm rather than a mapping.
+for run in "1" "4" "4 fused" "1 dio"; do
     set -- $run
     nt=$1; tag="$nt${2:+-$2}"
-    extra=(); [ -n "${2:-}" ] && extra=(fused "$STEPS")
+    extra=()
+    case "${2:-}" in
+        fused) extra=(fused "$STEPS") ;;
+        dio) extra=(NODE_DUMP_LOAD=dio) ;;
+    esac
     for side in ref port; do
         "$RUN" "$out/node_$side.exe" "llamazig-node-$side" "node_$side.$tag.txt" "$X86_MODEL" "$PROMPT" "$nt" cpu ${extra[@]+"${extra[@]}"} > "$out/$side.$tag.log" || exit 2
         grep -aq 'node_dump rc=0' "$out/$side.$tag.log" || { echo "FAIL: $side run failed ($tag)"; tail -5 "$out/$side.$tag.log"; exit 1; }

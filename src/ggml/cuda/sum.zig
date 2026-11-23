@@ -10,7 +10,7 @@
 const ggml = @import("../module.zig");
 /// `DeviceReduce::Sum(d_temp_storage, *tmp_size, x, dst, ne, stream)`; see
 /// `cub_shim.cu`.
-pub extern fn ggml_cuda_cub_reduce_sum_f32(d_temp_storage: ?*anyopaque, tmp_size: *usize, x: ?*const f32, dst: ?*f32, ne: i64, stream: ggml.cuda.common.cu.cudaStream_t) ggml.cuda.common.cu.cudaError_t;
+pub extern fn ggml_cuda_cub_reduce_sum_f32(d_temp_storage: ?*anyopaque, tmp_size: *usize, x: ?*const f32, dst: ?*f32, ne: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t) ggml.cuda.common.cuda_c.cudaError_t;
 
 /// Ports `sum_f32_cuda` (sum.cu:11 @b1b770d90). Upstream ignores both of
 /// CUB's return values, and so does this.
@@ -19,7 +19,7 @@ pub extern fn ggml_cuda_cub_reduce_sum_f32(d_temp_storage: ?*anyopaque, tmp_size
 /// - `pool`: the device's pool, for CUB's temporary storage.
 /// - `x`, `dst`: `ne` floats in, one float out.
 /// - `stream`: the stream the reduction runs on.
-pub fn sumF32Cuda(pool: *ggml.cuda.common.Pool, x: ?*const f32, dst: ?*f32, ne: i64, stream: ggml.cuda.common.cu.cudaStream_t) void {
+pub fn sumF32Cuda(pool: *ggml.cuda.common.Pool, x: ?*const f32, dst: ?*f32, ne: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     var tmp_size: usize = 0;
     _ = ggml_cuda_cub_reduce_sum_f32(null, &tmp_size, x, dst, ne, stream);
     var tmp_alloc = ggml.cuda.common.PoolAlloc(u8).initAlloc(pool, tmp_size);

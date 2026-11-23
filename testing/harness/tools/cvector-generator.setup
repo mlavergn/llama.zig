@@ -2,7 +2,7 @@
 # Writes cvector-generator's prompt files and the clock pin into $DATA.
 # Run by testing/scripts/tools-diff.
 set -eu
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 if [ "$(uname)" = Darwin ]; then
     zig cc -O2 -dynamiclib "$ROOT/testing/harness/tools/fixed_time.c" -o "$DATA/fixed_time.so"
 else

@@ -100,7 +100,7 @@ fn ssmScanF32Cuda(
     n_seq: i64,
     K: i64,
     cache: ?*const FusedCache,
-    stream: ggml.cuda.common.cu.cudaStream_t,
+    stream: ggml.cuda.common.cuda_c.cudaStream_t,
 ) void {
     // when fused, the states go straight into the recurrent cache and the dst tail is left alone
     const s_base: ?*anyopaque = if (cache) |ch| @ptrCast(ch.data) else @ptrCast(@as([*]u8, @ptrCast(dst.?)) + @as(usize, @bitCast(s_off)));
@@ -223,7 +223,7 @@ fn ssmScanSsdF32Cuda(
 
     const state_per_head = d_state * head_dim;
 
-    const matmul_dtype = ggml.cuda.common.cu.CUDA_R_16F;
+    const matmul_dtype = ggml.cuda.common.cuda_c.CUDA_R_16F;
 
     const sz = struct {
         fn f(x: i64) usize {
@@ -259,7 +259,7 @@ fn ssmScanSsdF32Cuda(
             .shmem = 0,
             .stream = stream,
         }, .{ src2_d, @as(?*anyopaque, dt_sp), @as(?*anyopaque, cs), int(n_head), int(n_tok), dt_stride_tok, dt_stride_seq });
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGetLastError(), "cudaGetLastError()", @src());
     }
 
     // Step 2: initialize running state from src0[ids[s]]
@@ -273,7 +273,7 @@ fn ssmScanSsdF32Cuda(
             .shmem = 0,
             .stream = stream,
         }, .{ src0_d, src6_d, @as(?*anyopaque, s_cur), int(state_size), s0_stride_seq });
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGetLastError(), "cudaGetLastError()", @src());
     }
 
     // Step 3: chunked SSD loop
@@ -305,9 +305,9 @@ fn ssmScanSsdF32Cuda(
                 const CB_s = at(CB, s * chunk_len * chunk_len * n_group);
 
                 if (n_group == 1) {
-                    ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasSgemm_v2(handle, ggml.cuda.common.cu.CUBLAS_OP_T, ggml.cuda.common.cu.CUBLAS_OP_N, int(chunk_len), int(chunk_len), int(d_state), &alpha_one, C_s, lda_C_src, B_s, ldb_B_src, &beta_zero, CB_s, int(chunk_len)), "cublasSgemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, chunk_len, chunk_len, d_state, &alpha_one, C_s, lda_C_src, B_s, ldb_B_src, &beta_zero, CB_s, (int)chunk_len)", @src());
+                    ggml.cuda.common.cublasCheck(ggml.cuda.common.cuda_c.cublasSgemm_v2(handle, ggml.cuda.common.cuda_c.CUBLAS_OP_T, ggml.cuda.common.cuda_c.CUBLAS_OP_N, int(chunk_len), int(chunk_len), int(d_state), &alpha_one, C_s, lda_C_src, B_s, ldb_B_src, &beta_zero, CB_s, int(chunk_len)), "cublasSgemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, chunk_len, chunk_len, d_state, &alpha_one, C_s, lda_C_src, B_s, ldb_B_src, &beta_zero, CB_s, (int)chunk_len)", @src());
                 } else {
-                    ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasGemmStridedBatchedEx(handle, ggml.cuda.common.cu.CUBLAS_OP_T, ggml.cuda.common.cu.CUBLAS_OP_N, int(chunk_len), int(chunk_len), int(d_state), &alpha_one, C_s, ggml.cuda.common.cu.CUDA_R_32F, lda_C_src, d_state, B_s, ggml.cuda.common.cu.CUDA_R_32F, ldb_B_src, d_state, &beta_zero, CB_s, ggml.cuda.common.cu.CUDA_R_32F, int(chunk_len), chunk_len * chunk_len, int(n_group), ggml.cuda.common.cu.CUBLAS_COMPUTE_32F, ggml.cuda.common.cu.CUBLAS_GEMM_DEFAULT), "cublasGemmStridedBatchedEx(handle, CUBLAS_OP_T, CUBLAS_OP_N, chunk_len, chunk_len, d_state, &alpha_one, C_s, CUDA_R_32F, lda_C_src, d_state, B_s, CUDA_R_32F, ldb_B_src, d_state, &beta_zero, CB_s, CUDA_R_32F, (int)chunk_len, (long long)(chunk_len * chunk_len), n_group, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT)", @src());
+                    ggml.cuda.common.cublasCheck(ggml.cuda.common.cuda_c.cublasGemmStridedBatchedEx(handle, ggml.cuda.common.cuda_c.CUBLAS_OP_T, ggml.cuda.common.cuda_c.CUBLAS_OP_N, int(chunk_len), int(chunk_len), int(d_state), &alpha_one, C_s, ggml.cuda.common.cuda_c.CUDA_R_32F, lda_C_src, d_state, B_s, ggml.cuda.common.cuda_c.CUDA_R_32F, ldb_B_src, d_state, &beta_zero, CB_s, ggml.cuda.common.cuda_c.CUDA_R_32F, int(chunk_len), chunk_len * chunk_len, int(n_group), ggml.cuda.common.cuda_c.CUBLAS_COMPUTE_32F, ggml.cuda.common.cuda_c.CUBLAS_GEMM_DEFAULT), "cublasGemmStridedBatchedEx(handle, CUBLAS_OP_T, CUBLAS_OP_N, chunk_len, chunk_len, d_state, &alpha_one, C_s, CUDA_R_32F, lda_C_src, d_state, B_s, CUDA_R_32F, ldb_B_src, d_state, &beta_zero, CB_s, CUDA_R_32F, (int)chunk_len, (long long)(chunk_len * chunk_len), n_group, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT)", @src());
                 }
             }
         }
@@ -338,7 +338,7 @@ fn ssmScanSsdF32Cuda(
                 C_stride_tok,               C_stride_seq,                   int(chunk_offset),
                 int(n_tok),
             });
-            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
+            ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGetLastError(), "cudaGetLastError()", @src());
         }
 
         // 3c: dst = S_cur^T @ C_scaled (state contribution)
@@ -350,7 +350,7 @@ fn ssmScanSsdF32Cuda(
             while (s < n_seq) : (s += 1) {
                 const dst_chunk = at(dst_d, s * d_inner * n_tok + chunk_offset * d_inner);
 
-                ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasGemmStridedBatchedEx(handle, ggml.cuda.common.cu.CUBLAS_OP_T, ggml.cuda.common.cu.CUBLAS_OP_N, int(head_dim), int(chunk_len), int(d_state), &alpha_one, at(s_cur, s * stride_S * n_head), ggml.cuda.common.cu.CUDA_R_32F, int(d_state), stride_S, at(C_scaled, s * stride_Cs * n_head), ggml.cuda.common.cu.CUDA_R_32F, int(d_state), stride_Cs, &beta_zero, dst_chunk, ggml.cuda.common.cu.CUDA_R_32F, int(d_inner), head_dim, int(n_head), ggml.cuda.common.cu.CUBLAS_COMPUTE_32F, ggml.cuda.common.cu.CUBLAS_GEMM_DEFAULT), "cublasGemmStridedBatchedEx(handle, CUBLAS_OP_T, CUBLAS_OP_N, head_dim, chunk_len, d_state, &alpha_one, s_cur + s * stride_S * n_head, CUDA_R_32F, d_state, stride_S, C_scaled + s * stride_Cs * n_head, CUDA_R_32F, d_state, stride_Cs, &beta_zero, dst_chunk, CUDA_R_32F, d_inner, head_dim, n_head, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT)", @src());
+                ggml.cuda.common.cublasCheck(ggml.cuda.common.cuda_c.cublasGemmStridedBatchedEx(handle, ggml.cuda.common.cuda_c.CUBLAS_OP_T, ggml.cuda.common.cuda_c.CUBLAS_OP_N, int(head_dim), int(chunk_len), int(d_state), &alpha_one, at(s_cur, s * stride_S * n_head), ggml.cuda.common.cuda_c.CUDA_R_32F, int(d_state), stride_S, at(C_scaled, s * stride_Cs * n_head), ggml.cuda.common.cuda_c.CUDA_R_32F, int(d_state), stride_Cs, &beta_zero, dst_chunk, ggml.cuda.common.cuda_c.CUDA_R_32F, int(d_inner), head_dim, int(n_head), ggml.cuda.common.cuda_c.CUBLAS_COMPUTE_32F, ggml.cuda.common.cuda_c.CUBLAS_GEMM_DEFAULT), "cublasGemmStridedBatchedEx(handle, CUBLAS_OP_T, CUBLAS_OP_N, head_dim, chunk_len, d_state, &alpha_one, s_cur + s * stride_S * n_head, CUDA_R_32F, d_state, stride_S, C_scaled + s * stride_Cs * n_head, CUDA_R_32F, d_state, stride_Cs, &beta_zero, dst_chunk, CUDA_R_32F, d_inner, head_dim, n_head, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT)", @src());
             }
         }
 
@@ -363,7 +363,7 @@ fn ssmScanSsdF32Cuda(
             var s: i64 = 0;
             while (s < n_seq) : (s += 1) {
                 const dst_chunk = at(dst_d, s * d_inner * n_tok + chunk_offset * d_inner);
-                ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasGemmStridedBatchedEx(handle, ggml.cuda.common.cu.CUBLAS_OP_N, ggml.cuda.common.cu.CUBLAS_OP_T, int(head_dim), int(chunk_len), int(chunk_len), &alpha_one, at(X_dt, s * stride_X_h * n_head), matmul_dtype, int(head_dim), stride_X_h, at(M_mat, s * stride_M * n_head), matmul_dtype, int(chunk_len), stride_M, &beta_one, dst_chunk, ggml.cuda.common.cu.CUDA_R_32F, int(d_inner), head_dim, int(n_head), ggml.cuda.common.cu.CUBLAS_COMPUTE_32F, ggml.cuda.common.cu.CUBLAS_GEMM_DEFAULT), "cublasGemmStridedBatchedEx(handle, CUBLAS_OP_N, CUBLAS_OP_T, head_dim, chunk_len, chunk_len, &alpha_one, X_dt + s * stride_X_h * n_head, matmul_dtype, head_dim, stride_X_h, M_mat + s * stride_M * n_head, matmul_dtype, chunk_len, stride_M, &beta_one, dst_chunk, CUDA_R_32F, d_inner, head_dim, n_head, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT)", @src());
+                ggml.cuda.common.cublasCheck(ggml.cuda.common.cuda_c.cublasGemmStridedBatchedEx(handle, ggml.cuda.common.cuda_c.CUBLAS_OP_N, ggml.cuda.common.cuda_c.CUBLAS_OP_T, int(head_dim), int(chunk_len), int(chunk_len), &alpha_one, at(X_dt, s * stride_X_h * n_head), matmul_dtype, int(head_dim), stride_X_h, at(M_mat, s * stride_M * n_head), matmul_dtype, int(chunk_len), stride_M, &beta_one, dst_chunk, ggml.cuda.common.cuda_c.CUDA_R_32F, int(d_inner), head_dim, int(n_head), ggml.cuda.common.cuda_c.CUBLAS_COMPUTE_32F, ggml.cuda.common.cuda_c.CUBLAS_GEMM_DEFAULT), "cublasGemmStridedBatchedEx(handle, CUBLAS_OP_N, CUBLAS_OP_T, head_dim, chunk_len, chunk_len, &alpha_one, X_dt + s * stride_X_h * n_head, matmul_dtype, head_dim, stride_X_h, M_mat + s * stride_M * n_head, matmul_dtype, chunk_len, stride_M, &beta_one, dst_chunk, CUDA_R_32F, d_inner, head_dim, n_head, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT)", @src());
             }
         }
 
@@ -383,7 +383,7 @@ fn ssmScanSsdF32Cuda(
                 int(chunk_offset),       int(chunk_len),             int(n_tok),
                 A_stride,
             });
-            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
+            ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGetLastError(), "cudaGetLastError()", @src());
 
             // cuBLAS with beta=1: s_cur = B_weighted @ X_dt^T + 1.0 * s_cur (already scaled)
             const stride_Bw = d_state * chunk_len;
@@ -393,7 +393,7 @@ fn ssmScanSsdF32Cuda(
             var s: i64 = 0;
             while (s < n_seq) : (s += 1) {
                 // X_dt is d-fastest {hd, C}, read as OP_T to get {C, hd}
-                ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasGemmStridedBatchedEx(handle, ggml.cuda.common.cu.CUBLAS_OP_N, ggml.cuda.common.cu.CUBLAS_OP_T, int(d_state), int(head_dim), int(chunk_len), &alpha_one, at(B_weighted, s * stride_Bw * n_head), matmul_dtype, int(d_state), stride_Bw, at(X_dt, s * stride_X * n_head), matmul_dtype, int(head_dim), stride_X, &beta_one, at(s_cur, s * stride_S * n_head), ggml.cuda.common.cu.CUDA_R_32F, int(d_state), stride_S, int(n_head), ggml.cuda.common.cu.CUBLAS_COMPUTE_32F, ggml.cuda.common.cu.CUBLAS_GEMM_DEFAULT), "cublasGemmStridedBatchedEx(handle, CUBLAS_OP_N, CUBLAS_OP_T, d_state, head_dim, chunk_len, &alpha_one, B_weighted + s * stride_Bw * n_head, matmul_dtype, d_state, stride_Bw, X_dt + s * stride_X * n_head, matmul_dtype, head_dim, stride_X, &beta_one, s_cur + s * stride_S * n_head, CUDA_R_32F, d_state, stride_S, n_head, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT)", @src());
+                ggml.cuda.common.cublasCheck(ggml.cuda.common.cuda_c.cublasGemmStridedBatchedEx(handle, ggml.cuda.common.cuda_c.CUBLAS_OP_N, ggml.cuda.common.cuda_c.CUBLAS_OP_T, int(d_state), int(head_dim), int(chunk_len), &alpha_one, at(B_weighted, s * stride_Bw * n_head), matmul_dtype, int(d_state), stride_Bw, at(X_dt, s * stride_X * n_head), matmul_dtype, int(head_dim), stride_X, &beta_one, at(s_cur, s * stride_S * n_head), ggml.cuda.common.cuda_c.CUDA_R_32F, int(d_state), stride_S, int(n_head), ggml.cuda.common.cuda_c.CUBLAS_COMPUTE_32F, ggml.cuda.common.cuda_c.CUBLAS_GEMM_DEFAULT), "cublasGemmStridedBatchedEx(handle, CUBLAS_OP_N, CUBLAS_OP_T, d_state, head_dim, chunk_len, &alpha_one, B_weighted + s * stride_Bw * n_head, matmul_dtype, d_state, stride_Bw, X_dt + s * stride_X * n_head, matmul_dtype, head_dim, stride_X, &beta_one, s_cur + s * stride_S * n_head, CUDA_R_32F, d_state, stride_S, n_head, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT)", @src());
             }
         }
     }

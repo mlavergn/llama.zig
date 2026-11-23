@@ -44,7 +44,7 @@ fn im2colCuda(
     p1: c_int,
     d0: c_int,
     d1: c_int,
-    stream: ggml.cuda.common.cu.cudaStream_t,
+    stream: ggml.cuda.common.cuda_c.cudaStream_t,
 ) void {
     const IC_KH_KW = IC * KH * KW;
     const N_OH = N * OH;
@@ -133,7 +133,7 @@ fn im2col3dCuda(
     d0: c_int,
     d1: c_int,
     d2: c_int,
-    stream: ggml.cuda.common.cu.cudaStream_t,
+    stream: ggml.cuda.common.cuda_c.cudaStream_t,
 ) void {
     const OH_OW = OH * OW;
     const KD_KH_KW = KD * KH * KW;

@@ -25,7 +25,7 @@ fn elems(nb: usize, ts: usize) u32 {
 
 /// Ports `scale_f32_cuda` (scale.cu:31 @b1b770d90), its element type `T`
 /// comptime: `f32` or `kernels.bf16`.
-fn scaleF32Cuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, scale: f32, bias: f32, src0: *const ggml.impl.ggml_c.ggml_tensor, t: *const ggml.impl.ggml_c.ggml_tensor, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn scaleF32Cuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, scale: f32, bias: f32, src0: *const ggml.impl.ggml_c.ggml_tensor, t: *const ggml.impl.ggml_c.ggml_tensor, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const k = ggml.types.ggml_nelements(src0);
     const ts: usize = @sizeOf(T);
     ggml.impl.assert(k <= std.math.maxInt(u32), "k <= std::numeric_limits<uint32_t>::max()");

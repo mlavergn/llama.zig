@@ -119,8 +119,9 @@ Per side, in paths, bodies, header values, !server arguments and !env
 values: $WORK is that side's scratch directory (!fresh), $CWD its
 server's working directory, $SPORT its server's port, and $MOCK its mock
 hub's URL. In what comes back, each side's own $WORK, $CWD, $MOCK and
-binary ($BIN) are written as those names, and 127.0.0.1:<its port> as
-127.0.0.1:$SPORT, so the two compare.
+binary ($BIN) are written as those names, and 127.0.0.1:<its port> and
+localhost:<its port> as 127.0.0.1:$SPORT and localhost:$SPORT, so the two
+compare.
 
 Router mode: a router forwards each child's output into
 its own log as "[<port>] <line>". Those lines are taken out of the
@@ -715,7 +716,8 @@ def main():
         if se["MOCK"] != "$MOCK":
             text = text.replace(se["MOCK"], "$MOCK")
         text = text.replace(os.path.realpath(sides[s].binary), "$BIN")
-        return text.replace(f"127.0.0.1:{se['SPORT']}", "127.0.0.1:$SPORT")
+        text = text.replace(f"127.0.0.1:{se['SPORT']}", "127.0.0.1:$SPORT")
+        return text.replace(f"localhost:{se['SPORT']}", "localhost:$SPORT")
 
     server_env = {}
     etags = {}  # per side: the ETag `!etag <path>` read, as $ETAG

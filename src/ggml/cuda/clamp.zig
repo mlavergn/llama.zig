@@ -24,7 +24,7 @@ fn u32Of(x: usize) u32 {
 /// `src0` and `dst` may be views: rows are contiguous, dims
 /// 1..3 follow the strides, in elements, and the kernel divides the flat
 /// index with `fast_div_modulo`.
-fn clampCuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, min: T, max: T, src0: *const ggml.impl.ggml_c.ggml_tensor, t: *const ggml.impl.ggml_c.ggml_tensor, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn clampCuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, min: T, max: T, src0: *const ggml.impl.ggml_c.ggml_tensor, t: *const ggml.impl.ggml_c.ggml_tensor, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const k: i64 = ggml.types.ggml_nelements(src0);
     const ts: usize = @sizeOf(T);
     ggml.impl.assert(k <= std.math.maxInt(u32), "k <= std::numeric_limits<uint32_t>::max()");

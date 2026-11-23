@@ -16,7 +16,7 @@ fn int(x: i64) c_int {
 }
 
 /// Ports `pool1d_nchw_kernel_f32_f32_cuda` (pool1d.cu:52 @b1b770d90).
-fn pool1dNchwKernelF32F32Cuda(iw: c_int, ow: c_int, kw: c_int, sw: c_int, pw: c_int, parallel_elements: c_int, src: ?*const anyopaque, dst: ?*anyopaque, op: ggml.impl.ggml_c.enum_ggml_op_pool, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn pool1dNchwKernelF32F32Cuda(iw: c_int, ow: c_int, kw: c_int, sw: c_int, pw: c_int, parallel_elements: c_int, src: ?*const anyopaque, dst: ?*anyopaque, op: ggml.impl.ggml_c.enum_ggml_op_pool, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const num_blocks: c_int = @divTrunc(parallel_elements +% (block_size - 1), block_size);
     ggml.cuda.kernels.launch(ggml.cuda.kernels.get("pool1d", "pool1d_nchw_kernel"), .{
         .grid = .{ .x = @bitCast(num_blocks) },

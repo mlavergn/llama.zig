@@ -61,7 +61,7 @@ const Args = struct {
 };
 
 /// Ports `ggml_cpy_scalar_contiguous_cuda` (cpy.cu:195 @b1b770d90).
-fn cpyScalarContiguousCuda(comptime S: type, comptime D: type, cx: ?*const anyopaque, cdst: ?*anyopaque, ne: i64, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn cpyScalarContiguousCuda(comptime S: type, comptime D: type, cx: ?*const anyopaque, cdst: ?*anyopaque, ne: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const num_blocks: i64 = @divTrunc(ne + block_size - 1, block_size);
     ggml.impl.assert(num_blocks <= int_max, "num_blocks <= INT_MAX");
     const key = comptime ggml.cuda.kernels.tmpl("cpy_scalar_contiguous", &.{ ggml.cuda.kernels.typeName(S), ggml.cuda.kernels.typeName(D) });
@@ -79,9 +79,9 @@ fn kernelArgs(cx: ?*const anyopaque, cdst: ?*anyopaque, a: Args) struct { ?*cons
 
 /// Ports `ggml_cpy_scalar_cuda` (cpy.cu:206 @b1b770d90) with its
 /// `launch_scalar_generic` lambda.
-fn cpyScalarCuda(comptime S: type, comptime D: type, comptime transposed: bool, cx: ?*const anyopaque, cdst: ?*anyopaque, a: Args, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn cpyScalarCuda(comptime S: type, comptime D: type, comptime transposed: bool, cx: ?*const anyopaque, cdst: ?*anyopaque, a: Args, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const launchScalarGeneric = struct {
-        fn f(cx_: ?*const anyopaque, cdst_: ?*anyopaque, a_: Args, stream_: ggml.cuda.common.cu.cudaStream_t) void {
+        fn f(cx_: ?*const anyopaque, cdst_: ?*anyopaque, a_: Args, stream_: ggml.cuda.common.cuda_c.cudaStream_t) void {
             const num_blocks: i64 = @divTrunc(a_.ne + block_size - 1, block_size);
             ggml.impl.assert(num_blocks <= int_max, "num_blocks <= INT_MAX");
             const key = comptime ggml.cuda.kernels.tmpl("cpy_scalar", &.{"&" ++ ggml.cuda.kernels.tmpl("cpy_1_scalar", &.{ ggml.cuda.kernels.typeName(S), ggml.cuda.kernels.typeName(D) })});
@@ -138,7 +138,7 @@ fn cpyScalarCuda(comptime S: type, comptime D: type, comptime transposed: bool, 
 /// `ggml_cpy_f32_q5_0_cuda` (cpy.cu:325 @b1b770d90),
 /// `ggml_cpy_f32_q5_1_cuda` (cpy.cu:351 @b1b770d90) and
 /// `ggml_cpy_f32_iq4_nl_cuda` (cpy.cu:377 @b1b770d90).
-fn cpyF32QCuda(comptime blck: []const u8, comptime qk: comptime_int, comptime qk_name: []const u8, cx: ?*const anyopaque, cdst: ?*anyopaque, a: Args, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn cpyF32QCuda(comptime blck: []const u8, comptime qk: comptime_int, comptime qk_name: []const u8, cx: ?*const anyopaque, cdst: ?*anyopaque, a: Args, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     ggml.impl.assert(@rem(a.ne, qk) == 0, "ne % " ++ qk_name ++ " == 0");
     const num_blocks: i64 = @divTrunc(@divTrunc(a.ne, qk) + block_size - 1, block_size);
     ggml.impl.assert(num_blocks <= int_max, "num_blocks <= INT_MAX");
@@ -156,7 +156,7 @@ fn cpyF32QCuda(comptime blck: []const u8, comptime qk: comptime_int, comptime qk
 /// `ggml_cpy_q5_0_f32_cuda` (cpy.cu:337 @b1b770d90) and
 /// `ggml_cpy_q5_1_f32_cuda` (cpy.cu:363 @b1b770d90). None asserts
 /// divisibility, as in the C.
-fn cpyQF32Cuda(comptime blck: []const u8, comptime qk: comptime_int, cx: ?*const anyopaque, cdst: ?*anyopaque, a: Args, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn cpyQF32Cuda(comptime blck: []const u8, comptime qk: comptime_int, cx: ?*const anyopaque, cdst: ?*anyopaque, a: Args, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const num_blocks: i64 = @divTrunc(@divTrunc(a.ne, qk) + block_size - 1, block_size);
     ggml.impl.assert(num_blocks <= int_max, "num_blocks <= INT_MAX");
     const key = comptime ggml.cuda.kernels.tmpl("cpy_q_f32", &.{ "&" ++ blck, ggml.cuda.kernels.int(qk) });
@@ -291,9 +291,9 @@ pub fn cpy(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.ggml_te
 
     if (t0 == t1 and contiguous_srcs) {
         ggml.impl.assert(ggml.types.ggml_nbytes(src0) == ggml.types.ggml_nbytes(src1), "ggml_nbytes(src0) == ggml_nbytes(src1)");
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(src1_ddc, src0_ddc, ggml.types.ggml_nbytes(src0), ggml.cuda.common.cu.cudaMemcpyDeviceToDevice, main_stream), "cudaMemcpyAsync(src1_ddc, src0_ddc, ggml_nbytes(src0), cudaMemcpyDeviceToDevice, main_stream)", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpyAsync(src1_ddc, src0_ddc, ggml.types.ggml_nbytes(src0), ggml.cuda.common.cuda_c.cudaMemcpyDeviceToDevice, main_stream), "cudaMemcpyAsync(src1_ddc, src0_ddc, ggml_nbytes(src0), cudaMemcpyDeviceToDevice, main_stream)", @src());
     } else if (cpyAsMemcpy2d(src0, src1, &mc)) {
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpy2DAsync(src1_ddc, mc.dpitch, src0_ddc, mc.spitch, mc.width, mc.height, ggml.cuda.common.cu.cudaMemcpyDeviceToDevice, main_stream), "cudaMemcpy2DAsync(src1_ddc, mc_dpitch, src0_ddc, mc_spitch, mc_width, mc_height, cudaMemcpyDeviceToDevice, main_stream)", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpy2DAsync(src1_ddc, mc.dpitch, src0_ddc, mc.spitch, mc.width, mc.height, ggml.cuda.common.cuda_c.cudaMemcpyDeviceToDevice, main_stream), "cudaMemcpy2DAsync(src1_ddc, mc_dpitch, src0_ddc, mc_spitch, mc_width, mc_height, cudaMemcpyDeviceToDevice, main_stream)", @src());
     } else if (t0 == F8 and t1 == F8) {
         cpyScalarCuda(u8, u8, false, src0_ddc, src1_ddc, a, main_stream);
     } else if (t0 == F32 and t1 == F8) {

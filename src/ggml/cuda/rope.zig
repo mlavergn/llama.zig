@@ -84,7 +84,7 @@ fn key3(comptime name: []const u8, comptime forward: bool, comptime has_ff: bool
 }
 
 /// Ports `rope_norm_cuda` (rope.cu:368 @b1b770d90).
-fn ropeNormCuda(comptime forward: bool, comptime T: type, comptime D: type, a: Args, row_indices: CPtr, set_rows_stride: c_int, inplace: bool, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn ropeNormCuda(comptime forward: bool, comptime T: type, comptime D: type, a: Args, row_indices: CPtr, set_rows_stride: c_int, inplace: bool, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const g = grid(&a);
     const theta_scale = thetaScale(&a);
     const p: ggml.cuda.kernels.LaunchParams = .{ .grid = g[0], .block = g[1], .shmem = 0, .stream = stream };
@@ -102,7 +102,7 @@ fn ropeNormCuda(comptime forward: bool, comptime T: type, comptime D: type, a: A
 }
 
 /// Ports `rope_neox_cuda` (rope.cu:412 @b1b770d90).
-fn ropeNeoxCuda(comptime forward: bool, comptime T: type, comptime D: type, a: Args, row_indices: CPtr, set_rows_stride: c_int, inplace: bool, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn ropeNeoxCuda(comptime forward: bool, comptime T: type, comptime D: type, a: Args, row_indices: CPtr, set_rows_stride: c_int, inplace: bool, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const g = grid(&a);
     const theta_scale = thetaScale(&a);
     const launch_params: ggml.cuda.kernels.LaunchParams = .{ .grid = g[0], .block = g[1], .shmem = 0, .stream = stream };
@@ -122,7 +122,7 @@ fn ropeNeoxCuda(comptime forward: bool, comptime T: type, comptime D: type, a: A
 /// Ports `rope_multi_cuda` (rope.cu:457 @b1b770d90). Since v0.8.0 it has
 /// `rope_norm_cuda`'s and `rope_neox_cuda`'s destination type and
 /// `ROPE + VIEW + SET_ROWS` parameters, for qwen's MRoPE.
-fn ropeMultiCuda(comptime forward: bool, comptime T: type, comptime D: type, a: Args, sections: MropeSections, is_imrope: bool, row_indices: CPtr, set_rows_stride: c_int, inplace: bool, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn ropeMultiCuda(comptime forward: bool, comptime T: type, comptime D: type, a: Args, sections: MropeSections, is_imrope: bool, row_indices: CPtr, set_rows_stride: c_int, inplace: bool, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const g = grid(&a);
     const theta_scale = thetaScale(&a);
     const launch_params: ggml.cuda.kernels.LaunchParams = .{ .grid = g[0], .block = g[1], .shmem = 0, .stream = stream };
@@ -140,7 +140,7 @@ fn ropeMultiCuda(comptime forward: bool, comptime T: type, comptime D: type, a: 
 }
 
 /// Ports `rope_vision_cuda` (rope.cu:505 @b1b770d90). Takes no `n_offs`.
-fn ropeVisionCuda(comptime forward: bool, comptime T: type, a: Args, sections: MropeSections, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn ropeVisionCuda(comptime forward: bool, comptime T: type, a: Args, sections: MropeSections, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const g = grid(&a);
     // break down (head_dim, heads, seq) into (CUDA_ROPE_BLOCK_SIZE, x, heads * seq)
     // where x ~= ceil(head_dim / CUDA_ROPE_BLOCK_SIZE);
@@ -372,7 +372,7 @@ fn rmsNormMulRopeCuda(
     row_indices: CPtr,
     set_rows_stride: c_int,
     is_neox: bool,
-    stream: ggml.cuda.common.cu.cudaStream_t,
+    stream: ggml.cuda.common.cuda_c.cudaStream_t,
 ) void {
     ggml.impl.assert(@rem(ncols, 2) == 0, "ncols % 2 == 0");
 

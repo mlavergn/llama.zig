@@ -113,7 +113,7 @@ fn kernel(comptime ty: ggml.impl.ggml_c.enum_ggml_type, comptime ncg: comptime_i
 }
 
 /// Ports `launch_mul_mat_q_few` (mmq-few.cu:699 @b1b770d90).
-fn launch(comptime ty: ggml.impl.ggml_c.enum_ggml_type, comptime ncg: comptime_int, comptime nmt: comptime_int, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor, src1_q: ?*const anyopaque, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn launch(comptime ty: ggml.impl.ggml_c.enum_ggml_type, comptime ncg: comptime_int, comptime nmt: comptime_int, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor, src1_q: ?*const anyopaque, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const ne00 = src0.ne[0];
     const ne01 = src0.ne[1];
     const ne02 = src0.ne[2];
@@ -167,7 +167,7 @@ fn nmtOf(ty: ggml.impl.ggml_c.enum_ggml_type, ncg: c_int, nrows_x: i64) c_int {
 }
 
 /// Ports `launch_mul_mat_q_few_tall` (mmq-few.cu:733 @b1b770d90).
-fn launchTall(comptime ty: ggml.impl.ggml_c.enum_ggml_type, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor, src1_q: ?*const anyopaque, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn launchTall(comptime ty: ggml.impl.ggml_c.enum_ggml_type, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor, src1_q: ?*const anyopaque, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     if (comptime tallSupported(ty)) {
         if (nmtOf(ty, 2, src0.ne[1]) == 2) {
             launch(ty, 2, 2, src0, src1, dst, src1_q, stream);
@@ -178,7 +178,7 @@ fn launchTall(comptime ty: ggml.impl.ggml_c.enum_ggml_type, src0: *const ggml.im
 }
 
 /// Ports `launch_mul_mat_q_few_switch_ncg` (mmq-few.cu:745 @b1b770d90).
-fn launchSwitchNcg(comptime ty: ggml.impl.ggml_c.enum_ggml_type, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor, src1_q: ?*const anyopaque, ncg: c_int, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn launchSwitchNcg(comptime ty: ggml.impl.ggml_c.enum_ggml_type, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor, src1_q: ?*const anyopaque, ncg: c_int, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     switch (ncg) {
         1 => launch(ty, 1, 1, src0, src1, dst, src1_q, stream),
         2 => launchTall(ty, src0, src1, dst, src1_q, stream),

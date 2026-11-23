@@ -34,7 +34,7 @@ fn padF32Cuda(
     ne2: c_int,
     ne3: c_int,
     circular: bool,
-    stream: ggml.cuda.common.cu.cudaStream_t,
+    stream: ggml.cuda.common.cuda_c.cudaStream_t,
 ) void {
     const num_blocks: c_int = @divTrunc(ne0 + block_size - 1, block_size);
     const grid: ggml.cuda.kernels.Dim3 = .{ .x = @bitCast(num_blocks), .y = @bitCast(@min(ne1, 65535)), .z = @bitCast(@min(ne2 *% ne3, 65535)) };

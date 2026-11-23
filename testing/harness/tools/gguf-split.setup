@@ -3,7 +3,7 @@
 # for --split, and a one-file split for --merge, each missing its last 4 KiB.
 # Run by testing/scripts/tools-diff.
 set -eu
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 cut_tail() { head -c "$(($(wc -c <"$1") - 4096))" "$1" >"$2"; }
 cut_tail "$ROOT/zig-out/arch-fixtures/qwen3-dense.gguf" "$DATA/trunc.gguf"
 cd "$DATA"

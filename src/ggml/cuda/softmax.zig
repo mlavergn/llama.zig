@@ -63,7 +63,7 @@ fn softMaxKernel(comptime use_shared: bool, comptime ncols: comptime_int, compti
 
 /// Ports `launch_soft_max_kernels` (softmax.cu:279 @b1b770d90),
 /// instantiated with `<32, 64, 128, 256, 512, 1024, 2048, 4096>`.
-fn launchSoftMaxKernels(comptime T: type, x: ?*const anyopaque, mask: ?*const anyopaque, sinks: ?*const anyopaque, dst: ?*anyopaque, p: *const Params, stream: ggml.cuda.common.cu.cudaStream_t, block_dims: ggml.cuda.kernels.Dim3, block_nums: ggml.cuda.kernels.Dim3, nbytes_shared: usize) void {
+fn launchSoftMaxKernels(comptime T: type, x: ?*const anyopaque, mask: ?*const anyopaque, sinks: ?*const anyopaque, dst: ?*anyopaque, p: *const Params, stream: ggml.cuda.common.cuda_c.cudaStream_t, block_dims: ggml.cuda.kernels.Dim3, block_nums: ggml.cuda.kernels.Dim3, nbytes_shared: usize) void {
     const id = ggml.cuda.common.getDevice();
     const smpbo = ggml.cuda.common.info().devices[@intCast(id)].smpbo;
 
@@ -85,7 +85,7 @@ fn launchSoftMaxKernels(comptime T: type, x: ?*const anyopaque, mask: ?*const an
 }
 
 /// Ports `soft_max_f32_cuda` (softmax.cu:328 @b1b770d90).
-fn softMaxF32Cuda(comptime T: type, x: ?*const anyopaque, mask: ?*const anyopaque, sinks: ?*const anyopaque, dst: ?*anyopaque, params: *const Params, stream: ggml.cuda.common.cu.cudaStream_t, ctx: *ggml.cuda.common.Context) void {
+fn softMaxF32Cuda(comptime T: type, x: ?*const anyopaque, mask: ?*const anyopaque, sinks: ?*const anyopaque, dst: ?*anyopaque, params: *const Params, stream: ggml.cuda.common.cuda_c.cudaStream_t, ctx: *ggml.cuda.common.Context) void {
     var nth: c_int = ggml.cuda.common.warp_size;
     const ncols_x = params.ncols;
 
@@ -139,7 +139,7 @@ fn softMaxF32Cuda(comptime T: type, x: ?*const anyopaque, mask: ?*const anyopaqu
 }
 
 /// Ports `soft_max_back_f32_cuda` (softmax.cu:374 @b1b770d90).
-fn softMaxBackF32Cuda(grad: ?*const anyopaque, dstf: ?*const anyopaque, dst: ?*anyopaque, ncols: c_int, nrows: c_int, scale: f32, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn softMaxBackF32Cuda(grad: ?*const anyopaque, dstf: ?*const anyopaque, dst: ?*anyopaque, ncols: c_int, nrows: c_int, scale: f32, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const block_dims: ggml.cuda.kernels.Dim3 = .{ .x = ggml.cuda.common.warp_size };
     const block_nums: ggml.cuda.kernels.Dim3 = .{ .x = @bitCast(nrows) };
 

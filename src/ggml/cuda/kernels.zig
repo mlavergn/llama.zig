@@ -106,7 +106,7 @@ fn lookup(comptime library: []const u8, comptime key: []const u8) Kernel {
 // Loading
 
 var load_mutex: stdlib.sync.Mutex = .{};
-var libraries: [cuda_kernels.libraries.len]mod.common.cu.CUlibrary = @splat(null);
+var libraries: [cuda_kernels.libraries.len]mod.common.cuda_c.CUlibrary = @splat(null);
 var handles: [cuda_kernels.kernel_count]std.atomic.Value(?*anyopaque) = @splat(.init(null));
 var checked: [cuda_kernels.kernel_count]std.atomic.Value(bool) = @splat(.init(false));
 
@@ -116,17 +116,17 @@ var checked: [cuda_kernels.kernel_count]std.atomic.Value(bool) = @splat(.init(fa
 /// - `k`: from `get`.
 ///
 /// Return: the context-independent handle; aborts if the driver refuses.
-pub fn handle(k: Kernel) mod.common.cu.CUkernel {
+pub fn handle(k: Kernel) mod.common.cuda_c.CUkernel {
     if (handles[k.index].load(.acquire)) |h| return @ptrCast(h);
     load_mutex.lock();
     defer load_mutex.unlock();
     if (handles[k.index].load(.acquire)) |h| return @ptrCast(h);
     if (libraries[k.library] == null) {
         const image = k.fatbin;
-        mod.common.cuCheck(mod.common.cu.cuLibraryLoadData(&libraries[k.library], image.ptr, null, null, 0, null, null, 0), "cuLibraryLoadData", @src());
+        mod.common.cuCheck(mod.common.cuda_c.cuLibraryLoadData(&libraries[k.library], image.ptr, null, null, 0, null, null, 0), "cuLibraryLoadData", @src());
     }
-    var h: mod.common.cu.CUkernel = null;
-    mod.common.cuCheck(mod.common.cu.cuLibraryGetKernel(&h, libraries[k.library], k.mangled.ptr), "cuLibraryGetKernel", @src());
+    var h: mod.common.cuda_c.CUkernel = null;
+    mod.common.cuCheck(mod.common.cuda_c.cuLibraryGetKernel(&h, libraries[k.library], k.mangled.ptr), "cuLibraryGetKernel", @src());
     handles[k.index].store(@ptrCast(h), .release);
     return h;
 }
@@ -150,7 +150,7 @@ pub const LaunchParams = struct {
     grid: Dim3,
     block: Dim3,
     shmem: usize = 0,
-    stream: mod.common.cu.cudaStream_t,
+    stream: mod.common.cuda_c.cudaStream_t,
 };
 
 /// The pointer array the driver reads, one per argument.
@@ -172,7 +172,7 @@ fn toRuntime(args: anytype) RuntimeArgs(@TypeOf(args)) {
 
 /// Packs `args` into the pointer array the driver reads, after the
 /// check against the kernel's declared parameters on its first launch.
-fn pack(k: Kernel, h: mod.common.cu.CUkernel, args: anytype) ArgPointers(@TypeOf(args.*)) {
+fn pack(k: Kernel, h: mod.common.cuda_c.CUkernel, args: anytype) ArgPointers(@TypeOf(args.*)) {
     const types = @typeInfo(@TypeOf(args.*)).@"struct".field_types;
     if (!checked[k.index].load(.acquire)) {
         checkArgs(k, h, types);
@@ -185,12 +185,12 @@ fn pack(k: Kernel, h: mod.common.cu.CUkernel, args: anytype) ArgPointers(@TypeOf
 
 /// Every argument's size, and the count, against the kernel, in every
 /// build mode.
-fn checkArgs(k: Kernel, h: mod.common.cu.CUkernel, comptime types: []const type) void {
+fn checkArgs(k: Kernel, h: mod.common.cuda_c.CUkernel, comptime types: []const type) void {
     inline for (types, 0..) |T, i| {
         var offset: usize = 0;
         var size: usize = 0;
-        const r = mod.common.cu.cuKernelGetParamInfo(h, i, &offset, &size);
-        if (r != mod.common.cu.CUDA_SUCCESS) {
+        const r = mod.common.cuda_c.cuKernelGetParamInfo(h, i, &offset, &size);
+        if (r != mod.common.cuda_c.CUDA_SUCCESS) {
             mod.common.fatal("CUDA kernel {s}: argument {d} of {d} has no parameter", .{ k.name, i, types.len });
         }
         if (size != @sizeOf(T)) {
@@ -199,15 +199,15 @@ fn checkArgs(k: Kernel, h: mod.common.cu.CUkernel, comptime types: []const type)
     }
     var offset: usize = 0;
     var size: usize = 0;
-    if (mod.common.cu.cuKernelGetParamInfo(h, types.len, &offset, &size) == mod.common.cu.CUDA_SUCCESS) {
+    if (mod.common.cuda_c.cuKernelGetParamInfo(h, types.len, &offset, &size) == mod.common.cuda_c.CUDA_SUCCESS) {
         mod.common.fatal("CUDA kernel {s}: {d} arguments given, it takes more", .{ k.name, types.len });
     }
 }
 
 /// The current context's function for `h`, for the per-device queries.
-fn function(h: mod.common.cu.CUkernel) mod.common.cu.CUfunction {
-    var f: mod.common.cu.CUfunction = null;
-    mod.common.cuCheck(mod.common.cu.cuKernelGetFunction(&f, h), "cuKernelGetFunction", @src());
+fn function(h: mod.common.cuda_c.CUkernel) mod.common.cuda_c.CUfunction {
+    var f: mod.common.cuda_c.CUfunction = null;
+    mod.common.cuCheck(mod.common.cuda_c.cuKernelGetFunction(&f, h), "cuKernelGetFunction", @src());
     return f;
 }
 
@@ -223,7 +223,7 @@ pub fn launch(k: Kernel, p: LaunchParams, args: anytype) void {
     const h = handle(k);
     var a = toRuntime(args);
     var ptrs = pack(k, h, &a);
-    mod.common.cuCheck(mod.common.cu.cuLaunchKernel(@ptrCast(h), p.grid.x, p.grid.y, p.grid.z, p.block.x, p.block.y, p.block.z, @intCast(p.shmem), @ptrCast(p.stream), &ptrs, null), "kernel launch", @src());
+    mod.common.cuCheck(mod.common.cuda_c.cuLaunchKernel(@ptrCast(h), p.grid.x, p.grid.y, p.grid.z, p.block.x, p.block.y, p.block.z, @intCast(p.shmem), @ptrCast(p.stream), &ptrs, null), "kernel launch", @src());
 }
 
 /// Ports `ggml_cuda_kernel_launch` (common.cuh:1533 @b1b770d90): `launch`
@@ -235,10 +235,10 @@ pub fn launchPdl(k: Kernel, p: LaunchParams, args: anytype) void {
         var a = toRuntime(args);
         var ptrs = pack(k, h, &a);
         // Ports `ggml_cuda_pdl_config` (common.cuh:1496 @b1b770d90).
-        var attr: mod.common.cu.CUlaunchAttribute = std.mem.zeroes(mod.common.cu.CUlaunchAttribute);
-        attr.id = mod.common.cu.CU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_STREAM_SERIALIZATION;
+        var attr: mod.common.cuda_c.CUlaunchAttribute = std.mem.zeroes(mod.common.cuda_c.CUlaunchAttribute);
+        attr.id = mod.common.cuda_c.CU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_STREAM_SERIALIZATION;
         attr.value.programmaticStreamSerializationAllowed = 1;
-        var cfg: mod.common.cu.CUlaunchConfig = std.mem.zeroes(mod.common.cu.CUlaunchConfig);
+        var cfg: mod.common.cuda_c.CUlaunchConfig = std.mem.zeroes(mod.common.cuda_c.CUlaunchConfig);
         cfg.gridDimX = p.grid.x;
         cfg.gridDimY = p.grid.y;
         cfg.gridDimZ = p.grid.z;
@@ -249,7 +249,7 @@ pub fn launchPdl(k: Kernel, p: LaunchParams, args: anytype) void {
         cfg.hStream = @ptrCast(p.stream);
         cfg.attrs = &attr;
         cfg.numAttrs = 1;
-        mod.common.cuCheck(mod.common.cu.cuLaunchKernelEx(&cfg, @ptrCast(h), &ptrs, null), "cudaLaunchKernelEx", @src());
+        mod.common.cuCheck(mod.common.cuda_c.cuLaunchKernelEx(&cfg, @ptrCast(h), &ptrs, null), "cudaLaunchKernelEx", @src());
         return;
     }
     launch(k, p, args);
@@ -276,7 +276,7 @@ pub fn launchCooperative(k: Kernel, p: LaunchParams, args: anytype) void {
     const h = handle(k);
     var a = toRuntime(args);
     var ptrs = pack(k, h, &a);
-    mod.common.cuCheck(mod.common.cu.cuLaunchCooperativeKernel(@ptrCast(h), p.grid.x, p.grid.y, p.grid.z, p.block.x, p.block.y, p.block.z, @intCast(p.shmem), @ptrCast(p.stream), &ptrs), "cudaLaunchCooperativeKernel", @src());
+    mod.common.cuCheck(mod.common.cuda_c.cuLaunchCooperativeKernel(@ptrCast(h), p.grid.x, p.grid.y, p.grid.z, p.block.x, p.block.y, p.block.z, @intCast(p.shmem), @ptrCast(p.stream), &ptrs), "cudaLaunchCooperativeKernel", @src());
 }
 
 /// The C's function-local `env_pdl_enabled` static.
@@ -300,7 +300,7 @@ fn pdlEnabled() bool {
 /// version a loaded function reports is a property of the kernel image and
 /// the device, so the cache here is per (device, kernel) too, as a
 /// tri-state byte.
-fn canUsePdl(k: Kernel, h: mod.common.cu.CUkernel) bool {
+fn canUsePdl(k: Kernel, h: mod.common.cuda_c.CUkernel) bool {
     const device: usize = @intCast(mod.common.getDevice());
     const slot = &pdl_cache[device][k.index];
     switch (slot.load(.acquire)) {
@@ -309,7 +309,7 @@ fn canUsePdl(k: Kernel, h: mod.common.cu.CUkernel) bool {
         else => {},
     }
     var ptx: c_int = 0;
-    mod.common.cuCheck(mod.common.cu.cuFuncGetAttribute(&ptx, mod.common.cu.CU_FUNC_ATTRIBUTE_PTX_VERSION, function(h)), "cudaFuncGetAttributes", @src());
+    mod.common.cuCheck(mod.common.cuda_c.cuFuncGetAttribute(&ptx, mod.common.cuda_c.CU_FUNC_ATTRIBUTE_PTX_VERSION, function(h)), "cudaFuncGetAttributes", @src());
     // PDL device-side primitives are emitted only for PTX versions >= 90.
     const can = ptx >= 90;
     slot.store(if (can) 2 else 1, .release);
@@ -324,9 +324,9 @@ pub fn setSharedMemoryLimit(k: Kernel, nbytes: usize) void {
     const device = mod.common.getDevice();
     const slot = &smem_raised[@intCast(device)][k.index];
     if (slot.load(.acquire)) return;
-    var dev: mod.common.cu.CUdevice = 0;
-    mod.common.cuCheck(mod.common.cu.cuDeviceGet(&dev, device), "cuDeviceGet", @src());
-    mod.common.cuCheck(mod.common.cu.cuKernelSetAttribute(mod.common.cu.CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, @intCast(nbytes), handle(k), dev), "cudaFuncSetAttribute", @src());
+    var dev: mod.common.cuda_c.CUdevice = 0;
+    mod.common.cuCheck(mod.common.cuda_c.cuDeviceGet(&dev, device), "cuDeviceGet", @src());
+    mod.common.cuCheck(mod.common.cuda_c.cuKernelSetAttribute(mod.common.cuda_c.CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, @intCast(nbytes), handle(k), dev), "cudaFuncSetAttribute", @src());
     slot.store(true, .release);
 }
 

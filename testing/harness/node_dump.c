@@ -130,6 +130,11 @@ int main(int argc, char ** argv) {
         mp.devices = cpu_only;
         mp.n_gpu_layers = 0;
     }
+    /* NODE_DUMP_LOAD names the load mode (`dio`, `none`, ...; default auto):
+     * x86-node-diff's `dio` run reads the weights through llama_file's
+     * unbuffered Windows arm instead of a mapping. */
+    const char * load_env = getenv("NODE_DUMP_LOAD");
+    if (load_env) mp.load_mode = llama_load_mode_from_str(load_env);
     struct llama_model * model = llama_model_load_from_file(argv[1], mp);
     if (!model) return 1;
 

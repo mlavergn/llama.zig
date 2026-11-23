@@ -4,7 +4,7 @@
 # them MOCK_REF and MOCK_PORT in $DATA/setup.env. Run by
 # testing/scripts/server-diff, which kills what $DATA/pids lists at the end.
 set -eu
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 FIX="$ROOT/zig-out/arch-fixtures/llama-dense.gguf"
 FIX2="$ROOT/zig-out/arch-fixtures/qwen3-dense.gguf"
 MM="$ROOT/zig-out/mmproj-fixtures"

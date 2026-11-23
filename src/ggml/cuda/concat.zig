@@ -22,7 +22,7 @@ fn dimOf(v: i64) u32 {
 }
 
 /// Ports `concat_cont_cuda` (concat.cu:56 @b1b770d90).
-fn concatContCuda(comptime T: type, x: ?*const anyopaque, y: ?*const anyopaque, dst: ?*anyopaque, ne00: i64, ne01: i64, ne02: i64, ne0: i64, ne1: i64, ne2: i64, dim: c_int, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn concatContCuda(comptime T: type, x: ?*const anyopaque, y: ?*const anyopaque, dst: ?*anyopaque, ne00: i64, ne01: i64, ne02: i64, ne0: i64, ne1: i64, ne2: i64, dim: c_int, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const n: i64 = ne0 * ne1 * ne2;
     const num_blocks: c_int = @truncate(@divTrunc(n + block_size - 1, block_size));
     const p: ggml.cuda.kernels.LaunchParams = .{
@@ -53,7 +53,7 @@ fn plane(comptime T: type, p: ?*const anyopaque, j3: i64, nb3: usize) usize {
 
 /// Ports `concat_cuda` (concat.cu:143 @b1b770d90) with its
 /// `launch_kernel` lambda.
-fn concatCuda(comptime T: type, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor, dim: c_int, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn concatCuda(comptime T: type, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, dst: *ggml.impl.ggml_c.ggml_tensor, dim: c_int, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     if (dim != 3 and ggml.types.ggml_is_contiguous_to_3(src0) and ggml.types.ggml_is_contiguous_to_3(src1)) {
         var j3: i64 = 0;
         while (j3 < dst.ne[3]) : (j3 += 1) {
@@ -76,8 +76,8 @@ fn concatCuda(comptime T: type, src0: *const ggml.impl.ggml_c.ggml_tensor, src1:
         const size0 = ggml.types.ggml_nbytes(src0);
         const size1 = ggml.types.ggml_nbytes(src1);
 
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(dst.data, src0.data, size0, ggml.cuda.common.cu.cudaMemcpyDeviceToDevice, stream), "cudaMemcpyAsync((char *) dst->data,         src0->data, size0, cudaMemcpyDeviceToDevice, stream)", @src());
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(@ptrFromInt(@intFromPtr(dst.data) + size0), src1.data, size1, ggml.cuda.common.cu.cudaMemcpyDeviceToDevice, stream), "cudaMemcpyAsync((char *) dst->data + size0, src1->data, size1, cudaMemcpyDeviceToDevice, stream)", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpyAsync(dst.data, src0.data, size0, ggml.cuda.common.cuda_c.cudaMemcpyDeviceToDevice, stream), "cudaMemcpyAsync((char *) dst->data,         src0->data, size0, cudaMemcpyDeviceToDevice, stream)", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpyAsync(@ptrFromInt(@intFromPtr(dst.data) + size0), src1.data, size1, ggml.cuda.common.cuda_c.cudaMemcpyDeviceToDevice, stream), "cudaMemcpyAsync((char *) dst->data + size0, src1->data, size1, cudaMemcpyDeviceToDevice, stream)", @src());
     } else {
         ggml.impl.assert(!ggml.types.ggml_is_quantized(src0.type), "!ggml_is_quantized(src0->type)");
 

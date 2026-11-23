@@ -13,7 +13,7 @@ const std = @import("std");
 const ggml = @import("../module.zig");
 
 /// `cudaStreamPerThread`.
-const stream_per_thread: ggml.cuda.common.cu.cudaStream_t = @ptrFromInt(0x2);
+const stream_per_thread: ggml.cuda.common.cuda_c.cudaStream_t = @ptrFromInt(0x2);
 
 /// Ports `ggml_cuda_batch_get_descriptor` (batch-get.cu:8 @b1b770d90): one
 /// copy, as the kernel reads it.
@@ -38,20 +38,20 @@ const Mapping = struct {
     /// The C's constructor.
     fn init(host: ?*anyopaque, size: usize) Mapping {
         var self: Mapping = .{};
-        const err = ggml.cuda.common.cu.cudaHostRegister(host, size, ggml.cuda.common.cu.cudaHostRegisterMapped | ggml.cuda.common.cu.cudaHostRegisterPortable);
-        if (err != ggml.cuda.common.cu.cudaSuccess) {
-            _ = ggml.cuda.common.cu.cudaGetLastError();
+        const err = ggml.cuda.common.cuda_c.cudaHostRegister(host, size, ggml.cuda.common.cuda_c.cudaHostRegisterMapped | ggml.cuda.common.cuda_c.cudaHostRegisterPortable);
+        if (err != ggml.cuda.common.cuda_c.cudaSuccess) {
+            _ = ggml.cuda.common.cuda_c.cudaGetLastError();
             ggml.impl.logDebug("%s: failed to register %.2f MiB of pinned memory: %s\n", .{
                 "ggml_cuda_batch_get_mapping",
                 @as(f64, @floatFromInt(size)) / 1024.0 / 1024.0,
-                ggml.cuda.common.cu.cudaGetErrorString(err),
+                ggml.cuda.common.cuda_c.cudaGetErrorString(err),
             });
             return self;
         }
         self.host = host;
         var dev: ?*anyopaque = null;
-        if (ggml.cuda.common.cu.cudaHostGetDevicePointer(&dev, host, 0) != ggml.cuda.common.cu.cudaSuccess) {
-            _ = ggml.cuda.common.cu.cudaGetLastError();
+        if (ggml.cuda.common.cuda_c.cudaHostGetDevicePointer(&dev, host, 0) != ggml.cuda.common.cuda_c.cudaSuccess) {
+            _ = ggml.cuda.common.cuda_c.cudaGetLastError();
             self.device = null;
             return self;
         }
@@ -63,7 +63,7 @@ const Mapping = struct {
     fn deinit(self: *Mapping) void {
         if (self.host) |h| {
             // Release only the registration acquired by this object.
-            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaHostUnregister(h), "cudaHostUnregister(host)", @src());
+            ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaHostUnregister(h), "cudaHostUnregister(host)", @src());
         }
     }
 };
@@ -181,17 +181,17 @@ pub fn getTensorN(device: c_int, tensors: [*c]const [*c]const ggml.impl.ggml_c.g
             const blocks_per_copy: usize = @min(@as(usize, std.math.maxInt(u16)), @max(@as(usize, 1), (nsm + n_batch - 1) / n_batch));
             const blocks: ggml.cuda.kernels.Dim3 = .{ .x = @truncate(n_batch), .y = @truncate(blocks_per_copy), .z = 1 };
             // Stream ordering keeps each kernel ahead of the next descriptor overwrite.
-            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(device_copies, copies, n_batch * @sizeOf(Descriptor), ggml.cuda.common.cu.cudaMemcpyHostToDevice, stream_per_thread), "cudaMemcpyAsync(device_copies, copies, n_batch * sizeof(copies[0]), cudaMemcpyHostToDevice, cudaStreamPerThread)", @src());
+            ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpyAsync(device_copies, copies, n_batch * @sizeOf(Descriptor), ggml.cuda.common.cuda_c.cudaMemcpyHostToDevice, stream_per_thread), "cudaMemcpyAsync(device_copies, copies, n_batch * sizeof(copies[0]), cudaMemcpyHostToDevice, cudaStreamPerThread)", @src());
             ggml.cuda.kernels.launch(ggml.cuda.kernels.get("batch-get", "ggml_cuda_batch_get_kernel"), .{
                 .grid = blocks,
                 .block = .{ .x = threads },
                 .shmem = 0,
                 .stream = stream_per_thread,
             }, .{ @as(?[*]const Descriptor, device_copies), n_batch });
-            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
+            ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGetLastError(), "cudaGetLastError()", @src());
             if (first + n_batch < n_reads_gather) {
                 // Wait before refilling the pinned host descriptor buffer.
-                ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
+                ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
             }
         }
     }
@@ -199,10 +199,10 @@ pub fn getTensorN(device: c_int, tensors: [*c]const [*c]const ggml.impl.ggml_c.g
     for (0..n_tensors) |i| {
         if (sizes[i] != 0 and (n_reads_gather == 0 or sizes[i] > max_gather_read_bytes)) {
             const src: [*]const u8 = @as([*]const u8, @ptrCast(ggml.impl.one(ggml.impl.ggml_c.ggml_tensor, @constCast(tensors[i])).data.?)) + offsets[i];
-            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(data[i], src, sizes[i], ggml.cuda.common.cu.cudaMemcpyDeviceToHost, stream_per_thread), "cudaMemcpyAsync(data[i], (const char *) tensors[i]->data + offsets[i], sizes[i], cudaMemcpyDeviceToHost, cudaStreamPerThread)", @src());
+            ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpyAsync(data[i], src, sizes[i], ggml.cuda.common.cuda_c.cudaMemcpyDeviceToHost, stream_per_thread), "cudaMemcpyAsync(data[i], (const char *) tensors[i]->data + offsets[i], sizes[i], cudaMemcpyDeviceToHost, cudaStreamPerThread)", @src());
         }
     }
     // Wait for GPU writes before releasing the CPU mapping and descriptor buffers.
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamSynchronize(stream_per_thread), "cudaStreamSynchronize(cudaStreamPerThread)", @src());
     return true;
 }

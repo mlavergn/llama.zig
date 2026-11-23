@@ -53,7 +53,7 @@ comptime {
 /// to 64 MB. Each block of a row reads a contiguous range of
 /// `block_cols` columns, and the gather breaks ties by column from the last
 /// pass's histograms.
-fn topKRadixCuda(pool: *ggml.cuda.common.Pool, src_in: [*]const f32, dst_in: [*]c_int, ncols: c_int, nrows: i64, k: c_int, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn topKRadixCuda(pool: *ggml.cuda.common.Pool, src_in: [*]const f32, dst_in: [*]c_int, ncols: c_int, nrows: i64, k: c_int, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const BLOCK_SIZE = 256;
     const RADIX_BITS = 8;
     const NBINS = 1 << RADIX_BITS;
@@ -103,7 +103,7 @@ fn topKRadixCuda(pool: *ggml.cuda.common.Pool, src_in: [*]const f32, dst_in: [*]
 /// Ports `top_k_argsort_cuda` (top-k.cu:302 @b1b770d90): argsort each chunk
 /// of rows into a scratch buffer, bitonic or CUB, and copy the first `k`
 /// columns out.
-fn topKArgsortCuda(pool: *ggml.cuda.common.Pool, src_in: [*]const f32, dst_in: [*]c_int, ncols: c_int, nrows: i64, k: c_int, use_cub: bool, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn topKArgsortCuda(pool: *ggml.cuda.common.Pool, src_in: [*]const f32, dst_in: [*]c_int, ncols: c_int, nrows: i64, k: c_int, use_cub: bool, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const chunk_nrows: i64 = ggml.cuda.argsort.chunkNrows(@as(usize, @intCast(ncols)) * @sizeOf(c_int), nrows);
 
     var src = src_in;
@@ -123,14 +123,14 @@ fn topKArgsortCuda(pool: *ggml.cuda.common.Pool, src_in: [*]const f32, dst_in: [
             ggml.cuda.argsort.argsortF32I32CudaBitonic(src, tmp, ncols, iter_nrows, ggml.impl.ggml_c.GGML_SORT_ORDER_DESC, stream);
         }
         const isz: usize = @sizeOf(c_int);
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpy2DAsync(
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpy2DAsync(
             dst,
             @as(usize, @intCast(k)) * isz,
             tmp,
             @as(usize, @intCast(ncols)) * isz,
             @as(usize, @intCast(k)) * isz,
             @intCast(iter_nrows),
-            ggml.cuda.common.cu.cudaMemcpyDeviceToDevice,
+            ggml.cuda.common.cuda_c.cudaMemcpyDeviceToDevice,
             stream,
         ), "cudaMemcpy2DAsync(dst, k * sizeof(int), tmp, ncols * sizeof(int), k * sizeof(int), iter_nrows, cudaMemcpyDeviceToDevice, stream)", @src());
 

@@ -28,4 +28,4 @@ SH
 chmod +x "$DATA/exits/llama-connect"
 printf 'not a program\n' > "$DATA/noexec/llama-connect"
 mkdir -p "$DATA/models"
-cp "$(cd "$(dirname "$0")/../.." && pwd)/zig-out/arch-fixtures/llama-dense.gguf" "$DATA/models/tiny.gguf"
+cp "$(cd "$(dirname "$0")/../../.." && pwd)/zig-out/arch-fixtures/llama-dense.gguf" "$DATA/models/tiny.gguf"

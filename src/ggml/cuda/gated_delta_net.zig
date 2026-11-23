@@ -63,7 +63,7 @@ fn launchGatedDeltaNet(
     scale: f32,
     state_slot_stride: i64,
     K: c_int,
-    stream: ggml.cuda.common.cu.cudaStream_t,
+    stream: ggml.cuda.common.cuda_c.cudaStream_t,
 ) void {
     //TODO: Add chunked kernel for even faster pre-fill
     const warp_size: c_int = ggml.cuda.common.info().devices[@intCast(ggml.cuda.common.getDevice())].warp_size;

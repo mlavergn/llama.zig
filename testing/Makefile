@@ -92,7 +92,8 @@ test:
 	@printf '\n== libc++ algorithms vs the SDK templates ==\n'
 	./testing/scripts/libcxx-diff
 	@printf '\n== std::regex vs libc++ ==\n'
-	zig build reference --release=fast
+	@# common-ref: schema-diff links upstream's libllama-common off macOS.
+	zig build reference common-ref --release=fast
 	./testing/scripts/regex-diff
 	@printf '\n== common_json vs the port ==\n'
 	./testing/scripts/json-diff
@@ -126,8 +127,12 @@ test:
 	@printf '\n== the libraries for iOS ==\n'
 	@# Nothing else compiles library code for iOS before the xcframework next
 	@# builds. The xcframework's iOS device slice: libggml with BLAS, libmtmd
-	@# with libllama inside, for the A7 upstream's framework is built for.
-	zig build xcframework -Dblas -Dtarget=aarch64-ios.26.0 -Dcpu=apple_a7 --release=fast --prefix zig-out/ios-check
+	@# with libllama inside, for the A7 upstream's framework is built for. It
+	@# needs the iOS SDK, so only a Mac runs it.
+	@if [ "$$(uname)" = Darwin ]; then \
+		echo 'zig build xcframework -Dblas -Dtarget=aarch64-ios.26.0 -Dcpu=apple_a7 --release=fast --prefix zig-out/ios-check'; \
+		zig build xcframework -Dblas -Dtarget=aarch64-ios.26.0 -Dcpu=apple_a7 --release=fast --prefix zig-out/ios-check; \
+	else echo 'skipped: the iOS SDK is only on macOS'; fi
 	@printf '\n== llama-server-core as a consumer builds it (host, Windows) ==\n'
 	./testing/scripts/server-core-consumer
 	@printf '\n== upstream citations ==\n'

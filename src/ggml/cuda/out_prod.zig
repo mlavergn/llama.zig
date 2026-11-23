@@ -84,7 +84,7 @@ pub fn outProd(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tenso
     const ldc: i64 = @bitCast(nb1 / @sizeOf(f32));
 
     const src1_T = ggml.types.ggml_is_transposed(src1);
-    const src1_cublas_op: ggml.cuda.common.cu.cublasOperation_t = if (src1_T) ggml.cuda.common.cu.CUBLAS_OP_N else ggml.cuda.common.cu.CUBLAS_OP_T;
+    const src1_cublas_op: ggml.cuda.common.cuda_c.cublasOperation_t = if (src1_T) ggml.cuda.common.cuda_c.CUBLAS_OP_N else ggml.cuda.common.cuda_c.CUBLAS_OP_T;
     const ldb: i64 = @bitCast((if (src1_T) nb10 else nb11) / @sizeOf(f32));
     ggml.impl.assert((if (src1_T) nb11 else nb10) == @sizeOf(f32), "(src1_T ?        nb11 :        nb10) == sizeof(float)");
 
@@ -107,7 +107,7 @@ pub fn outProd(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tenso
         const batch_count: c_int = @intCast(ne2);
         var j3: i64 = 0; // the C's `i3`; Zig reserves the name
         while (j3 < ne3) : (j3 += 1) {
-            ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasSgemmStridedBatched(handle, ggml.cuda.common.cu.CUBLAS_OP_N, src1_cublas_op, int(ne0), int(ne1), int(ne01), &alpha, at(src0_d, u(@divTrunc(j3, dps3)) *% s03), int(lda), @bitCast(s02), at(src1_d, u(j3) *% s13), int(ldb), @bitCast(s12), &beta, at(dst_d, u(j3) *% s3), int(ldc), @bitCast(s2), batch_count), "cublasSgemmStridedBatched(handle, CUBLAS_OP_N, src1_cublas_op, ne0, ne1, ne01, &alpha, src0_d + (i3/dps3)*s03, lda, s02, src1_d +  i3     *s13, ldb, s12, &beta,  dst_d  +  i3     *s3,  ldc, s2, batch_count)", @src());
+            ggml.cuda.common.cublasCheck(ggml.cuda.common.cuda_c.cublasSgemmStridedBatched(handle, ggml.cuda.common.cuda_c.CUBLAS_OP_N, src1_cublas_op, int(ne0), int(ne1), int(ne01), &alpha, at(src0_d, u(@divTrunc(j3, dps3)) *% s03), int(lda), @bitCast(s02), at(src1_d, u(j3) *% s13), int(ldb), @bitCast(s12), &beta, at(dst_d, u(j3) *% s3), int(ldc), @bitCast(s2), batch_count), "cublasSgemmStridedBatched(handle, CUBLAS_OP_N, src1_cublas_op, ne0, ne1, ne01, &alpha, src0_d + (i3/dps3)*s03, lda, s02, src1_d +  i3     *s13, ldb, s12, &beta,  dst_d  +  i3     *s3,  ldc, s2, batch_count)", @src());
         }
     } else if (ne2 > 1 or ne3 > 1) {
         // dps2 > 1 (src0 broadcast along dim 2 with non-uniform stride) or multiple GEMMs
@@ -141,11 +141,11 @@ pub fn outProd(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tenso
             s12,                                      s13,                                      s2,
             s3,
         });
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGetLastError(), "cudaGetLastError()", @src());
 
-        ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasSgemmBatched(handle, ggml.cuda.common.cu.CUBLAS_OP_N, src1_cublas_op, int(ne0), int(ne1), int(ne01), &alpha, @ptrCast(ptrs_a.get()), int(lda), @ptrCast(ptrs_b.get()), int(ldb), &beta, @ptrCast(ptrs_c.get()), int(ldc), batch_count), "cublasSgemmBatched(handle, CUBLAS_OP_N, src1_cublas_op, ne0, ne1, ne01, &alpha, ptrs_a.get(), lda, ptrs_b.get(), ldb, &beta,  ptrs_c.get(), ldc, batch_count)", @src());
+        ggml.cuda.common.cublasCheck(ggml.cuda.common.cuda_c.cublasSgemmBatched(handle, ggml.cuda.common.cuda_c.CUBLAS_OP_N, src1_cublas_op, int(ne0), int(ne1), int(ne01), &alpha, @ptrCast(ptrs_a.get()), int(lda), @ptrCast(ptrs_b.get()), int(ldb), &beta, @ptrCast(ptrs_c.get()), int(ldc), batch_count), "cublasSgemmBatched(handle, CUBLAS_OP_N, src1_cublas_op, ne0, ne1, ne01, &alpha, ptrs_a.get(), lda, ptrs_b.get(), ldb, &beta,  ptrs_c.get(), ldc, batch_count)", @src());
     } else {
         // ne2 == 1 && ne3 == 1: single GEMM
-        ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasSgemm_v2(handle, ggml.cuda.common.cu.CUBLAS_OP_N, src1_cublas_op, int(ne0), int(ne1), int(ne01), &alpha, src0_d, int(lda), src1_d, int(ldb), &beta, dst_d, int(ldc)), "cublasSgemm(handle, CUBLAS_OP_N, src1_cublas_op, ne0, ne1, ne01, &alpha, src0_d, lda, src1_d, ldb, &beta,  dst_d,  ldc)", @src());
+        ggml.cuda.common.cublasCheck(ggml.cuda.common.cuda_c.cublasSgemm_v2(handle, ggml.cuda.common.cuda_c.CUBLAS_OP_N, src1_cublas_op, int(ne0), int(ne1), int(ne01), &alpha, src0_d, int(lda), src1_d, int(ldb), &beta, dst_d, int(ldc)), "cublasSgemm(handle, CUBLAS_OP_N, src1_cublas_op, ne0, ne1, ne01, &alpha, src0_d, lda, src1_d, ldb, &beta,  dst_d,  ldc)", @src());
     }
 }

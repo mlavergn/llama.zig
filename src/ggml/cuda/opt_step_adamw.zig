@@ -11,7 +11,7 @@ const ggml = @import("../module.zig");
 const block_size = 256;
 
 /// Ports `opt_step_adamw_f32_cuda` (opt-step-adamw.cu:37 @b1b770d90).
-fn optStepAdamwF32Cuda(x: ?*anyopaque, g: ?*const anyopaque, g_m: ?*anyopaque, g_v: ?*anyopaque, pars: ?*const anyopaque, k: i64, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn optStepAdamwF32Cuda(x: ?*anyopaque, g: ?*const anyopaque, g_m: ?*anyopaque, g_v: ?*anyopaque, pars: ?*const anyopaque, k: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const block_dims: ggml.cuda.kernels.Dim3 = .{ .x = block_size };
     const block_nums: ggml.cuda.kernels.Dim3 = .{ .x = @truncate(@as(u64, @bitCast(@divTrunc(k + block_size - 1, block_size)))) };
     ggml.cuda.kernels.launch(ggml.cuda.kernels.get("opt-step-adamw", "opt_step_adamw_f32"), .{

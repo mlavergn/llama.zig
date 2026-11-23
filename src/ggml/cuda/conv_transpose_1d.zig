@@ -39,7 +39,7 @@ fn convTranspose1dF32F32Cuda(
     src0: ?*const anyopaque,
     src1: ?*const anyopaque,
     dst: ?*anyopaque,
-    stream: ggml.cuda.common.cu.cudaStream_t,
+    stream: ggml.cuda.common.cuda_c.cudaStream_t,
 ) void {
     const num_blocks: c_int = @divTrunc(output_size +% (block_size - 1), block_size);
     ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv-transpose-1d", "conv_transpose_1d_kernel"), .{

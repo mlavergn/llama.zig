@@ -4,7 +4,7 @@
 # is not in the cache, so its measure child exits before reporting. Run by
 # testing/scripts/server-diff.
 set -eu
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 FIX="$ROOT/zig-out/arch-fixtures/llama-dense.gguf"
 FIX2="$ROOT/zig-out/arch-fixtures/qwen3-dense.gguf"
 mkdir -p "$DATA/models" "$DATA/two" "$DATA/reload-a" "$DATA/reload-b"

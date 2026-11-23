@@ -37,7 +37,7 @@ fn solveTriF32Cublas(
     s13: usize,
     s2: usize,
     s3: usize,
-    stream: ggml.cuda.common.cu.cudaStream_t,
+    stream: ggml.cuda.common.cuda_c.cudaStream_t,
 ) void {
     _ = s12;
     _ = s13;
@@ -50,7 +50,7 @@ fn solveTriF32Cublas(
     // Bulk copy B -> X (contiguous tensors)
     if (@as(?*const anyopaque, X) != B) {
         const total_elements_BX: i64 = @as(i64, n *% k) * total_batches;
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(X, B, @as(usize, @bitCast(total_elements_BX)) * @sizeOf(f32), ggml.cuda.common.cu.cudaMemcpyDeviceToDevice, stream), "cudaMemcpyAsync(X, B, total_elements_BX * sizeof(float), cudaMemcpyDeviceToDevice, stream)", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpyAsync(X, B, @as(usize, @bitCast(total_elements_BX)) * @sizeOf(f32), ggml.cuda.common.cuda_c.cudaMemcpyDeviceToDevice, stream), "cudaMemcpyAsync(X, B, total_elements_BX * sizeof(float), cudaMemcpyDeviceToDevice, stream)", @src());
     }
 
     const id = ggml.cuda.common.getDevice();
@@ -71,11 +71,11 @@ fn solveTriF32Cublas(
     }, .{ A, X, @as(?*anyopaque, @ptrCast(A_ptrs_dev)), @as(?*anyopaque, @ptrCast(X_ptrs_dev)), ne02, total_batches, s02, s03, s2, s3 });
 
     // Yes, this is necessary, without this we get RMSE errors
-    ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasSetMathMode(ctx.cublasHandle(), ggml.cuda.common.cu.CUBLAS_DEFAULT_MATH), "cublasSetMathMode(ctx.cublas_handle(), CUBLAS_DEFAULT_MATH)", @src());
-    ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasStrsmBatched(ctx.cublasHandle(), ggml.cuda.common.cu.CUBLAS_SIDE_RIGHT, ggml.cuda.common.cu.CUBLAS_FILL_MODE_UPPER, ggml.cuda.common.cu.CUBLAS_OP_N, ggml.cuda.common.cu.CUBLAS_DIAG_NON_UNIT, k, n, &alpha, @ptrCast(A_ptrs_dev), n, @ptrCast(X_ptrs_dev), k, @truncate(total_batches)), "cublasStrsmBatched(ctx.cublas_handle(), CUBLAS_SIDE_RIGHT, CUBLAS_FILL_MODE_UPPER, CUBLAS_OP_N, CUBLAS_DIAG_NON_UNIT, k, n, &alpha, A_ptrs_dev, n, X_ptrs_dev, k, total_batches)", @src());
+    ggml.cuda.common.cublasCheck(ggml.cuda.common.cuda_c.cublasSetMathMode(ctx.cublasHandle(), ggml.cuda.common.cuda_c.CUBLAS_DEFAULT_MATH), "cublasSetMathMode(ctx.cublas_handle(), CUBLAS_DEFAULT_MATH)", @src());
+    ggml.cuda.common.cublasCheck(ggml.cuda.common.cuda_c.cublasStrsmBatched(ctx.cublasHandle(), ggml.cuda.common.cuda_c.CUBLAS_SIDE_RIGHT, ggml.cuda.common.cuda_c.CUBLAS_FILL_MODE_UPPER, ggml.cuda.common.cuda_c.CUBLAS_OP_N, ggml.cuda.common.cuda_c.CUBLAS_DIAG_NON_UNIT, k, n, &alpha, @ptrCast(A_ptrs_dev), n, @ptrCast(X_ptrs_dev), k, @truncate(total_batches)), "cublasStrsmBatched(ctx.cublas_handle(), CUBLAS_SIDE_RIGHT, CUBLAS_FILL_MODE_UPPER, CUBLAS_OP_N, CUBLAS_DIAG_NON_UNIT, k, n, &alpha, A_ptrs_dev, n, X_ptrs_dev, k, total_batches)", @src());
 
     // revert to standard mode from common.cuh
-    ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasSetMathMode(ctx.cublasHandle(), ggml.cuda.common.cu.CUBLAS_TF32_TENSOR_OP_MATH), "cublasSetMathMode(ctx.cublas_handle(), CUBLAS_TF32_TENSOR_OP_MATH)", @src());
+    ggml.cuda.common.cublasCheck(ggml.cuda.common.cuda_c.cublasSetMathMode(ctx.cublasHandle(), ggml.cuda.common.cuda_c.CUBLAS_TF32_TENSOR_OP_MATH), "cublasSetMathMode(ctx.cublas_handle(), CUBLAS_TF32_TENSOR_OP_MATH)", @src());
 }
 
 fn fastKernel(comptime n: comptime_int, comptime k: comptime_int) ggml.cuda.kernels.Kernel {
@@ -97,7 +97,7 @@ fn solveTriF32Cuda(
     nb13: usize,
     nb2: usize,
     nb3: usize,
-    stream: ggml.cuda.common.cu.cudaStream_t,
+    stream: ggml.cuda.common.cuda_c.cudaStream_t,
 ) void {
     const ne02_fd = ggml.cuda.common.initFastdivValues(@as(u32, @truncate(@as(u64, @bitCast(ne02)))));
     const threads: ggml.cuda.kernels.Dim3 = .{ .x = ggml.cuda.common.warp_size, .y = @bitCast(k) };

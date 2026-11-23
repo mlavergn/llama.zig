@@ -291,7 +291,7 @@ fn u32Of(x: i64) u32 {
 /// block, and writes the GLU of `I/2` up rows and `I/2` gate rows per tile.
 /// Column tiles are innermost, grid x, so that the concurrently
 /// running blocks share the same tile of `x` and read it from L2.
-fn launchMulMatQ(comptime ty: ggml.impl.ggml_c.enum_ggml_type, comptime J: comptime_int, comptime fallback: bool, comptime prec_src1: ggml.impl.ggml_c.enum_ggml_prec, comptime has_fusion: bool, ctx: *ggml.cuda.common.Context, args: *const Args, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn launchMulMatQ(comptime ty: ggml.impl.ggml_c.enum_ggml_type, comptime J: comptime_int, comptime fallback: bool, comptime prec_src1: ggml.impl.ggml_c.enum_ggml_prec, comptime has_fusion: bool, ctx: *ggml.cuda.common.Context, args: *const Args, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const id = ggml.cuda.common.getDevice();
     const dev = ggml.cuda.common.info().devices[@intCast(id)];
     const x = dev.cc;
@@ -389,7 +389,7 @@ fn launchMulMatQ(comptime ty: ggml.impl.ggml_c.enum_ggml_type, comptime J: compt
 
     if (!fixup_needed) return;
 
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGetLastError(), "cudaGetLastError()", @src());
     ggml.cuda.kernels.launch(comptime fixupKernel(ty, J, fallback, prec_src1), .{ .grid = block_nums_fixup, .block = block_dims_fixup, .stream = stream }, .{
         args.ids_dst,       args.tile_spec,                 args.dst,              tmp_ptr,
         blocks_per_ne00_fd, i32Of(args.nrows_x),            i32Of(args.ncols_dst), i32Of(args.nrows_dst),
@@ -400,7 +400,7 @@ fn launchMulMatQ(comptime ty: ggml.impl.ggml_c.enum_ggml_type, comptime J: compt
 
 /// Ports `mul_mat_q_switch_J` (mmq.cuh:1555 @b1b770d90): the dispatch on
 /// `args.J_best`, which the caller chose.
-fn mulMatQSwitchJ(comptime ty: ggml.impl.ggml_c.enum_ggml_type, comptime fallback: bool, comptime prec_src1: ggml.impl.ggml_c.enum_ggml_prec, comptime has_fusion: bool, ctx: *ggml.cuda.common.Context, args: *const Args, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn mulMatQSwitchJ(comptime ty: ggml.impl.ggml_c.enum_ggml_type, comptime fallback: bool, comptime prec_src1: ggml.impl.ggml_c.enum_ggml_prec, comptime has_fusion: bool, ctx: *ggml.cuda.common.Context, args: *const Args, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     switch (args.J_best) {
         inline 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128 => |j| launchMulMatQ(ty, j, fallback, prec_src1, has_fusion, ctx, args, stream),
         else => {
@@ -413,7 +413,7 @@ fn mulMatQSwitchJ(comptime ty: ggml.impl.ggml_c.enum_ggml_type, comptime fallbac
 /// Ports `mul_mat_q_switch_fusion` (mmq.cuh:1612 @b1b770d90):
 /// a fused kernel exists only without the fallback and for the types
 /// `fusionSupported` names.
-fn mulMatQSwitchFusion(comptime ty: ggml.impl.ggml_c.enum_ggml_type, comptime fallback: bool, comptime prec_src1: ggml.impl.ggml_c.enum_ggml_prec, ctx: *ggml.cuda.common.Context, args: *const Args, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn mulMatQSwitchFusion(comptime ty: ggml.impl.ggml_c.enum_ggml_type, comptime fallback: bool, comptime prec_src1: ggml.impl.ggml_c.enum_ggml_prec, ctx: *ggml.cuda.common.Context, args: *const Args, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     if (comptime !fallback and fusionSupported(ty)) {
         if (args.fusion.gate != null) {
             mulMatQSwitchJ(ty, fallback, prec_src1, true, ctx, args, stream);
@@ -426,7 +426,7 @@ fn mulMatQSwitchFusion(comptime ty: ggml.impl.ggml_c.enum_ggml_type, comptime fa
 
 /// Ports `mul_mat_q_case` (mmq.cuh:1624 @b1b770d90). The `GGML_PREC_Q4`
 /// instantiation exists for MXFP4 and NVFP4 only (`DECL_MMQ_CASE_W4A4`).
-fn mulMatQCase(comptime ty: ggml.impl.ggml_c.enum_ggml_type, comptime prec_src1: ggml.impl.ggml_c.enum_ggml_prec, ctx: *ggml.cuda.common.Context, args: *const Args, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn mulMatQCase(comptime ty: ggml.impl.ggml_c.enum_ggml_type, comptime prec_src1: ggml.impl.ggml_c.enum_ggml_prec, ctx: *ggml.cuda.common.Context, args: *const Args, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     if (needsFallback(args.nrows_x)) {
         mulMatQSwitchFusion(ty, true, prec_src1, ctx, args, stream);
     } else {
@@ -436,7 +436,7 @@ fn mulMatQCase(comptime ty: ggml.impl.ggml_c.enum_ggml_type, comptime prec_src1:
 
 /// Ports `ggml_cuda_mul_mat_q_switch_type` (mmq.cu:8 @b1b770d90). It
 /// spells `GGML_PREC_Q8` at every case.
-fn mulMatQSwitchType(ctx: *ggml.cuda.common.Context, args: *const Args, stream: ggml.cuda.common.cu.cudaStream_t, prec_src1: ggml.impl.ggml_c.enum_ggml_prec) void {
+fn mulMatQSwitchType(ctx: *ggml.cuda.common.Context, args: *const Args, stream: ggml.cuda.common.cuda_c.cudaStream_t, prec_src1: ggml.impl.ggml_c.enum_ggml_prec) void {
     switch (args.type_x) {
         // src1 at Q4 uses the native FP4 instructions, which are Blackwell-only
         inline ggml.impl.ggml_c.GGML_TYPE_MXFP4, ggml.impl.ggml_c.GGML_TYPE_NVFP4 => |t| {
@@ -630,7 +630,7 @@ pub fn mulMatQ(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.ggm
             if (size_alloc > size_data) {
                 ggml.impl.assert(ggml.types.ggml_is_contiguously_allocated(t), "ggml_is_contiguously_allocated(t)");
                 ggml.impl.assert(t.view_src == null, "!t->view_src");
-                ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemsetAsync(@as([*]u8, @ptrCast(t.data.?)) + size_data, 0, size_alloc - size_data, stream), "cudaMemsetAsync((char *) t->data + size_data, 0, size_alloc - size_data, stream)", @src());
+                ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemsetAsync(@as([*]u8, @ptrCast(t.data.?)) + size_data, 0, size_alloc - size_data, stream), "cudaMemsetAsync((char *) t->data + size_data, 0, size_alloc - size_data, stream)", @src());
             }
         }
     }
@@ -696,7 +696,7 @@ pub fn mulMatQ(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.ggm
             } else {
                 ggml.cuda.quantize.quantizeMmqQ8_1(src1_d, null, src1_q8_1.get(), src0.type, ne10, s11, s12, s13, ne10_padded, ne11, ne12, ne13, stream);
             }
-            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
+            ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGetLastError(), "cudaGetLastError()", @src());
         }
 
         // Stride depends on quantization format
@@ -768,7 +768,7 @@ pub fn mulMatQ(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.ggm
         const sis1: c_int = @intCast(nb12 / nb11);
 
         ggml.cuda.mmid.launchMmIdsHelperDispatch(@ptrCast(@alignCast(id_t.data)), firstOf(i32, ids_src1.ptr), firstOf(i32, ids_dst.ptr), firstOf(ggml.cuda.mmid.TileSpec, tile_spec.ptr), i32Of(ne02), i32Of(ne12), i32Of(n_expert_used), i32Of(ne11), J_best, si1, sis1, dedup_bcast, stream);
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGetLastError(), "cudaGetLastError()", @src());
     }
 
     const nbytes_src1_q8_1: usize = @as(usize, @intCast(@divTrunc(ne12 * n_expert_used * ne10_padded * y_block_size, y_values_per_block))) + src1_q8_1_padding;
@@ -802,7 +802,7 @@ pub fn mulMatQ(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.ggm
         } else {
             ggml.cuda.quantize.quantizeMmqQ8_1(src1_d, firstOf(i32, ids_src1.ptr), src1_q8_1.get(), src0.type, ne10, s11, s12, s13, ne10_padded, ne11_flat, ne12_flat, ne13_flat, stream);
         }
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGetLastError(), "cudaGetLastError()", @src());
     }
 
     const s12: i64 = if (use_native_fp4)

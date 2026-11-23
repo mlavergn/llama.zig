@@ -3,7 +3,7 @@
 # each), a Winogrande CSV with malformed rows among 105 good ones, and a
 # multiple-choice file in its binary layout. Run by testing/scripts/tools-diff.
 set -eu
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 # The exit grace for the --log-jsonl error case (testing/harness/tools/exit_grace.c).
 if [ "$(uname)" = Darwin ]; then
     zig cc -O2 -dynamiclib "$ROOT/testing/harness/tools/exit_grace.c" -o "$DATA/exit_grace.so"

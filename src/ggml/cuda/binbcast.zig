@@ -69,7 +69,7 @@ fn launchBinBcastPack(
     src0_dd: ?*const anyopaque,
     src1_dd: ?*const anyopaque,
     dst_dd: ?*anyopaque,
-    stream: ggml.cuda.common.cu.cudaStream_t,
+    stream: ggml.cuda.common.cuda_c.cudaStream_t,
 ) void {
     const ne10 = src1.ne[0];
     const ne11 = src1.ne[1];
@@ -278,7 +278,7 @@ fn launchBinBcastPack(
 /// Ports `ggml_cuda_op_bin_bcast` (binbcast.cu:413 @b1b770d90) with the
 /// functor `bin_bcast_cuda` (binbcast.cu:390 @b1b770d90) it is instantiated
 /// with, as `bin_bcast_cuda<op, n_fuse>`.
-fn opBinBcast(comptime op: Op, comptime n_fuse: usize, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, dst: *const ggml.impl.ggml_c.ggml_tensor, src0_dd: ?*const anyopaque, src1_dd: ?*const anyopaque, dst_dd: ?*anyopaque, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn opBinBcast(comptime op: Op, comptime n_fuse: usize, src0: *const ggml.impl.ggml_c.ggml_tensor, src1: *const ggml.impl.ggml_c.ggml_tensor, dst: *const ggml.impl.ggml_c.ggml_tensor, src0_dd: ?*const anyopaque, src1_dd: ?*const anyopaque, dst_dd: ?*anyopaque, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     ggml.impl.assert(src1.type == ggml.impl.ggml_c.GGML_TYPE_F32 or src1.type == ggml.impl.ggml_c.GGML_TYPE_F16 or src1.type == ggml.impl.ggml_c.GGML_TYPE_BF16, "src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_F16 || src1->type == GGML_TYPE_BF16");
 
     const F32 = ggml.impl.ggml_c.GGML_TYPE_F32;

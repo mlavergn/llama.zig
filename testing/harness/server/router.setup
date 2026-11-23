@@ -4,7 +4,7 @@
 # a tokenizer (it loads, and is never asked to generate). Run by
 # testing/scripts/server-diff.
 set -eu
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 Q3="$ROOT/Qwen3-0.6B-Q8_0.gguf"
 FIX="$ROOT/zig-out/arch-fixtures/llama-dense.gguf"
 MM="$ROOT/zig-out/mmproj-fixtures"

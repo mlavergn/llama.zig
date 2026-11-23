@@ -187,10 +187,10 @@ fn vIsKView(K: *const ggml.impl.ggml_c.ggml_tensor, V: *const ggml.impl.ggml_c.g
 /// forwards to the driver's, which takes the kernel's function in the
 /// current context.
 fn occupancyMaxActiveBlocksPerMultiprocessor(k: ggml.cuda.kernels.Kernel, block_size: c_int, nbytes_shared: usize) c_int {
-    var f: ggml.cuda.common.cu.CUfunction = null;
-    ggml.cuda.common.cuCheck(ggml.cuda.common.cu.cuKernelGetFunction(&f, ggml.cuda.kernels.handle(k)), "cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max_blocks_per_sm, fattn_kernel, block_dim.x * block_dim.y * block_dim.z, nbytes_shared)", @src());
+    var f: ggml.cuda.common.cuda_c.CUfunction = null;
+    ggml.cuda.common.cuCheck(ggml.cuda.common.cuda_c.cuKernelGetFunction(&f, ggml.cuda.kernels.handle(k)), "cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max_blocks_per_sm, fattn_kernel, block_dim.x * block_dim.y * block_dim.z, nbytes_shared)", @src());
     var n: c_int = 0;
-    ggml.cuda.common.cuCheck(ggml.cuda.common.cu.cuOccupancyMaxActiveBlocksPerMultiprocessor(&n, f, block_size, nbytes_shared), "cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max_blocks_per_sm, fattn_kernel, block_dim.x * block_dim.y * block_dim.z, nbytes_shared)", @src());
+    ggml.cuda.common.cuCheck(ggml.cuda.common.cuda_c.cuOccupancyMaxActiveBlocksPerMultiprocessor(&n, f, block_size, nbytes_shared), "cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max_blocks_per_sm, fattn_kernel, block_dim.x * block_dim.y * block_dim.z, nbytes_shared)", @src());
     return n;
 }
 

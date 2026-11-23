@@ -37,7 +37,7 @@ fn launchCase(comptime family: []const u8, comptime warps_per_block: c_int, comp
 /// `n_head == 4` has no mma instantiation (upstream's four-head arm names
 /// only the tile and vec kernels), so its mma branch must not be analysed.
 /// The mma kernel runs four warps of the device's warp size.
-fn shapeCase(comptime n_head: i64, use_mma: bool, k_type: ggml.impl.ggml_c.enum_ggml_type, n_kv: c_int, n_batch: c_int, n_stream: c_int, warp_size: c_int, stream: ggml.cuda.common.cu.cudaStream_t, args: anytype) void {
+fn shapeCase(comptime n_head: i64, use_mma: bool, k_type: ggml.impl.ggml_c.enum_ggml_type, n_kv: c_int, n_batch: c_int, n_stream: c_int, warp_size: c_int, stream: ggml.cuda.common.cuda_c.cudaStream_t, args: anytype) void {
     if (n_head != 4 and use_mma) {
         const k_vecs_per_block = 32;
         const warps_per_block = 4;

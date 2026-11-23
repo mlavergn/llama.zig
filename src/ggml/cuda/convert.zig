@@ -23,10 +23,10 @@ const dequantize_block_size = 256;
 const q8_0_ne_align = 2048;
 
 /// Ports `to_t_cuda_t` (convert.cuh:7 @b1b770d90), with the element type erased.
-pub const ToFn = *const fn (x: ?*const anyopaque, y: ?*anyopaque, k: i64, stream: ggml.cuda.common.cu.cudaStream_t) void;
+pub const ToFn = *const fn (x: ?*const anyopaque, y: ?*anyopaque, k: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t) void;
 
 /// Ports `to_t_nc_cuda_t` (convert.cuh:22 @b1b770d90), with the element type erased.
-pub const ToNcFn = *const fn (x: ?*const anyopaque, y: ?*anyopaque, ne00: i64, ne01: i64, ne02: i64, ne03: i64, s01: i64, s02: i64, s03: i64, stream: ggml.cuda.common.cu.cudaStream_t) void;
+pub const ToNcFn = *const fn (x: ?*const anyopaque, y: ?*anyopaque, ne00: i64, ne01: i64, ne02: i64, ne03: i64, s01: i64, s02: i64, s03: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t) void;
 
 /// The `dequantize_kernel_t` a `dequantize_block` is instantiated with:
 /// its name and its `qk`/`qr`.
@@ -49,7 +49,7 @@ fn DequantizeBlock(comptime d: Deq, comptime T: type) type {
     return struct {
         const k = ggml.cuda.kernels.get("convert", ggml.cuda.kernels.tmpl("dequantize_block", &.{ ggml.cuda.kernels.int(d.qk), ggml.cuda.kernels.int(d.qr), "&" ++ d.name, ggml.cuda.kernels.typeName(T) }));
 
-        fn nc(vx: ?*const anyopaque, y: ?*anyopaque, ne00: i64, ne01: i64, ne02: i64, ne03: i64, s01: i64, s02: i64, s03: i64, stream: ggml.cuda.common.cu.cudaStream_t) void {
+        fn nc(vx: ?*const anyopaque, y: ?*anyopaque, ne00: i64, ne01: i64, ne02: i64, ne03: i64, s01: i64, s02: i64, s03: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
             const ne0203 = ne02 * ne03;
             const ne02_fdv = ggml.cuda.common.initFastdivValues(@bitCast(ne02));
             ggml.cuda.kernels.launch(k, .{
@@ -64,14 +64,14 @@ fn DequantizeBlock(comptime d: Deq, comptime T: type) type {
         }
 
         /// Ports `dequantize_block_cont_cuda` (convert.cu:263 @b1b770d90).
-        fn cont(vx: ?*const anyopaque, y: ?*anyopaque, kk: i64, stream: ggml.cuda.common.cu.cudaStream_t) void {
+        fn cont(vx: ?*const anyopaque, y: ?*anyopaque, kk: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
             nc(vx, y, kk, 1, 1, 1, @divTrunc(kk, d.qk), @divTrunc(kk, d.qk), @divTrunc(kk, d.qk), stream);
         }
     };
 }
 
 /// Ports `dequantize_block_q8_0_f16_cuda` (convert.cu:267 @b1b770d90).
-fn dequantizeBlockQ8_0F16(vx: ?*const anyopaque, y: ?*anyopaque, k: i64, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn dequantizeBlockQ8_0F16(vx: ?*const anyopaque, y: ?*anyopaque, k: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const num_blocks: c_int = @truncate(@divTrunc(k + q8_0_ne_align - 1, q8_0_ne_align));
     const p: ggml.cuda.kernels.LaunchParams = .{ .grid = .{ .x = @bitCast(num_blocks) }, .block = .{ .x = ggml.cuda.common.warp_size }, .stream = stream };
     if (@rem(k, q8_0_ne_align) == 0) {
@@ -103,7 +103,7 @@ fn DequantizeRow(comptime name: []const u8, comptime threads: comptime_int, comp
     return struct {
         const k = ggml.cuda.kernels.get("convert", ggml.cuda.kernels.tmpl("dequantize_block_" ++ name, &.{ggml.cuda.kernels.typeName(T)}));
 
-        fn run(vx: ?*const anyopaque, y: ?*anyopaque, kk: i64, stream: ggml.cuda.common.cu.cudaStream_t) void {
+        fn run(vx: ?*const anyopaque, y: ?*anyopaque, kk: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
             switch (grid) {
                 .per_block => {
                     const nb: c_int = @truncate(@divTrunc(kk, ggml.impl.ggml_c.QK_K));
@@ -133,7 +133,7 @@ fn DequantizeRowNvfp4(comptime T: type) type {
     return struct {
         const k = ggml.cuda.kernels.get("convert", ggml.cuda.kernels.tmpl("dequantize_block_nvfp4", &.{ggml.cuda.kernels.typeName(T)}));
 
-        fn run(vx: ?*const anyopaque, y: ?*anyopaque, kk: i64, stream: ggml.cuda.common.cu.cudaStream_t) void {
+        fn run(vx: ?*const anyopaque, y: ?*anyopaque, kk: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
             ggml.impl.assert(@rem(kk, ggml.impl.ggml_c.QK_NVFP4) == 0, "k % QK_NVFP4 == 0");
             const nb: c_int = @truncate(@divTrunc(kk, ggml.impl.ggml_c.QK_NVFP4));
             ggml.cuda.kernels.launch(k, .{ .grid = .{ .x = @bitCast(nb) }, .block = .{ .x = 32 }, .stream = stream }, .{ vx, y, kk });
@@ -150,7 +150,7 @@ fn ConvertUnary(comptime S: type, comptime T: type) type {
     return struct {
         const k = ggml.cuda.kernels.get("convert", ggml.cuda.kernels.tmpl("convert_unary", &.{ ggml.cuda.kernels.typeName(S), ggml.cuda.kernels.typeName(T) }));
 
-        fn nc(vx: ?*const anyopaque, y: ?*anyopaque, ne00: i64, ne01: i64, ne02: i64, ne03: i64, s01: i64, s02: i64, s03: i64, stream: ggml.cuda.common.cu.cudaStream_t) void {
+        fn nc(vx: ?*const anyopaque, y: ?*anyopaque, ne00: i64, ne01: i64, ne02: i64, ne03: i64, s01: i64, s02: i64, s03: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
             const ne0203 = ne02 * ne03;
             const ne02_fdv = ggml.cuda.common.initFastdivValues(@bitCast(ne02));
             ggml.cuda.kernels.launch(k, .{
@@ -164,7 +164,7 @@ fn ConvertUnary(comptime S: type, comptime T: type) type {
             }, .{ vx, y, ne00, ne01, ne0203, ne02_fdv, s01, s02, s03 });
         }
 
-        fn cont(vx: ?*const anyopaque, y: ?*anyopaque, kk: i64, stream: ggml.cuda.common.cu.cudaStream_t) void {
+        fn cont(vx: ?*const anyopaque, y: ?*anyopaque, kk: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
             if (@rem(kk, 4) == 0 and
                 @intFromPtr(vx) % (@sizeOf(S) * 4) == 0 and
                 @intFromPtr(y) % (@sizeOf(T) * 4) == 0)

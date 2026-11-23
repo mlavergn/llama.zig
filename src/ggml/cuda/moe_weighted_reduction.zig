@@ -13,7 +13,7 @@
 const ggml = @import("../module.zig");
 /// Ports `launch_moe_weighted_reduction` (moe-weighted-reduction.cu:27 @b1b770d90),
 /// which launches with `<<<>>>`.
-fn launch(experts: ?*const anyopaque, expert_scale: ?*const anyopaque, weights: ?*const anyopaque, dst: ?*anyopaque, n_embd: i64, n_tokens: i64, n_expert_used: c_int, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn launch(experts: ?*const anyopaque, expert_scale: ?*const anyopaque, weights: ?*const anyopaque, dst: ?*anyopaque, n_embd: i64, n_tokens: i64, n_expert_used: c_int, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const threads = 256;
     // `dim3`'s members are `unsigned int`.
     const blocks: ggml.cuda.kernels.Dim3 = .{
@@ -54,5 +54,5 @@ pub fn opMoeWeightedReduction(ctx: *ggml.cuda.common.Context, experts: *const gg
         @truncate(n_expert_used),
         stream,
     );
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGetLastError(), "cudaGetLastError()", @src());
 }

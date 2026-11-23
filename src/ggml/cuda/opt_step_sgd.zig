@@ -11,7 +11,7 @@ const ggml = @import("../module.zig");
 const block_size = 256;
 
 /// Ports `opt_step_sgd_f32_cuda` (opt-step-sgd.cu:18 @b1b770d90).
-fn optStepSgdF32Cuda(x: ?*anyopaque, g: ?*const anyopaque, pars: ?*const anyopaque, k: i64, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn optStepSgdF32Cuda(x: ?*anyopaque, g: ?*const anyopaque, pars: ?*const anyopaque, k: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const block_dims: ggml.cuda.kernels.Dim3 = .{ .x = block_size };
     const block_nums: ggml.cuda.kernels.Dim3 = .{ .x = @truncate(@as(u64, @bitCast(@divTrunc(k + block_size - 1, block_size)))) };
     ggml.cuda.kernels.launch(ggml.cuda.kernels.get("opt-step-sgd", "opt_step_sgd_f32"), .{

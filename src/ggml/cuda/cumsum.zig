@@ -19,7 +19,7 @@ const ggml = @import("../module.zig");
 const block_size = 256;
 
 /// `cub_shim.cu`'s wrapper of `cumsum_cub<float>`'s `InclusiveSum`.
-extern fn ggml_cuda_cub_inclusive_sum_f32(d_temp_storage: ?*anyopaque, tmp_size: *usize, src: [*]const f32, dst: [*]f32, ne: i64, stream: ggml.cuda.common.cu.cudaStream_t) ggml.cuda.common.cu.cudaError_t;
+extern fn ggml_cuda_cub_inclusive_sum_f32(d_temp_storage: ?*anyopaque, tmp_size: *usize, src: [*]const f32, dst: [*]f32, ne: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t) ggml.cuda.common.cuda_c.cudaError_t;
 
 /// A `dim3` member from an `int64_t`: C++ converts modulo 2^32.
 fn dimOf(v: i64) u32 {
@@ -34,7 +34,7 @@ fn strideOf(nb: i64, ts: usize) i64 {
 
 /// Ports `cumsum_cub` (cumsum.cu:190 @b1b770d90) for `T = float`. Upstream
 /// checks neither call's result, and neither does this.
-fn cumsumCub(pool: *ggml.cuda.common.Pool, src: [*]const f32, dst: [*]f32, ne: i64, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn cumsumCub(pool: *ggml.cuda.common.Pool, src: [*]const f32, dst: [*]f32, ne: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     var tmp_size: usize = 0;
 
     // Query how much temp storage CUDA UnBound (CUB) needs
@@ -64,7 +64,7 @@ fn cumsumCuda(
     nb1: i64,
     nb2: i64,
     nb3: i64,
-    stream: ggml.cuda.common.cu.cudaStream_t,
+    stream: ggml.cuda.common.cuda_c.cudaStream_t,
 ) void {
     const type_size: usize = @sizeOf(f32);
     var use_cub = false;

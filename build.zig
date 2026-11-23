@@ -29,18 +29,18 @@ const Git = struct {
                 const dest = b.root.joinString(b.allocator, dep.path) catch @panic("OOM");
                 missing += 1;
                 if (std.Io.Dir.cwd().access(io, dest, .{})) |_| {
-                    std.debug.print("{s} exists but is not a Zig package\n", .{dep.path});
+                    std.log.err("{s} exists but is not a Zig package", .{dep.path});
                 } else |err| switch (err) {
                     error.FileNotFound => if (Self.clone(io, dep.clone, dest)) {
                         cloned += 1;
                     } else |clone_err| {
-                        std.debug.print("git clone {s} {s} failed [{any}]\n", .{ dep.clone, dep.path, clone_err });
+                        std.log.err("git clone {s} {s} failed [{any}]", .{ dep.clone, dep.path, clone_err });
                     },
-                    else => std.debug.print("cannot check {s} [{any}]\n", .{ dep.path, err }),
+                    else => std.log.err("cannot check {s} [{any}]", .{ dep.path, err }),
                 }
             }
         }
-        if (cloned > 0) std.debug.print("cloned {d} of {d} missing dependencies; re-run zig build\n", .{ cloned, missing });
+        if (cloned > 0) std.log.err("cloned {d} of {d} missing dependencies; re-run zig build", .{ cloned, missing });
         std.process.exit(1);
     }
 
@@ -239,6 +239,7 @@ fn cudaOptions(b: *std.Build, target: std.Build.ResolvedTarget) ?llamacpp.Cuda {
     };
     // nvcc compiles host code with the system g++; ask it where its runtime is.
     const libstdcxx = std.mem.trim(u8, b.run(&.{ "g++", "-print-file-name=libstdc++.so" }), " \r\n\t");
+    const libgcc_s = std.mem.trim(u8, b.run(&.{ "g++", "-print-file-name=libgcc_s.so.1" }), " \r\n\t");
     // The swap: the Zig host layer is the CUDA
     // backend. `-Dcuda-port=false` builds upstream's instead, which only the
     // gates want -- `testing/scripts/cuda-node-diff` diffs the two.
@@ -247,7 +248,7 @@ fn cudaOptions(b: *std.Build, target: std.Build.ResolvedTarget) ?llamacpp.Cuda {
     // (`GGML_CUDA_FA_ALL_QUANTS`); a shorter list is how the
     // f16 fallback of a K/V pair with no vector instance gets gated.
     const fa_quants = b.option([]const u8, "cuda-fa-quants", "FlashAttention K-V type combinations to compile, \"all\" or e.g. \"q8_0-q8_0;q8_0-q4_0\" (default: all)") orelse "all";
-    return .{ .toolkit = toolkit, .arch = arch, .libstdcxx = libstdcxx, .port = port, .fa_quants = fa_quants };
+    return .{ .toolkit = toolkit, .arch = arch, .libstdcxx = libstdcxx, .libgcc_s = libgcc_s, .port = port, .fa_quants = fa_quants };
 }
 
 /// Resolves `-Dblas`: ggml's BLAS backend over Apple's Accelerate.

@@ -7,7 +7,9 @@
 // path that is not absolute is taken under `%USERPROFILE%`, so a script can
 // name a model on the laptop without knowing its user's name.
 //
-// Usage: win_node_dump <out name> <model> <prompt> <threads> [cpu|gpu] [fused <n>]
+// Usage: win_node_dump <out name> <model> <prompt> <threads> [cpu|gpu] [fused <n>] [NAME=VALUE]
+//   A last argument holding `=` is set in the environment first and dropped,
+//   as win_ops_dump does: `NODE_DUMP_LOAD=dio` for the unbuffered load.
 
 #define main node_dump_main
 #include "node_dump.c"
@@ -21,6 +23,10 @@ static void temp_path(char * buf, size_t len, const char * name) {
 }
 
 int main(int argc, char ** argv) {
+    if (argc > 5 && strchr(argv[argc - 1], '=')) {
+        if (_putenv(argv[argc - 1]) != 0) { fprintf(stderr, "cannot set %s\n", argv[argc - 1]); return 2; }
+        argc--;
+    }
     if (argc < 5) {
         fprintf(stderr, "usage: %s <out name> <model> <prompt> <threads> [cpu|gpu] [fused <n>]\n", argv[0]);
         return 2;

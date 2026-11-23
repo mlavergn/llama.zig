@@ -94,7 +94,7 @@ fn offset(comptime T: type, p: ?*anyopaque, n: i64) ?*anyopaque {
 }
 
 /// Ports `unary_cuda` (unary.cu:131 @b1b770d90).
-fn unaryCuda(comptime op: Op, comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, k: c_int, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn unaryCuda(comptime op: Op, comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, k: c_int, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const num_blocks: c_int = @divTrunc(k + neg_block_size - 1, neg_block_size);
     ggml.cuda.kernels.launchPdl(unaryKernel(op, T), .{
         .grid = .{ .x = @bitCast(num_blocks) },
@@ -109,7 +109,7 @@ fn unaryStridedKernel(comptime op: Op, comptime T: type) ggml.cuda.kernels.Kerne
 
 /// Ports `unary_cuda_strided` (unary.cu:159 @b1b770d90), new at v0.7.0:
 /// the same op over a source of any strides, writing a contiguous `dst`.
-fn unaryCudaStrided(comptime op: Op, comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, k: c_int, ne00: i64, ne01: i64, ne02: i64, nb00: usize, nb01: usize, nb02: usize, nb03: usize, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn unaryCudaStrided(comptime op: Op, comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, k: c_int, ne00: i64, ne01: i64, ne02: i64, nb00: usize, nb01: usize, nb02: usize, nb03: usize, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const num_blocks: c_int = @divTrunc(k + neg_block_size - 1, neg_block_size);
     ggml.cuda.kernels.launchPdl(unaryStridedKernel(op, T), .{
         .grid = .{ .x = @bitCast(num_blocks) },
@@ -169,7 +169,7 @@ pub fn opUnary(comptime op: Op, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.
 }
 
 /// Ports `unary_gated_cuda` (unary.cu:324 @b1b770d90).
-fn unaryGatedCuda(comptime op: Op, comptime T: type, x: ?*const anyopaque, g: ?*const anyopaque, dst: ?*anyopaque, k: i64, n: i64, o0: i64, o1: i64, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn unaryGatedCuda(comptime op: Op, comptime T: type, x: ?*const anyopaque, g: ?*const anyopaque, dst: ?*anyopaque, k: i64, n: i64, o0: i64, o1: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const num_blocks: i64 = @divTrunc(k + glu_block_size - 1, glu_block_size);
     ggml.cuda.kernels.launchPdl(gatedKernel(op, T), .{
         .grid = .{ .x = uint(num_blocks) },
@@ -259,7 +259,7 @@ pub fn opGated(comptime op: Op, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.
 
 /// Ports `swiglu_oai_cuda` (unary.cu:434 @b1b770d90), which launches with
 /// `<<<>>>`, not PDL.
-fn swigluOaiCuda(x: ?*const anyopaque, g: ?*const anyopaque, dst: ?*anyopaque, k: i64, n: i64, o0: i64, o1: i64, alpha: f32, limit: f32, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn swigluOaiCuda(x: ?*const anyopaque, g: ?*const anyopaque, dst: ?*anyopaque, k: i64, n: i64, o0: i64, o1: i64, alpha: f32, limit: f32, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const num_blocks: i64 = @divTrunc(k + glu_block_size - 1, glu_block_size);
     ggml.cuda.kernels.launch(ggml.cuda.kernels.get("unary", "swiglu_oai_kernel<float>"), .{
         .grid = .{ .x = uint(num_blocks) },
@@ -314,7 +314,7 @@ pub fn opSwigluOai(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_t
 
 /// Ports `swiglu_clamp_cuda` (unary.cu:500 @b1b770d90), which launches
 /// `swiglu_clamp_kernel` (unary.cu:486 @b1b770d90) with `<<<>>>`, not PDL.
-fn swigluClampCuda(comptime T: type, gate: ?*const anyopaque, up: ?*const anyopaque, dst: ?*anyopaque, k: i64, n: i64, o0: i64, o1: i64, limit: f32, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn swigluClampCuda(comptime T: type, gate: ?*const anyopaque, up: ?*const anyopaque, dst: ?*anyopaque, k: i64, n: i64, o0: i64, o1: i64, limit: f32, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const num_blocks: i64 = @divTrunc(k + glu_block_size - 1, glu_block_size);
     ggml.cuda.kernels.launch(comptime ggml.cuda.kernels.get("unary", ggml.cuda.kernels.tmpl("swiglu_clamp_kernel", &.{ggml.cuda.kernels.typeName(T)})), .{
         .grid = .{ .x = uint(num_blocks) },
@@ -378,7 +378,7 @@ pub fn opSwigluClamp(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml
 }
 
 /// Ports `xielu_cuda` (unary.cu:580 @b1b770d90).
-fn xieluCuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, k: c_int, alpha_n: f32, alpha_p: f32, beta: f32, eps: f32, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn xieluCuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, k: c_int, alpha_n: f32, alpha_p: f32, beta: f32, eps: f32, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const num_blocks: c_int = @divTrunc(k + xielu_block_size, xielu_block_size);
     ggml.cuda.kernels.launch(ggml.cuda.kernels.get("unary", ggml.cuda.kernels.tmpl("xielu_kernel", &.{ggml.cuda.kernels.typeName(T)})), .{
         .grid = .{ .x = @bitCast(num_blocks) },
@@ -418,7 +418,7 @@ pub fn opXielu(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tenso
 /// Ports `silu_back_cuda` (unary.cu:632 @b1b770d90). The C divides by
 /// `CUDA_SILU_BLOCK_SIZE` after adding `CUDA_SILU_BACK_BLOCK_SIZE - 1`; both
 /// are 256.
-fn siluBackCuda(comptime T: type, grad: ?*const anyopaque, x: ?*const anyopaque, dst: ?*anyopaque, k: c_int, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn siluBackCuda(comptime T: type, grad: ?*const anyopaque, x: ?*const anyopaque, dst: ?*anyopaque, k: c_int, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const num_blocks: c_int = @divTrunc(k + silu_back_block_size - 1, silu_block_size);
     ggml.cuda.kernels.launch(ggml.cuda.kernels.get("unary", ggml.cuda.kernels.tmpl("silu_back_kernel", &.{ggml.cuda.kernels.typeName(T)})), .{
         .grid = .{ .x = @bitCast(num_blocks) },
@@ -452,7 +452,7 @@ pub fn opSiluBack(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_te
 }
 
 /// Ports `leaky_relu_cuda` (unary.cu:678 @b1b770d90).
-fn leakyReluCuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, k: c_int, negative_slope: f32, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn leakyReluCuda(comptime T: type, x: ?*const anyopaque, dst: ?*anyopaque, k: c_int, negative_slope: f32, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const num_blocks: c_int = @divTrunc(k + relu_block_size - 1, relu_block_size);
     ggml.cuda.kernels.launch(ggml.cuda.kernels.get("unary", ggml.cuda.kernels.tmpl("leaky_relu_kernel", &.{ggml.cuda.kernels.typeName(T)})), .{
         .grid = .{ .x = @bitCast(num_blocks) },

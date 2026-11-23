@@ -904,7 +904,7 @@ pub fn processMtmdPrompt(
         videos.deinit(gpa);
     }
     for (files) |file| {
-        const out = mtmd.helper.mtmd_helper_bitmap_init_from_buf(mctx.?, file.ptr, file.len, is_placeholder, init_opt);
+        const out = mtmd.helper.mtmd_helper_bitmap_init_from_buf(mctx, file.ptr, file.len, is_placeholder, init_opt);
         if (out.bitmap == null) {
             return common_chat.exception.throw(error.RuntimeError, "Failed to load image or audio file", .{});
         }

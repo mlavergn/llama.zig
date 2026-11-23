@@ -55,7 +55,7 @@ pub fn opCrossEntropyLoss(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c
     } else {
         ggml.cuda.kernels.launch(ggml.cuda.kernels.get("cross-entropy-loss", "cross_entropy_loss_f32<(bool)0>"), .{ .grid = blocks_num, .block = blocks_dim, .shmem = 0, .stream = stream }, args);
     }
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGetLastError(), "cudaGetLastError()", @src());
 
     // Combine results from individual blocks:
     ggml.cuda.sum.sumF32Cuda(pool, @ptrCast(dst_tmp.ptr), @ptrCast(@alignCast(dst.data)), blocks_num.x, stream);

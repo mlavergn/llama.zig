@@ -256,15 +256,15 @@ const Common = struct {
     fusion: ggml.cuda.common.MmFusionArgsDevice,
     dst: ?*f32,
     ncols_x: u32,
-    nchannels_y: ggml.cuda.common.cu.uint3,
+    nchannels_y: ggml.cuda.common.cuda_c.uint3,
     stride_row_x: u32,
     stride_col_y: u32,
     stride_col_dst: u32,
-    channel_ratio: ggml.cuda.common.cu.uint3,
+    channel_ratio: ggml.cuda.common.cuda_c.uint3,
     stride_channel_x: u32,
     stride_channel_y: u32,
     stride_channel_dst: u32,
-    sample_ratio: ggml.cuda.common.cu.uint3,
+    sample_ratio: ggml.cuda.common.cuda_c.uint3,
     stride_sample_x: u32,
     stride_sample_y: u32,
     stride_sample_dst: u32,
@@ -276,7 +276,7 @@ fn mmvqKernel(comptime ty: ggml.impl.ggml_c.enum_ggml_type, comptime ncols_dst: 
 }
 
 /// Ports `mul_mat_vec_q_switch_fusion` (mmvq.cu:1044 @b1b770d90).
-fn switchFusion(comptime ty: ggml.impl.ggml_c.enum_ggml_type, comptime ncols_dst: comptime_int, comptime small_k: bool, comptime halve_iters: bool, a: *const Common, dims: [2]ggml.cuda.kernels.Dim3, nbytes_shared: c_int, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn switchFusion(comptime ty: ggml.impl.ggml_c.enum_ggml_type, comptime ncols_dst: comptime_int, comptime small_k: bool, comptime halve_iters: bool, a: *const Common, dims: [2]ggml.cuda.kernels.Dim3, nbytes_shared: c_int, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const f = a.fusion;
     const has_fusion = f.gate != null or f.x_bias != null or f.gate_bias != null or f.x_scale != null or f.gate_scale != null;
     const p: ggml.cuda.kernels.LaunchParams = .{ .grid = dims[0], .block = dims[1], .shmem = @intCast(nbytes_shared), .stream = stream };
@@ -302,7 +302,7 @@ fn switchFusion(comptime ty: ggml.impl.ggml_c.enum_ggml_type, comptime ncols_dst
 /// takes the fusion arguments by value either way; `has_fusion` picks the
 /// instantiation that reads them. A shared expert is one more
 /// channel of blocks, the last, which the kernel points at its weights.
-fn moeLaunch(comptime ty: ggml.impl.ggml_c.enum_ggml_type, a: *const Common, nrows_x: u32, ncols_dst: u32, warp_size: c_int, nchannels_dst: c_int, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn moeLaunch(comptime ty: ggml.impl.ggml_c.enum_ggml_type, a: *const Common, nrows_x: u32, ncols_dst: u32, warp_size: c_int, nchannels_dst: c_int, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const rows_per_block = 2; // 2 gives best perf based on tuning
     const nblocks_rows: i64 = @divTrunc(@as(i64, nrows_x) + rows_per_block - 1, rows_per_block);
     const p: ggml.cuda.kernels.LaunchParams = .{
@@ -363,12 +363,12 @@ fn switchNcolsDst(
     stride_sample_y: c_int,
     stride_sample_dst: c_int,
     ids_stride: c_int,
-    stream: ggml.cuda.common.cu.cudaStream_t,
+    stream: ggml.cuda.common.cuda_c.cudaStream_t,
 ) void {
     ggml.impl.assert(@rem(ncols_x, @as(c_int, @intCast(ggml.types.ggml_blck_size(ty)))) == 0, "ncols_x % ggml_blck_size(type) == 0");
     ggml.impl.assert(ncols_dst <= max_batch_size, "ncols_dst <= MMVQ_MAX_BATCH_SIZE");
 
-    const zero3: ggml.cuda.common.cu.uint3 = .{ .x = 0, .y = 0, .z = 0 };
+    const zero3: ggml.cuda.common.cuda_c.uint3 = .{ .x = 0, .y = 0, .z = 0 };
     const nchannels_y_fd = if (ids != null) ggml.cuda.common.initFastdivValues(@bitCast(@as(i64, nchannels_y))) else zero3;
     const channel_ratio_fd = if (ids != null) zero3 else ggml.cuda.common.initFastdivValues(@bitCast(@as(i64, @divTrunc(nchannels_dst, nchannels_x))));
     const sample_ratio_fd = ggml.cuda.common.initFastdivValues(@bitCast(@as(i64, @divTrunc(nsamples_dst, nsamples_x))));
@@ -485,7 +485,7 @@ fn switchNcolsDst(
 }
 
 /// Ports `mul_mat_vec_q_switch_type` (mmvq.cu:1300 @b1b770d90).
-fn switchType(vx: ?*const anyopaque, type_x: ggml.impl.ggml_c.enum_ggml_type, vy: ?*const anyopaque, ids: ?*const i32, fusion: ggml.cuda.common.MmFusionArgsDevice, dst: ?*f32, ncols_x: c_int, nrows_x: c_int, ncols_dst: c_int, stride_row_x: c_int, stride_col_y: c_int, stride_col_dst: c_int, nchannels_x: c_int, nchannels_y: c_int, nchannels_dst: c_int, stride_channel_x: c_int, stride_channel_y: c_int, stride_channel_dst: c_int, nsamples_x: c_int, nsamples_dst: c_int, stride_sample_x: c_int, stride_sample_y: c_int, stride_sample_dst: c_int, ids_stride: c_int, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn switchType(vx: ?*const anyopaque, type_x: ggml.impl.ggml_c.enum_ggml_type, vy: ?*const anyopaque, ids: ?*const i32, fusion: ggml.cuda.common.MmFusionArgsDevice, dst: ?*f32, ncols_x: c_int, nrows_x: c_int, ncols_dst: c_int, stride_row_x: c_int, stride_col_y: c_int, stride_col_dst: c_int, nchannels_x: c_int, nchannels_y: c_int, nchannels_dst: c_int, stride_channel_x: c_int, stride_channel_y: c_int, stride_channel_dst: c_int, nsamples_x: c_int, nsamples_dst: c_int, stride_sample_x: c_int, stride_sample_y: c_int, stride_sample_dst: c_int, ids_stride: c_int, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     switch (type_x) {
         inline ggml.impl.ggml_c.GGML_TYPE_Q1_0,
         ggml.impl.ggml_c.GGML_TYPE_Q2_0,
@@ -621,7 +621,7 @@ pub fn mulMatVecQ(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.
         if (size_alloc > size_data) {
             ggml.impl.assert(ggml.types.ggml_is_contiguously_allocated(src0), "ggml_is_contiguously_allocated(src0)");
             ggml.impl.assert(src0.view_src == null, "!src0->view_src");
-            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemsetAsync(@as([*]u8, @ptrCast(src0.data.?)) + size_data, 0, size_alloc - size_data, stream), "cudaMemsetAsync((char *) src0->data + size_data, 0, size_alloc - size_data, stream)", @src());
+            ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemsetAsync(@as([*]u8, @ptrCast(src0.data.?)) + size_data, 0, size_alloc - size_data, stream), "cudaMemsetAsync((char *) src0->data + size_data, 0, size_alloc - size_data, stream)", @src());
         }
     }
 

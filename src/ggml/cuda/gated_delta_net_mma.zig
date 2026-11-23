@@ -149,12 +149,12 @@ fn Init(comptime C: comptime_int, comptime V: comptime_int, comptime BLOCKS: com
             // `cudaFuncSetAttribute((const void *) gdn_single<C, V, BLOCKS>,
             // cudaFuncAttributeMaxDynamicSharedMemorySize, size)` on the
             // device just made current.
-            var dev: ggml.cuda.common.cu.CUdevice = 0;
-            ggml.cuda.common.cuCheck(ggml.cuda.common.cu.cuDeviceGet(&dev, ggml.cuda.common.getDevice()), "cuDeviceGet", @src());
-            const status = ggml.cuda.common.cu.cuKernelSetAttribute(ggml.cuda.common.cu.CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, size, ggml.cuda.kernels.handle(kernel(C, V, BLOCKS)), dev);
-            available[@intCast(device)] = status == ggml.cuda.common.cu.CUDA_SUCCESS;
-            if (status != ggml.cuda.common.cu.CUDA_SUCCESS) {
-                _ = ggml.cuda.common.cu.cudaGetLastError();
+            var dev: ggml.cuda.common.cuda_c.CUdevice = 0;
+            ggml.cuda.common.cuCheck(ggml.cuda.common.cuda_c.cuDeviceGet(&dev, ggml.cuda.common.getDevice()), "cuDeviceGet", @src());
+            const status = ggml.cuda.common.cuda_c.cuKernelSetAttribute(ggml.cuda.common.cuda_c.CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, size, ggml.cuda.kernels.handle(kernel(C, V, BLOCKS)), dev);
+            available[@intCast(device)] = status == ggml.cuda.common.cuda_c.CUDA_SUCCESS;
+            if (status != ggml.cuda.common.cuda_c.CUDA_SUCCESS) {
+                _ = ggml.cuda.common.cuda_c.cudaGetLastError();
             }
         }
     };
@@ -202,7 +202,7 @@ fn dim(x: i64) u32 {
 ///
 /// Return: whether the chunked kernel ran; false leaves the op to the
 /// recurrent kernel, with nothing launched.
-pub fn launch(device: c_int, a: *const Args, stream: ggml.cuda.common.cu.cudaStream_t) bool {
+pub fn launch(device: c_int, a: *const Args, stream: ggml.cuda.common.cuda_c.cudaStream_t) bool {
     if (a.state_out == null) return false;
     const path = selectPath(device, a);
     if (path == .ar) return false;
@@ -214,6 +214,6 @@ pub fn launch(device: c_int, a: *const Args, stream: ggml.cuda.common.cu.cudaStr
     } else {
         ggml.cuda.kernels.launch(kernel(16, 128, 1), .{ .grid = .{ .x = dim(a.H * a.n_seqs) }, .block = block, .shmem = @sizeOf(Shared(16, 128)), .stream = stream }, .{a.*});
     }
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGetLastError(), "cudaGetLastError()", @src());
     return true;
 }

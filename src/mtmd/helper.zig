@@ -600,8 +600,11 @@ fn sha256Hex(buf: []const u8) [64:0]u8 {
 /// Ports `mtmd_helper_bitmap_init_from_buf` (mtmd-helper.cpp:442 @b1b770d90):
 /// audio by its magic bytes, else an image stb_image can read. The ID is
 /// the buffer's SHA-256 unless `placeholder`. `opt` is only read by the
-/// video paths, which this build does not compile.
-pub fn mtmd_helper_bitmap_init_from_buf(ctx: *const mod.mtmd.Context, buf_ptr: ?[*]const u8, len: usize, placeholder: bool, opt: InitOpt) callconv(.c) BitmapWrapper {
+/// video paths, which this build does not compile. `ctx` may be null, as
+/// the C's pointer may: only audio reads it, and a buffer that is neither
+/// audio nor an image fails without it (the server's decision API passes
+/// none for a vocab-only model).
+pub fn mtmd_helper_bitmap_init_from_buf(ctx: ?*const mod.mtmd.Context, buf_ptr: ?[*]const u8, len: usize, placeholder: bool, opt: InitOpt) callconv(.c) BitmapWrapper {
     _ = opt; // only used by video code paths
     const buf: []const u8 = if (len == 0) &.{} else buf_ptr.?[0..len];
     // calculate the hash if needed
@@ -617,7 +620,7 @@ pub fn mtmd_helper_bitmap_init_from_buf(ctx: *const mod.mtmd.Context, buf_ptr: ?
     if (isAudioFile(buf)) {
         var pcmf32: std.ArrayList(f32) = .empty;
         defer pcmf32.deinit(std.heap.c_allocator);
-        const sample_rate = mod.mtmd.mtmd_get_audio_sample_rate(ctx);
+        const sample_rate = mod.mtmd.mtmd_get_audio_sample_rate(ctx.?);
         if (sample_rate < 0) {
             logErr("This model does not support audio input\n", .{});
             return .{ .bitmap = null, .video_ctx = null };

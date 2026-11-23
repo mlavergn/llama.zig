@@ -817,7 +817,7 @@ fn makeChatOpt(j: *const json.Value) !server_data.oaicompat.ServerChatParams {
     const a = ra();
     const o = try j.at("opt");
     var opt: server_data.oaicompat.ServerChatParams = .{
-        .use_jinja = try o.value("zigjinja", bool, false),
+        .use_jinja = try o.value("jinja", bool, false),
         .prefill_assistant = try o.value("prefill_assistant", bool, true),
         .reasoning_format = @fromBackingInt(@intCast(try o.value("reasoning_format", c_int, 0))),
         .tmpls = undefined,

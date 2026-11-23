@@ -33,8 +33,8 @@ fn rt(comptime T: type, v: T) T {
 }
 
 /// `make_uint3(0, 0, 0)`, at runtime.
-fn uint3Zero() ggml.cuda.common.cu.uint3 {
-    return rt(ggml.cuda.common.cu.uint3, .{ .x = 0, .y = 0, .z = 0 });
+fn uint3Zero() ggml.cuda.common.cuda_c.uint3 {
+    return rt(ggml.cuda.common.cuda_c.uint3, .{ .x = 0, .y = 0, .z = 0 });
 }
 
 /// An `int` converted to a `dim3` member (`unsigned int`).
@@ -55,7 +55,7 @@ fn int(v: i64) c_int {
 }
 
 /// Ports `norm_f32_cuda` (norm.cu:362 @b1b770d90).
-fn normF32Cuda(x: CPtr, dst: Ptr, ncols: c_int, nrows: c_int, nchannels: c_int, nsamples: c_int, stride_row: i64, stride_channel: i64, stride_sample: i64, eps: f32, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn normF32Cuda(x: CPtr, dst: Ptr, ncols: c_int, nrows: c_int, nchannels: c_int, nsamples: c_int, stride_row: i64, stride_channel: i64, stride_sample: i64, eps: f32, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const blocks_num = rowGrid(nrows, nchannels, nsamples);
     if (ncols < 1024) {
         const block_dims: ggml.cuda.kernels.Dim3 = .{ .x = ggml.cuda.common.warp_size };
@@ -77,7 +77,7 @@ fn normF32Cuda(x: CPtr, dst: Ptr, ncols: c_int, nrows: c_int, nchannels: c_int, 
 }
 
 /// Ports `group_norm_f32_cuda` (norm.cu:375 @b1b770d90).
-fn groupNormF32Cuda(x: CPtr, dst: Ptr, num_groups: c_int, eps: f32, group_size: c_int, ne_elements: c_int, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn groupNormF32Cuda(x: CPtr, dst: Ptr, num_groups: c_int, eps: f32, group_size: c_int, ne_elements: c_int, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     if (group_size < 1024) {
         const block_dims: ggml.cuda.kernels.Dim3 = .{ .x = ggml.cuda.common.warp_size };
         ggml.cuda.kernels.launch(ggml.cuda.kernels.get("norm", "group_norm_f32<(int)32>"), .{
@@ -110,10 +110,10 @@ const RmsOperand = struct {
     stride_row: i64 = 0,
     stride_channel: i64 = 0,
     stride_sample: i64 = 0,
-    ncols_packed: ggml.cuda.common.cu.uint3 = .{ .x = 0, .y = 0, .z = 0 },
-    nrows_packed: ggml.cuda.common.cu.uint3 = .{ .x = 0, .y = 0, .z = 0 },
-    nchannels_packed: ggml.cuda.common.cu.uint3 = .{ .x = 0, .y = 0, .z = 0 },
-    nsamples_packed: ggml.cuda.common.cu.uint3 = .{ .x = 0, .y = 0, .z = 0 },
+    ncols_packed: ggml.cuda.common.cuda_c.uint3 = .{ .x = 0, .y = 0, .z = 0 },
+    nrows_packed: ggml.cuda.common.cuda_c.uint3 = .{ .x = 0, .y = 0, .z = 0 },
+    nchannels_packed: ggml.cuda.common.cuda_c.uint3 = .{ .x = 0, .y = 0, .z = 0 },
+    nsamples_packed: ggml.cuda.common.cuda_c.uint3 = .{ .x = 0, .y = 0, .z = 0 },
 
     /// `mul_t ? mul_t->data : nullptr`.
     fn data(self: RmsOperand) CPtr {
@@ -122,7 +122,7 @@ const RmsOperand = struct {
 };
 
 /// Ports `RMS_NORM_LAUNCH` (norm.cu:386 @b1b770d90).
-fn rmsNormLaunch(comptime block_size: comptime_int, comptime vpt: comptime_int, comptime vec: bool, comptime do_multiply: bool, comptime do_add: bool, comptime do_scale: bool, blocks_num: ggml.cuda.kernels.Dim3, stream: ggml.cuda.common.cu.cudaStream_t, args: anytype) void {
+fn rmsNormLaunch(comptime block_size: comptime_int, comptime vpt: comptime_int, comptime vec: bool, comptime do_multiply: bool, comptime do_add: bool, comptime do_scale: bool, blocks_num: ggml.cuda.kernels.Dim3, stream: ggml.cuda.common.cuda_c.cudaStream_t, args: anytype) void {
     const block_dims: ggml.cuda.kernels.Dim3 = .{ .x = block_size };
     ggml.cuda.kernels.launchPdl(rmsNormKernel(block_size, vpt, vec, do_multiply, do_add, do_scale), .{
         .grid = blocks_num,
@@ -152,7 +152,7 @@ fn rmsNormF32Dispatch(
     eps: f32,
     mul: RmsOperand,
     add: RmsOperand,
-    stream: ggml.cuda.common.cu.cudaStream_t,
+    stream: ggml.cuda.common.cuda_c.cudaStream_t,
     scale_out: f32,
 ) void {
     comptime std.debug.assert(!do_add or do_multiply); // fusing add is not supported without multiplying
@@ -225,7 +225,7 @@ fn rmsNormF32Dispatch(
 /// Ports `rms_norm_f32_cuda` (norm.cu:453 @b1b770d90), its `do_scale`
 /// template argument comptime; `scale_out` multiplies the normalised row
 /// when it is set (the `RMS_NORM + SCALE` fusion) and is ignored otherwise.
-fn rmsNormF32Cuda(comptime do_scale: bool, x_t: *const ggml.impl.ggml_c.ggml_tensor, dst: Ptr, ncols: c_int, nrows: c_int, nchannels: c_int, nsamples: c_int, stride_row: i64, stride_channel: i64, stride_sample: i64, eps: f32, stream: ggml.cuda.common.cu.cudaStream_t, scale_out: f32) void {
+fn rmsNormF32Cuda(comptime do_scale: bool, x_t: *const ggml.impl.ggml_c.ggml_tensor, dst: Ptr, ncols: c_int, nrows: c_int, nchannels: c_int, nsamples: c_int, stride_row: i64, stride_channel: i64, stride_sample: i64, eps: f32, stream: ggml.cuda.common.cuda_c.cudaStream_t, scale_out: f32) void {
     const blocks_num = rowGrid(nrows, nchannels, nsamples);
     rmsNormF32Dispatch(false, false, do_scale, blocks_num, x_t, dst, ncols, nchannels, nsamples, stride_row, stride_channel, stride_sample, eps, .{}, .{}, stream, scale_out);
 }
@@ -258,7 +258,7 @@ fn rmsNormMulF32Cuda(
     add_nchannels: u32,
     add_nsamples: u32,
     eps: f32,
-    stream: ggml.cuda.common.cu.cudaStream_t,
+    stream: ggml.cuda.common.cuda_c.cudaStream_t,
 ) void {
     const blocks_num = rowGrid(nrows, nchannels, nsamples);
     if (mul_t == null) {
@@ -294,7 +294,7 @@ fn rmsNormMulF32Cuda(
 }
 
 /// Ports `rms_norm_back_f32_cuda` (norm.cu:523 @b1b770d90).
-fn rmsNormBackF32Cuda(grad: CPtr, xf: CPtr, dst: Ptr, ncols: c_int, nrows: c_int, eps: f32, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn rmsNormBackF32Cuda(grad: CPtr, xf: CPtr, dst: Ptr, ncols: c_int, nrows: c_int, eps: f32, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     if (ncols < 1024) {
         const block_dims: ggml.cuda.kernels.Dim3 = .{ .x = ggml.cuda.common.warp_size };
         ggml.cuda.kernels.launch(ggml.cuda.kernels.get("norm", "rms_norm_back_f32<(int)32>"), .{
@@ -315,7 +315,7 @@ fn rmsNormBackF32Cuda(grad: CPtr, xf: CPtr, dst: Ptr, ncols: c_int, nrows: c_int
 }
 
 /// Ports `l2_norm_f32_cuda` (norm.cu:533 @b1b770d90).
-fn l2NormF32Cuda(x: CPtr, dst: Ptr, ncols: c_int, nrows: c_int, nchannels: c_int, nsamples: c_int, stride_row: i64, stride_channel: i64, stride_sample: i64, eps: f32, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn l2NormF32Cuda(x: CPtr, dst: Ptr, ncols: c_int, nrows: c_int, nchannels: c_int, nsamples: c_int, stride_row: i64, stride_channel: i64, stride_sample: i64, eps: f32, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const blocks_num = rowGrid(nrows, nchannels, nsamples);
     if (ncols < 1024) {
         const block_dims: ggml.cuda.kernels.Dim3 = .{ .x = ggml.cuda.common.warp_size };

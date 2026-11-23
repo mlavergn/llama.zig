@@ -25,8 +25,8 @@ fn i32Of(x: i64) c_int {
 /// Ports `batched_mul_mat_traits` (ggml-cuda.cu:1786 @b1b770d90), for each `T`.
 const Traits = struct {
     cuda_type_size: usize,
-    compute_type: ggml.cuda.common.cu.cublasComputeType_t,
-    data_type: ggml.cuda.common.cu.cudaDataType,
+    compute_type: ggml.cuda.common.cuda_c.cublasComputeType_t,
+    data_type: ggml.cuda.common.cuda_c.cudaDataType,
     ggml_type_val: ggml.impl.ggml_c.enum_ggml_type,
     alpha: *const anyopaque,
     beta: *const anyopaque,
@@ -42,9 +42,9 @@ const zero_f16: u16 = 0x0000;
 
 fn traitsOf(comptime t: ggml.impl.ggml_c.enum_ggml_type) Traits {
     return switch (t) {
-        ggml.impl.ggml_c.GGML_TYPE_F32 => .{ .cuda_type_size = 4, .compute_type = ggml.cuda.common.cu.CUBLAS_COMPUTE_32F, .data_type = ggml.cuda.common.cu.CUDA_R_32F, .ggml_type_val = ggml.impl.ggml_c.GGML_TYPE_F32, .alpha = &one_f32, .beta = &zero_f32, .convert = ggml.cuda.convert.getToFp32, .convert_nc = ggml.cuda.convert.getToFp32Nc },
-        ggml.impl.ggml_c.GGML_TYPE_BF16 => .{ .cuda_type_size = 2, .compute_type = ggml.cuda.common.cu.CUBLAS_COMPUTE_32F, .data_type = ggml.cuda.common.cu.CUDA_R_16BF, .ggml_type_val = ggml.impl.ggml_c.GGML_TYPE_BF16, .alpha = &one_f32, .beta = &zero_f32, .convert = ggml.cuda.convert.getToBf16, .convert_nc = ggml.cuda.convert.getToBf16Nc },
-        ggml.impl.ggml_c.GGML_TYPE_F16 => .{ .cuda_type_size = 2, .compute_type = ggml.cuda.common.cu.CUBLAS_COMPUTE_16F, .data_type = ggml.cuda.common.cu.CUDA_R_16F, .ggml_type_val = ggml.impl.ggml_c.GGML_TYPE_F16, .alpha = &one_f16, .beta = &zero_f16, .convert = ggml.cuda.convert.getToFp16, .convert_nc = ggml.cuda.convert.getToFp16Nc },
+        ggml.impl.ggml_c.GGML_TYPE_F32 => .{ .cuda_type_size = 4, .compute_type = ggml.cuda.common.cuda_c.CUBLAS_COMPUTE_32F, .data_type = ggml.cuda.common.cuda_c.CUDA_R_32F, .ggml_type_val = ggml.impl.ggml_c.GGML_TYPE_F32, .alpha = &one_f32, .beta = &zero_f32, .convert = ggml.cuda.convert.getToFp32, .convert_nc = ggml.cuda.convert.getToFp32Nc },
+        ggml.impl.ggml_c.GGML_TYPE_BF16 => .{ .cuda_type_size = 2, .compute_type = ggml.cuda.common.cuda_c.CUBLAS_COMPUTE_32F, .data_type = ggml.cuda.common.cuda_c.CUDA_R_16BF, .ggml_type_val = ggml.impl.ggml_c.GGML_TYPE_BF16, .alpha = &one_f32, .beta = &zero_f32, .convert = ggml.cuda.convert.getToBf16, .convert_nc = ggml.cuda.convert.getToBf16Nc },
+        ggml.impl.ggml_c.GGML_TYPE_F16 => .{ .cuda_type_size = 2, .compute_type = ggml.cuda.common.cuda_c.CUBLAS_COMPUTE_16F, .data_type = ggml.cuda.common.cuda_c.CUDA_R_16F, .ggml_type_val = ggml.impl.ggml_c.GGML_TYPE_F16, .alpha = &one_f16, .beta = &zero_f16, .convert = ggml.cuda.convert.getToFp16, .convert_nc = ggml.cuda.convert.getToFp16Nc },
         else => @compileError("no batched_mul_mat_traits"),
     };
 }
@@ -200,9 +200,9 @@ fn mulMatCublasImpl(comptime compute_type: ggml.impl.ggml_c.enum_ggml_type, ctx:
     const r3 = @divTrunc(ne13, ne03);
 
     if (compute_type == ggml.impl.ggml_c.GGML_TYPE_F32 and ne12 == 1 and ne13 == 1) {
-        ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasSgemm_v2(cublas_h, ggml.cuda.common.cu.CUBLAS_OP_T, ggml.cuda.common.cu.CUBLAS_OP_N, i32Of(ne01), i32Of(ne11), i32Of(ne10), @ptrCast(@alignCast(alpha)), @ptrCast(@alignCast(src0_ptr)), i32Of(s01), @ptrCast(@alignCast(src1_ptr)), i32Of(s11), @ptrCast(@alignCast(beta)), @ptrCast(@alignCast(dst_ptr)), i32Of(ldc)), "cublasSgemm(...)", @src());
+        ggml.cuda.common.cublasCheck(ggml.cuda.common.cuda_c.cublasSgemm_v2(cublas_h, ggml.cuda.common.cuda_c.CUBLAS_OP_T, ggml.cuda.common.cuda_c.CUBLAS_OP_N, i32Of(ne01), i32Of(ne11), i32Of(ne10), @ptrCast(@alignCast(alpha)), @ptrCast(@alignCast(src0_ptr)), i32Of(s01), @ptrCast(@alignCast(src1_ptr)), i32Of(s11), @ptrCast(@alignCast(beta)), @ptrCast(@alignCast(dst_ptr)), i32Of(ldc)), "cublasSgemm(...)", @src());
     } else if (ne12 == 1 and ne13 == 1) {
-        ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasGemmEx(cublas_h, ggml.cuda.common.cu.CUBLAS_OP_T, ggml.cuda.common.cu.CUBLAS_OP_N, i32Of(ne01), i32Of(ne11), i32Of(ne10), alpha, src0_ptr, cu_data_type_a, i32Of(s01), src1_ptr, cu_data_type_b, i32Of(s11), beta, dst_ptr, cu_data_type, i32Of(ldc), cu_compute_type, ggml.cuda.common.cu.CUBLAS_GEMM_DEFAULT_TENSOR_OP), "cublasGemmEx(...)", @src());
+        ggml.cuda.common.cublasCheck(ggml.cuda.common.cuda_c.cublasGemmEx(cublas_h, ggml.cuda.common.cuda_c.CUBLAS_OP_T, ggml.cuda.common.cuda_c.CUBLAS_OP_N, i32Of(ne01), i32Of(ne11), i32Of(ne10), alpha, src0_ptr, cu_data_type_a, i32Of(s01), src1_ptr, cu_data_type_b, i32Of(s11), beta, dst_ptr, cu_data_type, i32Of(ldc), cu_compute_type, ggml.cuda.common.cuda_c.CUBLAS_GEMM_DEFAULT_TENSOR_OP), "cublasGemmEx(...)", @src());
     } else if (r2 == 1 and r3 == 1 and is_src0_cont_2 and is_src1_cont_2) {
         // with a [0, 2, 1, 3] perm. and ne02==1 the matrix strides need to be
         // determined from dim 3:
@@ -211,7 +211,7 @@ fn mulMatCublasImpl(comptime compute_type: ggml.impl.ggml_c.enum_ggml_type, ctx:
 
         // there is no broadcast and src0, src1 are contiguous across dims
         // 2, 3: use cublasGemmStridedBatchedEx
-        ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasGemmStridedBatchedEx(cublas_h, ggml.cuda.common.cu.CUBLAS_OP_T, ggml.cuda.common.cu.CUBLAS_OP_N, i32Of(ne01), i32Of(ne11), i32Of(ne10), alpha, src0_ptr, cu_data_type_a, i32Of(s01), sma, src1_ptr, cu_data_type_b, i32Of(s11), smb, beta, dst_ptr, cu_data_type, i32Of(ldc), ne1 * ldc, i32Of(ne12 * ne13), cu_compute_type, ggml.cuda.common.cu.CUBLAS_GEMM_DEFAULT_TENSOR_OP), "cublasGemmStridedBatchedEx(...)", @src());
+        ggml.cuda.common.cublasCheck(ggml.cuda.common.cuda_c.cublasGemmStridedBatchedEx(cublas_h, ggml.cuda.common.cuda_c.CUBLAS_OP_T, ggml.cuda.common.cuda_c.CUBLAS_OP_N, i32Of(ne01), i32Of(ne11), i32Of(ne10), alpha, src0_ptr, cu_data_type_a, i32Of(s01), sma, src1_ptr, cu_data_type_b, i32Of(s11), smb, beta, dst_ptr, cu_data_type, i32Of(ldc), ne1 * ldc, i32Of(ne12 * ne13), cu_compute_type, ggml.cuda.common.cuda_c.CUBLAS_GEMM_DEFAULT_TENSOR_OP), "cublasGemmStridedBatchedEx(...)", @src());
     } else {
         // use cublasGemmBatchedEx
         const ne23 = ne12 * ne13;
@@ -238,14 +238,14 @@ fn mulMatCublasImpl(comptime compute_type: ggml.impl.ggml_c.enum_ggml_type, ctx:
             r3,
         });
 
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGetLastError(), "cudaGetLastError()", @src());
 
         const ps = ptrs_src.get().?;
-        ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasGemmBatchedEx(cublas_h, ggml.cuda.common.cu.CUBLAS_OP_T, ggml.cuda.common.cu.CUBLAS_OP_N, i32Of(ne01), i32Of(ne11), i32Of(ne10), alpha, ps + 0 * @as(usize, @intCast(ne23)), cu_data_type_a, i32Of(s01), ps + 1 * @as(usize, @intCast(ne23)), cu_data_type_b, i32Of(s11), beta, @ptrCast(ptrs_dst.get().?), cu_data_type, i32Of(ldc), i32Of(ne23), cu_compute_type, ggml.cuda.common.cu.CUBLAS_GEMM_DEFAULT_TENSOR_OP), "cublasGemmBatchedEx(...)", @src());
+        ggml.cuda.common.cublasCheck(ggml.cuda.common.cuda_c.cublasGemmBatchedEx(cublas_h, ggml.cuda.common.cuda_c.CUBLAS_OP_T, ggml.cuda.common.cuda_c.CUBLAS_OP_N, i32Of(ne01), i32Of(ne11), i32Of(ne10), alpha, ps + 0 * @as(usize, @intCast(ne23)), cu_data_type_a, i32Of(s01), ps + 1 * @as(usize, @intCast(ne23)), cu_data_type_b, i32Of(s11), beta, @ptrCast(ptrs_dst.get().?), cu_data_type, i32Of(ldc), i32Of(ne23), cu_compute_type, ggml.cuda.common.cuda_c.CUBLAS_GEMM_DEFAULT_TENSOR_OP), "cublasGemmBatchedEx(...)", @src());
     }
 
     // Convert output back to F32 if needed
-    if (cu_data_type != ggml.cuda.common.cu.CUDA_R_32F) {
+    if (cu_data_type != ggml.cuda.common.cuda_c.CUDA_R_32F) {
         const to_fp32_cuda = ggml.cuda.convert.getToFp32(traits.ggml_type_val).?;
         to_fp32_cuda(dst_temp.get(), dst_ddf, ne_dst, main_stream);
     }
@@ -749,8 +749,8 @@ pub fn mulMatId(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tens
 
     const ids_host = std.heap.c_allocator.alloc(u8, ggml.types.ggml_nbytes(ids)) catch ggml.impl.abort("out of memory");
     defer std.heap.c_allocator.free(ids_host);
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(ids_host.ptr, ids.data, ggml.types.ggml_nbytes(ids), ggml.cuda.common.cu.cudaMemcpyDeviceToHost, stream), "cudaMemcpyAsync(ids_host.data(), ids->data, ggml_nbytes(ids), cudaMemcpyDeviceToHost, stream)", @src());
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamSynchronize(stream), "cudaStreamSynchronize(stream)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpyAsync(ids_host.ptr, ids.data, ggml.types.ggml_nbytes(ids), ggml.cuda.common.cuda_c.cudaMemcpyDeviceToHost, stream), "cudaMemcpyAsync(ids_host.data(), ids->data, ggml_nbytes(ids), cudaMemcpyDeviceToHost, stream)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamSynchronize(stream), "cudaStreamSynchronize(stream)", @src());
 
     var j02: i64 = 0;
     while (j02 < ne02) : (j02 += 1) { // expert matrices
@@ -774,8 +774,8 @@ pub fn mulMatId(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tens
     }
     ggml.impl.assert(n_to_sorted == n_rows, "ids_to_sorted_host.size() == size_t(ne_get_rows)");
 
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpyAsync(@ptrCast(ids_buf_dev.ptr), ids_sorted_host.ptr, 2 * n_rows * @sizeOf(i32), ggml.cuda.common.cu.cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(ids_buf_dev.ptr, ids_to_sorted_host.data(), 2*ne_get_rows*sizeof(int32_t), cudaMemcpyHostToDevice, stream)", @src());
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamSynchronize(stream), "cudaStreamSynchronize(stream)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemcpyAsync(@ptrCast(ids_buf_dev.ptr), ids_sorted_host.ptr, 2 * n_rows * @sizeOf(i32), ggml.cuda.common.cuda_c.cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync(ids_buf_dev.ptr, ids_to_sorted_host.data(), 2*ne_get_rows*sizeof(int32_t), cudaMemcpyHostToDevice, stream)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamSynchronize(stream), "cudaStreamSynchronize(stream)", @src());
 
     const ids_dev: [*]i32 = @ptrCast(ids_buf_dev.ptr.?);
     const ids_to_sorted: *const i32 = &ids_dev[0];
@@ -783,7 +783,7 @@ pub fn mulMatId(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tens
 
     const rows_i32: usize = n_rows * @sizeOf(i32);
     ggml.cuda.getrows.getRowsCuda(src1.data, src1.type, ids_to_sorted, src1_sorted.get(), type_src1_sorted, ne10, nb11, nb12, nb13, ne_get_rows, 1, 1, @sizeOf(i32), rows_i32, rows_i32, @as(usize, @intCast(ne10)) * ts_src1_sorted, n_src1_sorted * ts_src1_sorted, n_src1_sorted * ts_src1_sorted, stream);
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGetLastError(), "cudaGetLastError()", @src());
 
     var src1_data_cur: [*]u8 = src1_sorted.get().?;
     var dst_data_cur: [*]u8 = dst_sorted.get().?;
@@ -821,7 +821,7 @@ pub fn mulMatId(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tens
         dst_slice.data = dst_data_cur;
 
         mulMat(ctx, &src0_slice, &src1_slice, &dst_slice);
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGetLastError(), "cudaGetLastError()", @src());
 
         src1_data_cur += src1_slice.nb[2];
         dst_data_cur += dst_slice.nb[2];

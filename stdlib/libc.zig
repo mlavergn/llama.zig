@@ -73,14 +73,28 @@ pub extern "c" fn _dup2(old: c_int, new: c_int) c_int;
 /// struct's bytes as a pointer and it faulted inside `__vsnprintf`. Windows
 /// x64's `va_list` is a `char *` by value, and Zig refuses `VaList` there
 /// (`zig_varargs`), so nothing on Windows reaches these.
-pub const CVaList = if (va_list_is_array) *std.lang.VaList else std.lang.VaList;
+///
+/// Where Zig refuses `std.lang.VaList` (aarch64 outside Apple and Windows,
+/// x86_64 Windows: "disabled due to miscompilations") no Zig function holds a
+/// list to pass -- `src/ggml/varargs.c` formats there -- so the type is an
+/// opaque pointer that only keeps the declarations compiling.
+pub const CVaList = if (!va_list_supported) *VaList else if (va_list_is_array) *VaList else VaList;
+
+/// `std.lang.VaList` where Zig defines it, an opaque stand-in elsewhere.
+pub const VaList = if (va_list_supported) std.lang.VaList else opaque {};
+
+const va_list_supported = switch (builtin.cpu.arch) {
+    .aarch64, .aarch64_be => builtin.os.tag.isDarwin() or builtin.os.tag == .windows,
+    .x86_64 => builtin.os.tag != .windows,
+    else => true,
+};
 
 const va_list_is_array = builtin.cpu.arch == .x86_64 and builtin.os.tag != .windows;
 
 /// `ap` as `CVaList` expects it: its address where `va_list` is an array, a
 /// copy elsewhere. Either way the callee consumes the list, as in C.
-pub inline fn cVaList(ap: *std.lang.VaList) CVaList {
-    return if (comptime va_list_is_array) ap else ap.*;
+pub inline fn cVaList(ap: *VaList) CVaList {
+    return if (comptime va_list_is_array or !va_list_supported) ap else ap.*;
 }
 
 // -----------------------------------------------------------------------------

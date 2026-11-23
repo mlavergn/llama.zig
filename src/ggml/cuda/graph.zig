@@ -155,8 +155,8 @@ fn computeForward(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_te
         else => return false,
     }
 
-    const err = ggml.cuda.common.cu.cudaGetLastError();
-    if (err != ggml.cuda.common.cu.cudaSuccess) {
+    const err = ggml.cuda.common.cuda_c.cudaGetLastError();
+    if (err != ggml.cuda.common.cuda_c.cudaSuccess) {
         ggml.impl.logError("%s: %s failed\n", .{ "ggml_cuda_compute_forward", ggml.types.ggml_op_desc(dst) });
         ggml.cuda.common.cudaCheck(err, "err", @src());
     }
@@ -262,7 +262,7 @@ const ClusterRuntime = struct {
     var affected: bool = false;
     fn init() void {
         var version: c_int = 0;
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaRuntimeGetVersion(&version), "cudaRuntimeGetVersion(&version)", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaRuntimeGetVersion(&version), "cudaRuntimeGetVersion(&version)", @src());
         // TODO: upper bound once fixed in the CUDA runtime
         affected = version >= 11080;
     }
@@ -272,26 +272,26 @@ const ClusterRuntime = struct {
 /// Ports `ggml_cuda_graph_get_clusters` (ggml-cuda.cu:3288 @b1b770d90)
 /// (#31284), under `USE_CUDA_GRAPH_CLUSTER_CHECK`: the cluster dims
 /// of every clustered kernel node, on Hopper and later.
-fn graphGetClusters(cuda_graph: ggml.cuda.common.cu.cudaGraph_t, device: c_int) std.ArrayList(ggml.cuda.common.GraphCluster) {
+fn graphGetClusters(cuda_graph: ggml.cuda.common.cuda_c.cudaGraph_t, device: c_int) std.ArrayList(ggml.cuda.common.GraphCluster) {
     var clusters: std.ArrayList(ggml.cuda.common.GraphCluster) = .empty;
     ClusterRuntime.once.call();
     if (!ClusterRuntime.affected or ggml.cuda.common.info().devices[@intCast(device)].cc < ggml.cuda.common.cc.hopper) {
         return clusters;
     }
     var n_nodes: usize = 0;
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGraphGetNodes(cuda_graph, null, &n_nodes), "cudaGraphGetNodes(cuda_graph, nullptr, &n_nodes)", @src());
-    const graph_nodes = std.heap.c_allocator.alloc(ggml.cuda.common.cu.cudaGraphNode_t, n_nodes) catch ggml.impl.abort("ggml-cuda: out of memory");
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGraphGetNodes(cuda_graph, null, &n_nodes), "cudaGraphGetNodes(cuda_graph, nullptr, &n_nodes)", @src());
+    const graph_nodes = std.heap.c_allocator.alloc(ggml.cuda.common.cuda_c.cudaGraphNode_t, n_nodes) catch ggml.impl.abort("ggml-cuda: out of memory");
     defer std.heap.c_allocator.free(graph_nodes);
     // An empty `std::vector`'s `data()` is null; a zero-length Zig slice's
     // pointer is not, and the runtime refuses it.
-    const nodes_ptr: ?[*]ggml.cuda.common.cu.cudaGraphNode_t = if (n_nodes == 0) null else graph_nodes.ptr;
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGraphGetNodes(cuda_graph, nodes_ptr, &n_nodes), "cudaGraphGetNodes(cuda_graph, nodes.data(), &n_nodes)", @src());
+    const nodes_ptr: ?[*]ggml.cuda.common.cuda_c.cudaGraphNode_t = if (n_nodes == 0) null else graph_nodes.ptr;
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGraphGetNodes(cuda_graph, nodes_ptr, &n_nodes), "cudaGraphGetNodes(cuda_graph, nodes.data(), &n_nodes)", @src());
     for (0..n_nodes) |i| {
-        var ty: ggml.cuda.common.cu.enum_cudaGraphNodeType = undefined;
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGraphNodeGetType(graph_nodes[i], &ty), "cudaGraphNodeGetType(nodes[i], &type)", @src());
-        if (ty != ggml.cuda.common.cu.cudaGraphNodeTypeKernel) continue;
-        var val: ggml.cuda.common.cu.cudaLaunchAttributeValue = std.mem.zeroes(ggml.cuda.common.cu.cudaLaunchAttributeValue);
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGraphKernelNodeGetAttribute(graph_nodes[i], ggml.cuda.common.cu.cudaLaunchAttributeClusterDimension, &val), "cudaGraphKernelNodeGetAttribute(nodes[i], cudaLaunchAttributeClusterDimension, &val)", @src());
+        var ty: ggml.cuda.common.cuda_c.enum_cudaGraphNodeType = undefined;
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGraphNodeGetType(graph_nodes[i], &ty), "cudaGraphNodeGetType(nodes[i], &type)", @src());
+        if (ty != ggml.cuda.common.cuda_c.cudaGraphNodeTypeKernel) continue;
+        var val: ggml.cuda.common.cuda_c.cudaLaunchAttributeValue = std.mem.zeroes(ggml.cuda.common.cuda_c.cudaLaunchAttributeValue);
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGraphKernelNodeGetAttribute(graph_nodes[i], ggml.cuda.common.cuda_c.cudaLaunchAttributeClusterDimension, &val), "cudaGraphKernelNodeGetAttribute(nodes[i], cudaLaunchAttributeClusterDimension, &val)", @src());
         const d = val.clusterDim;
         if (d.x *% d.y *% d.z > 1) {
             clusters.append(std.heap.c_allocator, .{ .node = i, .x = d.x, .y = d.y, .z = d.z }) catch ggml.impl.abort("ggml-cuda: out of memory");
@@ -304,15 +304,15 @@ fn graphGetClusters(cuda_graph: ggml.cuda.common.cu.cudaGraph_t, device: c_int) 
 /// the CUDA 12 arm. It takes one chunk's executable and
 /// captured graph. Its debug line is `GGML_CUDA_GRAPH_DEBUG`'s. A chunk whose
 /// kernel cluster dims changed is re-instantiated rather than updated.
-fn graphUpdateExecutable(instance: *ggml.cuda.common.GraphInstance, cuda_graph: ggml.cuda.common.cu.cudaGraph_t, device: c_int) void {
+fn graphUpdateExecutable(instance: *ggml.cuda.common.GraphInstance, cuda_graph: ggml.cuda.common.cuda_c.cudaGraph_t, device: c_int) void {
     {
         var clusters = graphGetClusters(cuda_graph, device);
         if (!instance.clustersEql(clusters.items)) {
             if (ggml.cuda.common.graphDebugEnabled()) {
                 ggml.impl.logDebug("%s: cluster dims changed, re-instantiating CUDA graph\n", .{"ggml_cuda_graph_update_executable"});
             }
-            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGraphExecDestroy(instance.handle), "cudaGraphExecDestroy(instance)", @src());
-            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGraphInstantiate(&instance.handle, cuda_graph, 0), "cudaGraphInstantiate(&instance.handle, cuda_graph, nullptr, nullptr, 0)", @src());
+            ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGraphExecDestroy(instance.handle), "cudaGraphExecDestroy(instance)", @src());
+            ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGraphInstantiate(&instance.handle, cuda_graph, 0), "cudaGraphInstantiate(&instance.handle, cuda_graph, nullptr, nullptr, 0)", @src());
             instance.clusters.deinit(std.heap.c_allocator);
             instance.clusters = clusters;
             return;
@@ -320,22 +320,22 @@ fn graphUpdateExecutable(instance: *ggml.cuda.common.GraphInstance, cuda_graph: 
         clusters.deinit(std.heap.c_allocator);
     }
 
-    var result_info: ggml.cuda.common.cu.cudaGraphExecUpdateResultInfo = undefined;
-    const stat = ggml.cuda.common.cu.cudaGraphExecUpdate(instance.handle, cuda_graph, &result_info);
+    var result_info: ggml.cuda.common.cuda_c.cudaGraphExecUpdateResultInfo = undefined;
+    const stat = ggml.cuda.common.cuda_c.cudaGraphExecUpdate(instance.handle, cuda_graph, &result_info);
 
-    if (stat == ggml.cuda.common.cu.cudaErrorGraphExecUpdateFailure) {
+    if (stat == ggml.cuda.common.cuda_c.cudaErrorGraphExecUpdateFailure) {
         if (ggml.cuda.common.graphDebugEnabled()) {
             ggml.impl.logDebug("%s: CUDA graph update failed\n", .{"ggml_cuda_graph_update_executable"});
         }
 
         // The pre-existing graph exec cannot be updated due to violated
         // constraints, so clear the error and re-instantiate.
-        _ = ggml.cuda.common.cu.cudaGetLastError();
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGraphExecDestroy(instance.handle), "cudaGraphExecDestroy(instance)", @src());
+        _ = ggml.cuda.common.cuda_c.cudaGetLastError();
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGraphExecDestroy(instance.handle), "cudaGraphExecDestroy(instance)", @src());
         instance.handle = null;
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGraphInstantiate(&instance.handle, cuda_graph, 0), "cudaGraphInstantiate(&instance.handle, cuda_graph, nullptr, nullptr, 0)", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGraphInstantiate(&instance.handle, cuda_graph, 0), "cudaGraphInstantiate(&instance.handle, cuda_graph, nullptr, nullptr, 0)", @src());
     } else {
-        ggml.impl.assert(stat == ggml.cuda.common.cu.cudaSuccess, "stat == cudaSuccess");
+        ggml.impl.assert(stat == ggml.cuda.common.cuda_c.cudaSuccess, "stat == cudaSuccess");
     }
 }
 
@@ -359,20 +359,20 @@ fn graphChunkSize() c_int {
 /// the capture of chunk `idx`, update or create its executable and launch it.
 /// A new executable records its cluster dims.
 fn graphLaunchChunk(cuda_ctx: *ggml.cuda.common.Context, graph: *ggml.cuda.common.Graph, idx: usize) void {
-    var cuda_graph: ggml.cuda.common.cu.cudaGraph_t = null;
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamEndCapture(cuda_ctx.stream(), &cuda_graph), "cudaStreamEndCapture(cuda_ctx->stream(), &cuda_graph)", @src());
+    var cuda_graph: ggml.cuda.common.cuda_c.cudaGraph_t = null;
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamEndCapture(cuda_ctx.stream(), &cuda_graph), "cudaStreamEndCapture(cuda_ctx->stream(), &cuda_graph)", @src());
 
     if (idx < graph.instances.items.len) {
         graphUpdateExecutable(&graph.instances.items[idx], cuda_graph, cuda_ctx.device);
     } else {
         ggml.impl.assert(idx == graph.instances.items.len, "idx == graph->instances.size()");
         graph.instances.append(std.heap.c_allocator, .{}) catch ggml.impl.abort("ggml-cuda: out of memory");
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGraphInstantiate(&graph.instances.items[idx].handle, cuda_graph, 0), "cudaGraphInstantiate(&graph->instances[idx].handle, cuda_graph, nullptr, nullptr, 0)", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGraphInstantiate(&graph.instances.items[idx].handle, cuda_graph, 0), "cudaGraphInstantiate(&graph->instances[idx].handle, cuda_graph, nullptr, nullptr, 0)", @src());
         graph.instances.items[idx].clusters = graphGetClusters(cuda_graph, cuda_ctx.device);
     }
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGraphDestroy(cuda_graph), "cudaGraphDestroy(cuda_graph)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGraphDestroy(cuda_graph), "cudaGraphDestroy(cuda_graph)", @src());
 
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGraphLaunch(graph.instances.items[idx].handle, cuda_ctx.stream()), "cudaGraphLaunch(graph->instances[idx], cuda_ctx->stream())", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGraphLaunch(graph.instances.items[idx].handle, cuda_ctx.stream()), "cudaGraphLaunch(graph->instances[idx], cuda_ctx->stream())", @src());
 }
 
 /// Ports `ggml_cuda_graph_set_enabled` (ggml-cuda.cu:5402 @b1b770d90).
@@ -410,12 +410,12 @@ const Concurrency = struct {
 
         const main_stream = self.cuda_ctx.stream(); // this should be stream 0
         ggml.impl.assert(self.cuda_ctx.curr_stream_no == 0, "cuda_ctx->curr_stream_no == 0");
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaEventRecord(ev.fork_event, main_stream), "cudaEventRecord(concurrent_event->fork_event, main_stream)", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaEventRecord(ev.fork_event, main_stream), "cudaEventRecord(concurrent_event->fork_event, main_stream)", @src());
 
         var i: c_int = 1;
         while (i <= ev.n_streams) : (i += 1) {
             const s = self.cuda_ctx.streamFor(self.cuda_ctx.device, i);
-            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamWaitEvent(s, ev.fork_event, 0), "cudaStreamWaitEvent(stream, concurrent_event->fork_event)", @src());
+            ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamWaitEvent(s, ev.fork_event, 0), "cudaStreamWaitEvent(stream, concurrent_event->fork_event)", @src());
         }
     }
 };
@@ -463,7 +463,7 @@ fn graphEvaluateAndCapture(cuda_ctx: *ggml.cuda.common.Context, cgraph: *ggml.im
                 if (use_cuda_graph and chunk_size > 0 and @as(c_int, @intCast(i)) >= chunk_end and !conc.is_active) {
                     graphLaunchChunk(cuda_ctx, graph.?, n_chunks);
                     n_chunks += 1;
-                    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamBeginCapture(cuda_ctx.stream(), ggml.cuda.common.cu.cudaStreamCaptureModeRelaxed), "cudaStreamBeginCapture(cuda_ctx->stream(), cudaStreamCaptureModeRelaxed)", @src());
+                    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamBeginCapture(cuda_ctx.stream(), ggml.cuda.common.cuda_c.cudaStreamCaptureModeRelaxed), "cudaStreamBeginCapture(cuda_ctx->stream(), cudaStreamCaptureModeRelaxed)", @src());
                     chunk_end = @as(c_int, @intCast(i)) + chunk_size;
                 }
                 if (conc.is_active) {
@@ -474,8 +474,8 @@ fn graphEvaluateAndCapture(cuda_ctx: *ggml.cuda.common.Context, cgraph: *ggml.im
                         while (s <= ev.n_streams) : (s += 1) {
                             // Wait on join events of forked streams in the main stream
                             const je = ev.join_events.items[@intCast(s - 1)];
-                            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaEventRecord(je, cuda_ctx.streamFor(cuda_ctx.device, s)), "cudaEventRecord(concurrent_event->join_events[i - 1], cuda_ctx->stream(cuda_ctx->device, i))", @src());
-                            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamWaitEvent(cuda_ctx.stream(), je, 0), "cudaStreamWaitEvent(cuda_ctx->stream(), concurrent_event->join_events[i - 1])", @src());
+                            ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaEventRecord(je, cuda_ctx.streamFor(cuda_ctx.device, s)), "cudaEventRecord(concurrent_event->join_events[i - 1], cuda_ctx->stream(cuda_ctx->device, i))", @src());
+                            ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamWaitEvent(cuda_ctx.stream(), je, 0), "cudaStreamWaitEvent(cuda_ctx->stream(), concurrent_event->join_events[i - 1])", @src());
                         }
                         conc.is_active = false;
                         conc.event = null;
@@ -526,7 +526,7 @@ fn graphEvaluateAndCapture(cuda_ctx: *ggml.cuda.common.Context, cgraph: *ggml.im
             // drop the chunks left over from a longer graph
             var i: usize = n_chunks;
             while (i < g.instances.items.len) : (i += 1) {
-                ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGraphExecDestroy(g.instances.items[i].handle), "cudaGraphExecDestroy(graph->instances[i])", @src());
+                ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGraphExecDestroy(g.instances.items[i].handle), "cudaGraphExecDestroy(graph->instances[i])", @src());
                 g.instances.items[i].deinit();
             }
             g.instances.resize(std.heap.c_allocator, n_chunks) catch ggml.impl.abort("ggml-cuda: out of memory");
@@ -541,7 +541,7 @@ fn graphEvaluateAndCapture(cuda_ctx: *ggml.cuda.common.Context, cgraph: *ggml.im
     if (use_cuda_graph and !cuda_graph_update_required) {
         // the chunks were launched during capture, otherwise launch them here
         for (graph.?.instances.items) |instance| {
-            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGraphLaunch(instance.handle, cuda_ctx.stream()), "cudaGraphLaunch(instance, cuda_ctx->stream())", @src());
+            ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGraphLaunch(instance.handle, cuda_ctx.stream()), "cudaGraphLaunch(instance, cuda_ctx->stream())", @src());
         }
     }
 }
@@ -638,7 +638,7 @@ pub fn graphCompute(backend_c: ggml.impl.ggml_c.ggml_backend_t, cgraph_c: ?*ggml
     if (use_cuda_graph and cuda_graph_update_required) {
         // Start CUDA graph capture
         ggml.cuda.common.lock.acquire();
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamBeginCapture(cuda_ctx.stream(), ggml.cuda.common.cu.cudaStreamCaptureModeRelaxed), "cudaStreamBeginCapture(cuda_ctx->stream(), cudaStreamCaptureModeRelaxed)", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamBeginCapture(cuda_ctx.stream(), ggml.cuda.common.cuda_c.cudaStreamCaptureModeRelaxed), "cudaStreamBeginCapture(cuda_ctx->stream(), cudaStreamCaptureModeRelaxed)", @src());
     }
 
     graphEvaluateAndCapture(cuda_ctx, cgraph, use_cuda_graph, cuda_graph_update_required, graph_key);

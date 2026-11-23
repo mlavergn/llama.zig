@@ -52,14 +52,14 @@ const Args = struct {
 };
 
 /// The `GGML_ASSERT`s and `init_fastdiv_values(ne12)` every launcher shares.
-fn ne12Fastdiv(a: *const Args) ggml.cuda.common.cu.uint3 {
+fn ne12Fastdiv(a: *const Args) ggml.cuda.common.cuda_c.uint3 {
     ggml.impl.assert(a.ne12 > 0, "ne12 > 0");
     ggml.impl.assert(a.ne11 <= @divTrunc(@as(i64, u32_max), a.ne12), "ne11 <= std::numeric_limits<uint32_t>::max() / ne12");
     return ggml.cuda.common.initFastdivValues(@bitCast(a.ne12));
 }
 
 /// Ports `get_rows_cuda_q` (getrows.cu:160 @b1b770d90).
-fn getRowsCudaQ(comptime qk: comptime_int, comptime qr: comptime_int, comptime dq: []const u8, comptime D: type, src0_d: ?*const anyopaque, src1_d: ?*const anyopaque, dst_d: ?*anyopaque, a: Args, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn getRowsCudaQ(comptime qk: comptime_int, comptime qr: comptime_int, comptime dq: []const u8, comptime D: type, src0_d: ?*const anyopaque, src1_d: ?*const anyopaque, dst_d: ?*anyopaque, a: Args, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const block_dims: ggml.cuda.kernels.Dim3 = .{ .x = block_size };
     const block_num_y: c_int = @truncate(@divTrunc(a.ne00 + 2 * block_size - 1, 2 * block_size));
     const block_nums: ggml.cuda.kernels.Dim3 = .{
@@ -96,7 +96,7 @@ fn getRowsCudaQ(comptime qk: comptime_int, comptime qr: comptime_int, comptime d
 }
 
 /// Ports `get_rows_cuda_kq` (getrows.cu:197 @b1b770d90).
-fn getRowsCudaKq(comptime block_dim: comptime_int, comptime D: type, comptime dq: []const u8, src0_d: ?*const anyopaque, src1_d: ?*const anyopaque, dst_d: ?*anyopaque, a: Args, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn getRowsCudaKq(comptime block_dim: comptime_int, comptime D: type, comptime dq: []const u8, src0_d: ?*const anyopaque, src1_d: ?*const anyopaque, dst_d: ?*anyopaque, a: Args, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     ggml.impl.assert(@rem(a.ne00, qk_k) == 0, "ne00 % QK_K == 0");
     const nsb: i64 = @divTrunc(a.ne00, qk_k);
 
@@ -134,7 +134,7 @@ fn getRowsCudaKq(comptime block_dim: comptime_int, comptime D: type, comptime dq
 }
 
 /// Ports `get_rows_cuda_float` (getrows.cu:234 @b1b770d90).
-fn getRowsCudaFloat(comptime S: type, comptime D: type, src0_d: ?*const anyopaque, src1_d: ?*const anyopaque, dst_d: ?*anyopaque, a: Args, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn getRowsCudaFloat(comptime S: type, comptime D: type, src0_d: ?*const anyopaque, src1_d: ?*const anyopaque, dst_d: ?*anyopaque, a: Args, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const block_dims: ggml.cuda.kernels.Dim3 = .{ .x = block_size };
 
     // strides in elements
@@ -205,7 +205,7 @@ fn getRowsCudaFloat(comptime S: type, comptime D: type, src0_d: ?*const anyopaqu
 
 /// Ports `ggml_cuda_get_rows_switch_src0_type` (getrows.cu:296 @b1b770d90).
 /// `F8_E4M3` is included.
-fn switchSrc0Type(comptime D: type, src0_d: ?*const anyopaque, src0_type: ggml.impl.ggml_c.ggml_type, src1_d: ?*const anyopaque, dst_d: ?*anyopaque, a: Args, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn switchSrc0Type(comptime D: type, src0_d: ?*const anyopaque, src0_type: ggml.impl.ggml_c.ggml_type, src1_d: ?*const anyopaque, dst_d: ?*anyopaque, a: Args, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     switch (src0_type) {
         ggml.impl.ggml_c.GGML_TYPE_F16 => getRowsCudaFloat(ggml.cuda.kernels.half, D, src0_d, src1_d, dst_d, a, stream),
         ggml.impl.ggml_c.GGML_TYPE_F32 => getRowsCudaFloat(f32, D, src0_d, src1_d, dst_d, a, stream),
@@ -265,7 +265,7 @@ pub fn getRowsCuda(
     nb1: usize,
     nb2: usize,
     nb3: usize,
-    stream: ggml.cuda.common.cu.cudaStream_t,
+    stream: ggml.cuda.common.cuda_c.cudaStream_t,
 ) void {
     const a: Args = .{
         .ne00 = ne00,

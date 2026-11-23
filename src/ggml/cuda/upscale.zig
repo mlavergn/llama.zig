@@ -18,7 +18,7 @@ const ggml = @import("../module.zig");
 /// Ports `CUDA_UPSCALE_BLOCK_SIZE` (upscale.cuh:3 @b1b770d90).
 const block_size = 256;
 
-fn params(dst_size: i64, stream: ggml.cuda.common.cu.cudaStream_t) ggml.cuda.kernels.LaunchParams {
+fn params(dst_size: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t) ggml.cuda.kernels.LaunchParams {
     const num_blocks: i64 = @divTrunc(dst_size + block_size - 1, block_size);
     return .{
         .grid = .{ .x = @truncate(@as(u64, @bitCast(num_blocks))) },
@@ -29,14 +29,14 @@ fn params(dst_size: i64, stream: ggml.cuda.common.cu.cudaStream_t) ggml.cuda.ker
 
 /// Ports `upscale_f32_cuda` (upscale.cu:218 @b1b770d90), which launches with
 /// `<<<>>>`.
-fn upscaleF32Cuda(x: ?*const anyopaque, dst: ?*anyopaque, nb00: c_int, nb01: c_int, nb02: c_int, nb03: c_int, ne10: c_int, ne11: c_int, ne12: c_int, ne13: c_int, sf0: f32, sf1: f32, sf2: f32, sf3: f32, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn upscaleF32Cuda(x: ?*const anyopaque, dst: ?*anyopaque, nb00: c_int, nb01: c_int, nb02: c_int, nb03: c_int, ne10: c_int, ne11: c_int, ne12: c_int, ne13: c_int, sf0: f32, sf1: f32, sf2: f32, sf3: f32, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const dst_size: i64 = ne10 *% ne11 *% ne12 *% ne13;
     ggml.cuda.kernels.launch(ggml.cuda.kernels.get("upscale", "upscale_f32"), params(dst_size, stream), .{ x, dst, nb00, nb01, nb02, nb03, ne10, ne11, ne12, ne13, sf0, sf1, sf2, sf3 });
 }
 
 /// Ports `upscale_f32_bilinear_cuda` (upscale.cu:229 @b1b770d90), which
 /// launches with `<<<>>>`.
-fn upscaleF32BilinearCuda(x: ?*const anyopaque, dst: ?*anyopaque, nb00: c_int, nb01: c_int, nb02: c_int, nb03: c_int, ne00_src: c_int, ne01_src: c_int, ne10_dst: c_int, ne11_dst: c_int, ne12_dst: c_int, ne13_dst: c_int, sf0: f32, sf1: f32, sf2: f32, sf3: f32, pixel_offset: f32, antialias: bool, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn upscaleF32BilinearCuda(x: ?*const anyopaque, dst: ?*anyopaque, nb00: c_int, nb01: c_int, nb02: c_int, nb03: c_int, ne00_src: c_int, ne01_src: c_int, ne10_dst: c_int, ne11_dst: c_int, ne12_dst: c_int, ne13_dst: c_int, sf0: f32, sf1: f32, sf2: f32, sf3: f32, pixel_offset: f32, antialias: bool, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const dst_size: i64 = ne10_dst *% ne11_dst *% ne12_dst *% ne13_dst;
     const args = .{ x, dst, nb00, nb01, nb02, nb03, ne00_src, ne01_src, ne10_dst, ne11_dst, ne12_dst, ne13_dst, sf0, sf1, sf2, sf3, pixel_offset };
     if (antialias) {
@@ -48,7 +48,7 @@ fn upscaleF32BilinearCuda(x: ?*const anyopaque, dst: ?*anyopaque, nb00: c_int, n
 
 /// Ports `upscale_f32_bicubic_cuda` (upscale.cu:245 @b1b770d90), which
 /// launches with `<<<>>>`.
-fn upscaleF32BicubicCuda(x: ?*const anyopaque, dst: ?*anyopaque, nb00: c_int, nb01: c_int, nb02: c_int, nb03: c_int, ne00_src: c_int, ne01_src: c_int, ne10_dst: c_int, ne11_dst: c_int, ne12_dst: c_int, ne13_dst: c_int, sf0: f32, sf1: f32, sf2: f32, sf3: f32, pixel_offset: f32, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn upscaleF32BicubicCuda(x: ?*const anyopaque, dst: ?*anyopaque, nb00: c_int, nb01: c_int, nb02: c_int, nb03: c_int, ne00_src: c_int, ne01_src: c_int, ne10_dst: c_int, ne11_dst: c_int, ne12_dst: c_int, ne13_dst: c_int, sf0: f32, sf1: f32, sf2: f32, sf3: f32, pixel_offset: f32, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const dst_size: i64 = ne10_dst *% ne11_dst *% ne12_dst *% ne13_dst;
     ggml.cuda.kernels.launch(ggml.cuda.kernels.get("upscale", "upscale_f32_bicubic"), params(dst_size, stream), .{ x, dst, nb00, nb01, nb02, nb03, ne00_src, ne01_src, ne10_dst, ne11_dst, ne12_dst, ne13_dst, sf0, sf1, sf2, sf3, pixel_offset });
 }

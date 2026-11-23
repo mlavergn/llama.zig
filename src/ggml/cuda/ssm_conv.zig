@@ -40,7 +40,7 @@ fn ssmConvF32Cuda(
     nr: i64,
     n_t: i64,
     n_s: i64,
-    stream: ggml.cuda.common.cu.cudaStream_t,
+    stream: ggml.cuda.common.cuda_c.cudaStream_t,
 ) void {
     const threads = 128;
     ggml.impl.assert(@rem(nr, threads) == 0, "nr % threads == 0");

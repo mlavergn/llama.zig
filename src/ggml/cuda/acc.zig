@@ -17,7 +17,7 @@ const block_size = 256;
 
 /// Ports `acc_f32_cuda` (acc.cu:30 @b1b770d90), which launches with
 /// `<<<>>>`.
-fn accF32Cuda(x: ?*const anyopaque, y: ?*const anyopaque, dst: ?*anyopaque, n_elements: i64, ne10: i64, ne11: i64, ne12: i64, ne13: i64, s1: i64, s2: i64, s3: i64, off: i64, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn accF32Cuda(x: ?*const anyopaque, y: ?*const anyopaque, dst: ?*anyopaque, n_elements: i64, ne10: i64, ne11: i64, ne12: i64, ne13: i64, s1: i64, s2: i64, s3: i64, off: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const num_blocks: c_int = @truncate(@divTrunc(n_elements + block_size - 1, block_size));
     ggml.cuda.kernels.launch(ggml.cuda.kernels.get("acc", "acc_f32"), .{
         .grid = .{ .x = @bitCast(num_blocks) },

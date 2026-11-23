@@ -54,7 +54,7 @@ fn strideOf(nb: usize, comptime size: usize) i64 {
 /// Ports the quantized `set_rows_cuda_quant` (set-rows.cu:75 @b1b770d90).
 /// `block` and `quantize` name the template's `block_type` and
 /// `quantize_func`.
-fn setRowsCudaQuant(comptime I: type, comptime block: []const u8, comptime qk: comptime_int, comptime quantize: []const u8, src0_d: ?*const anyopaque, src1_d: ?*const anyopaque, dst_d: ?*anyopaque, a: Args, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn setRowsCudaQuant(comptime I: type, comptime block: []const u8, comptime qk: comptime_int, comptime quantize: []const u8, src0_d: ?*const anyopaque, src1_d: ?*const anyopaque, dst_d: ?*anyopaque, a: Args, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     ggml.impl.assert(@rem(a.ne00, qk) == 0, "ne00 % qk == 0");
     const ne_total: i64 = @divTrunc(a.ne00 * a.ne01 * a.ne02 * a.ne03, qk);
     const num_blocks: c_int = @truncate(@divTrunc(ne_total + block_size - 1, block_size));
@@ -92,7 +92,7 @@ fn setRowsCudaQuant(comptime I: type, comptime block: []const u8, comptime qk: c
 }
 
 /// Ports the element-wise `set_rows_cuda` (set-rows.cu:180 @b1b770d90).
-fn setRowsCudaLaunch(comptime S: type, comptime I: type, comptime D: type, src0_d: ?*const anyopaque, src1_d: ?*const anyopaque, dst_d: ?*anyopaque, a: Args, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn setRowsCudaLaunch(comptime S: type, comptime I: type, comptime D: type, src0_d: ?*const anyopaque, src1_d: ?*const anyopaque, dst_d: ?*anyopaque, a: Args, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const ne_total: i64 = a.ne00 * a.ne01 * a.ne02 * a.ne03;
     const num_blocks: c_int = @truncate(@divTrunc(ne_total + block_size - 1, block_size));
     const block_dims: ggml.cuda.kernels.Dim3 = .{ .x = block_size };

@@ -46,7 +46,7 @@ const sizeof_half = 2;
 /// group is partial.
 /// It is in this translation unit whichever instance file's `launch_fattn`
 /// asks for it, since the C's function is not a template.
-pub fn compactMask(mask: *const ggml.impl.ggml_c.ggml_tensor, indices: ?[*]i32, counts: ?[*]i32, n_queries: i32, ncols1: i32, n_kv_max: i32, stream: ggml.cuda.common.cu.cudaStream_t) void {
+pub fn compactMask(mask: *const ggml.impl.ggml_c.ggml_tensor, indices: ?[*]i32, counts: ?[*]i32, n_queries: i32, ncols1: i32, n_kv_max: i32, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const s31: i64 = @bitCast(mask.nb[1] / sizeof_half);
     const s33: i64 = @bitCast(mask.nb[3] / sizeof_half);
     // `dim3`'s members are `unsigned int`.
@@ -71,7 +71,7 @@ pub fn compactMask(mask: *const ggml.impl.ggml_c.ggml_tensor, indices: ?[*]i32, 
     else
         comptime ggml.cuda.kernels.get("fattn", "flash_attn_mask_to_sparse_indices<(int)8, (bool)0>");
     ggml.cuda.kernels.launchPdl(kernel, launch_params, .{ @as(?*const anyopaque, mask.data), indices, counts, @as(c_int, @truncate(mask.ne[0])), n_queries, n_kv_max, s31, s33 });
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGetLastError(), "cudaGetLastError()", @src());
 }
 
 /// Ports `ggml_cuda_flash_attn_ext_mma_f16_shall_use_sparse` (fattn.cu:139 @b1b770d90),

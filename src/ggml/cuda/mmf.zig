@@ -86,7 +86,7 @@ const Args = struct {
 
 /// Ports `mul_mat_f_switch_ids` (mmf.cuh:590 @b1b770d90). Since v1.0.0 the
 /// compact-ids kernel runs one block row per tile spec.
-fn switchIds(comptime T: type, comptime rpb: comptime_int, comptime cpb: comptime_int, comptime nwarps: comptime_int, a: *const Args, block_nums: ggml.cuda.kernels.Dim3, block_dims: ggml.cuda.kernels.Dim3, nbytes_shared_total: c_int, stream: ggml.cuda.common.cu.cudaStream_t, ids_data: ?*const IdsData) void {
+fn switchIds(comptime T: type, comptime rpb: comptime_int, comptime cpb: comptime_int, comptime nwarps: comptime_int, a: *const Args, block_nums: ggml.cuda.kernels.Dim3, block_dims: ggml.cuda.kernels.Dim3, nbytes_shared_total: c_int, stream: ggml.cuda.common.cuda_c.cudaStream_t, ids_data: ?*const IdsData) void {
     const has_ids_data = ids_data != null and ids_data.?.ids_src_compact != null;
     const tu = comptime instanceTu(cpb);
     const tname = comptime ggml.cuda.kernels.typeName(T);
@@ -99,7 +99,7 @@ fn switchIds(comptime T: type, comptime rpb: comptime_int, comptime cpb: comptim
         if (d.max_tiles == 0) return;
         const block_nums_ids: ggml.cuda.kernels.Dim3 = .{ .x = block_nums.x, .y = @bitCast(d.max_tiles), .z = 1 };
 
-        const sis1_fd: ggml.cuda.common.cu.uint3 = if (d.sis1 > 0) ggml.cuda.common.initFastdivValues(@as(u32, @bitCast(d.sis1))) else .{ .x = 0, .y = 0, .z = 1 };
+        const sis1_fd: ggml.cuda.common.cuda_c.uint3 = if (d.sis1 > 0) ggml.cuda.common.initFastdivValues(@as(u32, @bitCast(d.sis1))) else .{ .x = 0, .y = 0, .z = 1 };
         const nch_fd = ggml.cuda.common.initFastdivValues(@as(u32, @truncate(@as(u64, @bitCast(a.nchannels_dst)))));
 
         ggml.cuda.kernels.launch(comptime ggml.cuda.kernels.get(tu, ggml.cuda.kernels.tmpl("mul_mat_f_ids", &.{ tname, ggml.cuda.kernels.int(rpb), ggml.cuda.kernels.int(cpb), ggml.cuda.kernels.int(nwarps) })), .{
@@ -176,7 +176,7 @@ fn mulMatFCuda(
     stride_sample_x: i64,
     stride_sample_y: i64,
     stride_sample_dst: i64,
-    stream: ggml.cuda.common.cu.cudaStream_t,
+    stream: ggml.cuda.common.cuda_c.cudaStream_t,
     ids_data: ?*const IdsData,
 ) void {
     _ = nchannels_y;
@@ -253,7 +253,7 @@ fn mulMatFCuda(
 /// Ports `mul_mat_f_switch_cols_per_block` (mmf.cuh:749 @b1b770d90) and
 /// `mul_mat_f_switch_rows_per_block` (mmf.cuh:850 @b1b770d90). Only
 /// `MMF_ROWS_PER_BLOCK` is reachable on an NVIDIA device.
-fn switchColsPerBlock(comptime T: type, rows_per_block: c_int, x: ?*const anyopaque, y: ?*const f32, ids: ?*const i32, dst: ?*f32, ncols_x: i64, nrows_x: i64, ncols_dst: i64, stride_row: i64, stride_col_y: i64, stride_col_dst: i64, stride_col_id: i64, stride_row_id: c_int, nchannels_x: i64, nchannels_y: i64, nchannels_dst: i64, stride_channel_x: i64, stride_channel_y: i64, stride_channel_dst: i64, nsamples_x: i64, nsamples_dst: i64, stride_sample_x: i64, stride_sample_y: i64, stride_sample_dst: i64, stream: ggml.cuda.common.cu.cudaStream_t, ids_data: ?*const IdsData) void {
+fn switchColsPerBlock(comptime T: type, rows_per_block: c_int, x: ?*const anyopaque, y: ?*const f32, ids: ?*const i32, dst: ?*f32, ncols_x: i64, nrows_x: i64, ncols_dst: i64, stride_row: i64, stride_col_y: i64, stride_col_dst: i64, stride_col_id: i64, stride_row_id: c_int, nchannels_x: i64, nchannels_y: i64, nchannels_dst: i64, stride_channel_x: i64, stride_channel_y: i64, stride_channel_dst: i64, nsamples_x: i64, nsamples_dst: i64, stride_sample_x: i64, stride_sample_y: i64, stride_sample_dst: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t, ids_data: ?*const IdsData) void {
     if (rows_per_block != rows_per_block_default) {
         ggml.impl.logError("unsupported rows_per_block: %i\n", .{rows_per_block});
         ggml.impl.abort("unsupported rows_per_block");
@@ -358,7 +358,7 @@ pub fn mulMatF(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.ggml_c.ggm
         ggml.impl.assert(sis1 > 0, "sis1 > 0");
 
         ggml.cuda.mmid.launchMmIdsHelperDispatch(ids_d, &ids_src_compact_dev.ptr.?[0], &ids_dst_compact_dev.ptr.?[0], &tile_spec_dev.ptr.?[0], i32Of(n_experts), i32Of(n_tokens), i32Of(n_expert_used), i32Of(ne11), 16, si1, sis1, false, ctx.stream());
-        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaGetLastError(), "cudaGetLastError()", @src());
 
         ids_info.ids_src_compact = &ids_src_compact_dev.ptr.?[0];
         ids_info.ids_dst_compact = &ids_dst_compact_dev.ptr.?[0];

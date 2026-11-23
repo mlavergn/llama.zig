@@ -162,6 +162,10 @@ pub fn stdlibModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: s
         .root_source_file = b.path("stdlib/module.zig"),
         .target = target,
         .optimize = optimize,
+        // It declares the C library (`libc.zig`, `libm.zig`) and calls it;
+        // a test rooted here links nothing else, and only Darwin links
+        // libc unasked.
+        .link_libc = true,
     });
     stdlib_modules.append(b.allocator, .{ .target = target, .optimize = optimize, .module = module }) catch @panic("OOM");
     return module;
@@ -362,6 +366,11 @@ pub const Cuda = struct {
     /// The host compiler's `libstdc++.so`, which `nvcc`'s objects need. Linked
     /// by path: Zig reads a system library named `stdc++` as its own libc++.
     libstdcxx: []const u8,
+    /// The host compiler's `libgcc_s.so.1`: `nvcc`'s objects call its
+    /// `_Unwind_Resume`, which g++ links from it and libstdc++ does not
+    /// export. Linked by path beside `libstdcxx`, which needs it at run time
+    /// anyway.
+    libgcc_s: []const u8,
     /// Use the Zig host layer (`src/ggml/cuda/`) in place of upstream's.
     /// Until the swap this is off by default and the gates
     /// build both.
@@ -897,7 +906,8 @@ pub fn addCudaRef(b: *std.Build, opts: Options) !*std.Build.Step.Compile {
     return b.addLibrary(.{ .name = "ggml-cuda-ref", .root_module = mod, .linkage = .static });
 }
 
-/// Adds the CUDA runtime, cuBLAS, the driver and libstdc++ to a module's link.
+/// Adds the CUDA runtime, cuBLAS, the driver, libstdc++ and libgcc_s to a
+/// module's link.
 ///
 /// The ggml module declares them, but a search path does not travel with a
 /// static library to the executable that links it, so every module that
@@ -913,6 +923,7 @@ pub fn addCudaLibraries(b: *std.Build, mod: *std.Build.Module, cuda: ?Cuda) void
     const tk = cuda orelse return;
     addCudaRuntime(b, mod, tk);
     mod.addObjectFile(.{ .cwd_relative = tk.libstdcxx });
+    mod.addObjectFile(.{ .cwd_relative = tk.libgcc_s });
 }
 
 /// Linux: gcc's static `libgcc.a` on an executable's link, ahead of Zig's

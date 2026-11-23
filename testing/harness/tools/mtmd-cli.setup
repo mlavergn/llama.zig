@@ -3,7 +3,7 @@
 # kHz stereo, so miniaudio's resampler and mixdown run), and the scripted
 # conversations the REPL cases read on stdin. Run by testing/scripts/tools-diff.
 set -eu
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 python3 -I - "$DATA" <<'PY'
 import math, struct, sys, os
 out = sys.argv[1]

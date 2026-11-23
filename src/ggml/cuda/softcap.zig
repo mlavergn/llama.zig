@@ -12,7 +12,7 @@ const ggml = @import("../module.zig");
 const block_size = 256;
 
 /// Ports `softcap_f32_cuda` (softcap.cu:15 @b1b770d90).
-fn softcapF32Cuda(x: ?*const anyopaque, dst: ?*anyopaque, scale: f32, softcap: f32, k: c_int, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn softcapF32Cuda(x: ?*const anyopaque, dst: ?*anyopaque, scale: f32, softcap: f32, k: c_int, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const num_blocks: c_int = @divTrunc(k + block_size - 1, block_size);
     ggml.cuda.kernels.launchPdl(ggml.cuda.kernels.get("softcap", "softcap_f32"), .{
         .grid = .{ .x = @bitCast(num_blocks) },

@@ -3,5 +3,5 @@
 # one at 44.1 kHz stereo, which miniaudio resamples and mixes down to what
 # the speaker encoder takes. Run by testing/scripts/tools-diff.
 set -eu
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 "$ROOT/testing/harness/tools/mtmd-cli.setup"

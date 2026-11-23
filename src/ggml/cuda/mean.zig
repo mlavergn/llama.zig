@@ -33,12 +33,12 @@ pub fn opMean(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tensor
     const nrows: i64 = ggml.types.ggml_nrows(src0);
 
     // Special case for reducing vectors
-    var iscapturing: ggml.cuda.common.cu.cudaStreamCaptureStatus = undefined;
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaStreamIsCapturing(stream, &iscapturing), "cudaStreamIsCapturing(stream, &iscapturing)", @src());
+    var iscapturing: ggml.cuda.common.cuda_c.cudaStreamCaptureStatus = undefined;
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaStreamIsCapturing(stream, &iscapturing), "cudaStreamIsCapturing(stream, &iscapturing)", @src());
     // Determine if CUDA graphs are effectively disabled for this context
     // (no graph instance exists and we're not capturing, OR graphs are
     // explicitly enabled)
-    const graphs_off = (!ctx.anyCudaGraphHasInstance() and iscapturing == ggml.cuda.common.cu.cudaStreamCaptureStatusNone) or ctx.anyCudaGraphEnabled();
+    const graphs_off = (!ctx.anyCudaGraphHasInstance() and iscapturing == ggml.cuda.common.cuda_c.cudaStreamCaptureStatusNone) or ctx.anyCudaGraphEnabled();
     if (nrows == 1 and ((ncols > 65536 and graphs_off) or
         // CUDA graphs are enabled - use lower threshold
         (ncols > 32768 and !graphs_off)))

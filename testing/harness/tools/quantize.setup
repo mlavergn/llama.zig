@@ -6,7 +6,7 @@
 # names alone, 71a6a114b) are seen apart from their paths. Run by
 # testing/scripts/tools-diff.
 set -eu
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 . "$ROOT/testing/scripts/platform-libs"
 platform_libs cc "$ROOT/zig-out/lib/libggml.a"
 zig cc -O2 -w -I "$ROOT/llama.cpp/ggml/include" "$ROOT/testing/harness/tools/add_vocab.c" \

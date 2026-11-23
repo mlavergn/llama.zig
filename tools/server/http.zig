@@ -647,7 +647,12 @@ const GcpParams = struct {
         const port_str = try getenvOr(a, "AIP_HTTP_PORT", "8080", false);
         const port = tools_common.arg.stoi(try a.dupeSentinel(u8, port_str, 0)) catch {
             const msg = tools_common.arg.what();
-            std.debug.print("libc++abi: terminating due to uncaught exception of type std::invalid_argument: {s}\n", .{msg});
+            // libc++abi's terminate message, verbatim on stderr.
+            const err = stdlib.stdio.stderr();
+            err.write("libc++abi: terminating due to uncaught exception of type std::invalid_argument: ");
+            err.write(msg);
+            err.write("\n");
+            err.flush();
             std.process.abort();
         };
         return .{

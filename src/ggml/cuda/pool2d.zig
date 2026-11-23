@@ -20,7 +20,7 @@ fn int(x: i64) c_int {
 
 /// Ports `pool2d_nchw_kernel_f32_f32_cuda` (pool2d.cu:112 @b1b770d90).
 /// A window of 32 or more elements takes one warp per output.
-fn pool2dNchwKernelF32F32Cuda(ih: c_int, iw: c_int, oh: c_int, ow: c_int, kh: c_int, kw: c_int, sh: c_int, sw: c_int, ph: c_int, pw: c_int, parallel_elements: c_int, src: ?*const anyopaque, dst: ?*anyopaque, op: ggml.impl.ggml_c.enum_ggml_op_pool, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn pool2dNchwKernelF32F32Cuda(ih: c_int, iw: c_int, oh: c_int, ow: c_int, kh: c_int, kw: c_int, sh: c_int, sw: c_int, ph: c_int, pw: c_int, parallel_elements: c_int, src: ?*const anyopaque, dst: ?*anyopaque, op: ggml.impl.ggml_c.enum_ggml_op_pool, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     if (kh *% kw >= warp_kernel_min_window) {
         const warps_per_block: c_int = block_size / ggml.cuda.common.warp_size;
         const num_blocks: c_int = @divTrunc(parallel_elements +% warps_per_block - 1, warps_per_block);

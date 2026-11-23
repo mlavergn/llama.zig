@@ -69,7 +69,7 @@ fn conv3dLaunchImplicitGemm(
     split_k: c_int,
     grid: ggml.cuda.kernels.Dim3,
     block: ggml.cuda.kernels.Dim3,
-    stream: ggml.cuda.common.cu.cudaStream_t,
+    stream: ggml.cuda.common.cuda_c.cudaStream_t,
 ) void {
     // Vector loads require both the base pointer and each weight row to be 16-byte aligned.
     const sizeof_int4 = 16;
@@ -214,26 +214,26 @@ pub fn opConv3d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_tens
             const yd: [*]f32 = @ptrCast(@alignCast(y.?));
             var n: c_int = 0;
             while (n < B) : (n += 1) {
-                ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasGemmEx(
+                ggml.cuda.common.cublasCheck(ggml.cuda.common.cuda_c.cublasGemmEx(
                     cublas_h,
-                    ggml.cuda.common.cu.CUBLAS_OP_N,
-                    ggml.cuda.common.cu.CUBLAS_OP_N,
+                    ggml.cuda.common.cuda_c.CUBLAS_OP_N,
+                    ggml.cuda.common.cuda_c.CUBLAS_OP_N,
                     positions,
                     @as(c_int, @truncate(OC)),
                     @as(c_int, @truncate(IC)),
                     &alpha,
                     xh + @as(usize, @intCast(@as(i64, n) * IC * positions)),
-                    ggml.cuda.common.cu.CUDA_R_16F,
+                    ggml.cuda.common.cuda_c.CUDA_R_16F,
                     positions,
                     w,
-                    ggml.cuda.common.cu.CUDA_R_16F,
+                    ggml.cuda.common.cuda_c.CUDA_R_16F,
                     @as(c_int, @truncate(IC)),
                     &beta,
                     yd + @as(usize, @intCast(@as(i64, n) * OC * positions)),
-                    ggml.cuda.common.cu.CUDA_R_32F,
+                    ggml.cuda.common.cuda_c.CUDA_R_32F,
                     positions,
-                    ggml.cuda.common.cu.CUBLAS_COMPUTE_32F,
-                    ggml.cuda.common.cu.CUBLAS_GEMM_DEFAULT_TENSOR_OP,
+                    ggml.cuda.common.cuda_c.CUBLAS_COMPUTE_32F,
+                    ggml.cuda.common.cuda_c.CUBLAS_GEMM_DEFAULT_TENSOR_OP,
                 ), "cublasGemmEx(cublas_h, CUBLAS_OP_N, CUBLAS_OP_N, positions, int(OC), int(IC), &alpha, x_half.get() + int64_t(n) * IC * positions, CUDA_R_16F, positions, w, CUDA_R_16F, int(IC), &beta, y + int64_t(n) * OC * positions, CUDA_R_32F, positions, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP)", @src());
             }
             return;

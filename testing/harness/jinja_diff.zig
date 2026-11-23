@@ -149,13 +149,13 @@ fn refRender(source: []const u8, conv: Conversation) !Outcome {
     try js.objectField("eos_token");
     try js.write(eos);
     try js.endObject();
-    const json = vars.written();
+    const vars_json = vars.written();
 
     var out: ?[*]u8 = null;
     var out_len: usize = 0;
     var input: ?[*]u8 = null;
     var parts: ?[*]u8 = null;
-    const rc = jinja_ref_render(source.ptr, source.len, json.ptr, json.len, &out, &out_len, &input, &parts);
+    const rc = jinja_ref_render(source.ptr, source.len, vars_json.ptr, vars_json.len, &out, &out_len, &input, &parts);
     defer jinja_ref_free(out);
     defer jinja_ref_free(input);
     defer jinja_ref_free(parts);

@@ -43,7 +43,7 @@ fn triCuda(
     nb2: i64,
     nb3: i64,
     ttype: ggml.impl.ggml_c.enum_ggml_tri_type,
-    stream: ggml.cuda.common.cu.cudaStream_t,
+    stream: ggml.cuda.common.cuda_c.cudaStream_t,
 ) void {
     const block_dims: ggml.cuda.kernels.Dim3 = .{ .x = block_size };
     const grid_dims: ggml.cuda.kernels.Dim3 = .{ .x = uint(ne01), .y = uint(ne02), .z = uint(ne03) };

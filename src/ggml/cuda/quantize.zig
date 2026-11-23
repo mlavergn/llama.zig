@@ -35,7 +35,7 @@ fn u32Of(x: i64) u32 {
 }
 
 /// Ports `quantize_row_q8_1_cuda` (quantize.cu:559 @b1b770d90).
-pub fn quantizeRowQ8_1(x: ?*const f32, vy: ?*anyopaque, ne00: i64, s01: i64, s02: i64, s03: i64, ne0: i64, ne1: i64, ne2: i64, ne3: i64, stream: ggml.cuda.common.cu.cudaStream_t) void {
+pub fn quantizeRowQ8_1(x: ?*const f32, vy: ?*anyopaque, ne00: i64, s01: i64, s02: i64, s03: i64, ne0: i64, ne1: i64, ne2: i64, ne3: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     ggml.impl.assert(@rem(ne0, ggml.impl.ggml_c.QK8_1) == 0, "ne0 % QK8_1 == 0");
 
     const ne2_fastdiv = ggml.cuda.common.initFastdivValues(@bitCast(ne2));
@@ -53,7 +53,7 @@ fn q8_1MmqKernel(comptime layout: ggml.cuda.mmq.Q8_1DsLayout, comptime scatter: 
 }
 
 /// Ports `quantize_mmq_q8_1_cuda` (quantize.cu:574 @b1b770d90).
-pub fn quantizeMmqQ8_1(x: ?*const f32, ids: ?*const i32, vy: ?*anyopaque, type_src0: ggml.impl.ggml_c.enum_ggml_type, ne00: i64, s01: i64, s02: i64, s03: i64, ne0: i64, ne1: i64, ne2: i64, ne3: i64, stream: ggml.cuda.common.cu.cudaStream_t) void {
+pub fn quantizeMmqQ8_1(x: ?*const f32, ids: ?*const i32, vy: ?*anyopaque, type_src0: ggml.impl.ggml_c.enum_ggml_type, ne00: i64, s01: i64, s02: i64, s03: i64, ne0: i64, ne1: i64, ne2: i64, ne3: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     ggml.impl.assert(@rem(ne00, 4) == 0, "ne00 % 4 == 0");
     ggml.impl.assert(@rem(ne0, ggml.cuda.mmq.qk8_1_mmq) == 0, "ne0 % QK8_1_MMQ == 0");
 
@@ -78,7 +78,7 @@ fn mmqFewQ8_1Kernel(comptime layout: ggml.cuda.mmq.Q8_1DsLayout) ggml.cuda.kerne
 /// Ports `quantize_mmq_few_q8_1_cuda` (quantize.cu:655 @b1b770d90):
 /// `src1` of few-row MMQ in the layout of the MMA fragments, one
 /// thread per 4 values of a column, the columns padded to whole groups.
-pub fn quantizeMmqFewQ8_1(x: ?*const f32, vy: ?*anyopaque, ds_layout: ggml.cuda.mmq.Q8_1DsLayout, ne00: i64, s01: i64, s02: i64, s03: i64, ne1: i64, ne2: i64, ne3: i64, stream: ggml.cuda.common.cu.cudaStream_t) void {
+pub fn quantizeMmqFewQ8_1(x: ?*const f32, vy: ?*anyopaque, ds_layout: ggml.cuda.mmq.Q8_1DsLayout, ne00: i64, s01: i64, s02: i64, s03: i64, ne1: i64, ne2: i64, ne3: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     ggml.impl.assert(@rem(ne00, ggml.impl.ggml_c.QK_K) == 0, "ne00 % QK_K == 0");
 
     const block_num_y = @divTrunc(ne00 + 4 * block_size_mmq - 1, 4 * block_size_mmq);
@@ -96,7 +96,7 @@ pub fn quantizeMmqFewQ8_1(x: ?*const f32, vy: ?*anyopaque, ds_layout: ggml.cuda.
 }
 
 /// Ports `quantize_scatter_mmq_q8_1_cuda` (quantize.cu:679 @b1b770d90).
-pub fn quantizeScatterMmqQ8_1(x: ?*const f32, ids_src1_inv: ?*const i32, vy: ?*anyopaque, type_src0: ggml.impl.ggml_c.enum_ggml_type, ne00: i64, stride_token: i64, ne0: i64, n_tokens: i64, nrows_dst: i64, n_expert_used: c_int, stream: ggml.cuda.common.cu.cudaStream_t) void {
+pub fn quantizeScatterMmqQ8_1(x: ?*const f32, ids_src1_inv: ?*const i32, vy: ?*anyopaque, type_src0: ggml.impl.ggml_c.enum_ggml_type, ne00: i64, stride_token: i64, ne0: i64, n_tokens: i64, nrows_dst: i64, n_expert_used: c_int, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     ggml.impl.assert(@rem(ne00, 4) == 0, "ne00 % 4 == 0");
     ggml.impl.assert(@rem(ne0, ggml.cuda.mmq.qk8_1_mmq) == 0, "ne0 % QK8_1_MMQ == 0");
 
@@ -113,7 +113,7 @@ pub fn quantizeScatterMmqQ8_1(x: ?*const f32, ids_src1_inv: ?*const i32, vy: ?*a
 }
 
 /// Ports `quantize_scatter_mmq_fp4_cuda` (quantize.cu:708 @b1b770d90).
-pub fn quantizeScatterMmqFp4(x: ?*const f32, ids_src1_inv: ?*const i32, vy: ?*anyopaque, scale: ?*f32, type_src0: ggml.impl.ggml_c.enum_ggml_type, use_aligned_float8: bool, ne00: i64, stride_token: i64, ne0: i64, n_tokens: i64, nrows_dst: i64, n_expert_used: c_int, stream: ggml.cuda.common.cu.cudaStream_t) void {
+pub fn quantizeScatterMmqFp4(x: ?*const f32, ids_src1_inv: ?*const i32, vy: ?*anyopaque, scale: ?*f32, type_src0: ggml.impl.ggml_c.enum_ggml_type, use_aligned_float8: bool, ne00: i64, stride_token: i64, ne0: i64, n_tokens: i64, nrows_dst: i64, n_expert_used: c_int, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     ggml.impl.assert(ne0 > 0, "ne0 > 0");
     if (type_src0 == ggml.impl.ggml_c.GGML_TYPE_NVFP4) {
         ggml.impl.assert(scale != null, "scale");
@@ -139,7 +139,7 @@ pub fn quantizeScatterMmqFp4(x: ?*const f32, ids_src1_inv: ?*const i32, vy: ?*an
 }
 
 /// Ports `quantize_mmq_fp4_cuda` (quantize.cu:737 @b1b770d90).
-pub fn quantizeMmqFp4(x: ?*const f32, ids: ?*const i32, vy: ?*anyopaque, scale: ?*f32, type_src0: ggml.impl.ggml_c.enum_ggml_type, use_aligned_float8: bool, ne00: i64, s01: i64, s02: i64, s03: i64, ne0: i64, ne1: i64, ne2: i64, ne3: i64, stream: ggml.cuda.common.cu.cudaStream_t) void {
+pub fn quantizeMmqFp4(x: ?*const f32, ids: ?*const i32, vy: ?*anyopaque, scale: ?*f32, type_src0: ggml.impl.ggml_c.enum_ggml_type, use_aligned_float8: bool, ne00: i64, s01: i64, s02: i64, s03: i64, ne0: i64, ne1: i64, ne2: i64, ne3: i64, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     ggml.impl.assert(type_src0 == ggml.impl.ggml_c.GGML_TYPE_MXFP4 or type_src0 == ggml.impl.ggml_c.GGML_TYPE_NVFP4, "type_src0 == GGML_TYPE_MXFP4 || type_src0 == GGML_TYPE_NVFP4");
     ggml.impl.assert(ne0 > 0, "ne0 > 0");
 

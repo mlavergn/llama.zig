@@ -11,7 +11,7 @@
 #   WAV8         8-bit PCM whose data chunk claims one byte more than it has
 # and $DATA/media/ (for --media-path): red.png, tone.wav, sub/blue.png.
 set -eu
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 python3 -I - "$DATA" "$ROOT" <<'PY'
 import base64, math, os, struct, sys, zlib
 out, root = sys.argv[1], sys.argv[2]

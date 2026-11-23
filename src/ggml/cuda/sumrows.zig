@@ -15,7 +15,7 @@ const kernel = ggml.cuda.kernels.get("sumrows", "reduce_rows_f32<(bool)0>");
 const kernel_strided = ggml.cuda.kernels.get("sumrows", "reduce_rows_f32_strided<(bool)0>");
 
 /// Ports `sum_rows_f32_cuda` (sumrows.cu:4 @b1b770d90).
-pub fn sumRowsF32Cuda(x: ?*const anyopaque, dst: ?*anyopaque, ncols: c_int, nrows: c_int, stream: ggml.cuda.common.cu.cudaStream_t) void {
+pub fn sumRowsF32Cuda(x: ?*const anyopaque, dst: ?*anyopaque, ncols: c_int, nrows: c_int, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const id = ggml.cuda.common.getDevice();
     const nsm = ggml.cuda.common.info().devices[@intCast(id)].nsm;
     const block_nums: ggml.cuda.kernels.Dim3 = .{ .x = @bitCast(nrows) };

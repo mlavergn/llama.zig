@@ -12,7 +12,7 @@ const block_size = 256;
 
 /// Ports `arange_f32_cuda` (arange.cu:12 @b1b770d90), which launches with
 /// `<<<>>>`.
-fn arangeF32Cuda(dst: ?*anyopaque, ne0: c_int, start: f32, step: f32, stream: ggml.cuda.common.cu.cudaStream_t) void {
+fn arangeF32Cuda(dst: ?*anyopaque, ne0: c_int, start: f32, step: f32, stream: ggml.cuda.common.cuda_c.cudaStream_t) void {
     const num_blocks: c_int = @divTrunc(ne0 + block_size - 1, block_size);
     ggml.cuda.kernels.launch(ggml.cuda.kernels.get("arange", "arange_f32"), .{
         .grid = .{ .x = @bitCast(num_blocks) },

@@ -35,7 +35,7 @@ pub fn opCountEqual(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.ggml_c.ggml_
     ggml.impl.assert(ne < (1 << 30), "ne < (1 << 30) && \"atomicAdd implementation only supports int\"");
     const dne: i64 = stdlib.num.pad(i64, @divTrunc(ne + 4 * nsm - 1, 4 * nsm), chunk_size);
 
-    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemsetAsync(dst_d, 0, ggml.types.ggml_nbytes(dst), stream), "cudaMemsetAsync(dst_d, 0, ggml_nbytes(dst), stream)", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cuda_c.cudaMemsetAsync(dst_d, 0, ggml.types.ggml_nbytes(dst), stream), "cudaMemsetAsync(dst_d, 0, ggml_nbytes(dst), stream)", @src());
 
     const blocks_dim: ggml.cuda.kernels.Dim3 = .{ .x = ggml.cuda.common.warp_size };
     const blocks_num: ggml.cuda.kernels.Dim3 = .{ .x = @truncate(@as(u64, @bitCast(@min(@as(i64, 4) * nsm, @divTrunc(ne + chunk_size - 1, chunk_size))))) };
